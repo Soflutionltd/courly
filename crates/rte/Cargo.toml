@@ -20,6 +20,6 @@ markup5ever = "0.40"
 hotpath = { workspace = true, optional = true }
 unicode-segmentation = "1.12"
 
-iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
+iced = { path = "../../../sluggrs/repos/iced", default-features = false, features = [
     "wgpu", "tokio", "advanced", "web-colors", "wayland", "image", "svg",
 ], optional = true }

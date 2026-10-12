@@ -23,9 +23,9 @@ use std::io;
 /// later wrap into tokio I/O types. `claim_stdio` produces this synchronously;
 /// `adopt_into_runtime` consumes it inside a runtime context.
 pub(crate) struct SavedStdio {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     stdin_fd: std::os::fd::OwnedFd,
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     stdout_fd: std::os::fd::OwnedFd,
     #[cfg(windows)]
     stdin_handle: std::os::windows::io::OwnedHandle,
@@ -37,7 +37,7 @@ pub(crate) struct SavedStdio {
 /// slots to the bit-bucket. Returns the saved descriptors for later wrapping.
 /// Must run before any other Service code so transitive prints/logs/panics
 /// land on the sink rather than the IPC pipe.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     use std::fs::OpenOptions;
     use std::os::fd::{FromRawFd, OwnedFd};
@@ -79,7 +79,7 @@ pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
 
 /// Wrap the saved descriptors into tokio I/O types. Must run inside a tokio
 /// runtime - `pipe::Receiver::from_file_unchecked` requires it.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub(crate) fn adopt_into_runtime(
     saved: SavedStdio,
 ) -> io::Result<(
@@ -95,7 +95,7 @@ pub(crate) fn adopt_into_runtime(
     Ok((stdin, stdout))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn set_nonblocking_fd(fd: &std::os::fd::OwnedFd) -> io::Result<()> {
     use std::os::fd::AsRawFd;
 
