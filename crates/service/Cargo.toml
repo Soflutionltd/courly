@@ -74,7 +74,7 @@ thiserror.workspace = true
 pdf-extract = "0.12"
 quick-xml.workspace = true
 encoding_rs = "0.8"
-zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(unix)']
 dev-dependencies = {}

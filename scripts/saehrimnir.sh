@@ -14,8 +14,12 @@
 # research/saehrimnir is also the orchestrator's job; this script assumes the
 # work is already committed there.
 #
-# The cargo install below installs an EXTERNAL tool (saehrimnir), not a
-# ratatoskr build - that is why it is raw cargo and not brokkr. Do not "fix" it.
+# The install goes through `brokkr install`, run from the saehrimnir checkout so
+# it resolves that tree's own config. A raw `cargo install` does not survive
+# brokkr's machine-wide rustc guard: the guard refuses a compile brokkr did not
+# start, and any brokkr run in another project SIGKILLs it as a stray cargo.
+# `brokkr install` also passes --locked, so the mock is built from the lockfile
+# its own checks validated rather than a fresh re-resolve.
 set -e
 
 cd /home/folk/Programs/ratatoskr/research/saehrimnir
@@ -24,7 +28,7 @@ git push
 cd /home/folk/Programs/sæhrimnir
 git pull
 
-cargo install --path /home/folk/Programs/sæhrimnir
+brokkr install --release
 
 echo "saehrimnir reinstalled at:"
 git rev-parse HEAD

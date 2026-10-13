@@ -74,7 +74,10 @@ pub fn compress_archive(
             .by_index(i)
             .map_err(|e| SqueezeError::ArchiveRead(e.to_string()))?;
 
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|e| SqueezeError::ArchiveRead(e.to_string()))?
+            .to_string();
         let is_image_entry = is_compressible_image(&name, prefixes);
 
         // Guard against zip bombs: cap actual decompressed bytes via take().

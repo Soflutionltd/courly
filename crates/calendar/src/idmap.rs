@@ -390,7 +390,13 @@ pub fn to_event_row(
     event: &CalendarEvent,
 ) -> Option<CalendarEventRow> {
     let start_time = event_time_to_epoch(&event.start, event.is_all_day)?;
-    let end_time = event_time_to_epoch(&event.end, event.is_all_day)?;
+    // A provider-less end follows RFC 5545's DTEND-absent rule: a timed
+    // event lasts zero seconds, an all-day event lasts its one day.
+    let end_time = match &event.end {
+        Some(end) => event_time_to_epoch(end, event.is_all_day)?,
+        None if event.is_all_day => start_time + 86_400,
+        None => start_time,
+    };
     let attendees_json = (!event.attendees.is_empty())
         .then(|| {
             serde_json::to_string(
@@ -542,10 +548,10 @@ mod tests {
                 value: "2026-01-01T00:00:00Z".to_string(),
                 timezone: Some("UTC".to_string()),
             },
-            end: EventTime {
+            end: Some(EventTime {
                 value: "2026-01-01T01:00:00Z".to_string(),
                 timezone: Some("UTC".to_string()),
-            },
+            }),
             is_all_day: false,
             status: EventStatus::Confirmed,
             availability: EventAvailability::Busy,

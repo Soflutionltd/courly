@@ -128,7 +128,7 @@ base64 = "0.23"
 quick-xml = "0.42.0"
 
 # Profiling
-hotpath = "0.27.0"
+hotpath = "0.28.6"
 
 # Optimized release profile
 [profile.release]
