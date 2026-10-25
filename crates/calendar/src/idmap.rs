@@ -258,6 +258,7 @@ pub fn input_to_event_create(calendar_remote_id: &str, input: &CalendarEventInpu
 
 pub fn input_to_event_patch(input: &CalendarEventInput) -> EventPatch {
     EventPatch {
+        expected_version: None,
         calendar_id: None,
         title: Some(Some(input.title.clone())),
         description: Some(Some(input.description.clone())),

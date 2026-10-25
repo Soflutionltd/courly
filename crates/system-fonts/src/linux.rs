@@ -16,20 +16,13 @@ const KEY_DOCUMENT_FONT: &str = "document-font-name";
 ///
 /// The portal returns `Variant(Variant(String))` - a doubly-wrapped variant.
 /// We unwrap both layers to get the inner string.
-async fn read_setting(
-    proxy: &zbus::proxy::Proxy<'_>,
-    namespace: &str,
-    key: &str,
-) -> Option<String> {
-    let reply: zbus::zvariant::OwnedValue = proxy.call("ReadOne", &(namespace, key)).await.ok()?;
+async fn read_setting(proxy: &zbus::Proxy<'_>, namespace: &str, key: &str) -> Option<String> {
+    let reply: zbus::OwnedVariant = proxy.call("ReadOne", &(namespace, key)).await.ok()?;
 
     // The portal wraps the value in Variant(Variant(value)).
-    // First unwrap: OwnedValue -> Value (outer variant)
-    let inner: zbus::zvariant::Value<'_> = reply
-        .downcast_ref::<zbus::zvariant::Value<'_>>()
-        .ok()?
-        .clone();
-    // Second unwrap: Value -> String
+    // First unwrap: OwnedVariant -> Variant (outer variant)
+    let inner: zbus::Variant<'_> = reply.downcast_ref::<zbus::Variant<'_>>().ok()?.clone();
+    // Second unwrap: Variant -> String
     let s: &str = inner.downcast_ref().ok()?;
     Some(s.to_string())
 }
@@ -45,13 +38,10 @@ pub(crate) async fn detect() -> SystemFonts {
         }
     };
 
-    let proxy = match zbus::proxy::Builder::new(&connection)
+    let proxy = match zbus::proxy::Builder::<zbus::Proxy<'_>>::new(&connection)
         .interface("org.freedesktop.portal.Settings")
-        .expect("valid interface name")
         .path("/org/freedesktop/portal/desktop")
-        .expect("valid path")
         .destination("org.freedesktop.portal.Desktop")
-        .expect("valid destination")
         .build()
         .await
     {

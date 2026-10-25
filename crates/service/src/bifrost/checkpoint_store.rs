@@ -103,6 +103,49 @@ impl CheckpointStore for SqliteCheckpointStore {
         })
     }
 
+    /// Durable side of the engine's account-wide schema reset. Drops EVERY
+    /// `sync_cursors` row of the account - change cursors and backfill rows of
+    /// every scope, the `BACKFILL_COMPLETION_PARTITION` markers included - and
+    /// writes the ledger, in one transaction. Addressed by the `account_id`
+    /// column alone, so rows of scopes the engine no longer tracks go too:
+    /// a surviving completion marker would skip the inventory walk that
+    /// re-mints ids under the new schema. Other accounts are untouched.
+    fn clear_account_checkpoints<'a>(
+        &'a self,
+        account: &'a AccountId,
+        ledger: DebtLedger,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'a>> {
+        let account_id = account.0.clone();
+        Box::pin(async move {
+            let ledger_blob = encode_ledger(&ledger);
+            self.writer
+                .with_write_mapped(
+                    move |conn| {
+                        let tx = conn
+                            .transaction()
+                            .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        tx.execute(
+                            "DELETE FROM sync_cursors WHERE account_id = ?1",
+                            params![account_id],
+                        )
+                        .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        tx.execute(
+                            "INSERT OR REPLACE INTO sync_ledgers (
+                                account_id, ledger_blob, updated_at
+                             ) VALUES (?1, ?2, strftime('%s', 'now'))",
+                            params![account_id, ledger_blob],
+                        )
+                        .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        tx.commit()
+                            .map_err(|error| Error::CheckpointStore(error.to_string()))?;
+                        Ok(())
+                    },
+                    Error::CheckpointStore,
+                )
+                .await
+        })
+    }
+
     fn put_ledger<'a>(
         &'a self,
         account: &'a AccountId,
@@ -693,6 +736,72 @@ mod tests {
             &survivor,
         );
         assert_eq!(count_rows(&writer, "backfill", "acct-a").await, 1);
+
+        remove_test_dir(dir);
+    }
+
+    /// The account-wide reset drops every change cursor and backfill row of the
+    /// account across scopes, completion marker included, writes the ledger it
+    /// was handed, and leaves every other account's rows alone.
+    #[tokio::test]
+    async fn clear_account_checkpoints_drops_every_row_of_the_account_only() {
+        let (writer, reader, dir) = test_dbs("clear-account");
+        seed_account(&writer, "acct-a").await;
+        seed_account(&writer, "acct-b").await;
+        let store = SqliteCheckpointStore::new(writer.clone(), reader);
+        let target = AccountId("acct-a".to_string());
+        let bystander = AccountId("acct-b".to_string());
+        let email = CursorScope::Type(ObjectType::Email);
+        let folder = CursorScope::Folder(FolderId("folder-a".to_string()));
+
+        for account in [&target, &bystander] {
+            store
+                .put_change_cursor(
+                    account,
+                    change_cursor(email.clone(), ProtocolKind::Jmap, 1, None),
+                )
+                .await
+                .expect("put change cursor");
+            for partition in [b"A".to_vec(), BACKFILL_COMPLETION_PARTITION.to_vec()] {
+                store
+                    .put_backfill(
+                        account,
+                        backfill_checkpoint(folder.clone(), partition, 5, None),
+                    )
+                    .await
+                    .expect("put backfill partition");
+            }
+        }
+
+        let ledger = DebtLedger::new();
+        let expected_ledger = encode_ledger(&ledger);
+        store
+            .clear_account_checkpoints(&target, ledger)
+            .await
+            .expect("clear account checkpoints");
+
+        assert_eq!(count_rows(&writer, "change", "acct-a").await, 0);
+        assert_eq!(count_rows(&writer, "backfill", "acct-a").await, 0);
+        assert_eq!(count_rows(&writer, "change", "acct-b").await, 1);
+        assert_eq!(count_rows(&writer, "backfill", "acct-b").await, 2);
+        assert!(
+            store
+                .get_backfill(&target, &folder)
+                .await
+                .expect("get cleared backfill")
+                .is_none()
+        );
+        assert!(
+            store
+                .get_change_cursor(&bystander, &email)
+                .await
+                .expect("get bystander cursor")
+                .is_some()
+        );
+        assert_eq!(
+            encode_ledger(&store.get_ledger(&target).await.expect("get ledger")),
+            expected_ledger
+        );
 
         remove_test_dir(dir);
     }

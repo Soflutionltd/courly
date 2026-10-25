@@ -96,9 +96,10 @@ fn run_script(
     let mut state = State::new();
     state.set_user_data(context);
     install_globals(&mut state).map_err(box_lua_error)?;
-    state
-        .load_string_named(source, Some(script.display().to_string()))
-        .map_err(box_lua_error)?;
+    let name = script.display().to_string();
+    let program =
+        dellingr::Program::compile(source, Some(name.as_bytes())).map_err(box_lua_error)?;
+    state.load(&program).map_err(box_lua_error)?;
     state
         .call(ArgCount::Fixed(0), RetCount::Fixed(0))
         .map_err(box_lua_error)?;
@@ -4296,8 +4297,9 @@ fn set_field_fn(
     key: &str,
     func: dellingr::RustFunc,
 ) -> dellingr::Result<()> {
+    let handle = state.add_rust_fn(func)?;
     state.push_string(key)?;
-    state.push_rust_fn(func)?;
+    state.push_rust_fn(handle)?;
     state.set_table_raw(table_idx)
 }
 
@@ -4755,5 +4757,5 @@ fn box_lua_error(error: dellingr::error::Error) -> Box<dyn std::error::Error + S
 }
 
 fn lua_error_message(message: impl Into<String>) -> dellingr::error::Error {
-    dellingr::error::Error::without_location(ErrorKind::InternalError(message.into()))
+    dellingr::error::Error::without_location(ErrorKind::HostError(message.into().into()))
 }

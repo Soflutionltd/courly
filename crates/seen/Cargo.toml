@@ -14,7 +14,7 @@ workspace = true
 db-read = { path = "../db-read" }
 serde.workspace = true
 rusqlite.workspace = true
-mail-parser = "0.11.3"
+mail-parser = "1.0.0"
 log = "0.4"
 hotpath = { workspace = true, optional = true }
 

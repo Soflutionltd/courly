@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use common::attachment_dedup::{
     dedup_by_key, prefer_missing_clone, prefer_missing_take, prefer_non_placeholder_filename,
 };
-use mail_parser::{MessageParser, MimeHeaders};
+use mail_parser::MessageParser;
 use xxhash_rust::xxh3::xxh3_64;
 
 #[derive(Debug, Clone)]
@@ -47,17 +47,20 @@ pub(crate) fn parse_message(
     let message = parser.parse(raw).ok_or("Failed to parse MIME message")?;
     let date = message
         .date()
-        .map(mail_parser::DateTime::to_timestamp)
+        .map(|date| date.to_timestamp())
         .or(internal_date)
         .unwrap_or(0)
         .saturating_mul(1000);
     let section_map = build_imap_section_map(&message);
+    // RFC 8621 `attachments` leaves out inline media the body displays, but
+    // those parts are exactly the `cid:` images that need an attachment row
+    // and an inline-image-store entry, so body media is taken as well.
     let attachments = message
-        .attachments
-        .iter()
-        .filter_map(|&part_idx| {
-            let attachment = message.parts.get(part_idx as usize)?;
-            let section = section_map.get(&(part_idx as usize))?.clone();
+        .root()
+        .parts()
+        .filter(|part| part.is_attachment() || part.role() == mail_parser::PartRole::MediaBody)
+        .filter_map(|attachment| {
+            let section = section_map.get(&attachment.id())?.clone();
             let mime_type = attachment
                 .content_type()
                 .map(|content_type| {
@@ -65,12 +68,13 @@ pub(crate) fn parse_message(
                     format!("{}/{subtype}", content_type.ctype())
                 })
                 .unwrap_or_else(|| "application/octet-stream".to_string());
-            let contents = attachment.contents();
+            let contents = attachment.decoded();
+            let contents = contents.as_ref();
             let is_inline = attachment
                 .content_disposition()
-                .is_some_and(mail_parser::ContentType::is_inline);
+                .is_some_and(|disposition| disposition.is_inline());
             #[allow(clippy::cast_possible_truncation)]
-            let size = attachment.len() as u32;
+            let size = attachment.decoded_len() as u32;
             let inline_data = if is_inline
                 && (size as usize) <= store::inline_image_store::MAX_INLINE_SIZE
                 && mime_type.starts_with("image/")
@@ -125,30 +129,29 @@ pub(crate) fn parse_message(
 
 /// Build the IMAP section-number mapping used both for persisted attachment
 /// ids and raw-RFC822 attachment-byte extraction.
-pub(crate) fn build_imap_section_map(message: &mail_parser::Message) -> HashMap<usize, String> {
-    use mail_parser::PartType;
-
+///
+/// Keys are mail-parser part ids. Only the root message's multipart tree is
+/// walked; a nested `message/rfc822` part maps as a single leaf.
+pub(crate) fn build_imap_section_map(
+    message: &mail_parser::Message,
+) -> HashMap<mail_parser::PartId, String> {
     fn walk(
-        parts: &[mail_parser::MessagePart],
-        part_idx: usize,
+        part: mail_parser::MessagePart<'_>,
         prefix: &str,
-        map: &mut HashMap<usize, String>,
+        map: &mut HashMap<mail_parser::PartId, String>,
     ) {
-        let Some(part) = parts.get(part_idx) else {
-            return;
-        };
-        if let PartType::Multipart(children) = &part.body {
-            for (index, &child) in children.iter().enumerate() {
+        if part.is_multipart() {
+            for (index, child) in part.children().enumerate() {
                 let section = if prefix.is_empty() {
                     (index + 1).to_string()
                 } else {
                     format!("{prefix}.{}", index + 1)
                 };
-                walk(parts, child as usize, &section, map);
+                walk(child, &section, map);
             }
         } else {
             map.insert(
-                part_idx,
+                part.id(),
                 if prefix.is_empty() {
                     "1".to_string()
                 } else {
@@ -159,9 +162,7 @@ pub(crate) fn build_imap_section_map(message: &mail_parser::Message) -> HashMap<
     }
 
     let mut map = HashMap::new();
-    if !message.parts.is_empty() {
-        walk(&message.parts, 0, "", &mut map);
-    }
+    walk(message.root_part(), "", &mut map);
     map
 }
 
@@ -177,18 +178,18 @@ pub(crate) fn extract_attachment_from_rfc822(raw: &[u8], part_id: &str) -> Resul
         .map(|(&index, _)| index)
         .ok_or_else(|| format!("Section {part_id} not found in message"))?;
     let part = message
-        .parts
-        .get(part_index)
+        .part(part_index)
         .ok_or_else(|| format!("Part index {part_index} out of range"))?;
-    match &part.body {
-        mail_parser::PartType::Binary(bytes) | mail_parser::PartType::InlineBinary(bytes) => {
-            Ok(bytes.as_ref().to_vec())
+    match part.kind() {
+        mail_parser::PartKind::Binary | mail_parser::PartKind::InlineBinary => {
+            Ok(part.decoded().into_owned())
         }
-        mail_parser::PartType::Text(text) | mail_parser::PartType::Html(text) => {
-            Ok(text.as_bytes().to_vec())
-        }
-        mail_parser::PartType::Message(message) => Ok(message.raw_message.as_ref().to_vec()),
-        mail_parser::PartType::Multipart(_) => Err(format!(
+        mail_parser::PartKind::Text | mail_parser::PartKind::Html => Ok(part
+            .text()
+            .map(|text| text.into_owned().into_bytes())
+            .unwrap_or_default()),
+        mail_parser::PartKind::Message(nested) => Ok(nested.raw().to_vec()),
+        mail_parser::PartKind::Multipart => Err(format!(
             "Part {part_id} is a multipart container, not a leaf part"
         )),
     }

@@ -9,6 +9,7 @@ pub mod engine_sync;
 pub mod error_map;
 pub mod factory;
 pub mod gmail_signatures;
+pub(crate) mod imap_object_id;
 pub mod push_ingress;
 pub mod resident;
 pub mod server_filters;

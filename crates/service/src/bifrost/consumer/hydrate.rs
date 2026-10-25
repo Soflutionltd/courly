@@ -12,12 +12,13 @@ use common::types::{
 };
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow};
 use futures::StreamExt;
-use mail_parser::{MessageParser, MimeHeaders};
+use mail_parser::MessageParser;
 use search::SearchDocument;
 use serde::{Deserialize, Serialize};
 use store::inline_image_store::InlineImage;
 
 use super::BifrostProviderKind;
+use crate::bifrost::imap_object_id::decode_imap_object_id;
 
 const SYNTHETIC_OBJECT_PREFIX: &str = "rtsk-synth:";
 
@@ -910,35 +911,6 @@ fn system_time_secs(time: SystemTime) -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DecodedImapObjectId {
-    pub(super) folder: String,
-    pub(super) uidvalidity: u32,
-    pub(super) uid: u32,
-}
-
-pub(super) fn decode_imap_object_id(id: &str) -> Option<DecodedImapObjectId> {
-    let rest = id.strip_prefix("imap1:")?;
-    let (len_text, after_len) = rest.split_once(':')?;
-    let len = len_text.parse::<usize>().ok()?;
-    if after_len.len() < len {
-        return None;
-    }
-    let folder = after_len.get(..len)?.to_string();
-    let rest = after_len.get(len..)?.strip_prefix(':')?;
-    let mut parts = rest.split(':');
-    let uidvalidity = parts.next()?.parse::<u32>().ok()?;
-    let uid = parts.next()?.parse::<u32>().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some(DecodedImapObjectId {
-        folder,
-        uidvalidity,
-        uid,
-    })
-}
-
 fn root_thread_reference(
     message_id_header: Option<&str>,
     references_header: Option<&str>,
@@ -988,20 +960,21 @@ const GMAIL_REACTION_MIME_TYPE: &str = "text/vnd.google.email-reaction+json";
 /// never matched the literal `{"emoji"` and was silently dropped, and (b) a
 /// normal message that merely MENTIONED the MIME-type string plus an emoji
 /// JSON blob in its body was mis-flagged as a reaction. `mail_parser` returns
-/// each part's `contents()` already decoded per its CTE, so a base64 / QP body
-/// is recovered, and the match keys on the part's actual `Content-Type`, so a
-/// body that only references the string is not a false positive.
+/// each part's `decoded()` body per its CTE, so a base64 / QP body is
+/// recovered, and the match keys on the part's actual `Content-Type`, so a
+/// body that only references the string is not a false positive. Only the
+/// root message's parts are searched, never a forwarded `message/rfc822`.
 fn extract_gmail_reaction_emoji(raw: &[u8]) -> Option<String> {
     let message = MessageParser::default().parse(raw)?;
-    message.parts.iter().find_map(|part| {
+    message.root().parts().find_map(|part| {
         let ct = part.content_type()?;
         let is_reaction_part = format!("{}/{}", ct.ctype(), ct.subtype().unwrap_or_default())
             .eq_ignore_ascii_case(GMAIL_REACTION_MIME_TYPE);
         if !is_reaction_part {
             return None;
         }
-        // `contents()` is the part body decoded per its Content-Transfer-Encoding.
-        serde_json::from_slice::<serde_json::Value>(part.contents())
+        // `decoded()` is the part body decoded per its Content-Transfer-Encoding.
+        serde_json::from_slice::<serde_json::Value>(&part.decoded())
             .ok()
             .and_then(|value| {
                 value

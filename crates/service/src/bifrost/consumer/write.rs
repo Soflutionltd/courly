@@ -19,7 +19,8 @@ use rusqlite::OptionalExtension;
 
 use super::BifrostConsumerStores;
 use super::BifrostProviderKind;
-use super::hydrate::{ConsumerMessageRow, decode_imap_object_id};
+use super::hydrate::ConsumerMessageRow;
+use crate::bifrost::imap_object_id::decode_imap_object_id;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PersistAffected {

@@ -183,10 +183,9 @@ fn imap_object_id(
     let uidvalidity = row
         .imap_uidvalidity
         .ok_or_else(|| AttachmentByteError::ImapPart("IMAP message missing UIDVALIDITY".into()))?;
-    Ok(ObjectId(format!(
-        "imap1:{}:{folder}:{uidvalidity}:{uid}",
-        folder.len()
-    )))
+    Ok(ObjectId(
+        crate::bifrost::imap_object_id::encode_imap_object_id(folder, uidvalidity, uid),
+    ))
 }
 
 async fn drain(
@@ -265,7 +264,7 @@ mod tests {
         r.imap_uid = Some(42);
         r.imap_uidvalidity = Some(7);
         let object_id = imap_object_id(&r).expect("object id");
-        assert_eq!(object_id.0, "imap1:5:INBOX:7:42");
+        assert_eq!(object_id.0, "imap2:5:INBOX:7:42");
 
         // Missing IMAP coordinates surface a structured error, never a
         // silently malformed ObjectId.

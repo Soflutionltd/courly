@@ -258,11 +258,8 @@ async fn dump_snapshot(state: &WriteDbState) -> Value {
                 let mut query = stmt.query([]).map_err(|e| e.to_string())?;
                 while let Some(row) = query.next().map_err(|e| e.to_string())? {
                     let statement = row.as_ref();
-                    let column_names: Vec<String> = statement
-                        .column_names()
-                        .iter()
-                        .map(|s| (*s).to_string())
-                        .collect();
+                    let column_names: Vec<String> =
+                        statement.column_names().map(ToString::to_string).collect();
                     let mut obj = Map::new();
                     for (idx, col) in column_names.iter().enumerate() {
                         let value: rusqlite::types::Value =
@@ -294,11 +291,8 @@ async fn dump_snapshot_with_reactions(state: &WriteDbState) -> Value {
             let mut out = Vec::new();
             while let Some(row) = rows.next().map_err(|e| e.to_string())? {
                 let statement = row.as_ref();
-                let column_names: Vec<String> = statement
-                    .column_names()
-                    .iter()
-                    .map(|s| (*s).to_string())
-                    .collect();
+                let column_names: Vec<String> =
+                    statement.column_names().map(ToString::to_string).collect();
                 let mut obj = Map::new();
                 for (idx, col) in column_names.iter().enumerate() {
                     let value: rusqlite::types::Value = row.get(idx).map_err(|e| e.to_string())?;
