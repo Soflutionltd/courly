@@ -944,11 +944,11 @@ fn parse_address_list(raw: &str) -> Vec<(Option<String>, String)> {
     };
 
     let mut results = Vec::new();
-    for addr in to.iter() {
-        if let Some(email) = addr.address.as_ref()
+    for addr in to.mailboxes() {
+        if let Some(email) = addr.address()
             && email.contains('@')
         {
-            let name = addr.name.as_ref().map(ToString::to_string);
+            let name = addr.name().map(ToString::to_string);
             results.push((name, email.to_string()));
         }
     }

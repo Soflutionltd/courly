@@ -186,159 +186,6 @@ pub fn reap_expired_unlisted_calendars(
     Ok(calendar_ids.len())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::open_writer_pool;
-
-    const NOW_MS: i64 = 2_000_000_000_000;
-    const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
-
-    async fn seeded_db() -> (tempfile::TempDir, crate::db::WriterPool) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db = open_writer_pool(dir.path()).expect("open writer");
-        db.with_write(|conn| {
-            conn.execute(
-                "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.test', 'caldav')",
-                [],
-            )
-            .expect("seed account");
-            let tx = conn.transaction().expect("transaction");
-            for (remote_id, name) in [("listed", "Listed"), ("gone", "Gone")] {
-                upsert_discovered_calendar(
-                    &tx,
-                    &DiscoveredCalendar {
-                        account_id: "acc",
-                        provider: "caldav",
-                        remote_id,
-                        display_name: Some(name),
-                        color: None,
-                        is_primary: false,
-                        can_edit: true,
-                    },
-                )
-                .expect("seed calendar");
-            }
-            tx.commit().expect("commit seed calendars");
-            Ok(())
-        })
-        .await
-        .expect("write seed");
-        (dir, db)
-    }
-
-    #[test]
-    fn calendar_unlisted_lifecycle_stamps_clears_and_reaps_children() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime");
-        runtime.block_on(async {
-        let (_dir, db) = seeded_db().await;
-        db.with_write(|conn| {
-            let tx = conn.transaction().expect("stamp transaction");
-            assert_eq!(stamp_unlisted_calendars(&tx, "acc", &[], NOW_MS).expect("empty guard"), 0);
-            assert_eq!(
-                stamp_unlisted_calendars(&tx, "acc", &["listed".into()], NOW_MS)
-                    .expect("stamp"),
-                1
-            );
-            assert_eq!(
-                stamp_unlisted_calendars(&tx, "acc", &["listed".into()], NOW_MS + 1)
-                    .expect("idempotent stamp"),
-                0
-            );
-            tx.commit().expect("commit stamp");
-            Ok(())
-        })
-        .await
-        .expect("stamp write");
-
-        db.with_write(|conn| {
-            let tx = conn.transaction().expect("clear transaction");
-            let (_, changed) = upsert_discovered_calendar(
-                &tx,
-                &DiscoveredCalendar {
-                    account_id: "acc",
-                    provider: "caldav",
-                    remote_id: "gone",
-                    display_name: Some("Gone"),
-                    color: None,
-                    is_primary: false,
-                    can_edit: true,
-                },
-            )
-            .expect("clear by upsert");
-            assert!(changed, "reappearance must clear the hidden stamp");
-            tx.commit().expect("commit clear");
-            Ok(())
-        })
-        .await
-        .expect("clear write");
-
-        db.with_write(|conn| {
-            let gone_id: String = conn
-                .query_row("SELECT id FROM calendars WHERE remote_id = 'gone'", [], |row| row.get(0))
-                .expect("gone id");
-            conn.execute(
-                "UPDATE calendars SET unlisted_since = ?1 WHERE id = ?2",
-                params![NOW_MS - WEEK_MS, gone_id],
-            )
-            .expect("restamp gone");
-            conn.execute(
-                "INSERT INTO calendar_events (id, account_id, google_event_id, start_time, end_time, calendar_id) \
-                 VALUES ('gone-event', 'acc', 'gone-event', 1, 2, ?1)",
-                params![gone_id],
-            )
-            .expect("seed event");
-            conn.execute(
-                "INSERT INTO calendar_attendees (account_id, event_id, email) VALUES ('acc', 'gone-event', 'x@example.test')",
-                [],
-            )
-            .expect("seed attendee");
-            conn.execute(
-                "INSERT INTO calendar_reminders (account_id, event_id, minutes_before) VALUES ('acc', 'gone-event', 5)",
-                [],
-            )
-            .expect("seed reminder");
-            conn.execute(
-                "INSERT INTO caldav_event_map (calendar_id, uri, event_uid, etag) VALUES (?1, 'gone.ics', 'gone-event', 'tag')",
-                params![gone_id],
-            )
-            .expect("seed map");
-
-            let tx = conn.transaction().expect("reap transaction");
-            assert_eq!(
-                reap_expired_unlisted_calendars(&tx, "acc", NOW_MS - 1, WEEK_MS)
-                    .expect("before boundary"),
-                0
-            );
-            assert_eq!(
-                reap_expired_unlisted_calendars(&tx, "acc", NOW_MS, WEEK_MS).expect("reap"),
-                1
-            );
-            tx.commit().expect("commit reap");
-
-            let remaining_calendars: i64 = conn
-                .query_row("SELECT COUNT(*) FROM calendars", [], |row| row.get(0))
-                .expect("count calendars");
-            assert_eq!(remaining_calendars, 1, "listed sibling survives");
-            let orphan_attendees: i64 = conn
-                .query_row("SELECT COUNT(*) FROM calendar_attendees", [], |row| row.get(0))
-                .expect("count attendees");
-            let orphan_reminders: i64 = conn
-                .query_row("SELECT COUNT(*) FROM calendar_reminders", [], |row| row.get(0))
-                .expect("count reminders");
-            assert_eq!(orphan_attendees, 0);
-            assert_eq!(orphan_reminders, 0);
-            Ok(())
-        })
-        .await
-        .expect("reap write");
-        });
-    }
-}
-
 /// Update the sync_token and/or ctag for a calendar row.
 ///
 /// Uses `COALESCE` so a `None` value leaves the existing column unchanged.
@@ -1154,4 +1001,157 @@ pub fn delete_seen_address_google_other(
     )
     .map_err(|e| format!("delete_seen_address_google_other: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_writer_pool;
+
+    const NOW_MS: i64 = 2_000_000_000_000;
+    const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+    async fn seeded_db() -> (tempfile::TempDir, crate::db::WriterPool) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = open_writer_pool(dir.path()).expect("open writer");
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.test', 'caldav')",
+                [],
+            )
+            .expect("seed account");
+            let tx = conn.transaction().expect("transaction");
+            for (remote_id, name) in [("listed", "Listed"), ("gone", "Gone")] {
+                upsert_discovered_calendar(
+                    &tx,
+                    &DiscoveredCalendar {
+                        account_id: "acc",
+                        provider: "caldav",
+                        remote_id,
+                        display_name: Some(name),
+                        color: None,
+                        is_primary: false,
+                        can_edit: true,
+                    },
+                )
+                .expect("seed calendar");
+            }
+            tx.commit().expect("commit seed calendars");
+            Ok(())
+        })
+        .await
+        .expect("write seed");
+        (dir, db)
+    }
+
+    #[test]
+    fn calendar_unlisted_lifecycle_stamps_clears_and_reaps_children() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+        let (_dir, db) = seeded_db().await;
+        db.with_write(|conn| {
+            let tx = conn.transaction().expect("stamp transaction");
+            assert_eq!(stamp_unlisted_calendars(&tx, "acc", &[], NOW_MS).expect("empty guard"), 0);
+            assert_eq!(
+                stamp_unlisted_calendars(&tx, "acc", &["listed".into()], NOW_MS)
+                    .expect("stamp"),
+                1
+            );
+            assert_eq!(
+                stamp_unlisted_calendars(&tx, "acc", &["listed".into()], NOW_MS + 1)
+                    .expect("idempotent stamp"),
+                0
+            );
+            tx.commit().expect("commit stamp");
+            Ok(())
+        })
+        .await
+        .expect("stamp write");
+
+        db.with_write(|conn| {
+            let tx = conn.transaction().expect("clear transaction");
+            let (_, changed) = upsert_discovered_calendar(
+                &tx,
+                &DiscoveredCalendar {
+                    account_id: "acc",
+                    provider: "caldav",
+                    remote_id: "gone",
+                    display_name: Some("Gone"),
+                    color: None,
+                    is_primary: false,
+                    can_edit: true,
+                },
+            )
+            .expect("clear by upsert");
+            assert!(changed, "reappearance must clear the hidden stamp");
+            tx.commit().expect("commit clear");
+            Ok(())
+        })
+        .await
+        .expect("clear write");
+
+        db.with_write(|conn| {
+            let gone_id: String = conn
+                .query_row("SELECT id FROM calendars WHERE remote_id = 'gone'", [], |row| row.get(0))
+                .expect("gone id");
+            conn.execute(
+                "UPDATE calendars SET unlisted_since = ?1 WHERE id = ?2",
+                params![NOW_MS - WEEK_MS, gone_id],
+            )
+            .expect("restamp gone");
+            conn.execute(
+                "INSERT INTO calendar_events (id, account_id, google_event_id, start_time, end_time, calendar_id) \
+                 VALUES ('gone-event', 'acc', 'gone-event', 1, 2, ?1)",
+                params![gone_id],
+            )
+            .expect("seed event");
+            conn.execute(
+                "INSERT INTO calendar_attendees (account_id, event_id, email) VALUES ('acc', 'gone-event', 'x@example.test')",
+                [],
+            )
+            .expect("seed attendee");
+            conn.execute(
+                "INSERT INTO calendar_reminders (account_id, event_id, minutes_before) VALUES ('acc', 'gone-event', 5)",
+                [],
+            )
+            .expect("seed reminder");
+            conn.execute(
+                "INSERT INTO caldav_event_map (calendar_id, uri, event_uid, etag) VALUES (?1, 'gone.ics', 'gone-event', 'tag')",
+                params![gone_id],
+            )
+            .expect("seed map");
+
+            let tx = conn.transaction().expect("reap transaction");
+            assert_eq!(
+                reap_expired_unlisted_calendars(&tx, "acc", NOW_MS - 1, WEEK_MS)
+                    .expect("before boundary"),
+                0
+            );
+            assert_eq!(
+                reap_expired_unlisted_calendars(&tx, "acc", NOW_MS, WEEK_MS).expect("reap"),
+                1
+            );
+            tx.commit().expect("commit reap");
+
+            let remaining_calendars: i64 = conn
+                .query_row("SELECT COUNT(*) FROM calendars", [], |row| row.get(0))
+                .expect("count calendars");
+            assert_eq!(remaining_calendars, 1, "listed sibling survives");
+            let orphan_attendees: i64 = conn
+                .query_row("SELECT COUNT(*) FROM calendar_attendees", [], |row| row.get(0))
+                .expect("count attendees");
+            let orphan_reminders: i64 = conn
+                .query_row("SELECT COUNT(*) FROM calendar_reminders", [], |row| row.get(0))
+                .expect("count reminders");
+            assert_eq!(orphan_attendees, 0);
+            assert_eq!(orphan_reminders, 0);
+            Ok(())
+        })
+        .await
+        .expect("reap write");
+        });
+    }
 }

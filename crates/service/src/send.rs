@@ -44,13 +44,11 @@ fn parse_address(addr: &str) -> Result<Address, SendError> {
     let (name, email) = MessageParser::default()
         .parse(&raw)
         .and_then(|message| {
-            message
-                .from()
-                .and_then(|addresses| addresses.first().cloned())
+            let mailbox = message.from()?.first()?;
+            let email = mailbox.address()?.to_string();
+            Some((mailbox.name().map(ToString::to_string), email))
         })
-        .and_then(|address| address.address.map(|email| (address.name, email)))
         .ok_or_else(invalid)?;
-    let email = email.into_owned();
     let (local, domain) = email.split_once('@').ok_or_else(invalid)?;
     if local.is_empty()
         || domain.is_empty()
@@ -60,7 +58,7 @@ fn parse_address(addr: &str) -> Result<Address, SendError> {
         return Err(invalid());
     }
     Ok(match name {
-        Some(name) => Address::named(name.into_owned(), email),
+        Some(name) => Address::named(name, email),
         None => Address::bare(email),
     })
 }

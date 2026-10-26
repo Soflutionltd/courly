@@ -17,7 +17,7 @@ db-read = { path = "../db-read" }
 flate2 = "1"
 types = { path = "../types" }
 lol_html = "3.0.0"
-mail-parser = "0.11.3"
+mail-parser = "1.0.0"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

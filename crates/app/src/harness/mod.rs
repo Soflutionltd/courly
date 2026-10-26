@@ -96,9 +96,10 @@ fn run_script(
     let mut state = State::new();
     state.set_user_data(context);
     install_globals(&mut state).map_err(box_lua_error)?;
-    state
-        .load_string_named(source, Some(script.display().to_string()))
-        .map_err(box_lua_error)?;
+    let name = script.display().to_string();
+    let program =
+        dellingr::Program::compile(source, Some(name.as_bytes())).map_err(box_lua_error)?;
+    state.load(&program).map_err(box_lua_error)?;
     state
         .call(ArgCount::Fixed(0), RetCount::Fixed(0))
         .map_err(box_lua_error)?;
@@ -168,7 +169,7 @@ fn install_globals(state: &mut State) -> dellingr::Result<()> {
         "protocol_version",
         service_api::PROTOCOL_VERSION as f64,
     )?;
-    state.set_global("harness");
+    state.set_global("harness")?;
     Ok(())
 }
 
@@ -1004,7 +1005,7 @@ fn lua_request_count_impl(
     let protocol = state.to_string(2)?;
     let command = state.to_string(3)?;
     let requests_idx = 1;
-    let len = state.table_len(requests_idx);
+    let len = state.raw_len(requests_idx)?;
     let mut count = 0u64;
     for i in 1..=len {
         let top = state.get_top();
@@ -3340,7 +3341,7 @@ fn parse_settings_set_params(
         return Err(lua_error_message("SettingsSet requires values table"));
     }
     let values_idx = state.get_top() as isize;
-    let len = state.table_len(values_idx);
+    let len = state.raw_len(values_idx)?;
     let mut values = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -3639,7 +3640,7 @@ fn parse_send_attachments(
         return Err(lua_error_message("ActionSend attachments must be a table"));
     }
     let attachments_idx = state.get_top() as isize;
-    let len = state.table_len(attachments_idx);
+    let len = state.raw_len(attachments_idx)?;
     let mut attachments = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -3724,7 +3725,7 @@ fn get_content_hash_field(
         LuaType::String => Some(parse_hex_hash(&state.to_string(-1)?)?),
         LuaType::Table => {
             let values_idx = state.get_top() as isize;
-            let len = state.table_len(values_idx);
+            let len = state.raw_len(values_idx)?;
             if len != 32 {
                 state.set_top(top as isize)?;
                 return Err(lua_error_message(format!(
@@ -3789,7 +3790,7 @@ fn parse_action_operations(
         ));
     }
     let operations_idx = state.get_top() as isize;
-    let len = state.table_len(operations_idx);
+    let len = state.raw_len(operations_idx)?;
     let mut operations = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -3821,7 +3822,7 @@ fn parse_calendar_action_operations(
         ));
     }
     let operations_idx = state.get_top() as isize;
-    let len = state.table_len(operations_idx);
+    let len = state.raw_len(operations_idx)?;
     let mut operations = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -4084,7 +4085,7 @@ fn read_extra_args(state: &mut State, idx: isize) -> dellingr::Result<Vec<String
     if state.typ(idx) != LuaType::Table {
         return Err(lua_error_message("extra args must be a table"));
     }
-    let len = state.table_len(idx);
+    let len = state.raw_len(idx)?;
     let mut args = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -4296,8 +4297,9 @@ fn set_field_fn(
     key: &str,
     func: dellingr::RustFunc,
 ) -> dellingr::Result<()> {
+    let handle = state.add_rust_fn(func)?;
     state.push_string(key)?;
-    state.push_rust_fn(func)?;
+    state.push_rust_fn(handle)?;
     state.set_table_raw(table_idx)
 }
 
@@ -4434,7 +4436,7 @@ fn get_string_array_field(
         return Err(lua_error_message(format!("{key} must be a table")));
     }
     let values_idx = state.get_top() as isize;
-    let len = state.table_len(values_idx);
+    let len = state.raw_len(values_idx)?;
     let mut values = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -4463,7 +4465,7 @@ fn get_byte_array_field(
         return Err(lua_error_message(format!("{key} must be a table")));
     }
     let values_idx = state.get_top() as isize;
-    let len = state.table_len(values_idx);
+    let len = state.raw_len(values_idx)?;
     let mut values = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -4492,7 +4494,7 @@ fn get_bifrost_messages_field(
         return Err(lua_error_message(format!("{key} must be a table")));
     }
     let values_idx = state.get_top() as isize;
-    let len = state.table_len(values_idx);
+    let len = state.raw_len(values_idx)?;
     let mut messages = Vec::with_capacity(len);
     for i in 1..=len {
         state.push_number(i as f64)?;
@@ -4755,5 +4757,5 @@ fn box_lua_error(error: dellingr::error::Error) -> Box<dyn std::error::Error + S
 }
 
 fn lua_error_message(message: impl Into<String>) -> dellingr::error::Error {
-    dellingr::error::Error::without_location(ErrorKind::InternalError(message.into()))
+    dellingr::error::Error::without_location(ErrorKind::HostError(message.into().into()))
 }

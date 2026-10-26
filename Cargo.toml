@@ -42,7 +42,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["folknor <folk@folk.wtf>"]
 license = "Apache-2.0"
-rust-version = "1.97"
+rust-version = "1.99"
 
 [workspace.lints.clippy]
 # Style: modern idiomatic Rust
@@ -96,7 +96,7 @@ futures-util = "0.3"
 tokio = { version = "1.52.3" }
 
 # Database
-rusqlite = { version = "0.40" }
+rusqlite = { version = "0.41.0" }
 
 # Time
 #
@@ -128,7 +128,7 @@ base64 = "0.23"
 quick-xml = "0.42.0"
 
 # Profiling
-hotpath = "0.27.0"
+hotpath = "0.29.1"
 
 # Optimized release profile
 [profile.release]
@@ -147,4 +147,12 @@ incremental = true
 split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
+opt-level = 2
+
+# Service and sync harness builds (brokkr.toml [ratatoskr.harness]). Optimizes
+# workspace code too, so harness runs stay fast while plain dev builds stay
+# opt-level 0 for quick brokkr check; a separate profile keeps the two from
+# invalidating each other's artifacts.
+[profile.harness]
+inherits = "dev"
 opt-level = 2

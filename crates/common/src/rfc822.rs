@@ -15,7 +15,7 @@
 //! equality test, so the two cannot drift: both feed identical raw MIME
 //! through the identical extraction here.
 
-use mail_parser::{MessageParser, MimeHeaders};
+use mail_parser::MessageParser;
 
 use crate::email_parsing::format_address_list;
 use crate::text::snippet_from_text_body;
@@ -74,14 +74,15 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
         .ok_or("Failed to parse JMAP RFC822 message")?;
 
     // Message-ID: legacy joined all ids with a space.
-    let message_id_header = join_text_ids(message.header(mail_parser::HeaderName::MessageId));
+    let headers = message.headers();
+    let message_id_header = join_text_ids(headers.value(mail_parser::HeaderName::MessageId));
 
     // In-Reply-To: legacy `email.in_reply_to().join(" ")` - ALL ids, not
     // just the first. The structured `Message::in_reply_to` keeps only the
     // first, which is the divergence this re-parse repairs.
-    let in_reply_to_header = join_text_ids(message.header(mail_parser::HeaderName::InReplyTo));
+    let in_reply_to_header = join_text_ids(headers.value(mail_parser::HeaderName::InReplyTo));
 
-    let references_header = join_text_ids(message.header(mail_parser::HeaderName::References));
+    let references_header = join_text_ids(headers.value(mail_parser::HeaderName::References));
 
     // List-Unsubscribe / -Post and Authentication-Results are URI- and
     // structured-token headers mail-parser does not always classify as a
@@ -98,8 +99,7 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
     // text/plain and text/html part; guard the HTML selection against AMP.
     let body_text = message.body_text(0).map(|text| text.to_string());
     let body_html = message.body_html(0).and_then(|html| {
-        if let Some(&part_idx) = message.html_body.first()
-            && let Some(part) = message.parts.get(part_idx as usize)
+        if let Some(part) = message.html_body().next()
             && let Some(ct) = part.content_type()
             && let Some(subtype) = ct.subtype()
             && crate::email_parsing::is_amp_content_type(&format!("{}/{subtype}", ct.ctype()))
@@ -110,10 +110,8 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
     });
 
     let attachments = message
-        .attachments
-        .iter()
-        .filter_map(|&part_idx| {
-            let part = message.parts.get(part_idx as usize)?;
+        .attachments()
+        .map(|part| {
             let mime_type = part
                 .content_type()
                 .map(|ct| {
@@ -129,19 +127,17 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
                     }
                 })
                 .unwrap_or_else(|| "application/octet-stream".to_string());
-            let is_inline = part
-                .content_disposition()
-                .is_some_and(mail_parser::ContentType::is_inline);
+            let is_inline = part.content_disposition().is_some_and(|ct| ct.is_inline());
             let calendar_payload = crate::email_parsing::is_calendar_content_type(&mime_type)
-                .then(|| String::from_utf8_lossy(part.contents()).into_owned());
-            Some(Rfc822Attachment {
+                .then(|| String::from_utf8_lossy(&part.decoded()).into_owned());
+            Rfc822Attachment {
                 filename: part.attachment_name().unwrap_or("attachment").to_string(),
                 mime_type,
-                size: i64::try_from(part.len()).unwrap_or(i64::MAX),
+                size: i64::try_from(part.decoded_len()).unwrap_or(i64::MAX),
                 content_id: part.content_id().map(ToString::to_string),
                 is_inline,
                 calendar_payload,
-            })
+            }
         })
         .collect();
 
@@ -173,24 +169,21 @@ pub fn snippet_from_body(body_text: Option<&str>) -> String {
 /// Format a mail-parser address field as the comma-joined "Name <email>"
 /// string the DB stores.
 #[must_use]
-pub fn format_addr_field(addr: Option<&mail_parser::Address>) -> Option<String> {
+pub fn format_addr_field(addr: Option<mail_parser::AddressList<'_>>) -> Option<String> {
     let addr = addr?;
-    format_address_list(addr.iter().map(|a| {
+    format_address_list(addr.mailboxes().map(|a| {
         (
-            a.name.as_ref().map(ToString::to_string),
-            a.address
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
+            a.name().map(ToString::to_string),
+            a.address().map(ToString::to_string).unwrap_or_default(),
         )
     }))
 }
 
-fn join_text_ids(hv: Option<&mail_parser::HeaderValue>) -> Option<String> {
+fn join_text_ids(hv: Option<mail_parser::HeaderValue<'_>>) -> Option<String> {
     match hv {
         Some(mail_parser::HeaderValue::Text(t)) => Some(t.to_string()),
         Some(mail_parser::HeaderValue::TextList(list)) if !list.is_empty() => {
-            Some(list.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(" "))
+            Some(list.iter().collect::<Vec<_>>().join(" "))
         }
         _ => None,
     }
@@ -275,8 +268,8 @@ Hello body text.";
 
     #[test]
     fn malformed_does_not_panic() {
-        // A header-less body still parses; an empty input parses to an empty
-        // message rather than erroring, so assert the call is total.
+        // Empty input does not parse to a message, so `parse_rfc822` errors;
+        // assert the call is total and the fallback carries no headers.
         let parsed = parse_rfc822(&MessageParser::default(), b"").unwrap_or_default();
         assert!(parsed.message_id_header.is_none());
     }

@@ -81,7 +81,9 @@ fn detect_archive_signature(data: &[u8]) -> Option<SignedMarker> {
         let Ok(entry) = archive.by_index_raw(i) else {
             continue;
         };
-        let name = entry.name();
+        let Ok(name) = entry.name() else {
+            continue;
+        };
         if name.starts_with("_xmlsignatures/") {
             return Some(SignedMarker::OoxmlXmlSignatures);
         }

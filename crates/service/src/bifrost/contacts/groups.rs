@@ -408,6 +408,7 @@ mod tests {
 
     fn page(items: Vec<DirectoryGroup>, next: Option<&str>) -> Page<DirectoryGroup> {
         Page {
+            truncated: false,
             items,
             next_cursor: next.map(|cursor| cursor.as_bytes().to_vec()),
             estimated_total: None,

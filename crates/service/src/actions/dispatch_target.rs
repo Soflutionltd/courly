@@ -15,6 +15,7 @@ use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use crate::bifrost::BifrostProviderKind;
 use crate::bifrost::containers::ContainerIndex;
+use crate::bifrost::imap_object_id::encode_imap_object_id;
 use crate::bifrost::resident::ResidentActionAccount;
 
 const FLAG_SEEN: &str = "\\Seen";
@@ -183,13 +184,7 @@ pub(crate) async fn resolve_thread_messages(
             let uid = imap_uid.ok_or_else(|| ActionError::db("IMAP message missing UID"))?;
             let uidvalidity = imap_uidvalidity
                 .ok_or_else(|| ActionError::db("IMAP message missing uidvalidity"))?;
-            ObjectId(format!(
-                "imap1:{}:{}:{}:{}",
-                folder.len(),
-                folder,
-                uidvalidity,
-                uid
-            ))
+            ObjectId(encode_imap_object_id(&folder, uidvalidity, uid))
         } else {
             ObjectId(message_id)
         };
@@ -247,13 +242,7 @@ pub(crate) async fn resolve_message_object_id(
         let uid = imap_uid.ok_or_else(|| ActionError::db("IMAP message missing UID"))?;
         let uidvalidity =
             imap_uidvalidity.ok_or_else(|| ActionError::db("IMAP message missing uidvalidity"))?;
-        Ok(ObjectId(format!(
-            "imap1:{}:{}:{}:{}",
-            folder.len(),
-            folder,
-            uidvalidity,
-            uid
-        )))
+        Ok(ObjectId(encode_imap_object_id(&folder, uidvalidity, uid)))
     } else {
         Ok(ObjectId(message_id))
     }
