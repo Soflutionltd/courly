@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn ctrl_z_triggers_undo() {
         let w = make_wrapper();
-        let event = make_key_event("z", keyboard::key::Code::KeyZ, keyboard::Modifiers::CTRL);
+        let event = make_key_event("z", keyboard::key::Code::KeyZ, keyboard::Modifiers::COMMAND);
         assert_eq!(w.check_undo_redo(&event), Some(Msg::Undo));
     }
 
@@ -428,7 +428,7 @@ mod tests {
         let event = make_key_event(
             "z",
             keyboard::key::Code::KeyZ,
-            keyboard::Modifiers::CTRL.union(keyboard::Modifiers::SHIFT),
+            keyboard::Modifiers::COMMAND.union(keyboard::Modifiers::SHIFT),
         );
         assert_eq!(w.check_undo_redo(&event), Some(Msg::Redo));
     }
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn ctrl_y_triggers_redo() {
         let w = make_wrapper();
-        let event = make_key_event("y", keyboard::key::Code::KeyY, keyboard::Modifiers::CTRL);
+        let event = make_key_event("y", keyboard::key::Code::KeyY, keyboard::Modifiers::COMMAND);
         assert_eq!(w.check_undo_redo(&event), Some(Msg::Redo));
     }
 
@@ -448,14 +448,14 @@ mod tests {
             on_undo: None,
             on_redo: None,
         };
-        let event = make_key_event("z", keyboard::key::Code::KeyZ, keyboard::Modifiers::CTRL);
+        let event = make_key_event("z", keyboard::key::Code::KeyZ, keyboard::Modifiers::COMMAND);
         assert_eq!(w.check_undo_redo(&event), None);
     }
 
     #[test]
     fn unrelated_key_returns_none() {
         let w = make_wrapper();
-        let event = make_key_event("a", keyboard::key::Code::KeyA, keyboard::Modifiers::CTRL);
+        let event = make_key_event("a", keyboard::key::Code::KeyA, keyboard::Modifiers::COMMAND);
         assert_eq!(w.check_undo_redo(&event), None);
     }
 }
