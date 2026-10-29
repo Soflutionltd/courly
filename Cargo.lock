@@ -4602,6 +4602,7 @@ dependencies = [
  "blitz-traits",
  "data-url",
  "log",
+ "num-traits",
  "peniko",
 ]
 

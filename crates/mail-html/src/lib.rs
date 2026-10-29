@@ -18,6 +18,7 @@ use blitz_paint::paint_scene;
 pub use blitz_traits::net::{Bytes, Url};
 use blitz_traits::net::{NetHandler, NetProvider, Request};
 use blitz_traits::shell::{ColorScheme, Viewport};
+use num_traits::ToPrimitive as _;
 use peniko::Fill;
 use peniko::kurbo::Rect;
 
@@ -149,10 +150,16 @@ impl NetProvider for MailNetProvider {
     }
 }
 
+/// Logical size times scale, as a whole number of device pixels (at least
+/// one; NaN maps to one).
+fn device_pixels(value: f32) -> u32 {
+    value.round().to_u32().unwrap_or(1).max(1)
+}
+
 /// Lay out and rasterise one HTML email. CPU only; call from a blocking
 /// worker, never from the UI thread.
 pub fn render(request: RenderRequest) -> RenderedMail {
-    let width = request.width.max(1.0).floor();
+    let width = request.width.clamp(1.0, MAX_WIDTH).floor();
     let pending = Arc::new(AtomicUsize::new(0));
     let net = Arc::new(MailNetProvider {
         inline_images: request.inline_images,
@@ -165,8 +172,8 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         &request.html,
         DocumentConfig {
             viewport: Some(Viewport::new(
-                (width * HIDPI_SCALE) as u32,
-                (LAYOUT_VIEWPORT_HEIGHT as f32 * HIDPI_SCALE) as u32,
+                device_pixels(width * HIDPI_SCALE),
+                device_pixels(LAYOUT_VIEWPORT_HEIGHT as f32 * HIDPI_SCALE),
                 HIDPI_SCALE,
                 ColorScheme::Light,
             )),
@@ -202,8 +209,8 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     } else {
         HIDPI_SCALE
     };
-    let px_width = (content_width * scale) as u32;
-    let px_height = (content_height * scale) as u32;
+    let px_width = device_pixels(content_width * scale);
+    let px_height = device_pixels(content_height * scale);
 
     let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
         |scene| {
@@ -278,11 +285,14 @@ fn collect_links(document: &HtmlDocument) -> Vec<LinkArea> {
                 return None;
             }
             let rect = doc.get_client_bounding_rect(node_id)?;
-            (rect.width > 0.0 && rect.height > 0.0).then(|| LinkArea {
-                x: rect.x as f32,
-                y: rect.y as f32,
-                width: rect.width as f32,
-                height: rect.height as f32,
+            if rect.width <= 0.0 || rect.height <= 0.0 {
+                return None;
+            }
+            Some(LinkArea {
+                x: rect.x.to_f32()?,
+                y: rect.y.to_f32()?,
+                width: rect.width.to_f32()?,
+                height: rect.height.to_f32()?,
                 href: href.to_string(),
             })
         })

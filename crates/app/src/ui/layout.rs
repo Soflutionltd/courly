@@ -591,6 +591,18 @@ pub const PEOPLE_PANEL_HEIGHT: f32 = 380.0;
 /// Vertical spacing between contact / group pills inside their panel.
 pub const PEOPLE_PILL_SPACING: f32 = 8.0;
 
+// ── HTML email body ─────────────────────────────────────
+
+/// Space reserved for an HTML email body while it renders.
+pub const HTML_BODY_PLACEHOLDER_HEIGHT: f32 = 160.0;
+/// Padding inside the "remote images blocked" banner above an email body.
+pub const PAD_REMOTE_BANNER: Padding = Padding {
+    top: 6.0,
+    right: 6.0,
+    bottom: 6.0,
+    left: 10.0,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -624,15 +636,3 @@ mod tests {
         );
     }
 }
-
-// ── HTML email body ─────────────────────────────────────
-
-/// Space reserved for an HTML email body while it renders.
-pub const HTML_BODY_PLACEHOLDER_HEIGHT: f32 = 160.0;
-/// Padding inside the "remote images blocked" banner above an email body.
-pub const PAD_REMOTE_BANNER: Padding = Padding {
-    top: 6.0,
-    right: 6.0,
-    bottom: 6.0,
-    left: 10.0,
-};
