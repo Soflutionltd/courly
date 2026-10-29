@@ -31,6 +31,7 @@ members = [
 "crates/service-state",
 "crates/action-types",
 "crates/coverage",
+"crates/mail-html",
 ]
 
 exclude = [

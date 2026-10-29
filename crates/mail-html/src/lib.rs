@@ -1,0 +1,346 @@
+//! HTML email rendering on top of the Blitz engine (Stylo CSS, Taffy layout,
+//! Parley text, Vello CPU raster).
+//!
+//! The renderer is deliberately static: no scripts, no forms, no network
+//! unless the caller opts in per message. Output is a set of RGBA tiles plus
+//! the hit areas of every link, so the UI layer only has to draw images.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
+
+use anyrender::{PaintScene as _, render_to_buffer};
+use anyrender_vello_cpu::VelloCpuImageRenderer;
+use blitz_dom::{DocumentConfig, UserAgentStylesheet, util::Color};
+use blitz_html::HtmlDocument;
+use blitz_paint::paint_scene;
+pub use blitz_traits::net::{Bytes, Url};
+use blitz_traits::net::{NetHandler, NetProvider, Request};
+use blitz_traits::shell::{ColorScheme, Viewport};
+use peniko::Fill;
+use peniko::kurbo::Rect;
+
+/// Device pixel ratio used for normal-length emails.
+const HIDPI_SCALE: f32 = 2.0;
+/// Emails taller than this (CSS px) are rasterised at 1x to bound memory.
+const HIDPI_MAX_HEIGHT: f32 = 6_000.0;
+/// Hard cap on rendered height (CSS px); anything below is cut off.
+const MAX_HEIGHT: f32 = 30_000.0;
+/// Hard cap on rendered width (CSS px) for emails wider than the pane.
+const MAX_WIDTH: f32 = 2_400.0;
+/// Height of each RGBA tile in device pixels. Kept under common GPU
+/// texture limits.
+const TILE_HEIGHT_PX: u32 = 4_096;
+/// Viewport height handed to layout. Only matters for `vh` units and
+/// `height: 100%` on the root; content is measured by overflow afterwards.
+const LAYOUT_VIEWPORT_HEIGHT: u32 = 800;
+/// How long to wait for opted-in remote images before painting anyway.
+const REMOTE_DEADLINE: Duration = Duration::from_secs(10);
+const REMOTE_POLL: Duration = Duration::from_millis(15);
+
+/// Rules layered over Blitz's default user-agent sheet.
+///
+/// `td, th` are forced back to table cells because responsive email
+/// templates set `display: block !important` on cells, which Blitz's table
+/// layout drops entirely. User-agent `!important` outranks author
+/// `!important`, so this wins over inline styles.
+const EMAIL_UA_CSS: &str = r#"
+html {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    color: #1f1f1f;
+}
+td, th { display: table-cell !important; }
+"#;
+
+static EMAIL_UA_SHEET: LazyLock<UserAgentStylesheet> =
+    LazyLock::new(|| UserAgentStylesheet::parse(EMAIL_UA_CSS));
+
+/// Fetches a remote resource. Only called for `http`/`https` URLs, and only
+/// when the caller allowed remote content for this message.
+pub type RemoteFetcher = Arc<dyn Fn(&Url) -> Option<Bytes> + Send + Sync>;
+
+pub struct RenderRequest {
+    pub html: String,
+    /// Available width in CSS px.
+    pub width: f32,
+    /// Inline parts keyed by Content-ID (without the `cid:` prefix).
+    pub inline_images: HashMap<String, Bytes>,
+    pub remote: Option<RemoteFetcher>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tile {
+    /// Offset from the top of the email, in CSS px.
+    pub y: f32,
+    /// Height in CSS px.
+    pub height: f32,
+    pub px_width: u32,
+    pub px_height: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkArea {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub href: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderedMail {
+    /// Rendered width in CSS px. Larger than the requested width when the
+    /// email has a fixed layout wider than the pane.
+    pub width: f32,
+    /// Rendered height in CSS px.
+    pub height: f32,
+    pub tiles: Vec<Tile>,
+    pub links: Vec<LinkArea>,
+    /// Remote resources that were requested but not loaded.
+    pub blocked_remote: usize,
+}
+
+struct MailNetProvider {
+    inline_images: HashMap<String, Bytes>,
+    remote: Option<RemoteFetcher>,
+    blocked: AtomicUsize,
+    pending: Arc<AtomicUsize>,
+}
+
+impl NetProvider for MailNetProvider {
+    fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
+        let url = request.url;
+        match url.scheme() {
+            "cid" => {
+                let cid = url.path().trim_start_matches('<').trim_end_matches('>');
+                if let Some(bytes) = self.inline_images.get(cid) {
+                    handler.bytes(url.to_string(), bytes.clone());
+                }
+            }
+            "data" => {
+                let decoded = data_url::DataUrl::process(url.as_str())
+                    .ok()
+                    .and_then(|data| data.decode_to_vec().ok());
+                if let Some((body, _)) = decoded {
+                    handler.bytes(url.to_string(), Bytes::from(body));
+                }
+            }
+            "http" | "https" => match &self.remote {
+                Some(fetch) => {
+                    let fetch = Arc::clone(fetch);
+                    let pending = Arc::clone(&self.pending);
+                    pending.fetch_add(1, Ordering::SeqCst);
+                    std::thread::spawn(move || {
+                        if let Some(bytes) = fetch(&url) {
+                            handler.bytes(url.to_string(), bytes);
+                        }
+                        pending.fetch_sub(1, Ordering::SeqCst);
+                    });
+                }
+                None => {
+                    self.blocked.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+            _ => {}
+        }
+    }
+}
+
+/// Lay out and rasterise one HTML email. CPU only; call from a blocking
+/// worker, never from the UI thread.
+pub fn render(request: RenderRequest) -> RenderedMail {
+    let width = request.width.max(1.0).floor();
+    let pending = Arc::new(AtomicUsize::new(0));
+    let net = Arc::new(MailNetProvider {
+        inline_images: request.inline_images,
+        remote: request.remote,
+        blocked: AtomicUsize::new(0),
+        pending: Arc::clone(&pending),
+    });
+
+    let mut document = HtmlDocument::from_html(
+        &request.html,
+        DocumentConfig {
+            viewport: Some(Viewport::new(
+                (width * HIDPI_SCALE) as u32,
+                (LAYOUT_VIEWPORT_HEIGHT as f32 * HIDPI_SCALE) as u32,
+                HIDPI_SCALE,
+                ColorScheme::Light,
+            )),
+            net_provider: Some(Arc::clone(&net) as Arc<dyn NetProvider>),
+            ua_stylesheets: vec![UserAgentStylesheet::default_sheet(), EMAIL_UA_SHEET.clone()],
+            ..Default::default()
+        },
+    );
+
+    let deadline = Instant::now() + REMOTE_DEADLINE;
+    loop {
+        document.as_mut().resolve(0.0);
+        if pending.load(Ordering::SeqCst) == 0 || Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(REMOTE_POLL);
+    }
+    document.as_mut().resolve(0.0);
+
+    let layout = document.as_ref().root_element().final_layout();
+    let content_height = layout
+        .size
+        .height
+        .max(layout.scrollable_overflow_rect.bottom)
+        .clamp(1.0, MAX_HEIGHT)
+        .ceil();
+    let content_width = width
+        .max(layout.scrollable_overflow_rect.right)
+        .min(MAX_WIDTH)
+        .ceil();
+    let scale = if content_height > HIDPI_MAX_HEIGHT {
+        1.0
+    } else {
+        HIDPI_SCALE
+    };
+    let px_width = (content_width * scale) as u32;
+    let px_height = (content_height * scale) as u32;
+
+    let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| {
+            scene.fill(
+                Fill::NonZero,
+                Default::default(),
+                Color::WHITE,
+                Default::default(),
+                &Rect::new(0.0, 0.0, f64::from(px_width), f64::from(px_height)),
+            );
+            paint_scene(
+                scene,
+                document.as_mut(),
+                f64::from(scale),
+                px_width,
+                px_height,
+                0,
+                0,
+            );
+        },
+        px_width,
+        px_height,
+    );
+
+    let tiles = split_into_tiles(&buffer, px_width, px_height, scale);
+    let links = collect_links(&document);
+
+    RenderedMail {
+        width: content_width,
+        height: content_height,
+        tiles,
+        links,
+        blocked_remote: net.blocked.load(Ordering::Relaxed),
+    }
+}
+
+fn split_into_tiles(buffer: &[u8], px_width: u32, px_height: u32, scale: f32) -> Vec<Tile> {
+    let row_bytes = px_width as usize * 4;
+    let mut tiles = Vec::new();
+    let mut top = 0;
+    while top < px_height {
+        let rows = TILE_HEIGHT_PX.min(px_height - top);
+        let start = top as usize * row_bytes;
+        let end = start + rows as usize * row_bytes;
+        tiles.push(Tile {
+            y: top as f32 / scale,
+            height: rows as f32 / scale,
+            px_width,
+            px_height: rows,
+            rgba: buffer[start..end].to_vec(),
+        });
+        top += rows;
+    }
+    tiles
+}
+
+fn collect_links(document: &HtmlDocument) -> Vec<LinkArea> {
+    let doc = document.as_ref();
+    let Ok(anchors) = doc.query_selector_all("a[href]") else {
+        return Vec::new();
+    };
+    anchors
+        .iter()
+        .filter_map(|&node_id| {
+            let href = doc
+                .get_node(node_id)?
+                .attr(blitz_dom::local_name!("href"))?;
+            let href = href.trim();
+            let scheme_ok = Url::parse(href)
+                .is_ok_and(|url| matches!(url.scheme(), "http" | "https" | "mailto"));
+            if !scheme_ok {
+                return None;
+            }
+            let rect = doc.get_client_bounding_rect(node_id)?;
+            (rect.width > 0.0 && rect.height > 0.0).then(|| LinkArea {
+                x: rect.x as f32,
+                y: rect.y as f32,
+                width: rect.width as f32,
+                height: rect.height as f32,
+                href: href.to_string(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn render_html(html: &str) -> RenderedMail {
+        render(RenderRequest {
+            html: html.to_string(),
+            width: 600.0,
+            inline_images: HashMap::new(),
+            remote: None,
+        })
+    }
+
+    #[test]
+    fn block_cells_still_render() {
+        let html = r#"<table><tr><td style="display:block !important">
+            <p style="height:300px">Paid</p></td></tr></table>"#;
+        let mail = render_html(html);
+        assert!(mail.height >= 300.0, "height was {}", mail.height);
+    }
+
+    #[test]
+    fn remote_images_are_blocked_by_default() {
+        let mail = render_html(r#"<img src="https://tracker.example/p.gif">"#);
+        assert_eq!(mail.blocked_remote, 1);
+    }
+
+    #[test]
+    fn links_are_reported_with_areas() {
+        let mail = render_html(r#"<p><a href="https://example.com/x">Open</a></p>"#);
+        assert_eq!(mail.links.len(), 1);
+        assert_eq!(mail.links[0].href, "https://example.com/x");
+        assert!(mail.links[0].width > 0.0);
+    }
+
+    #[test]
+    fn fixed_width_layouts_widen_the_render() {
+        let mail = render_html(r#"<table width="900"><tr><td>wide</td></tr></table>"#);
+        assert!(mail.width >= 900.0, "width was {}", mail.width);
+    }
+
+    #[test]
+    fn script_links_are_ignored() {
+        let mail = render_html(r#"<a href="javascript:alert(1)">x</a>"#);
+        assert!(mail.links.is_empty());
+    }
+
+    #[test]
+    fn tiles_cover_the_full_height() {
+        let mail = render_html(r#"<div style="height:5000px">tall</div>"#);
+        let covered: f32 = mail.tiles.iter().map(|t| t.height).sum();
+        assert!((covered - mail.height).abs() < 1.0);
+        assert!(mail.tiles.len() > 1);
+    }
+}

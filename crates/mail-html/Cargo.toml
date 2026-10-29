@@ -1,0 +1,22 @@
+[package]
+name = "mail-html"
+description = "Native HTML email rendering for Ratatoskr, built on the Blitz engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyrender = "0.14"
+anyrender_vello_cpu = "0.18"
+blitz-dom = { version = "=0.3.0-beta.4", default-features = false, features = ["svg", "system-fonts", "floats", "woff"] }
+blitz-html = "=0.3.0-beta.4"
+blitz-paint = "=0.3.0-beta.4"
+blitz-traits = "=0.3.0-beta.4"
+data-url = "0.3"
+log = "0.4"
+peniko = "0.6"
