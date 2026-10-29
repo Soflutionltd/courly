@@ -62,6 +62,17 @@ pub enum ReadingPaneMessage {
     ToggleStar,
     /// User clicked a hyperlink in the HTML body; open it in the system browser.
     LinkClicked(String),
+    /// The HTML body of the message at this index was laid out at a new width.
+    HtmlBodyResized(usize, f32),
+    /// A background HTML render finished.
+    HtmlBodyRendered {
+        index: usize,
+        generation: u64,
+        width: f32,
+        body: Option<std::sync::Arc<super::mail_body::RenderedBody>>,
+    },
+    /// Load remote images for the message at this index.
+    ShowRemoteImages(usize),
     Noop,
 }
 
@@ -136,12 +147,13 @@ pub struct ReadingPane {
     /// Set of filenames whose versions list is currently expanded.
     /// Reset on thread switch.
     expanded_attachment_versions: std::collections::HashSet<String>,
-    /// Pre-parsed HTML bodies, one per message. Avoids re-parsing HTML on every
-    /// view cycle - only rebuilt when thread detail loads.
-    cached_html: Vec<Option<super::html_render::CachedHtmlBody>>,
-    /// Pre-loaded inline images for CID resolution in HTML bodies.
-    /// Maps Content-ID to image bytes.
-    inline_images: HashMap<String, iced::widget::image::Handle>,
+    /// HTML render state, one per message.
+    html_bodies: Vec<super::mail_body::HtmlBodyState>,
+    /// Bumped whenever the thread content changes so late renders of a
+    /// previous thread are dropped.
+    body_generation: u64,
+    /// Inline images for CID resolution in HTML bodies, keyed by Content-ID.
+    inline_image_bytes: HashMap<String, mail_html::Bytes>,
 }
 
 /// Minimal reference to the currently selected thread for display purposes.
@@ -196,6 +208,39 @@ impl ReadingPane {
         })
     }
 
+    /// Start a background render of the HTML body at `index` when `start`
+    /// is set and the body has a known width.
+    fn start_html_render(&mut self, index: usize, start: bool) -> Task<ReadingPaneMessage> {
+        if !start {
+            return Task::none();
+        }
+        let Some(html) = self
+            .thread_messages
+            .get(index)
+            .and_then(|msg| msg.body_html.clone())
+        else {
+            return Task::none();
+        };
+        let Some((width, allow_remote)) = self
+            .html_bodies
+            .get_mut(index)
+            .and_then(super::mail_body::HtmlBodyState::start)
+        else {
+            return Task::none();
+        };
+        let generation = self.body_generation;
+        let inline_images = self.inline_image_bytes.clone();
+        Task::perform(
+            super::mail_body::render(html, width, inline_images, allow_remote),
+            move |body| ReadingPaneMessage::HtmlBodyRendered {
+                index,
+                generation,
+                width,
+                body,
+            },
+        )
+    }
+
     pub fn new() -> Self {
         Self {
             thread_messages: Vec::new(),
@@ -210,8 +255,9 @@ impl ReadingPane {
             search_highlight_terms: Vec::new(),
             deduped_attachments: Vec::new(),
             expanded_attachment_versions: std::collections::HashSet::new(),
-            cached_html: Vec::new(),
-            inline_images: HashMap::new(),
+            html_bodies: Vec::new(),
+            body_generation: 0,
+            inline_image_bytes: HashMap::new(),
         }
     }
 
@@ -230,8 +276,9 @@ impl ReadingPane {
         self.focused_message = None;
         self.deduped_attachments.clear();
         self.expanded_attachment_versions.clear();
-        self.cached_html.clear();
-        self.inline_images.clear();
+        self.html_bodies.clear();
+        self.body_generation += 1;
+        self.inline_image_bytes.clear();
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
             .map(|t| {
@@ -306,21 +353,17 @@ impl ReadingPane {
 
         // Apply expansion rules then set messages
         self.apply_message_expansion(&detail.messages);
-        // Pre-parse HTML bodies so we don't re-parse on every view cycle.
-        self.cached_html = detail
+        self.html_bodies = detail
             .messages
             .iter()
-            .map(|msg| {
-                msg.body_html
-                    .as_deref()
-                    .map(super::html_render::preparse_html)
-            })
+            .map(|_| super::mail_body::HtmlBodyState::default())
             .collect();
+        self.body_generation += 1;
 
         self.thread_messages = detail.messages;
         self.thread_attachments = detail.attachments;
         self.thread_labels = detail.labels;
-        self.inline_images = detail.inline_images;
+        self.inline_image_bytes = super::mail_body::inline_image_bytes(&detail.inline_images);
         self.recompute_deduped_attachments();
     }
 
@@ -548,6 +591,35 @@ impl Component for ReadingPane {
             ReadingPaneMessage::LinkClicked(url) => {
                 open_url_in_browser(&url);
                 (Task::none(), None)
+            }
+            ReadingPaneMessage::HtmlBodyResized(index, width) => {
+                let start = self
+                    .html_bodies
+                    .get_mut(index)
+                    .is_some_and(|state| state.set_width(width));
+                (self.start_html_render(index, start), None)
+            }
+            ReadingPaneMessage::HtmlBodyRendered {
+                index,
+                generation,
+                width,
+                body,
+            } => {
+                if generation != self.body_generation {
+                    return (Task::none(), None);
+                }
+                let again = self
+                    .html_bodies
+                    .get_mut(index)
+                    .is_some_and(|state| state.finish(width, body));
+                (self.start_html_render(index, again), None)
+            }
+            ReadingPaneMessage::ShowRemoteImages(index) => {
+                let start = self
+                    .html_bodies
+                    .get_mut(index)
+                    .is_some_and(super::mail_body::HtmlBodyState::allow_remote);
+                (self.start_html_render(index, start), None)
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }
@@ -840,15 +912,22 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     for (i, msg) in pane.thread_messages.iter().enumerate() {
         let is_expanded = pane.message_expanded.get(i).copied().unwrap_or(false);
         if is_expanded {
-            let cached_html = pane.cached_html.get(i).and_then(|c| c.as_ref());
+            let html_body = msg.body_html.as_ref().map(|_| {
+                super::mail_body::view(
+                    pane.html_bodies.get(i),
+                    msg.body_text.as_deref(),
+                    move |width| ReadingPaneMessage::HtmlBodyResized(i, width),
+                    ReadingPaneMessage::LinkClicked,
+                    ReadingPaneMessage::ShowRemoteImages(i),
+                )
+            });
             msg_col = msg_col.push(widgets::expanded_message_card(
                 msg,
                 i,
                 pane.date_display,
                 first_message_date,
                 &pane.search_highlight_terms,
-                cached_html,
-                &pane.inline_images,
+                html_body,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Reply,
@@ -860,7 +939,6 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                     message_index,
                     response,
                 },
-                ReadingPaneMessage::LinkClicked,
             ));
         } else {
             msg_col = msg_col.push(widgets::collapsed_message_row(
@@ -1002,7 +1080,7 @@ fn attachment_group<'a>(
 }
 
 /// Open a URL in the system default browser.
-fn open_url_in_browser(url: &str) {
+pub(crate) fn open_url_in_browser(url: &str) {
     // Only allow safe URL schemes from untrusted email content
     let allowed =
         url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:");

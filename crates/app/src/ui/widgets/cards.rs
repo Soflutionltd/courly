@@ -268,8 +268,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     date_display: DateDisplay,
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
-    cached_html: Option<&'a crate::ui::html_render::CachedHtmlBody>,
-    inline_images: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    html_body: Option<Element<'a, M>>,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
     on_reply: impl Fn(usize) -> M,
@@ -278,7 +277,6 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
     on_rsvp: impl Fn(usize, service_api::RsvpResponse) -> M,
-    on_link_click: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
     let sender_name = msg
         .from_name
@@ -379,27 +377,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 
     let header = column![avatar_rows, to_row].spacing(SPACE_XXS);
 
-    let on_link = std::rc::Rc::new(on_link_click);
-    let body_inner: Element<'_, M> = if msg.body_html.is_some() {
-        let link_cb = std::rc::Rc::clone(&on_link);
-        let rendered = if let Some(cached) = cached_html {
-            crate::ui::html_render::render_cached_html(
-                cached,
-                msg.body_text.as_deref(),
-                move |url| link_cb(url),
-                inline_images,
-            )
-        } else if let Some(html) = msg.body_html.as_deref() {
-            let link_cb2 = std::rc::Rc::clone(&on_link);
-            crate::ui::html_render::render_html(
-                html,
-                msg.body_text.as_deref(),
-                move |url| link_cb2(url),
-                inline_images,
-            )
-        } else {
-            unreachable!()
-        };
+    let body_inner: Element<'_, M> = if let Some(rendered) = html_body {
         container(rendered).padding(PAD_BODY).into()
     } else {
         let display = msg

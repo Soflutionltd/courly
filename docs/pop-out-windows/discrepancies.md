@@ -170,7 +170,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 
 ### Phase 3 - rendering modes
 
-- Plain text, Simple HTML, Original HTML (via `html_render`), Source
+- Plain text, Simple HTML, Original HTML (via `mail-html`), Source
   (synthesized) all render (`message_view.rs:579-637`).
 - System-wide default rendering mode persisted via
   `Settings.default_rendering_mode`; new pop-outs and session-restored

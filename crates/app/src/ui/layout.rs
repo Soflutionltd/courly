@@ -624,3 +624,15 @@ mod tests {
         );
     }
 }
+
+// ── HTML email body ─────────────────────────────────────
+
+/// Space reserved for an HTML email body while it renders.
+pub const HTML_BODY_PLACEHOLDER_HEIGHT: f32 = 160.0;
+/// Padding inside the "remote images blocked" banner above an email body.
+pub const PAD_REMOTE_BANNER: Padding = Padding {
+    top: 6.0,
+    right: 6.0,
+    bottom: 6.0,
+    left: 10.0,
+};

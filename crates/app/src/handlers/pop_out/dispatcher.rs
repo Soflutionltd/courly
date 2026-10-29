@@ -112,7 +112,7 @@ impl ReadyApp {
                 let PopOutMessage::MessageView(msg) = pop_out_msg else {
                     return Task::none();
                 };
-                handle_message_view_update(state, msg)
+                handle_message_view_update(window_id, state, msg)
             }
             // Compose discard
             (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Discard)) => {

@@ -268,10 +268,11 @@ Phases 1-2 complete. Phase 3 blocked on upstream.
 
 ## Remaining Enhancements (HTML rendering)
 
-The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has significant fidelity gaps. Remaining:
-- [ ] Remote image loading with user consent (`block_remote_images` setting exists but disconnected from `render_html` - function signature needs context parameter)
-- [ ] Table rendering (table-for-layout is the hardest - no `<table>`/`<tr>`/`<td>` handling at all)
-- [ ] Image caching (`HashMap<String, image::Handle>`) - no `iced::widget::image` usage in app crate
+HTML bodies are rendered by `crates/mail-html` (Blitz: Stylo CSS, Taffy layout, Parley text, Vello CPU raster) and shown as image tiles with link hit areas (`crates/app/src/ui/mail_body.rs`). Remaining:
+- [ ] Text selection and copy inside rendered HTML bodies (tiles are images today)
+- [ ] Wire the `block_remote_images` setting and a per-sender allow list to `HtmlBodyState::allow_remote`
+- [ ] Dark-mode rendering for emails that do not declare their own colors
+- [ ] Hover feedback for links (URL preview in the status bar)
 
 ## Security / Bug Findings (unfixed)
 
@@ -332,12 +333,6 @@ Smaller confirmed issues from the same hunt, roughly in severity order:
   - `link_at_content_point` (`crates/rte/src/widget/mod.rs`) returns `None` when `entry.paragraph()` is `None`, which is the case for container blocks (`BlockQuote`, list groups). Single-clicking a link inside a quoted reply still falls through to caret placement instead of emitting `Action::LinkClicked`. Matches the existing "container content isn't `DocPosition`-addressable" limitation - revisit when/if container content becomes addressable.
   - Caret rendering inside an atomic block: `draw_cursor` (`crates/rte/src/widget/mod.rs`) falls into the no-paragraph branch and draws at `para_origin_x` for both offset 0 and offset 1, so arrowing across an `Image` or `HorizontalRule` produces no visible cursor movement even though the offset advances. Functionally fine (Backspace/Delete on the post-atom offset still removes the atom); purely a visual fidelity gap.
   - `paste_plain_text` (`crates/rte/src/widget/editor_state.rs`) splits on `\n` after CRLF normalization, so a trailing newline (e.g. `"alpha\n"`) produces an extra empty paragraph at the end. Likely intended (preserves explicit blank-line intent), but worth confirming against real-world paste sources before treating as final.
-
-- [ ] **`html_render` post-review gaps** *(Bridge fixes only - litehtml-rs at `/home/folk/Programs/litehtml-rs` is the eventual replacement)* - Surfaced during the 11-finding review of `crates/app/src/ui/html_render.rs`. None are regressions; each is a known limitation of the targeted fixes that landed for the bridge period.
-  - **Inline image frame width.** `render_cid_image` uses `width(Length::Fill) + ContentFit::ScaleDown`. Large images correctly scale down to body width, but small images now reserve the full body width with empty space around the rendered pixels. iced's `image` widget doesn't expose `max_width`; a real "shrink to natural, cap at container width" needs a `responsive` wrapper or a natural-dimension query that picks `Length::Fixed(min(natural_w, available_w))`. Verify visually before treating as final.
-  - **Heading style fidelity.** `Block::Heading(String, u8)` only stores plain text, so `<h1>Hello <em>world</em></h1>` collapses to "Hello world" rendered semibold - the `<em>` italic run is lost. Promoting to `Block::Heading(Vec<InlineSpan>, u8)` would restore fidelity but ripples through all heading rendering call sites; not worth doing now if litehtml-rs is close.
-  - **Inline styles inside `<pre>`.** Style flag bumps are gated by `!self.in_pre` so `<pre>plain<b>bold</b>plain</pre>` flattens to `Preformatted("plainboldplain")` - bold is lost. Correct semantics for pre-as-plain-text but wrong for source-with-syntax-highlighting. Same path-of-least-resistance trade-off until litehtml-rs.
-  - **Trailing-text-after-nested-list ordinal renumbering.** `<ol><li>outer<ul>...</ul>after</li></ol>` parses as `1. outer / • inner / 2. after`. The "2." is a side-effect of the flat block model emitting the trailing inline content as its own outer-list item. Same flat-model compromise as the rte parser - users may or may not notice.
 
 ## Test Harness
 

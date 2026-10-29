@@ -54,8 +54,17 @@ pub enum MessageViewMessage {
     /// Open or close the message action context menu.
     OpenContextMenu,
     CloseContextMenu,
-    /// Load remote content in Original HTML mode.
+    /// Load remote images for this message.
     LoadRemoteContent,
+    /// The HTML body was laid out at a new width.
+    HtmlBodyResized(f32),
+    /// A background HTML render finished.
+    HtmlBodyRendered {
+        width: f32,
+        body: Option<std::sync::Arc<crate::ui::mail_body::RenderedBody>>,
+    },
+    /// User clicked a link in the HTML body.
+    LinkClicked(String),
     /// User clicked Open on an attachment card. The string is the
     /// attachment id. Stubbed: opens with the system default handler.
     OpenAttachment(String),
@@ -112,7 +121,8 @@ pub struct MessageViewState {
     // ── Window-local state ──
     pub rendering_mode: RenderingMode,
     pub context_menu_open: bool,
-    pub remote_content_loaded: bool,
+    /// Render state of the HTML body.
+    pub html_body: crate::ui::mail_body::HtmlBodyState,
     pub error_banner: Option<String>,
 
     // ── Action context ──
@@ -161,7 +171,7 @@ impl MessageViewState {
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
-            remote_content_loaded: false,
+            html_body: crate::ui::mail_body::HtmlBodyState::default(),
             error_banner: None,
             source_selection,
             width: MESSAGE_VIEW_DEFAULT_WIDTH,
@@ -204,7 +214,7 @@ impl MessageViewState {
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
-            remote_content_loaded: false,
+            html_body: crate::ui::mail_body::HtmlBodyState::default(),
             error_banner: None,
             source_selection,
             width: MESSAGE_VIEW_DEFAULT_WIDTH,
@@ -242,7 +252,7 @@ impl MessageViewState {
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
-            remote_content_loaded: false,
+            html_body: crate::ui::mail_body::HtmlBodyState::default(),
             error_banner: None,
             source_selection: None, // not available on session restore
             width: entry.width,
@@ -285,11 +295,6 @@ pub fn view_message_window<'a>(
     // Error banner (shown above body for failed loads / deleted messages)
     if let Some(ref error) = state.error_banner {
         content = content.push(error_banner_view(error));
-    }
-
-    // Remote content banner for Original HTML mode
-    if state.rendering_mode == RenderingMode::OriginalHtml && !state.remote_content_loaded {
-        content = content.push(remote_content_banner(window_id));
     }
 
     content = content.push(body);
@@ -633,27 +638,15 @@ fn message_view_body<'a>(
                 .into()
         }
         RenderingMode::SimpleHtml | RenderingMode::OriginalHtml => {
-            // Route through `html_render` so the pop-out body picks up inline
-            // text formatting, links, lists, blockquotes, headings, and CID
-            // image alt-text - the same primitive the reading pane uses.
-            // OriginalHtml differs from SimpleHtml only in remote-image
-            // policy; the actual remote-image fetch isn't wired here yet, so
-            // both modes render identically until that lands. Falls back to
-            // plain text when the message has no HTML body, and the renderer
-            // itself falls back to plain text for HTML it considers
-            // structurally too complex.
-            if let Some(html) = state.body_html.as_deref() {
-                let on_link = move |_url: String| {
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::MessageView(MessageViewMessage::Noop),
-                    )
-                };
-                crate::ui::html_render::render_html(
-                    html,
+            if state.body_html.is_some() {
+                let view_msg =
+                    move |msg| Message::PopOut(window_id, PopOutMessage::MessageView(msg));
+                crate::ui::mail_body::view(
+                    Some(&state.html_body),
                     state.body_text.as_deref(),
-                    on_link,
-                    &state.inline_images,
+                    move |width| view_msg(MessageViewMessage::HtmlBodyResized(width)),
+                    move |url| view_msg(MessageViewMessage::LinkClicked(url)),
+                    view_msg(MessageViewMessage::LoadRemoteContent),
                 )
             } else {
                 let txt = state
@@ -716,35 +709,6 @@ fn error_banner_view<'a>(error: &'a str) -> Element<'a, Message> {
             text(error)
                 .size(TEXT_MD)
                 .style(theme::TextClass::Tertiary.style()),
-        ]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center),
-    )
-    .padding(PAD_CARD)
-    .style(theme::ContainerClass::Elevated.style())
-    .width(Length::Fill)
-    .into()
-}
-
-// ── Remote content banner ──────────────────────────────
-
-fn remote_content_banner<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
-    container(
-        row![
-            text("Remote content is blocked.")
-                .size(TEXT_SM)
-                .style(text::secondary),
-            button(
-                text("Load for this message")
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Accent.style()),
-            )
-            .on_press(Message::PopOut(
-                window_id,
-                PopOutMessage::MessageView(MessageViewMessage::LoadRemoteContent,),
-            ))
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::Ghost.style()),
         ]
         .spacing(SPACE_SM)
         .align_y(Alignment::Center),

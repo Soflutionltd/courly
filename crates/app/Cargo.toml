@@ -30,6 +30,7 @@ types = { path = "../types" }
 smart-folder = { path = "../smart-folder" }
 label-colors = { path = "../label-colors" }
 rte = { path = "../rte" }
+mail-html = { path = "../mail-html" }
 import = { path = "../import" }
 env_logger = "0.11"
 log = "0.4"

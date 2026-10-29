@@ -7,6 +7,7 @@ use crate::pop_out::{PopOutMessage, PopOutWindow};
 use crate::{Message, ReadyApp};
 
 pub(super) fn handle_message_view_update(
+    window_id: iced::window::Id,
     state: &mut MessageViewState,
     msg: MessageViewMessage,
 ) -> Task<Message> {
@@ -19,6 +20,7 @@ pub(super) fn handle_message_view_update(
         MessageViewMessage::BodyLoaded(_, Ok((body_text, body_html))) => {
             state.body_text = body_text;
             state.body_html = body_html;
+            state.html_body = crate::ui::mail_body::HtmlBodyState::default();
             Task::none()
         }
         MessageViewMessage::BodyLoaded(_, Err(e)) => {
@@ -58,7 +60,19 @@ pub(super) fn handle_message_view_update(
             Task::none()
         }
         MessageViewMessage::LoadRemoteContent => {
-            state.remote_content_loaded = true;
+            let start = state.html_body.allow_remote();
+            start_html_render(window_id, state, start)
+        }
+        MessageViewMessage::HtmlBodyResized(width) => {
+            let start = state.html_body.set_width(width);
+            start_html_render(window_id, state, start)
+        }
+        MessageViewMessage::HtmlBodyRendered { width, body } => {
+            let again = state.html_body.finish(width, body);
+            start_html_render(window_id, state, again)
+        }
+        MessageViewMessage::LinkClicked(url) => {
+            crate::ui::reading_pane::open_url_in_browser(&url);
             Task::none()
         }
         MessageViewMessage::HoverAttachment(id) => {
@@ -93,6 +107,33 @@ pub(super) fn handle_message_view_update(
         | MessageViewMessage::SaveAs
         | MessageViewMessage::Noop => Task::none(),
     }
+}
+
+/// Start a background render of the HTML body when `start` is set.
+fn start_html_render(
+    window_id: iced::window::Id,
+    state: &mut MessageViewState,
+    start: bool,
+) -> Task<Message> {
+    if !start {
+        return Task::none();
+    }
+    let Some(html) = state.body_html.clone() else {
+        return Task::none();
+    };
+    let Some((width, allow_remote)) = state.html_body.start() else {
+        return Task::none();
+    };
+    let inline_images = crate::ui::mail_body::inline_image_bytes(&state.inline_images);
+    Task::perform(
+        crate::ui::mail_body::render(html, width, inline_images, allow_remote),
+        move |body| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::HtmlBodyRendered { width, body }),
+            )
+        },
+    )
 }
 
 /// Build a best-effort pseudo `.eml` for the Source view from the headers and

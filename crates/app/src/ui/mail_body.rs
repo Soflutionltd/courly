@@ -1,0 +1,284 @@
+//! HTML email bodies rendered off the UI thread by the `mail-html` engine
+//! and shown as image tiles with clickable link areas.
+
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+
+use iced::widget::{
+    Space, button, column, container, image, mouse_area, row, scrollable, sensor, stack, text,
+};
+use iced::{Alignment, Element, Length, Padding, mouse};
+use mail_html::{Bytes, LinkArea, RemoteFetcher, RenderRequest, Url};
+
+use crate::icon;
+use crate::ui::layout::*;
+use crate::ui::theme;
+
+/// Largest remote resource accepted when the user allows remote content.
+const REMOTE_MAX_BYTES: u64 = 15 * 1024 * 1024;
+const REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
+
+static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(REMOTE_TIMEOUT)
+        .user_agent("Mozilla/5.0")
+        .build()
+        .map_err(|e| log::warn!("remote image client unavailable: {e}"))
+        .ok()
+});
+
+/// A rendered email body, ready to draw.
+pub struct RenderedBody {
+    width: f32,
+    height: f32,
+    tiles: Vec<(image::Handle, f32)>,
+    links: Vec<LinkArea>,
+    blocked_remote: usize,
+}
+
+impl std::fmt::Debug for RenderedBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderedBody")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("tiles", &self.tiles.len())
+            .field("links", &self.links.len())
+            .field("blocked_remote", &self.blocked_remote)
+            .finish()
+    }
+}
+
+/// Per-message render state in the reading pane.
+#[derive(Debug, Clone, Default)]
+pub struct HtmlBodyState {
+    desired_width: Option<f32>,
+    in_flight: bool,
+    failed: bool,
+    allow_remote: bool,
+    rendered: Option<Arc<RenderedBody>>,
+}
+
+impl HtmlBodyState {
+    /// Record the width the body is laid out at. Returns true when a new
+    /// render should start.
+    pub fn set_width(&mut self, width: f32) -> bool {
+        let width = width.floor();
+        if width < 1.0 || self.desired_width == Some(width) {
+            return false;
+        }
+        self.desired_width = Some(width);
+        !self.in_flight
+    }
+
+    /// Allow remote content for this message. Returns true when a new
+    /// render should start.
+    pub fn allow_remote(&mut self) -> bool {
+        if self.allow_remote {
+            return false;
+        }
+        self.allow_remote = true;
+        !self.in_flight
+    }
+
+    /// Store a finished render. Returns true when the width changed while it
+    /// was running and another pass is needed.
+    pub fn finish(&mut self, rendered_width: f32, body: Option<Arc<RenderedBody>>) -> bool {
+        self.in_flight = false;
+        match body {
+            Some(body) => {
+                self.failed = false;
+                self.rendered = Some(body);
+            }
+            None => self.failed = true,
+        }
+        self.desired_width
+            .is_some_and(|w| (w - rendered_width).abs() >= 1.0)
+    }
+
+    /// Mark a render as started and return its inputs.
+    pub fn start(&mut self) -> Option<(f32, bool)> {
+        let width = self.desired_width?;
+        self.in_flight = true;
+        Some((width, self.allow_remote))
+    }
+}
+
+/// Extract raw bytes for inline (`cid:`) images.
+pub fn inline_image_bytes(handles: &HashMap<String, image::Handle>) -> HashMap<String, Bytes> {
+    handles
+        .iter()
+        .filter_map(|(cid, handle)| match handle {
+            image::Handle::Bytes(_, bytes) => Some((cid.clone(), bytes.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Render one body on a blocking worker. `None` when the engine failed.
+pub async fn render(
+    html: String,
+    width: f32,
+    inline_images: HashMap<String, Bytes>,
+    allow_remote: bool,
+) -> Option<Arc<RenderedBody>> {
+    let remote = allow_remote.then(|| remote_fetcher(tokio::runtime::Handle::current()));
+    let result = tokio::task::spawn_blocking(move || {
+        let mail = mail_html::render(RenderRequest {
+            html,
+            width,
+            inline_images,
+            remote,
+        });
+        let tiles = mail
+            .tiles
+            .into_iter()
+            .map(|tile| {
+                (
+                    image::Handle::from_rgba(tile.px_width, tile.px_height, tile.rgba),
+                    tile.height,
+                )
+            })
+            .collect();
+        Arc::new(RenderedBody {
+            width: mail.width,
+            height: mail.height,
+            tiles,
+            links: mail.links,
+            blocked_remote: mail.blocked_remote,
+        })
+    })
+    .await;
+    result
+        .map_err(|e| log::error!("HTML email render failed: {e}"))
+        .ok()
+}
+
+fn remote_fetcher(runtime: tokio::runtime::Handle) -> RemoteFetcher {
+    Arc::new(move |url: &Url| {
+        let client = HTTP.as_ref()?;
+        let url = url.clone();
+        runtime.block_on(async move {
+            let response = client.get(url).send().await.ok()?.error_for_status().ok()?;
+            if response
+                .content_length()
+                .is_some_and(|len| len > REMOTE_MAX_BYTES)
+            {
+                return None;
+            }
+            let body = response.bytes().await.ok()?;
+            (body.len() as u64 <= REMOTE_MAX_BYTES).then_some(body)
+        })
+    })
+}
+
+/// The HTML body of one message. Reports its available width through
+/// `on_width` so the owner can (re)render at the right size.
+pub fn view<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    on_link: impl Fn(String) -> M + 'a,
+    on_show_remote: M,
+) -> Element<'a, M> {
+    let content: Element<'a, M> = match state {
+        Some(HtmlBodyState {
+            rendered: Some(body),
+            allow_remote,
+            desired_width,
+            ..
+        }) => {
+            let overflows = desired_width.is_some_and(|w| body.width > w + 1.0);
+            let page = rendered_page(body, overflows, on_link);
+            if body.blocked_remote > 0 && !allow_remote {
+                column![remote_banner(on_show_remote), page]
+                    .spacing(SPACE_XS)
+                    .into()
+            } else {
+                page
+            }
+        }
+        Some(HtmlBodyState { failed: true, .. }) => text(
+            fallback_text
+                .unwrap_or("This message could not be displayed.")
+                .to_string(),
+        )
+        .size(TEXT_LG)
+        .into(),
+        _ => Space::new()
+            .width(Length::Fill)
+            .height(HTML_BODY_PLACEHOLDER_HEIGHT)
+            .into(),
+    };
+
+    let on_width = Rc::new(on_width);
+    let on_resize = Rc::clone(&on_width);
+    sensor(container(content).width(Length::Fill))
+        .on_show(move |size| on_width(size.width))
+        .on_resize(move |size| on_resize(size.width))
+        .into()
+}
+
+fn rendered_page<'a, M: Clone + 'a>(
+    body: &'a RenderedBody,
+    overflows: bool,
+    on_link: impl Fn(String) -> M + 'a,
+) -> Element<'a, M> {
+    let mut tiles = column![].width(body.width);
+    for (handle, height) in &body.tiles {
+        tiles = tiles.push(
+            image(handle.clone())
+                .width(body.width)
+                .height(*height)
+                .content_fit(iced::ContentFit::Fill),
+        );
+    }
+
+    let mut layers = stack![tiles].width(body.width).height(body.height);
+    for link in &body.links {
+        let hit = mouse_area(Space::new().width(link.width).height(link.height))
+            .on_press(on_link(link.href.clone()))
+            .interaction(mouse::Interaction::Pointer);
+        layers = layers.push(container(hit).padding(Padding {
+            top: link.y.max(0.0),
+            left: link.x.max(0.0),
+            right: 0.0,
+            bottom: 0.0,
+        }));
+    }
+
+    if !overflows {
+        return layers.into();
+    }
+    scrollable(layers)
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default(),
+        ))
+        .width(Length::Fill)
+        .into()
+}
+
+fn remote_banner<'a, M: Clone + 'a>(on_show_remote: M) -> Element<'a, M> {
+    container(
+        row![
+            icon::shield()
+                .size(ICON_SM)
+                .style(theme::TextClass::Muted.style()),
+            text("Remote images were blocked to protect your privacy.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style()),
+            Space::new().width(Length::Fill),
+            button(text("Show images").size(TEXT_SM))
+                .on_press(on_show_remote)
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::Secondary.style()),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_REMOTE_BANNER)
+    .width(Length::Fill)
+    .style(theme::ContainerClass::Badge.style())
+    .into()
+}
