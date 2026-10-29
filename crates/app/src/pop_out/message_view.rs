@@ -60,6 +60,7 @@ pub enum MessageViewMessage {
     HtmlBodyResized(f32),
     /// A background HTML render finished.
     HtmlBodyRendered {
+        ticket: u64,
         width: f32,
         body: Option<std::sync::Arc<crate::ui::mail_body::RenderedBody>>,
     },

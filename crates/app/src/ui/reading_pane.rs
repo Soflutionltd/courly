@@ -67,7 +67,7 @@ pub enum ReadingPaneMessage {
     /// A background HTML render finished.
     HtmlBodyRendered {
         index: usize,
-        generation: u64,
+        ticket: u64,
         width: f32,
         body: Option<std::sync::Arc<super::mail_body::RenderedBody>>,
     },
@@ -149,9 +149,6 @@ pub struct ReadingPane {
     expanded_attachment_versions: std::collections::HashSet<String>,
     /// HTML render state, one per message.
     html_bodies: Vec<super::mail_body::HtmlBodyState>,
-    /// Bumped whenever the thread content changes so late renders of a
-    /// previous thread are dropped.
-    body_generation: u64,
     /// Inline images for CID resolution in HTML bodies, keyed by Content-ID.
     inline_image_bytes: HashMap<String, mail_html::Bytes>,
 }
@@ -221,20 +218,19 @@ impl ReadingPane {
         else {
             return Task::none();
         };
-        let Some((width, allow_remote)) = self
+        let Some((ticket, width, allow_remote)) = self
             .html_bodies
             .get_mut(index)
             .and_then(super::mail_body::HtmlBodyState::start)
         else {
             return Task::none();
         };
-        let generation = self.body_generation;
         let inline_images = self.inline_image_bytes.clone();
         Task::perform(
             super::mail_body::render(html, width, inline_images, allow_remote),
             move |body| ReadingPaneMessage::HtmlBodyRendered {
                 index,
-                generation,
+                ticket,
                 width,
                 body,
             },
@@ -256,7 +252,6 @@ impl ReadingPane {
             deduped_attachments: Vec::new(),
             expanded_attachment_versions: std::collections::HashSet::new(),
             html_bodies: Vec::new(),
-            body_generation: 0,
             inline_image_bytes: HashMap::new(),
         }
     }
@@ -277,7 +272,6 @@ impl ReadingPane {
         self.deduped_attachments.clear();
         self.expanded_attachment_versions.clear();
         self.html_bodies.clear();
-        self.body_generation += 1;
         self.inline_image_bytes.clear();
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
@@ -358,7 +352,6 @@ impl ReadingPane {
             .iter()
             .map(|_| super::mail_body::HtmlBodyState::default())
             .collect();
-        self.body_generation += 1;
 
         self.thread_messages = detail.messages;
         self.thread_attachments = detail.attachments;
@@ -601,17 +594,14 @@ impl Component for ReadingPane {
             }
             ReadingPaneMessage::HtmlBodyRendered {
                 index,
-                generation,
+                ticket,
                 width,
                 body,
             } => {
-                if generation != self.body_generation {
-                    return (Task::none(), None);
-                }
                 let again = self
                     .html_bodies
                     .get_mut(index)
-                    .is_some_and(|state| state.finish(width, body));
+                    .is_some_and(|state| state.finish(ticket, width, body));
                 (self.start_html_render(index, again), None)
             }
             ReadingPaneMessage::ShowRemoteImages(index) => {

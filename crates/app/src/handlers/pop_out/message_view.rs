@@ -67,8 +67,12 @@ pub(super) fn handle_message_view_update(
             let start = state.html_body.set_width(width);
             start_html_render(window_id, state, start)
         }
-        MessageViewMessage::HtmlBodyRendered { width, body } => {
-            let again = state.html_body.finish(width, body);
+        MessageViewMessage::HtmlBodyRendered {
+            ticket,
+            width,
+            body,
+        } => {
+            let again = state.html_body.finish(ticket, width, body);
             start_html_render(window_id, state, again)
         }
         MessageViewMessage::LinkClicked(url) => {
@@ -121,7 +125,7 @@ fn start_html_render(
     let Some(html) = state.body_html.clone() else {
         return Task::none();
     };
-    let Some((width, allow_remote)) = state.html_body.start() else {
+    let Some((ticket, width, allow_remote)) = state.html_body.start() else {
         return Task::none();
     };
     let inline_images = crate::ui::mail_body::inline_image_bytes(&state.inline_images);
@@ -130,7 +134,11 @@ fn start_html_render(
         move |body| {
             Message::PopOut(
                 window_id,
-                PopOutMessage::MessageView(MessageViewMessage::HtmlBodyRendered { width, body }),
+                PopOutMessage::MessageView(MessageViewMessage::HtmlBodyRendered {
+                    ticket,
+                    width,
+                    body,
+                }),
             )
         },
     )

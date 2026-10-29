@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -19,6 +20,10 @@ use crate::ui::theme;
 /// Largest remote resource accepted when the user allows remote content.
 const REMOTE_MAX_BYTES: u64 = 15 * 1024 * 1024;
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Source of render tickets. A result is applied only if its ticket is the
+/// one its state is waiting for, so renders for replaced content are dropped.
+static NEXT_TICKET: AtomicU64 = AtomicU64::new(1);
 
 static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -54,7 +59,8 @@ impl std::fmt::Debug for RenderedBody {
 #[derive(Debug, Clone, Default)]
 pub struct HtmlBodyState {
     desired_width: Option<f32>,
-    in_flight: bool,
+    /// Ticket of the render in flight, if any.
+    in_flight: Option<u64>,
     failed: bool,
     allow_remote: bool,
     rendered: Option<Arc<RenderedBody>>,
@@ -69,7 +75,7 @@ impl HtmlBodyState {
             return false;
         }
         self.desired_width = Some(width);
-        !self.in_flight
+        self.in_flight.is_none()
     }
 
     /// Allow remote content for this message. Returns true when a new
@@ -79,13 +85,22 @@ impl HtmlBodyState {
             return false;
         }
         self.allow_remote = true;
-        !self.in_flight
+        self.in_flight.is_none()
     }
 
     /// Store a finished render. Returns true when the width changed while it
-    /// was running and another pass is needed.
-    pub fn finish(&mut self, rendered_width: f32, body: Option<Arc<RenderedBody>>) -> bool {
-        self.in_flight = false;
+    /// was running and another pass is needed. Results for any other ticket
+    /// are ignored.
+    pub fn finish(
+        &mut self,
+        ticket: u64,
+        rendered_width: f32,
+        body: Option<Arc<RenderedBody>>,
+    ) -> bool {
+        if self.in_flight != Some(ticket) {
+            return false;
+        }
+        self.in_flight = None;
         match body {
             Some(body) => {
                 self.failed = false;
@@ -97,11 +112,12 @@ impl HtmlBodyState {
             .is_some_and(|w| (w - rendered_width).abs() >= 1.0)
     }
 
-    /// Mark a render as started and return its inputs.
-    pub fn start(&mut self) -> Option<(f32, bool)> {
+    /// Mark a render as started and return its ticket and inputs.
+    pub fn start(&mut self) -> Option<(u64, f32, bool)> {
         let width = self.desired_width?;
-        self.in_flight = true;
-        Some((width, self.allow_remote))
+        let ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
+        self.in_flight = Some(ticket);
+        Some((ticket, width, self.allow_remote))
     }
 }
 
@@ -281,4 +297,65 @@ fn remote_banner<'a, M: Clone + 'a>(on_show_remote: M) -> Element<'a, M> {
     .width(Length::Fill)
     .style(theme::ContainerClass::Badge.style())
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn body(width: f32) -> Option<Arc<RenderedBody>> {
+        Some(Arc::new(RenderedBody {
+            width,
+            height: 10.0,
+            tiles: Vec::new(),
+            links: Vec::new(),
+            blocked_remote: 0,
+        }))
+    }
+
+    #[test]
+    fn first_width_starts_a_render() {
+        let mut state = HtmlBodyState::default();
+        assert!(state.set_width(600.4));
+        let (_, width, remote) = state.start().expect("width known");
+        assert!((width - 600.0).abs() < f32::EPSILON);
+        assert!(!remote);
+    }
+
+    #[test]
+    fn width_change_during_render_triggers_one_more_pass() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let (ticket, width, _) = state.start().expect("started");
+        assert!(!state.set_width(500.0), "no second render while in flight");
+        assert!(state.finish(ticket, width, body(width)));
+        let (ticket, width, _) = state.start().expect("restarted");
+        assert!(!state.finish(ticket, width, body(width)));
+    }
+
+    #[test]
+    fn results_for_replaced_state_are_ignored() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let (ticket, width, _) = state.start().expect("started");
+        let mut replaced = HtmlBodyState::default();
+        assert!(!replaced.finish(ticket, width, body(width)));
+        assert!(replaced.rendered.is_none());
+        state.set_width(700.0);
+        let (newer, _, _) = state.start().expect("restarted");
+        assert!(!state.finish(ticket, width, body(width)));
+        assert!(state.rendered.is_none());
+        assert!(!state.finish(newer, 700.0, body(700.0)));
+        assert!(state.rendered.is_some());
+    }
+
+    #[test]
+    fn allowing_remote_rerenders_once() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        assert!(state.allow_remote());
+        assert!(!state.allow_remote());
+        let (_, _, remote) = state.start().expect("started");
+        assert!(remote);
+    }
 }
