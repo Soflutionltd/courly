@@ -39,7 +39,7 @@ const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const MICROSOFT_GRAPH_ME_URL: &str =
     "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName";
-const MICROSOFT_GRAPH_SCOPES: [&str; 11] = [
+const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
     "Mail.ReadWrite",
     "Mail.ReadWrite.Shared",
     "Mail.Send",
@@ -50,7 +50,6 @@ const MICROSOFT_GRAPH_SCOPES: [&str; 11] = [
     "openid",
     "profile",
     "User.Read",
-    "GroupMember.Read.All",
 ];
 
 use common::http::shared_http_client;
@@ -754,16 +753,18 @@ pub fn sha256_base64url(input: &[u8]) -> String {
 mod tests {
     use super::{MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, microsoft_userinfo_from_me};
 
-    /// O10: the directory-group pull needs `GroupMember.Read.All`, and the
-    /// two Microsoft scope lists are maintained separately - they have
+    /// `GroupMember.Read.All` needs a tenant admin's consent, so requesting
+    /// it at sign-in blocks every ordinary user of a tenant that has not
+    /// granted it. The directory-group pull reports `NoPermission` instead.
+    /// The two Microsoft scope lists are maintained separately - they have
     /// already drifted from each other elsewhere (`User.Read` vs `email`),
     /// so each is asserted on its own.
     #[test]
-    fn microsoft_scopes_include_group_member_read() {
+    fn microsoft_scopes_exclude_admin_consent_group_read() {
         const SCOPE: &str = "GroupMember.Read.All";
         assert!(
-            MICROSOFT_GRAPH_SCOPES.contains(&SCOPE),
-            "MICROSOFT_GRAPH_SCOPES is missing {SCOPE}"
+            !MICROSOFT_GRAPH_SCOPES.contains(&SCOPE),
+            "MICROSOFT_GRAPH_SCOPES must not request {SCOPE}"
         );
 
         let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
@@ -772,8 +773,8 @@ mod tests {
             panic!("microsoft_graph must be an OAuth2 entry");
         };
         assert!(
-            scopes.iter().any(|scope| scope == SCOPE),
-            "Outlook discovery registry entry is missing {SCOPE}"
+            !scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry must not request {SCOPE}"
         );
     }
 
