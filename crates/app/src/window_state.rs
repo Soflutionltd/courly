@@ -85,6 +85,13 @@ impl WindowState {
             maximized: self.maximized,
             min_size: Some(Size::new(MIN_WIDTH, MIN_HEIGHT)),
             exit_on_close_request: false,
+            // The app's own title bar (search) runs under the traffic lights.
+            #[cfg(target_os = "macos")]
+            platform_specific: window::settings::PlatformSpecific {
+                title_hidden: true,
+                titlebar_transparent: true,
+                fullsize_content_view: true,
+            },
             ..Default::default()
         }
     }

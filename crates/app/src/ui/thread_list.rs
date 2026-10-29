@@ -200,6 +200,20 @@ impl ThreadList {
         }
     }
 
+    /// The search field, rendered in the window's title bar rather than
+    /// in the list header. Keeps the `search-bar` id that focus commands
+    /// target.
+    pub fn search_bar(&self) -> Element<'_, ThreadListMessage> {
+        text_input("Search", &self.search_query)
+            .id("search-bar")
+            .on_input(ThreadListMessage::SearchInput)
+            .on_submit(ThreadListMessage::SearchSubmit)
+            .size(TEXT_MD)
+            .padding(PAD_INPUT)
+            .style(theme::TextInputClass::TitleSearch.style())
+            .into()
+    }
+
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn set_threads(&mut self, threads: Vec<Thread>) {
         self.threads = threads;
@@ -518,7 +532,6 @@ impl Component for ThreadList {
         let header = thread_list_header(
             &self.folder_name,
             &self.scope_name,
-            &self.search_query,
             &self.mode,
             self.threads.len(),
             selection_count,
@@ -550,20 +563,12 @@ impl Component for ThreadList {
 fn thread_list_header<'a>(
     folder_name: &'a str,
     scope_name: &'a str,
-    search_query: &'a str,
     mode: &ThreadListMode,
     thread_count: usize,
     selection_count: usize,
     typeahead: &'a TypeaheadState,
     pinned_search_updated_at: Option<i64>,
 ) -> Element<'a, ThreadListMessage> {
-    let search_input = text_input("Search...", search_query)
-        .id("search-bar")
-        .on_input(ThreadListMessage::SearchInput)
-        .on_submit(ThreadListMessage::SearchSubmit)
-        .size(TEXT_MD)
-        .padding(PAD_INPUT);
-
     let staleness: Option<Element<'a, ThreadListMessage>> = pinned_search_updated_at.map(|ts| {
         text(format!(
             "Last updated {}",
@@ -596,8 +601,8 @@ fn thread_list_header<'a>(
         match mode {
             ThreadListMode::Scope => row![
                 text(folder_name)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
+                    .size(TEXT_TITLE)
+                    .font(crate::font::text_semibold()),
                 Space::new().width(Length::Fill),
                 text(scope_name)
                     .size(TEXT_SM)
@@ -626,7 +631,7 @@ fn thread_list_header<'a>(
         }
     };
 
-    let mut header_col = column![search_input].spacing(SPACE_XXS);
+    let mut header_col = column![].spacing(SPACE_XXS);
     if let Some(label) = staleness {
         header_col = header_col.push(label);
     }

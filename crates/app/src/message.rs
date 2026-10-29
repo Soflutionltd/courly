@@ -330,6 +330,8 @@ pub enum Message {
     Calendar(Box<CalendarMessage>),
     ToggleAppMode,
     SetAppMode(AppMode),
+    /// Press on an empty part of the custom title bar: move the main window.
+    DragMainWindow,
     SetCalendarView(CalendarView),
     CalendarToday,
     /// Calendar sync completed - refresh in-memory calendar state.

@@ -37,8 +37,9 @@ pub enum Divider {
     ThreadList,
 }
 
-/// Drag handle width in logical pixels.
-pub(crate) const DIVIDER_WIDTH: f32 = 2.0;
+/// Drag handle width in logical pixels. It doubles as the gap between the
+/// floating panes, so it matches `PANE_GAP`.
+pub(crate) const DIVIDER_WIDTH: f32 = crate::ui::layout::PANE_GAP;
 
 /// How long to wait for the second chord of a sequence.
 pub(crate) const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
@@ -573,17 +574,15 @@ impl ReadyApp {
 
     pub(crate) fn theme(&self) -> Theme {
         match self.settings.theme.as_str() {
-            "Light" => Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT),
-            "Dark" => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
+            "Light" => crate::ui::theme::light_theme(),
+            "Dark" => crate::ui::theme::dark_theme(),
             "Theme" => {
                 let idx = self.settings.selected_theme.unwrap_or(0);
                 crate::ui::theme::theme_by_index(idx)
             }
             _ => match self.mode {
-                appearance::Mode::Light => {
-                    Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT)
-                }
-                _ => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
+                appearance::Mode::Light => crate::ui::theme::light_theme(),
+                _ => crate::ui::theme::dark_theme(),
             },
         }
     }
@@ -972,10 +971,8 @@ impl App {
             // pre-existing behaviour and matches the safest default for
             // an OS that never delivers an appearance event.
             App::Booting(b) => match b.appearance_mode {
-                Some(crate::appearance::Mode::Light) => {
-                    Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT)
-                }
-                _ => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
+                Some(crate::appearance::Mode::Light) => crate::ui::theme::light_theme(),
+                _ => crate::ui::theme::dark_theme(),
             },
             App::Ready(r) => r.daemon_theme(window_id),
         }

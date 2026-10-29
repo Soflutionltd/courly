@@ -181,6 +181,21 @@ pub const SIDEBAR_HEADER_HEIGHT: f32 = 76.0;
 pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
 pub const READING_PANE_MIN_WIDTH: f32 = 300.0;
 
+// ── Window chrome (title bar, ribbon, app rail) ────────
+
+/// Custom title bar holding the search field. On macOS it runs under the
+/// traffic lights (transparent system title bar).
+pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+/// Left inset that keeps title bar content clear of the macOS traffic lights.
+pub const TRAFFIC_LIGHTS_INSET: f32 = 84.0;
+pub const TITLE_SEARCH_MAX_WIDTH: f32 = 560.0;
+pub const APP_RAIL_WIDTH: f32 = 48.0;
+pub const RAIL_BUTTON_SIZE: f32 = 36.0;
+/// Glyph size for app rail and ribbon-primary icons.
+pub const ICON_RAIL: f32 = 18.0;
+/// Gap between the floating panes and around the window edge.
+pub const PANE_GAP: f32 = 6.0;
+
 // ── Padding presets ─────────────────────────────────────
 // Named by usage, not by raw values. All values land on
 // the spacing scale above.

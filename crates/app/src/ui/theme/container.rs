@@ -85,6 +85,13 @@ pub enum ContainerClass {
     /// surface above the dimmed backdrop. Used by the `alert_dialog` /
     /// `form_dialog` primitives in `ui/dialog.rs`.
     DialogCard,
+    /// Brand-colored strip across the top of the main window (search).
+    TitleBar,
+    /// Window background the panes float on.
+    Canvas,
+    /// A main-window pane (folders, message list, reading pane) drawn as
+    /// a rounded card on the canvas.
+    Pane,
 }
 
 impl ContainerClass {
@@ -127,7 +134,61 @@ impl ContainerClass {
             Self::RadioCircleSelected => style_radio_circle_selected,
             Self::RadioCircleUnselected => style_radio_circle_unselected,
             Self::RadioCircleInner => style_radio_circle_inner,
+            Self::TitleBar => style_title_bar_container,
+            Self::Canvas => style_canvas_container,
+            Self::Pane => style_pane_container,
         }
+    }
+}
+
+fn style_title_bar_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    let background = if p.is_dark {
+        p.background.base.color
+    } else {
+        p.primary.base.color
+    };
+    container::Style {
+        background: Some(background.into()),
+        ..Default::default()
+    }
+}
+
+/// The canvas sits one step darker than the panes in both modes.
+/// `background.weak` deviates toward the text color, which is darker in
+/// light mode but lighter in dark mode, so dark mode mixes toward black.
+fn style_canvas_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    let background = if p.is_dark {
+        mix(p.background.base.color, Color::BLACK, 0.35)
+    } else {
+        p.background.weak.color
+    };
+    container::Style {
+        background: Some(background.into()),
+        ..Default::default()
+    }
+}
+
+fn style_pane_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.base.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.12),
+            width: 1.0,
+            radius: RADIUS_LG.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a,
     }
 }
 

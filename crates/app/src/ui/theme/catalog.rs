@@ -1,8 +1,36 @@
-use iced::Theme;
 use iced::theme::palette::Seed;
+use iced::{Color, Theme};
 use serde::Deserialize;
 
 use super::color::hex_to_color;
+
+/// Default light palette, modeled on Microsoft Outlook (Fluent brand blue).
+pub const OUTLOOK_LIGHT: Seed = Seed {
+    background: Color::WHITE,
+    text: Color::from_rgb8(0x24, 0x24, 0x24),
+    primary: Color::from_rgb8(0x0F, 0x6C, 0xBD),
+    success: Color::from_rgb8(0x10, 0x7C, 0x10),
+    warning: Color::from_rgb8(0xBC, 0x4B, 0x09),
+    danger: Color::from_rgb8(0xC5, 0x0F, 0x1F),
+};
+
+/// Default dark palette, modeled on Microsoft Outlook's dark mode.
+pub const OUTLOOK_DARK: Seed = Seed {
+    background: Color::from_rgb8(0x29, 0x29, 0x29),
+    text: Color::from_rgb8(0xF5, 0xF5, 0xF5),
+    primary: Color::from_rgb8(0x47, 0x9E, 0xF5),
+    success: Color::from_rgb8(0x54, 0xB0, 0x54),
+    warning: Color::from_rgb8(0xF7, 0x63, 0x0C),
+    danger: Color::from_rgb8(0xDC, 0x62, 0x6D),
+};
+
+pub fn light_theme() -> Theme {
+    Theme::custom(String::from("Light"), OUTLOOK_LIGHT)
+}
+
+pub fn dark_theme() -> Theme {
+    Theme::custom(String::from("Dark"), OUTLOOK_DARK)
+}
 
 pub struct ThemeEntry {
     pub name: &'static str,
@@ -12,11 +40,11 @@ pub struct ThemeEntry {
 pub const THEMES: &[ThemeEntry] = &[
     ThemeEntry {
         name: "Light",
-        palette: Seed::LIGHT,
+        palette: OUTLOOK_LIGHT,
     },
     ThemeEntry {
         name: "Dark",
-        palette: Seed::DARK,
+        palette: OUTLOOK_DARK,
     },
     ThemeEntry {
         name: "Dracula",

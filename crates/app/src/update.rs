@@ -696,6 +696,7 @@ impl ReadyApp {
 
             // Calendar - delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
+            Message::DragMainWindow => iced::window::drag(self.main_window_id),
             Message::ToggleAppMode => {
                 // If calendar is popped out, focus the pop-out instead of toggling
                 if self.app_mode == AppMode::Mail
@@ -715,6 +716,9 @@ impl ReadyApp {
                     && let Some(win_id) = self.calendar_pop_out_id()
                 {
                     return iced::window::gain_focus(win_id);
+                }
+                if self.show_settings {
+                    self.close_settings();
                 }
                 if self.app_mode == mode {
                     return Task::none();

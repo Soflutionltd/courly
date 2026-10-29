@@ -32,7 +32,7 @@ pub use button::{
     ButtonClass, RowPosition, style_filter_container, style_pill_card_button,
     style_recessed_list_panel, style_settings_row_button,
 };
-pub use catalog::{THEMES, theme_by_index};
+pub use catalog::{THEMES, dark_theme, light_theme, theme_by_index};
 pub use color::hex_to_color;
 pub use container::ContainerClass;
 pub use forms::{

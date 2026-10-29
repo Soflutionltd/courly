@@ -123,6 +123,8 @@ pub enum TextInputClass {
     Inline,
     /// Settings field with border and background.
     Settings,
+    /// Search field sitting on the brand-colored title bar.
+    TitleSearch,
 }
 
 impl TextInputClass {
@@ -130,6 +132,7 @@ impl TextInputClass {
         match self {
             Self::Inline => style_inline_text_input,
             Self::Settings => style_settings_text_input,
+            Self::TitleSearch => style_title_search_text_input,
         }
     }
 }
@@ -165,6 +168,30 @@ fn style_settings_text_input(theme: &Theme, status: text_input::Status) -> text_
         },
         placeholder: p.background.base.text.scale_alpha(0.4),
         value: p.background.base.text,
+        selection: p.primary.base.color.scale_alpha(0.3),
+    }
+}
+
+fn style_title_search_text_input(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let p = theme.palette();
+    let focused = matches!(status, text_input::Status::Focused { .. });
+    let background = if p.is_dark {
+        p.background.weak.color
+    } else if focused {
+        Color::WHITE
+    } else {
+        Color::WHITE.scale_alpha(0.92)
+    };
+    let text_color = p.background.base.text;
+    text_input::Style {
+        background: background.into(),
+        border: iced::Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: RADIUS_SM.into(),
+        },
+        placeholder: text_color.scale_alpha(0.55),
+        value: text_color,
         selection: p.primary.base.color.scale_alpha(0.3),
     }
 }

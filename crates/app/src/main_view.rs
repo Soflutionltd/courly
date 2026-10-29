@@ -5,10 +5,12 @@ use crate::message::Message;
 use crate::pop_out::{self, PopOutWindow};
 use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
-use crate::ui::layout::{READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use crate::ui::layout::{
+    APP_RAIL_WIDTH, PANE_GAP, READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
+};
 use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
-use iced::{Element, Length, Point, Task};
+use iced::{Element, Length, Padding, Point, Task};
 
 impl ReadyApp {
     pub(crate) fn view(&self, window_id: iced::window::Id) -> Element<'_, Message> {
@@ -43,85 +45,9 @@ impl ReadyApp {
             return self.view_with_add_account_modal(wizard);
         }
 
-        if self.show_settings {
-            let settings_view = self.settings.view().map(Message::Settings);
-            return container(settings_view)
-                .height(Length::Fill)
-                .width(Length::Fill)
-                .into();
-        }
+        let layout = self.view_main_layout();
 
-        let layout = match self.app_mode {
-            AppMode::Calendar => {
-                let calendar_view = ui::calendar::calendar_layout(&self.calendar)
-                    .map(|m| Message::Calendar(Box::new(m)));
-                row![calendar_view].height(Length::Fill)
-            }
-            AppMode::Mail => {
-                let sidebar = container(self.sidebar.view().map(Message::Sidebar))
-                    .width(SIDEBAR_MIN_WIDTH)
-                    .height(Length::Fill);
-
-                let is_chat = self.active_chat.is_some();
-
-                if is_chat {
-                    // Chat view: sidebar + full-width chat timeline
-                    let chat_view = if let Some(ref timeline) = self.chat_timeline {
-                        container(timeline.view().map(Message::ChatTimeline))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                    } else {
-                        container(
-                            iced::widget::text("No chat selected")
-                                .style(ui::theme::TextClass::Muted.style()),
-                        )
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                    };
-
-                    let status_bar = self.status_bar_view();
-                    let content_area = column![chat_view, status_bar,];
-
-                    let divider_sidebar = self.build_divider(Divider::Sidebar);
-                    row![sidebar, divider_sidebar, content_area].height(Length::Fill)
-                } else {
-                    // Normal mail view: sidebar + thread list + reading pane
-                    let thread_list = container(self.thread_list.view().map(Message::ThreadList))
-                        .width(self.thread_list_width)
-                        .height(Length::Fill);
-
-                    let divider_thread = self.build_divider(Divider::ThreadList);
-
-                    let ctx = command_dispatch::build_context(self);
-                    let reading_pane = container(self.reading_pane.view_with_commands(
-                        &self.registry,
-                        &self.binding_table,
-                        &ctx,
-                    ))
-                    .width(Length::Fill)
-                    .height(Length::Fill);
-
-                    let rs_data = ui::right_sidebar::RightSidebarData {
-                        calendar: &self.calendar,
-                        threads: &self.thread_list.threads,
-                    };
-                    let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
-
-                    let status_bar = self.status_bar_view();
-                    let content_area = column![
-                        row![thread_list, divider_thread, reading_pane, right_sidebar]
-                            .height(Length::Fill),
-                        status_bar,
-                    ];
-
-                    row![sidebar, content_area].height(Length::Fill)
-                }
-            }
-        };
-
-        let full_layout = column![layout];
+        let full_layout = layout;
 
         let main_layout: Element<'_, Message> = if self.dragging.is_some() {
             mouse_area(full_layout)
@@ -216,43 +142,108 @@ impl ReadyApp {
         )
     }
 
+    /// The whole main window below any modal: title bar with search, app
+    /// rail, and the floating panes for the current mode.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn view_main_layout(&self) -> Element<'_, Message> {
-        let sidebar = container(self.sidebar.view().map(Message::Sidebar))
+        let search = self.thread_list.search_bar().map(Message::ThreadList);
+        let rail = ui::chrome::app_rail(self.app_mode, self.show_settings);
+
+        let body: Element<'_, Message> = if self.show_settings {
+            pane(self.settings.view().map(Message::Settings))
+        } else {
+            match self.app_mode {
+                AppMode::Calendar => pane(
+                    ui::calendar::calendar_layout(&self.calendar)
+                        .map(|m| Message::Calendar(Box::new(m))),
+                ),
+                AppMode::Mail => self.view_mail_body(),
+            }
+        };
+
+        let workspace = container(row![rail, body].height(Length::Fill))
+            .padding(Padding {
+                top: PANE_GAP,
+                right: PANE_GAP,
+                bottom: PANE_GAP,
+                left: 0.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        container(column![
+            ui::chrome::title_bar(search),
+            workspace,
+            self.status_bar_view()
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(ui::theme::ContainerClass::Canvas.style())
+        .into()
+    }
+
+    /// Mail mode: ribbon over folders, message list and reading pane (or
+    /// the chat timeline when a chat is open).
+    fn view_mail_body(&self) -> Element<'_, Message> {
+        let ctx = command_dispatch::build_context(self);
+        let ribbon = ui::chrome::ribbon(&self.registry, &self.binding_table, &ctx);
+        let sidebar = container(pane(self.sidebar.view().map(Message::Sidebar)))
             .width(self.sidebar_width)
             .height(Length::Fill);
         let divider_sidebar = self.build_divider(Divider::Sidebar);
-        let thread_list = container(self.thread_list.view().map(Message::ThreadList))
-            .width(self.thread_list_width)
-            .height(Length::Fill);
-        let divider_thread = self.build_divider(Divider::ThreadList);
-        let ctx = command_dispatch::build_context(self);
-        let reading_pane = container(self.reading_pane.view_with_commands(
-            &self.registry,
-            &self.binding_table,
-            &ctx,
-        ))
-        .width(Length::Fill)
-        .height(Length::Fill);
-        let rs_data = ui::right_sidebar::RightSidebarData {
-            calendar: &self.calendar,
-            threads: &self.thread_list.threads,
+
+        let panes: Element<'_, Message> = if self.active_chat.is_some() {
+            let chat_view: Element<'_, Message> = if let Some(ref timeline) = self.chat_timeline {
+                timeline.view().map(Message::ChatTimeline)
+            } else {
+                container(
+                    iced::widget::text("No chat selected")
+                        .style(ui::theme::TextClass::Muted.style()),
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+            };
+            row![sidebar, divider_sidebar, pane(chat_view)]
+                .height(Length::Fill)
+                .into()
+        } else {
+            let thread_list = container(pane(self.thread_list.view().map(Message::ThreadList)))
+                .width(self.thread_list_width)
+                .height(Length::Fill);
+            let divider_thread = self.build_divider(Divider::ThreadList);
+            let reading_pane = pane(self.reading_pane.view_with_commands(
+                &self.registry,
+                &self.binding_table,
+                &ctx,
+            ));
+            let rs_data = ui::right_sidebar::RightSidebarData {
+                calendar: &self.calendar,
+                threads: &self.thread_list.threads,
+            };
+            let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
+            row![
+                sidebar,
+                divider_sidebar,
+                thread_list,
+                divider_thread,
+                reading_pane,
+                right_sidebar
+            ]
+            .height(Length::Fill)
+            .into()
         };
-        let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
-        let layout = row![
-            sidebar,
-            divider_sidebar,
-            thread_list,
-            divider_thread,
-            reading_pane,
-            right_sidebar
-        ]
-        .height(Length::Fill);
-        let status_bar = self.status_bar_view();
-        column![layout, status_bar].into()
+
+        column![ribbon, panes]
+            .spacing(PANE_GAP)
+            .height(Length::Fill)
+            .into()
     }
 
     pub(crate) fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {
+        // Panes start right of the app rail and stop one gap short of the
+        // window edge.
+        let point = Point::new(point.x - APP_RAIL_WIDTH, point.y);
         // Available width for the three main panels (excludes right sidebar
         // when open, and both dividers).
         let right_sidebar_used = if self.right_sidebar_open {
@@ -260,7 +251,11 @@ impl ReadyApp {
         } else {
             0.0
         };
-        let available = self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
+        let available = self.window.width
+            - APP_RAIL_WIDTH
+            - PANE_GAP
+            - 2.0 * DIVIDER_WIDTH
+            - right_sidebar_used;
 
         match self.dragging {
             Some(Divider::Sidebar) => {
@@ -293,7 +288,11 @@ impl ReadyApp {
         } else {
             0.0
         };
-        let available = self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
+        let available = self.window.width
+            - APP_RAIL_WIDTH
+            - PANE_GAP
+            - 2.0 * DIVIDER_WIDTH
+            - right_sidebar_used;
 
         // 1. Ensure sidebar doesn't exceed what leaves room for the other
         //    two panels at their minimums.
@@ -314,7 +313,7 @@ impl ReadyApp {
         let class = if self.hovered_divider == Some(divider) || self.dragging == Some(divider) {
             ui::theme::ContainerClass::DividerHover
         } else {
-            ui::theme::ContainerClass::Divider
+            ui::theme::ContainerClass::Canvas
         };
         mouse_area(
             container("")
@@ -341,4 +340,14 @@ impl ReadyApp {
             Space::new().width(0).height(0).into()
         }
     }
+}
+
+/// Wraps a pane's content in the rounded card that floats on the canvas.
+fn pane<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .clip(true)
+        .style(ui::theme::ContainerClass::Pane.style())
+        .into()
 }

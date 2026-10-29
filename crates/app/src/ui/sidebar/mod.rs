@@ -1,13 +1,11 @@
 use std::collections::HashSet;
 
-use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::widget::{Space, column, container, row, scrollable};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
 use crate::db::{Account, PinnedPublicFolder, PinnedSearch, SharedMailbox};
-use crate::icon;
 use crate::ui::layout::*;
-use crate::ui::theme;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationState};
 use rtsk::scope::ViewScope;
@@ -304,49 +302,12 @@ impl Component for Sidebar {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, SidebarMessage> {
-        // Mode toggle button (tall square spanning dropdown + compose height)
-        let mode_btn = container(
-            button(
-                container(icon::calendar().size(ICON_HERO).style(text::primary))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .on_press(SidebarMessage::ToggleMode)
-            .height(Length::Fill)
-            .width(Length::Fill)
-            .style(theme::ButtonClass::Experiment { variant: 10 }.style()),
-        )
-        .width(SIDEBAR_HEADER_HEIGHT) // square
-        .height(Length::Fill);
-
-        // Stack the dropdown and compose button vertically
-        let right_stack = container(
-            column![
-                scope_dropdown(self),
-                Space::new().height(SPACE_XXS),
-                row![
-                    container(widgets::compose_button(SidebarMessage::Compose)).width(Length::Fill),
-                    widgets::add_button(SidebarMessage::AddAccount),
-                ]
-                .spacing(SPACE_XXS)
-                .height(Length::Shrink),
-            ]
-            .spacing(0)
-            .width(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
+        let header_row = row![
+            container(scope_dropdown(self)).width(Length::Fill),
+            widgets::add_button(SidebarMessage::AddAccount),
+        ]
+        .spacing(SPACE_XXS)
         .align_y(Alignment::Center);
-
-        // Fixed-height header so Fill children resolve correctly
-        let header_row = container(
-            row![mode_btn, right_stack]
-                .spacing(SPACE_XXS)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .height(SIDEBAR_HEADER_HEIGHT)
-        .width(Length::Fill);
 
         let mut scroll_content = column![Space::new().height(SPACE_XXS)]
             .spacing(0)
@@ -395,14 +356,12 @@ impl Component for Sidebar {
                 scrollable(scroll_content)
                     .spacing(SCROLLBAR_SPACING)
                     .height(Length::Fill),
-                widgets::settings_button(SidebarMessage::ToggleSettings),
             ]
             .spacing(SPACE_XS),
         )
         .padding(PAD_SIDEBAR)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::ContainerClass::Sidebar.style())
         .into()
     }
 }
