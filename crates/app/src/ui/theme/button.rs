@@ -149,7 +149,7 @@ fn style_nav_button(theme: &Theme, status: button::Status, active: bool) -> butt
         },
         _ => button::Style {
             background: if active {
-                Some(p.background.strong.color.into())
+                Some(p.primary.base.color.scale_alpha(0.12).into())
             } else {
                 None
             },
@@ -484,7 +484,7 @@ fn style_pinned_search_button(
     let p = theme.palette();
     match status {
         button::Status::Hovered if active => button::Style {
-            background: Some(p.background.stronger.color.into()),
+            background: Some(p.primary.base.color.scale_alpha(0.18).into()),
             text_color: p.background.base.text,
             border: iced::Border {
                 color: p.background.stronger.color.scale_alpha(0.1),
@@ -505,9 +505,9 @@ fn style_pinned_search_button(
         },
         _ => button::Style {
             background: Some(if active {
-                p.background.strong.color.into()
+                p.primary.base.color.scale_alpha(0.12).into()
             } else {
-                p.background.weakest.color.into()
+                p.background.base.color.into()
             }),
             text_color: if active {
                 p.primary.base.color

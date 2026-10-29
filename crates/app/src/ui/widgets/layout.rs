@@ -5,8 +5,8 @@ use iced::{Alignment, Element, Length};
 
 use crate::icon;
 use crate::ui::layout::{
-    ICON_XS, PAD_BADGE, PAD_COLLAPSIBLE_HEADER, PAD_SECTION_HEADER, PAD_STAT_ROW, SPACE_XXS,
-    TEXT_MD, TEXT_SM, TEXT_TITLE, TEXT_XS,
+    ICON_XS, PAD_COLLAPSIBLE_HEADER, PAD_SECTION_HEADER, PAD_STAT_ROW, SPACE_XXS, TEXT_MD, TEXT_SM,
+    TEXT_TITLE, TEXT_XS,
 };
 use crate::ui::theme;
 
@@ -27,9 +27,10 @@ pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
     } else {
         count.to_string()
     };
-    container(text(label).size(TEXT_XS).style(text::secondary))
-        .padding(PAD_BADGE)
-        .style(theme::ContainerClass::Badge.style())
+    text(label)
+        .size(TEXT_SM)
+        .font(crate::font::text_semibold())
+        .style(theme::TextClass::Accent.style())
         .into()
 }
 

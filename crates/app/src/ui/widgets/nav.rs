@@ -59,7 +59,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
     let label_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
-        theme::TextClass::Muted.style()
+        theme::TextClass::Default.style()
     };
     let icon_style: fn(&Theme) -> text::Style = if active {
         text::primary

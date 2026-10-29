@@ -1,6 +1,7 @@
 use iced::Element;
 use iced::widget::{column, mouse_area};
 
+use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
@@ -44,7 +45,7 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         let sel = universal_folder_selection(&f.id);
         let is_active = sidebar_nav_selection_is_active(sidebar, &sel);
         let nav_btn = widgets::nav_button(
-            None,
+            Some(universal_folder_icon(&f.id)),
             &f.name,
             is_active,
             widgets::NavSize::Compact,
@@ -71,4 +72,19 @@ pub(super) fn sidebar_nav_selection_is_active(
     selection: &SidebarSelection,
 ) -> bool {
     sidebar.active_pinned_search.is_none() && sidebar.selection == *selection
+}
+
+fn universal_folder_icon<'a>(id: &str) -> iced::widget::Text<'a> {
+    match id {
+        "INBOX" => icon::inbox(),
+        "STARRED" => icon::star(),
+        "SNOOZED" => icon::clock(),
+        "SENT" => icon::send(),
+        "DRAFT" => icon::file_text(),
+        "archive" => icon::archive(),
+        "TRASH" => icon::trash(),
+        "SPAM" => icon::alert_triangle(),
+        "all-mail" => icon::mail(),
+        _ => icon::folder(),
+    }
 }
