@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
 "crates/db",
+"crates/vtimezones-empty",
 "crates/db-read",
 "crates/db-read-lockdown",
 "crates/core",
@@ -149,3 +150,9 @@ split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# caldata (via bifrost CalDAV/CardDAV) hard-depends on the GPL-3.0
+# vtimezones-rs but only reads it in RFC 7809 mode, which bifrost never
+# enables. See crates/vtimezones-empty.
+[patch.crates-io]
+vtimezones-rs = { path = "crates/vtimezones-empty" }
