@@ -9,9 +9,10 @@
 # Bump `version` in the workspace Cargo.toml and push that commit first:
 # the script refuses to publish a dirty tree or an existing tag.
 #
-# Needs: gh (write access to the repo), the Developer ID certificate in
-# the login keychain, the App Store Connect API key used for notarization,
-# and the updater signing key (backup in 1Password, vault Soflution).
+# Needs: gh (write access to the repo), cargo-about, the Developer ID
+# certificate in the login keychain, the App Store Connect API key used for
+# notarization, and the updater signing key (backup in 1Password, vault
+# Soflution).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -70,6 +71,9 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
+cp LICENSE "$APP/Contents/Resources/LICENSE"
+cargo about generate --manifest-path crates/runner/Cargo.toml --locked about.hbs \
+  -o "$APP/Contents/Resources/THIRD-PARTY-LICENSES.html"
 
 cat >"$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

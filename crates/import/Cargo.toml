@@ -3,6 +3,7 @@ name = "import"
 description = "Contact import from CSV, XLSX, and vCard files"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 rust-version.workspace = true
 
 [lints]

@@ -1,0 +1,29 @@
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "zlib-acknowledgement",
+    "0BSD",
+]
+targets = ["aarch64-apple-darwin"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+no-clearly-defined = true
+
+[caldata.clarify]
+license = "Apache-2.0"
+
+[[caldata.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "bd9df84b6904dfb10da00376fbb057f9927074ed967522ee8f8ec9a8f53c5020"
