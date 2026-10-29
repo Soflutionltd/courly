@@ -27,6 +27,8 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum SettingValue {
     ShowSyncStatus(bool),
+    /// Install app updates as soon as they are found instead of asking.
+    AutoUpdate(bool),
     BlockRemoteImages(bool),
     PhishingDetectionEnabled(bool),
     PhishingSensitivity(String),
@@ -58,6 +60,7 @@ impl SettingValue {
     pub fn key(&self) -> &'static str {
         match self {
             Self::ShowSyncStatus(_) => "show_sync_status",
+            Self::AutoUpdate(_) => "auto_update",
             Self::BlockRemoteImages(_) => "block_remote_images",
             Self::PhishingDetectionEnabled(_) => "phishing_detection_enabled",
             Self::PhishingSensitivity(_) => "phishing_sensitivity",
@@ -77,6 +80,7 @@ impl SettingValue {
     pub fn render_for_storage(&self) -> String {
         match self {
             Self::ShowSyncStatus(v)
+            | Self::AutoUpdate(v)
             | Self::BlockRemoteImages(v)
             | Self::PhishingDetectionEnabled(v)
             | Self::CompressAttachments(v)
@@ -147,6 +151,7 @@ mod tests {
     fn setting_value_storage_keys_are_unique() {
         let values = [
             SettingValue::ShowSyncStatus(true),
+            SettingValue::AutoUpdate(false),
             SettingValue::BlockRemoteImages(true),
             SettingValue::PhishingDetectionEnabled(true),
             SettingValue::PhishingSensitivity("medium".to_string()),

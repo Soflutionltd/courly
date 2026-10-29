@@ -42,6 +42,7 @@ pub struct PreferencesState {
     pub date_display: DateDisplay,
     pub reading_pane_position: String,
     pub sync_status_bar: bool,
+    pub auto_update: bool,
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,

@@ -486,6 +486,12 @@ impl Settings {
                     prefs.sync_status_bar = v;
                 }
             }
+            SettingsMessage::ToggleAutoUpdate(v) => {
+                self.auto_update = v;
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.auto_update = v;
+                }
+            }
             SettingsMessage::ToggleBlockRemoteImages(v) => {
                 self.block_remote_images = v;
                 if let Some(ref mut prefs) = self.editing_preferences {

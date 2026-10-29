@@ -599,6 +599,7 @@ impl ReadyApp {
                 };
                 let values = vec![
                     SettingValue::ShowSyncStatus(prefs.sync_status_bar),
+                    SettingValue::AutoUpdate(prefs.auto_update),
                     SettingValue::BlockRemoteImages(prefs.block_remote_images),
                     SettingValue::PhishingDetectionEnabled(prefs.phishing_detection),
                     SettingValue::PhishingSensitivity(prefs.phishing_sensitivity.clone()),

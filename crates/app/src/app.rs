@@ -224,6 +224,8 @@ pub struct ReadyApp {
     /// for an intentional second click - faster than that is a
     /// double-click.
     pub(crate) action_throttle: std::collections::HashMap<(String, String), std::time::Instant>,
+
+    pub(crate) updater: crate::updater::UpdaterState,
 }
 
 /// Tri-state for an in-flight action plan per Phase 2 plan scope item 14.
@@ -443,6 +445,7 @@ impl ReadyApp {
             pending_action_plans: std::collections::HashMap::new(),
             in_flight_sends: std::collections::HashMap::new(),
             action_throttle: std::collections::HashMap::new(),
+            updater: crate::updater::UpdaterState::default(),
         };
 
         // Note: the queued-drafts sweep, pending-ops boot recovery, and
@@ -508,6 +511,11 @@ impl ReadyApp {
 
         // Snooze resurface on boot: unsnooze threads that became due while the app was closed.
         boot_tasks.push(Task::done(Message::SnoozeTick));
+
+        boot_tasks.push(Task::perform(
+            tokio::time::sleep(crate::updater::BOOT_CHECK_DELAY),
+            |()| Message::Updater(crate::updater::UpdaterMessage::Check { forced: true }),
+        ));
 
         // Phase 8-1: async-init the body / inline / search stores
         // outside the boot-ready transition. Each runs inside

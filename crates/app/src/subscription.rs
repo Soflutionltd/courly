@@ -5,6 +5,7 @@ use crate::message::Message;
 use crate::service_subscription::service_notification_subscription;
 use crate::ui::settings::SettingsMessage;
 use crate::ui::status_bar::sync_progress_subscription;
+use crate::updater::{self, UpdaterMessage};
 use crate::{appearance, component::Component};
 
 impl ReadyApp {
@@ -13,13 +14,17 @@ impl ReadyApp {
             appearance::subscription().map(Message::AppearanceChanged),
             iced::window::resize_events().map(|(id, size)| Message::WindowResized(id, size)),
             iced::window::close_requests().map(Message::WindowCloseRequested),
-            iced::event::listen_with(|event, _status, id| {
-                if let iced::Event::Window(iced::window::Event::Moved(point)) = event {
+            iced::event::listen_with(|event, _status, id| match event {
+                iced::Event::Window(iced::window::Event::Moved(point)) => {
                     Some(Message::WindowMoved(id, point))
-                } else {
-                    None
                 }
+                iced::Event::Window(iced::window::Event::Focused) => {
+                    Some(Message::Updater(UpdaterMessage::Check { forced: false }))
+                }
+                _ => None,
             }),
+            iced::time::every(updater::CHECK_INTERVAL)
+                .map(|_| Message::Updater(UpdaterMessage::Check { forced: true })),
             iced::event::listen_with(|event, status, id| match &event {
                 iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key, modifiers, ..

@@ -20,6 +20,7 @@ pub enum SettingsMessage {
     ReadingPaneChanged(String),
     ThemeSelected(usize),
     ToggleSyncStatusBar(bool),
+    ToggleAutoUpdate(bool),
     ToggleBlockRemoteImages(bool),
     TogglePhishingDetection(bool),
     PhishingSensitivityChanged(String),

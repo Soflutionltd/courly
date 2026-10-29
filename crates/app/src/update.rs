@@ -23,6 +23,7 @@ impl ReadyApp {
             Message::ReadingPane(msg) => self.handle_reading_pane(msg),
             Message::Settings(msg) => self.handle_settings(msg),
             Message::StatusBar(msg) => self.handle_status_bar(msg),
+            Message::Updater(msg) => self.handle_updater(msg),
 
             // Appearance
             Message::AppearanceChanged(mode) => {

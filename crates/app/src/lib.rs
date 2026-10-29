@@ -50,6 +50,7 @@ mod service_subscription;
 mod subscription;
 mod ui;
 mod update;
+mod updater;
 mod window_state;
 
 pub(crate) use app::PendingChord;

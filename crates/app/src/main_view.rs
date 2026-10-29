@@ -38,6 +38,14 @@ impl ReadyApp {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn view_main_window(&self) -> Element<'_, Message> {
+        let window = self.view_main_window_content();
+        match ui::update_banner::view(&self.updater) {
+            Some(banner) => stack![window, banner.map(Message::Updater)].into(),
+            None => window,
+        }
+    }
+
+    fn view_main_window_content(&self) -> Element<'_, Message> {
         if let Some(ref wizard) = self.add_account_wizard {
             if self.no_accounts {
                 return self.view_first_launch_modal(wizard);
@@ -47,16 +55,14 @@ impl ReadyApp {
 
         let layout = self.view_main_layout();
 
-        let full_layout = layout;
-
         let main_layout: Element<'_, Message> = if self.dragging.is_some() {
-            mouse_area(full_layout)
+            mouse_area(layout)
                 .on_move(Message::DividerDragMove)
                 .on_release(Message::DividerDragEnd)
                 .interaction(iced::mouse::Interaction::ResizingHorizontally)
                 .into()
         } else {
-            full_layout.into()
+            layout
         };
 
         if self.palette.is_open() {

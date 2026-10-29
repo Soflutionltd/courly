@@ -23,4 +23,5 @@ pub mod thread_list;
 pub mod token_input;
 pub mod undoable;
 pub mod undoable_text_input;
+pub mod update_banner;
 pub mod widgets;

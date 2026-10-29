@@ -21,6 +21,7 @@ pub(crate) mod pop_out;
 pub(crate) mod provider;
 pub(crate) mod search;
 pub mod signatures;
+mod updater;
 
 use crate::ui::settings::SignatureEntry;
 use rtsk::db::queries_extra::navigation::{AccountLabelsGroup, SettingsLabelGroupRow};

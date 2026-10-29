@@ -136,6 +136,7 @@ pub struct UiBootstrapSnapshot {
     pub color_theme: Option<String>,
     pub inbox_view_mode: Option<String>,
     pub show_sync_status: bool,
+    pub auto_update: bool,
     pub task_sidebar_visible: bool,
     pub sidebar_nav_config: Option<String>,
 }
@@ -327,6 +328,7 @@ pub fn get_ui_bootstrap_snapshot(
         color_theme: get("color_theme"),
         inbox_view_mode: get("inbox_view_mode"),
         show_sync_status: get_bool("show_sync_status", true),
+        auto_update: get_bool("auto_update", false),
         task_sidebar_visible: get("task_sidebar_visible").is_some_and(|value| value == "true"),
         sidebar_nav_config: get("sidebar_nav_config"),
     })

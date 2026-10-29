@@ -135,6 +135,20 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
         ),
     ));
 
+    col = col.push(section(
+        "Updates",
+        vec![toggle_row(
+            "Install updates automatically",
+            concat!(
+                "You have version ",
+                env!("CARGO_PKG_VERSION"),
+                ". When off, Ratatoskr asks before installing a new version."
+            ),
+            state.auto_update,
+            SettingsMessage::ToggleAutoUpdate,
+        )],
+    ));
+
     let privacy_help_id = "privacy-security";
     let privacy_help_visible = state.hovered_help.as_deref() == Some(privacy_help_id);
     col = col.push(section_with_help("Privacy & Security", SectionHelp {

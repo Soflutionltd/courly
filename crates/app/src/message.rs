@@ -107,6 +107,9 @@
 // Undo: dropped (no actions to undo before Ready):
 //   Undo | UndoCompleted
 //
+// Updates: dropped (the first check is scheduled after Ready):
+//   Updater
+//
 // Future Message variants must include a Booting-state row in this table.
 // The `BootingApp::update` enforces this at runtime by logging unrecognised
 // variants at debug level rather than panicking.
@@ -141,6 +144,7 @@ pub enum Message {
     ReadingPane(ReadingPaneMessage),
     Settings(SettingsMessage),
     StatusBar(StatusBarMessage),
+    Updater(crate::updater::UpdaterMessage),
 
     // Existing data loading
     AccountsLoaded(GenerationToken<Nav>, Result<Vec<db::Account>, String>),

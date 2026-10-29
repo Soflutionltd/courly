@@ -603,6 +603,15 @@ pub const PAD_REMOTE_BANNER: Padding = Padding {
     left: 10.0,
 };
 
+// ── Update banner ───────────────────────────────────────
+
+/// Width of the floating "update available" card.
+pub const UPDATE_BANNER_WIDTH: f32 = 400.0;
+/// Distance between the update card and the bottom of the window.
+pub const UPDATE_BANNER_BOTTOM_OFFSET: f32 = 40.0;
+/// Thickness of the download progress bar.
+pub const UPDATE_PROGRESS_HEIGHT: f32 = 4.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;

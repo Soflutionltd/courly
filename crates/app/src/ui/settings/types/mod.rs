@@ -302,6 +302,7 @@ pub struct Settings {
     pub reading_pane_position: String,
     pub selected_theme: Option<usize>,
     pub sync_status_bar: bool,
+    pub auto_update: bool,
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
@@ -431,6 +432,7 @@ impl Settings {
             self.reading_pane_position = canonical.into();
         }
         self.sync_status_bar = ui.show_sync_status;
+        self.auto_update = ui.auto_update;
         self.block_remote_images = settings.block_remote_images;
         self.phishing_detection = settings.phishing_detection_enabled;
         if let Some(canonical) = settings
@@ -485,6 +487,7 @@ impl Settings {
             date_display: self.date_display,
             reading_pane_position: self.reading_pane_position.clone(),
             sync_status_bar: self.sync_status_bar,
+            auto_update: self.auto_update,
             block_remote_images: self.block_remote_images,
             phishing_detection: self.phishing_detection,
             phishing_sensitivity: self.phishing_sensitivity.clone(),
@@ -502,6 +505,7 @@ impl Settings {
         self.date_display = prefs.date_display;
         self.reading_pane_position = prefs.reading_pane_position.clone();
         self.sync_status_bar = prefs.sync_status_bar;
+        self.auto_update = prefs.auto_update;
         self.block_remote_images = prefs.block_remote_images;
         self.phishing_detection = prefs.phishing_detection;
         self.phishing_sensitivity = prefs.phishing_sensitivity.clone();
@@ -521,6 +525,7 @@ impl Default for Settings {
             date_display: DateDisplay::RelativeOffset,
             reading_pane_position: "Right".into(),
             sync_status_bar: true,
+            auto_update: false,
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
@@ -540,6 +545,7 @@ impl Default for Settings {
             reading_pane_position: "Right".into(),
             selected_theme: None,
             sync_status_bar: true,
+            auto_update: false,
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
@@ -702,6 +708,7 @@ mod tests {
             color_theme: None,
             inbox_view_mode: None,
             show_sync_status: true,
+            auto_update: false,
             task_sidebar_visible: false,
             sidebar_nav_config: None,
         }
