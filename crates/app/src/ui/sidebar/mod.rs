@@ -25,7 +25,6 @@ use chats::chats_section;
 use labels::labels_section;
 use nav::nav_items;
 pub(crate) use pinned_searches::format_relative_time;
-use pinned_searches::pinned_searches_section;
 use public_folders::pinned_public_folders_section;
 use scope::scope_dropdown;
 use smart::smart_folders;
@@ -103,11 +102,6 @@ pub enum SidebarEvent {
         folder_id: String,
     },
 }
-
-// ── Sidebar layout constants ─────────────────────────────
-
-/// Maximum display length for pinned search query text before truncation.
-const PINNED_SEARCH_QUERY_MAX_CHARS: usize = 28;
 
 // ── State ──────────────────────────────────────────────
 
@@ -313,18 +307,8 @@ impl Component for Sidebar {
             .spacing(0)
             .width(Length::Fill);
 
-        // Pinned searches (only if non-empty)
-        if !self.pinned_searches.is_empty() {
-            scroll_content = scroll_content.push(pinned_searches_section(self));
-            scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
-        }
-
-        // Chats (between pinned searches and universal folders, only if non-empty,
-        // scope-independent)
+        // Chats (above universal folders, only if non-empty, scope-independent)
         if !self.chat_contacts.is_empty() {
-            if !self.pinned_searches.is_empty() {
-                scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
-            }
             scroll_content = scroll_content.push(chats_section(self));
             scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
         }
