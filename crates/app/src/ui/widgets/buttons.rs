@@ -8,7 +8,8 @@ use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 use crate::Message;
 use crate::icon;
 use crate::ui::layout::{
-    ICON_LG, ICON_MD, ICON_SM, PAD_BUTTON, PAD_ICON_BTN, SPACE_XXS, TEXT_LG, TEXT_SM,
+    ICON_LG, ICON_MD, ICON_SM, ICON_XL, PAD_BUTTON, PAD_DROPDOWN, PAD_ICON_BTN, SPACE_XXS, TEXT_LG,
+    TEXT_SM,
 };
 use crate::ui::theme;
 
@@ -148,6 +149,20 @@ pub fn compose_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
     .padding(PAD_BUTTON)
     .style(theme::ButtonClass::Primary.style())
     .width(Length::Fill)
+    .into()
+}
+
+/// Icon-only "+" with the same vertical padding as the compose button,
+/// so the two line up in a row.
+pub fn add_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
+    button(
+        container(icon::plus().size(ICON_XL).style(text::primary))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_DROPDOWN)
+    .style(theme::ButtonClass::Action.style())
     .into()
 }
 

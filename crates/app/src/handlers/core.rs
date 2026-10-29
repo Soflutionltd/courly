@@ -47,6 +47,7 @@ impl ReadyApp {
                 self.load_threads_for_current_view(token)
             }
             SidebarEvent::Compose => self.update(Message::Compose),
+            SidebarEvent::AddAccount => self.handle_open_add_account_wizard(),
             SidebarEvent::ToggleSettings => self.update(Message::ToggleSettings),
             SidebarEvent::PinnedSearchSelected(id) => self.update(Message::SelectPinnedSearch(id)),
             SidebarEvent::PinnedSearchDismissed(id) => {
@@ -1109,13 +1110,7 @@ impl ReadyApp {
     pub(crate) fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {
         self.sidebar.accounts = accounts;
         if self.sidebar.accounts.is_empty() {
-            self.no_accounts = true;
-            self.add_account_wizard =
-                Some(crate::ui::add_account::AddAccountWizard::new_first_launch(
-                    Arc::clone(&self.db),
-                    self.service_client.clone(),
-                ));
-            self.status = "Welcome".to_string();
+            self.status = "No account yet".to_string();
             return Task::none();
         }
         self.no_accounts = false;

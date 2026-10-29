@@ -168,6 +168,9 @@ impl ReadyApp {
             Message::WindowCloseRequested(id) => self.handle_window_close(id),
 
             // Compose
+            Message::Compose if self.sidebar.accounts.is_empty() => {
+                self.handle_open_add_account_wizard()
+            }
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
             Message::AttachmentSaveFolderRemembered(key, folder) => {

@@ -45,6 +45,7 @@ pub enum SidebarMessage {
     ToggleSmartFoldersSection,
     ToggleFolderExpand(String),
     Compose,
+    AddAccount,
     ToggleSettings,
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
@@ -75,6 +76,7 @@ pub enum SidebarEvent {
     AllAccountsSelected,
     SelectionChanged(SidebarSelection),
     Compose,
+    AddAccount,
     ToggleSettings,
     PinnedSearchSelected(i64),
     PinnedSearchDismissed(i64),
@@ -237,6 +239,7 @@ impl Component for Sidebar {
                 (Task::none(), None)
             }
             SidebarMessage::Compose => (Task::none(), Some(SidebarEvent::Compose)),
+            SidebarMessage::AddAccount => (Task::none(), Some(SidebarEvent::AddAccount)),
             SidebarMessage::ToggleSettings => (Task::none(), Some(SidebarEvent::ToggleSettings)),
             SidebarMessage::SelectPinnedSearch(id) => {
                 (Task::none(), Some(SidebarEvent::PinnedSearchSelected(id)))
@@ -321,7 +324,12 @@ impl Component for Sidebar {
             column![
                 scope_dropdown(self),
                 Space::new().height(SPACE_XXS),
-                widgets::compose_button(SidebarMessage::Compose),
+                row![
+                    container(widgets::compose_button(SidebarMessage::Compose)).width(Length::Fill),
+                    widgets::add_button(SidebarMessage::AddAccount),
+                ]
+                .spacing(SPACE_XXS)
+                .height(Length::Shrink),
             ]
             .spacing(0)
             .width(Length::Fill),

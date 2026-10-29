@@ -393,15 +393,6 @@ pub struct AddAccountWizard {
 }
 
 impl AddAccountWizard {
-    pub fn new_first_launch(
-        db: Arc<Db>,
-        service_client: Option<Arc<crate::service_client::ServiceClient>>,
-    ) -> Self {
-        let mut wizard = Self::new(true, Vec::new(), db, service_client);
-        wizard.apply_admin_config(crate::admin_config());
-        wizard
-    }
-
     pub fn new_add_account(
         used_colors: Vec<String>,
         db: Arc<Db>,
