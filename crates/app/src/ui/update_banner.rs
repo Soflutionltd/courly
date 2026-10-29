@@ -62,6 +62,13 @@ pub fn view(state: &UpdaterState) -> Option<Element<'_, UpdaterMessage>> {
         ]
         .spacing(SPACE_XS)
         .into(),
+        Phase::Installed(info) => column![
+            title(format!("Ratatoskr {} is installed", info.version)),
+            muted("Quit and reopen Ratatoskr to start using it.".to_string()),
+            actions(None, ("Quit", UpdaterMessage::Quit)),
+        ]
+        .spacing(SPACE_XS)
+        .into(),
         Phase::Failed { info, error } => {
             let mut body = column![
                 title(format!("Ratatoskr {} could not be installed", info.version)),

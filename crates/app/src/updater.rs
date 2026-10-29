@@ -2,7 +2,7 @@
 //!
 //! Same contract as the Tauri updater: a `latest.json` manifest published
 //! on GitHub Releases, a `.app.tar.gz` payload, and a minisign signature
-//! (Tauri key format, signed by `scripts/release.sh`). The running bundle
+//! (Tauri key format, signed by `scripts/release-macos.sh`). The running bundle
 //! is swapped in place and relaunched, so the user keeps the same app.
 
 use std::collections::HashMap;
@@ -81,6 +81,9 @@ pub enum Phase {
         error: String,
     },
     Restarting(UpdateInfo),
+    /// The new bundle is on disk but the automatic relaunch could not be
+    /// scheduled; the user quits and reopens.
+    Installed(UpdateInfo),
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +97,7 @@ pub enum UpdaterMessage {
     Later,
     Event(InstallEvent),
     Retry,
+    Quit,
 }
 
 #[derive(Debug, Default)]

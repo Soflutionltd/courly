@@ -25,6 +25,13 @@ impl ReadyApp {
                     Task::none()
                 }
             }
+            UpdaterMessage::Quit => {
+                if matches!(self.updater.phase, Phase::Installed(_)) {
+                    self.handle_window_close(self.main_window_id)
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 
@@ -32,7 +39,10 @@ impl ReadyApp {
         let state = &mut self.updater;
         let busy = matches!(
             state.phase,
-            Phase::Downloading { .. } | Phase::Installing(_) | Phase::Restarting(_)
+            Phase::Downloading { .. }
+                | Phase::Installing(_)
+                | Phase::Restarting(_)
+                | Phase::Installed(_)
         );
         let throttled = state
             .last_check
@@ -54,7 +64,12 @@ impl ReadyApp {
         self.updater.checking = false;
         let info = match result {
             Ok(Some(info)) => info,
-            Ok(None) => return Task::none(),
+            Ok(None) => {
+                if matches!(self.updater.phase, Phase::Available(_)) {
+                    self.updater.phase = Phase::Idle;
+                }
+                return Task::none();
+            }
             Err(error) => {
                 log::info!("update check failed: {error}");
                 return Task::none();
@@ -122,7 +137,14 @@ impl ReadyApp {
                     self.updater.phase = Phase::Restarting(info);
                     self.handle_window_close(self.main_window_id)
                 }
-                Err(error) => self.fail_update(info, error),
+                Err(error) => {
+                    log::warn!(
+                        "update {} installed, relaunch failed: {error}",
+                        info.version
+                    );
+                    self.updater.phase = Phase::Installed(info);
+                    Task::none()
+                }
             },
             InstallEvent::Done(Err(error)) => self.fail_update(info, error),
         }
