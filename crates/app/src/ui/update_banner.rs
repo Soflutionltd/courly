@@ -2,6 +2,7 @@
 
 use iced::widget::{Space, button, column, container, opaque, progress_bar, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::{
     PAD_BUTTON, PAD_CARD, SPACE_SM, SPACE_XS, TEXT_LG, TEXT_SM, UPDATE_BANNER_BOTTOM_OFFSET,
@@ -16,14 +17,16 @@ pub fn view(state: &UpdaterState) -> Option<Element<'_, UpdaterMessage>> {
     let content: Element<'_, UpdaterMessage> = match &state.phase {
         Phase::Idle => return None,
         Phase::Available(info) => {
-            let mut body = column![title(format!("Ratatoskr {} is available", info.version))]
-                .spacing(SPACE_XS);
+            let mut body = column![title(
+                t!("updater.available", version = info.version).into_owned()
+            )]
+            .spacing(SPACE_XS);
             if !info.notes.trim().is_empty() {
                 body = body.push(muted(info.notes.trim().to_string()));
             }
             body.push(actions(
-                Some(("Later", UpdaterMessage::Later)),
-                ("Update", UpdaterMessage::Install),
+                Some((t!("updater.later").into_owned(), UpdaterMessage::Later)),
+                (t!("updater.update").into_owned(), UpdaterMessage::Install),
             ))
             .into()
         }
@@ -36,51 +39,60 @@ pub fn view(state: &UpdaterState) -> Option<Element<'_, UpdaterMessage>> {
                 .filter(|total| *total > 0)
                 .map_or(0.0, |total| *downloaded as f32 / total as f32);
             column![
-                title(format!("Downloading Ratatoskr {}", info.version)),
+                title(t!("updater.downloading", version = info.version).into_owned()),
                 progress_bar(0.0..=1.0, fraction.min(1.0)).girth(UPDATE_PROGRESS_HEIGHT),
-                muted(format!(
-                    "{:.1} MB{}",
-                    *downloaded as f64 / 1_048_576.0,
-                    total.map_or(String::new(), |total| format!(
-                        " of {:.1} MB",
-                        total as f64 / 1_048_576.0
-                    )),
-                )),
+                muted(
+                    match total {
+                        Some(total) => t!(
+                            "updater.downloaded_of_total",
+                            downloaded = format!("{:.1}", *downloaded as f64 / 1_048_576.0),
+                            total = format!("{:.1}", *total as f64 / 1_048_576.0)
+                        ),
+                        None => t!(
+                            "updater.downloaded",
+                            downloaded = format!("{:.1}", *downloaded as f64 / 1_048_576.0)
+                        ),
+                    }
+                    .into_owned()
+                ),
             ]
             .spacing(SPACE_XS)
             .into()
         }
         Phase::Installing(info) => column![
-            title(format!("Installing Ratatoskr {}", info.version)),
-            muted("Checking the signature and replacing the app.".to_string()),
+            title(t!("updater.installing", version = info.version).into_owned()),
+            muted(t!("updater.installing_detail").into_owned()),
         ]
         .spacing(SPACE_XS)
         .into(),
         Phase::Restarting(info) => column![
-            title(format!("Ratatoskr {} is installed", info.version)),
-            muted("Restarting...".to_string()),
+            title(t!("updater.installed", version = info.version).into_owned()),
+            muted(t!("updater.restarting").into_owned()),
         ]
         .spacing(SPACE_XS)
         .into(),
         Phase::Installed(info) => column![
-            title(format!("Ratatoskr {} is installed", info.version)),
-            muted("Quit and reopen Ratatoskr to start using it.".to_string()),
-            actions(None, ("Quit", UpdaterMessage::Quit)),
+            title(t!("updater.installed", version = info.version).into_owned()),
+            muted(t!("updater.quit_and_reopen").into_owned()),
+            actions(
+                None,
+                (t!("updater.quit").into_owned(), UpdaterMessage::Quit)
+            ),
         ]
         .spacing(SPACE_XS)
         .into(),
         Phase::Failed { info, error } => {
             let mut body = column![
-                title(format!("Ratatoskr {} could not be installed", info.version)),
+                title(t!("updater.install_failed", version = info.version).into_owned()),
                 muted(error.clone()),
             ]
             .spacing(SPACE_XS);
             if state.attempts <= AUTO_RETRIES {
-                body = body.push(muted("Trying again in a few seconds.".to_string()));
+                body = body.push(muted(t!("updater.retrying_soon").into_owned()));
             } else {
                 body = body.push(actions(
-                    Some(("Later", UpdaterMessage::Later)),
-                    ("Retry", UpdaterMessage::Retry),
+                    Some((t!("updater.later").into_owned(), UpdaterMessage::Later)),
+                    (t!("updater.retry").into_owned(), UpdaterMessage::Retry),
                 ));
             }
             body.into()
@@ -121,8 +133,8 @@ fn muted<'a>(label: String) -> Element<'a, UpdaterMessage> {
 }
 
 fn actions<'a>(
-    secondary: Option<(&'a str, UpdaterMessage)>,
-    primary: (&'a str, UpdaterMessage),
+    secondary: Option<(String, UpdaterMessage)>,
+    primary: (String, UpdaterMessage),
 ) -> Element<'a, UpdaterMessage> {
     let mut buttons = row![Space::new().width(Length::Fill)]
         .spacing(SPACE_SM)

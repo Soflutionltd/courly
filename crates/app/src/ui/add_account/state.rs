@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::{Element, Task};
+use rust_i18n::t;
 
 use crate::component::Component;
 use crate::db::Db;
@@ -41,11 +42,11 @@ pub enum SecurityOption {
 }
 
 impl SecurityOption {
-    pub(super) fn label(self) -> &'static str {
+    pub(super) fn label(self) -> String {
         match self {
-            Self::Tls => "SSL/TLS",
-            Self::StartTls => "STARTTLS",
-            Self::None => "None",
+            Self::Tls => "SSL/TLS".to_string(),
+            Self::StartTls => "STARTTLS".to_string(),
+            Self::None => t!("account_setup.security_none").into_owned(),
         }
     }
 
@@ -113,14 +114,14 @@ impl ManualProvider {
         ManualProvider::CustomOidcJmap,
     ];
 
-    pub(super) fn label(self) -> &'static str {
+    pub(super) fn label(self) -> String {
         match self {
-            Self::Gmail => "Gmail",
-            Self::Microsoft365 => "Microsoft 365",
-            Self::Jmap => "JMAP",
-            Self::Imap => "IMAP",
-            Self::CustomOidcImap => "Custom (OIDC + IMAP)",
-            Self::CustomOidcJmap => "Custom (OIDC + JMAP)",
+            Self::Gmail => "Gmail".to_string(),
+            Self::Microsoft365 => "Microsoft 365".to_string(),
+            Self::Jmap => "JMAP".to_string(),
+            Self::Imap => "IMAP".to_string(),
+            Self::CustomOidcImap => t!("account_setup.provider_custom_oidc_imap").into_owned(),
+            Self::CustomOidcJmap => t!("account_setup.provider_custom_oidc_jmap").into_owned(),
         }
     }
 
@@ -163,10 +164,10 @@ pub enum ManualAuthMethod {
 }
 
 impl ManualAuthMethod {
-    pub(super) fn label(self) -> &'static str {
+    pub(super) fn label(self) -> String {
         match self {
-            Self::OAuth => "OAuth",
-            Self::Password => "Password",
+            Self::OAuth => "OAuth".to_string(),
+            Self::Password => t!("account_setup.password").into_owned(),
         }
     }
 }
@@ -593,11 +594,13 @@ impl Component for AddAccountWizard {
             AddAccountMessage::DiscoveryComplete(_, Err(e)) => {
                 // Duplicate account errors go back to email input.
                 // Discovery failures go to manual configuration.
-                if e.contains("already configured") || e.contains("Database error") {
+                if is_email_input_error(&e) {
                     self.error = Some(e);
                     self.step = AddAccountStep::EmailInput;
                 } else {
-                    self.error = Some(format!("We couldn't auto-detect your mail server. {e}"));
+                    self.error = Some(
+                        t!("account_setup.error.autodetect_failed_detail", error = e).into_owned(),
+                    );
                     self.step = AddAccountStep::ManualConfiguration;
                 }
                 (Task::none(), None)
@@ -617,7 +620,7 @@ impl Component for AddAccountWizard {
                 // the `account.update_tokens` IPC.
                 if let Some(ref account_id) = self.reauth_account_id {
                     let Some(client) = self.service_client.as_ref().cloned() else {
-                        self.error = Some("Service not ready".into());
+                        self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
                         return (Task::none(), None);
                     };
                     let imap_password = self.auth_state.password.clone();
@@ -713,7 +716,8 @@ impl Component for AddAccountWizard {
                 )
             }
             AddAccountMessage::ReauthTokensSaved(_, Err(e)) => {
-                self.error = Some(format!("Failed to save credentials: {e}"));
+                self.error =
+                    Some(t!("account_setup.error.save_credentials_failed", error = e).into_owned());
                 (Task::none(), None)
             }
             AddAccountMessage::Cancel | AddAccountMessage::CancelOAuth => {
@@ -749,6 +753,16 @@ impl Component for AddAccountWizard {
     }
 }
 
+/// Errors from the email step (duplicate account, database failure) send
+/// the user back to the email input; every other discovery error falls
+/// through to manual configuration. The database message keeps its
+/// `%{error}` placeholder last so the prefix comparison holds in every
+/// language.
+fn is_email_input_error(error: &str) -> bool {
+    error == t!("account_setup.error.already_configured")
+        || error.starts_with(t!("account_setup.error.database", error = "").as_ref())
+}
+
 // Update helpers
 
 impl AddAccountWizard {
@@ -779,7 +793,7 @@ impl AddAccountWizard {
                 let scopes_clone = scopes.clone();
                 let use_pkce_clone = *use_pkce;
                 let Some(client) = self.service_client.as_ref().cloned() else {
-                    self.error = Some("Service not ready".into());
+                    self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
                     return (Task::none(), None);
                 };
 
@@ -839,15 +853,13 @@ impl AddAccountWizard {
                 self.prefill_auth_from_option(option);
                 self.step = AddAccountStep::PasswordAuth;
                 self.error = Some(if let Some(url) = help_url {
-                    format!(
-                        "This provider requires an app-specific password. \
-                         See: {url}"
-                    )
+                    t!("account_setup.error.app_password_required_url", url = url).into_owned()
                 } else {
-                    format!(
-                        "This provider requires an app-specific password. \
-                         Check {provider_domain} for setup instructions."
+                    t!(
+                        "account_setup.error.app_password_required_domain",
+                        domain = provider_domain
                     )
+                    .into_owned()
                 });
                 (Task::none(), None)
             }

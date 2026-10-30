@@ -1,5 +1,6 @@
 use iced::widget::{Space, column, text};
 use iced::{Alignment, Element, Length, Task};
+use rust_i18n::t;
 use service_api::{AccountCreateParams, AccountCredentials};
 
 use crate::ui::layout::*;
@@ -13,11 +14,11 @@ impl AddAccountWizard {
         &mut self,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if self.identity.name.trim().is_empty() {
-            self.error = Some("Please enter an account name.".to_string());
+            self.error = Some(t!("account_setup.error.account_name_required").into_owned());
             return (Task::none(), None);
         }
         let Some(client) = self.service_client.as_ref().cloned() else {
-            self.error = Some("Service not ready - try again in a moment.".to_string());
+            self.error = Some(t!("account_setup.error.service_not_ready_retry").into_owned());
             return (Task::none(), None);
         };
         self.step = AddAccountStep::Creating;
@@ -174,14 +175,18 @@ impl AddAccountWizard {
         col = col.push(text(&self.email).size(TEXT_LG).style(text::secondary));
         col = col.push(Space::new().height(SPACE_XS));
         col = col.push(labeled_input(
-            "Account name",
-            "e.g. Work, Personal",
+            t!("account_setup.account_name"),
+            t!("account_setup.account_name_placeholder"),
             &self.identity.name,
             AddAccountMessage::AccountNameChanged,
         ));
 
         col = col.push(Space::new().height(SPACE_SM));
-        col = col.push(text("Pick a color").size(TEXT_SM).style(text::secondary));
+        col = col.push(
+            text(t!("account_setup.pick_color"))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
         col = col.push(widgets::color_palette_grid(
             self.identity.selected_color_index,
             &self.used_colors,
@@ -194,7 +199,10 @@ impl AddAccountWizard {
         }
 
         col = col.push(Space::new().height(SPACE_LG));
-        col = col.push(primary_button("Done", AddAccountMessage::SubmitIdentity));
+        col = col.push(primary_button(
+            t!("account_setup.done"),
+            AddAccountMessage::SubmitIdentity,
+        ));
 
         col.into()
     }
@@ -202,7 +210,7 @@ impl AddAccountWizard {
 
 pub(super) fn view_creating<'a>() -> Element<'a, AddAccountMessage> {
     column![
-        text("Creating account...")
+        text(t!("account_setup.creating"))
             .size(TEXT_LG)
             .style(text::secondary),
         Space::new().height(SPACE_MD),

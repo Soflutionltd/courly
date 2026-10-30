@@ -1,5 +1,6 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length, Task};
+use rust_i18n::t;
 
 use crate::font;
 use crate::ui::layout::*;
@@ -17,7 +18,7 @@ impl AddAccountWizard {
         config: &DiscoveredConfig,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if config.options.is_empty() {
-            self.error = Some("We couldn't auto-detect your mail server.".to_string());
+            self.error = Some(t!("account_setup.error.autodetect_failed").into_owned());
             self.step = AddAccountStep::ManualConfiguration;
             return (Task::none(), None);
         }
@@ -66,7 +67,7 @@ impl AddAccountWizard {
         };
 
         let mut col = column![
-            text("Choose your email provider")
+            text(t!("account_setup.choose_provider"))
                 .size(TEXT_HEADING)
                 .style(text::base)
                 .font(iced::Font {
@@ -88,10 +89,13 @@ impl AddAccountWizard {
 
         col = col.push(Space::new().height(SPACE_MD));
         col = col.push(primary_button(
-            "Continue",
+            t!("account_setup.continue"),
             AddAccountMessage::ConfirmProtocol,
         ));
-        col = col.push(ghost_button("Back", AddAccountMessage::Back));
+        col = col.push(ghost_button(
+            t!("account_setup.back"),
+            AddAccountMessage::Back,
+        ));
 
         col.into()
     }
@@ -146,13 +150,13 @@ fn protocol_card_view(
 
 pub(super) fn view_discovering<'a>() -> Element<'a, AddAccountMessage> {
     column![
-        text("Looking up your email provider...")
+        text(t!("account_setup.discovering"))
             .size(TEXT_LG)
             .style(text::secondary),
         Space::new().height(SPACE_MD),
         widgets::spinner(24.0),
         Space::new().height(SPACE_LG),
-        ghost_button("Cancel", AddAccountMessage::Cancel),
+        ghost_button(t!("account_setup.cancel"), AddAccountMessage::Cancel),
     ]
     .spacing(SPACE_XS)
     .align_x(Alignment::Center)
@@ -181,8 +185,8 @@ fn protocol_display_name(protocol: &Protocol, provider_name: Option<&str>) -> St
 
 fn protocol_detail(protocol: &Protocol) -> String {
     match protocol {
-        Protocol::GmailApi => "Gmail API (recommended)".to_string(),
-        Protocol::MicrosoftGraph => "Microsoft Graph API".to_string(),
+        Protocol::GmailApi => t!("account_setup.protocol_gmail_api").into_owned(),
+        Protocol::MicrosoftGraph => t!("account_setup.protocol_graph_api").into_owned(),
         Protocol::Jmap { session_url } => format!("JMAP: {session_url}"),
         Protocol::Imap { incoming, outgoing } => {
             format!(
@@ -193,15 +197,16 @@ fn protocol_detail(protocol: &Protocol) -> String {
     }
 }
 
-fn source_display(source: &DiscoverySource) -> &str {
+fn source_display(source: &DiscoverySource) -> String {
     match source {
-        DiscoverySource::Registry => "Known provider",
-        DiscoverySource::AutoconfigXml { .. } => "Auto-detected",
-        DiscoverySource::MxLookup { .. } => "MX lookup",
-        DiscoverySource::JmapWellKnown => "JMAP discovery",
-        DiscoverySource::OidcWellKnown => "OIDC discovery",
-        DiscoverySource::PortProbe => "Port scan",
+        DiscoverySource::Registry => t!("account_setup.source_registry"),
+        DiscoverySource::AutoconfigXml { .. } => t!("account_setup.source_autoconfig"),
+        DiscoverySource::MxLookup { .. } => t!("account_setup.source_mx"),
+        DiscoverySource::JmapWellKnown => t!("account_setup.source_jmap"),
+        DiscoverySource::OidcWellKnown => t!("account_setup.source_oidc"),
+        DiscoverySource::PortProbe => t!("account_setup.source_port_scan"),
     }
+    .into_owned()
 }
 
 trait HighConfidence {

@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, text, text_input};
 use iced::{Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -7,7 +8,7 @@ use crate::ui::theme;
 use super::state::{AddAccountMessage, ManualAuthMethod, SecurityOption};
 
 pub(super) fn primary_button<'a>(
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
     button(container(text(label).size(TEXT_LG).color(theme::ON_AVATAR)).center_x(Length::Fill))
@@ -19,7 +20,7 @@ pub(super) fn primary_button<'a>(
 }
 
 pub(super) fn ghost_button<'a>(
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
     button(container(text(label).size(TEXT_LG).style(text::secondary)).center_x(Length::Fill))
@@ -31,8 +32,8 @@ pub(super) fn ghost_button<'a>(
 }
 
 pub(super) fn labeled_input<'a>(
-    label: &'a str,
-    placeholder: &'a str,
+    label: impl text::IntoFragment<'a>,
+    placeholder: impl text::IntoFragment<'a>,
     value: &'a str,
     on_input: impl Fn(String) -> AddAccountMessage + 'a,
 ) -> Element<'a, AddAccountMessage> {
@@ -59,7 +60,9 @@ pub(super) fn server_port_row<'a>(
 ) -> Element<'a, AddAccountMessage> {
     row![
         column![
-            text("Server").size(TEXT_SM).style(text::secondary),
+            text(t!("account_setup.server"))
+                .size(TEXT_SM)
+                .style(text::secondary),
             text_input(server_placeholder, server_value)
                 .on_input(on_server)
                 .size(TEXT_LG)
@@ -69,7 +72,9 @@ pub(super) fn server_port_row<'a>(
         .spacing(SPACE_XXXS)
         .width(Length::FillPortion(3)),
         column![
-            text("Port").size(TEXT_SM).style(text::secondary),
+            text(t!("account_setup.port"))
+                .size(TEXT_SM)
+                .style(text::secondary),
             text_input(port_placeholder, port_value)
                 .on_input(on_port)
                 .size(TEXT_LG)

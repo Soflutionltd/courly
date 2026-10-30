@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use iced::widget::{Space, column, container, svg, text, text_input};
 use iced::{Alignment, Element, Length, Task};
+use rust_i18n::t;
 
 use crate::font;
 use crate::ui::layout::*;
@@ -18,7 +19,7 @@ impl AddAccountWizard {
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         let email = self.email.trim().to_lowercase();
         if email.is_empty() || !email.contains('@') {
-            self.error = Some("Please enter a valid email address.".to_string());
+            self.error = Some(t!("account_setup.error.invalid_email").into_owned());
             return (Task::none(), None);
         }
         self.email = email.clone();
@@ -38,11 +39,14 @@ impl AddAccountWizard {
                     Ok(true) => {
                         return (
                             generation,
-                            Err("This account is already configured.".to_string()),
+                            Err(t!("account_setup.error.already_configured").into_owned()),
                         );
                     }
                     Err(e) => {
-                        return (generation, Err(format!("Database error: {e}")));
+                        return (
+                            generation,
+                            Err(t!("account_setup.error.database", error = e).into_owned()),
+                        );
                     }
                     Ok(false) => {}
                 }
@@ -91,7 +95,7 @@ impl AddAccountWizard {
 
         if self.is_first_launch {
             col = col.push(
-                text("Welcome to Ratatoskr")
+                text(t!("account_setup.welcome_title"))
                     .size(TEXT_HEADING)
                     .style(text::base)
                     .font(iced::Font {
@@ -100,13 +104,13 @@ impl AddAccountWizard {
                     }),
             );
             col = col.push(
-                text("Enter your email address to get started")
+                text(t!("account_setup.welcome_subtitle"))
                     .size(TEXT_LG)
                     .style(text::secondary),
             );
         } else {
             col = col.push(
-                text("Add Account")
+                text(t!("account_setup.add_account_title"))
                     .size(TEXT_HEADING)
                     .style(text::base)
                     .font(iced::Font {
@@ -132,10 +136,16 @@ impl AddAccountWizard {
             col = col.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
         }
 
-        col = col.push(primary_button("Continue", AddAccountMessage::SubmitEmail));
+        col = col.push(primary_button(
+            t!("account_setup.continue"),
+            AddAccountMessage::SubmitEmail,
+        ));
 
         if !self.is_first_launch {
-            col = col.push(ghost_button("Cancel", AddAccountMessage::Cancel));
+            col = col.push(ghost_button(
+                t!("account_setup.cancel"),
+                AddAccountMessage::Cancel,
+            ));
         }
 
         col.width(Length::Fill).into()
