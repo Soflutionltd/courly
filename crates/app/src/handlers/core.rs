@@ -206,6 +206,30 @@ impl ReadyApp {
                 // Batch email actions not yet wired to providers.
                 Task::none()
             }
+            ThreadListEvent::RowAction { index, action } => {
+                use crate::action_resolve::MailActionIntent;
+                use crate::ui::widgets::ThreadRowAction;
+
+                let select = self.handle_select_thread(index);
+                let in_trash =
+                    crate::command_dispatch::build_context(self).thread_in_trash == Some(true);
+                let (intent, command) = match action {
+                    ThreadRowAction::Pin => (MailActionIntent::TogglePin, CommandId::EmailPin),
+                    ThreadRowAction::Flag => (MailActionIntent::ToggleStar, CommandId::EmailStar),
+                    ThreadRowAction::Trash => {
+                        let intent = super::keyboard::delete_key_intent(in_trash);
+                        let command = match intent {
+                            MailActionIntent::PermanentDelete => CommandId::EmailPermanentDelete,
+                            _ => CommandId::EmailTrash,
+                        };
+                        (intent, command)
+                    }
+                };
+                if !self.is_command_available(command) {
+                    return select;
+                }
+                Task::batch([select, self.handle_email_action(intent)])
+            }
         }
     }
 

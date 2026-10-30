@@ -24,7 +24,10 @@ pub(super) fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
             tr(t!("settings.reference.thread")),
             &[
                 (tr(t!("settings.reference.archive")), "e"),
-                (tr(t!("settings.reference.delete")), "#"),
+                (
+                    tr(t!("settings.reference.delete")),
+                    tr(t!("settings.reference.delete_keys")),
+                ),
                 (tr(t!("settings.reference.reply")), "r"),
                 (tr(t!("settings.reference.reply_all")), "a"),
                 (tr(t!("settings.reference.forward")), "f"),

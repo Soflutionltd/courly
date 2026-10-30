@@ -105,12 +105,18 @@ pub enum ThreadListMessage {
     ),
     /// User selected a typeahead suggestion by index.
     TypeaheadSelect(usize),
+    /// Pin, flag or delete from the buttons on one row. Acts on that row
+    /// alone, whatever else is selected.
+    RowAction {
+        index: usize,
+        action: widgets::ThreadRowAction,
+    },
     /// Dismiss the typeahead dropdown.
     TypeaheadDismiss,
 }
 
 /// Events the thread list emits upward to the App.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // BatchAction / TypeaheadQuery / SearchUndo / SearchRedo land per follow-up
 pub enum ThreadListEvent {
     ThreadSelected(usize),
@@ -142,6 +148,11 @@ pub enum ThreadListEvent {
     SearchUndo,
     /// Search redo requested.
     SearchRedo,
+    /// A row button (pin, flag, delete) was pressed.
+    RowAction {
+        index: usize,
+        action: widgets::ThreadRowAction,
+    },
 }
 
 // ── Thread list mode ───────────────────────────────────
@@ -548,6 +559,18 @@ impl Component for ThreadList {
                 self.typeahead.visible = false;
                 (Task::none(), None)
             }
+            ThreadListMessage::RowAction { index, action } => {
+                if self.threads.get(index).is_none() {
+                    return (Task::none(), None);
+                }
+                self.clear_multi_select();
+                self.selected_thread = Some(index);
+                self.last_selected_anchor = Some(index);
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::RowAction { index, action }),
+                )
+            }
         }
     }
 
@@ -778,6 +801,7 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             &thread.label_paints,
             bimi_logo.as_deref(),
             ThreadListMessage::SelectThread,
+            |index, action| ThreadListMessage::RowAction { index, action },
         ));
     }
     scrollable(list)
@@ -832,6 +856,44 @@ mod tests {
         assert_eq!(threads.selected_thread, Some(1));
         assert_eq!(threads.last_selected_anchor, Some(1));
         assert_eq!(threads.selected_threads, HashSet::from([1, 2]));
+    }
+
+    #[test]
+    fn a_row_action_selects_only_that_thread() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c"]));
+        threads.selected_thread = Some(0);
+        threads.selected_threads = HashSet::from([0, 1]);
+
+        let (_, event) = threads.update(ThreadListMessage::RowAction {
+            index: 2,
+            action: widgets::ThreadRowAction::Trash,
+        });
+
+        assert_eq!(threads.selected_thread, Some(2));
+        assert!(threads.selected_threads.is_empty());
+        assert_eq!(
+            event,
+            Some(ThreadListEvent::RowAction {
+                index: 2,
+                action: widgets::ThreadRowAction::Trash,
+            })
+        );
+    }
+
+    #[test]
+    fn a_row_action_on_a_missing_index_does_nothing() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a"]));
+        threads.selected_thread = Some(0);
+
+        let (_, event) = threads.update(ThreadListMessage::RowAction {
+            index: 4,
+            action: widgets::ThreadRowAction::Pin,
+        });
+
+        assert_eq!(threads.selected_thread, Some(0));
+        assert_eq!(event, None);
     }
 
     #[test]

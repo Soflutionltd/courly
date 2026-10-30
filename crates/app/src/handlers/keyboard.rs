@@ -1,10 +1,34 @@
 use iced::Task;
 
+use crate::action_resolve::MailActionIntent;
 use crate::command_dispatch::{self, KeyEventMessage};
 use crate::pop_out::PopOutWindow;
 use crate::ui::thread_list::{ThreadListMessage, TypeaheadDirection};
-use crate::{Message, PendingChord, ReadyApp};
+use crate::{AppMode, Message, PendingChord, ReadyApp};
 use cmdk::{Chord, CommandId, ResolveResult};
+
+/// What the Delete key does. Outside the trash it moves the selection
+/// there (undoable). Inside the trash it deletes for good, which is what
+/// Outlook does with the same key.
+pub(crate) fn delete_key_intent(in_trash: bool) -> MailActionIntent {
+    if in_trash {
+        MailActionIntent::PermanentDelete
+    } else {
+        MailActionIntent::Trash
+    }
+}
+
+fn is_plain_delete_key(key: &iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> bool {
+    matches!(
+        key,
+        iced::keyboard::Key::Named(
+            iced::keyboard::key::Named::Backspace | iced::keyboard::key::Named::Delete
+        )
+    ) && !modifiers.command()
+        && !modifiers.control()
+        && !modifiers.shift()
+        && !modifiers.alt()
+}
 
 impl ReadyApp {
     pub(crate) fn handle_key_event(&mut self, msg: KeyEventMessage) -> Task<Message> {
@@ -46,7 +70,7 @@ impl ReadyApp {
                 {
                     return self.handle_window_close(window_id);
                 }
-                self.handle_key_pressed(&key, modifiers, status)
+                self.handle_key_pressed(&key, modifiers, status, window_id)
             }
             KeyEventMessage::PendingChordTimeout => {
                 self.pending_chord = None;
@@ -60,6 +84,7 @@ impl ReadyApp {
         key: &iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
+        window_id: iced::window::Id,
     ) -> Task<Message> {
         // 1. If palette is open, route to palette-specific handler
         if self.palette.is_open() {
@@ -127,6 +152,26 @@ impl ReadyApp {
         if status == iced::event::Status::Captured
             && !command_dispatch::has_command_modifier(&modifiers)
         {
+            return Task::none();
+        }
+
+        // The Mac key labelled Delete sends Backspace; forward delete sends
+        // Delete. Both move the selection to the trash, and delete it for
+        // good once it is already there. A text field that captured the key
+        // (search, compose) never reaches this point.
+        if is_plain_delete_key(key, modifiers)
+            && window_id == self.main_window_id
+            && self.app_mode == AppMode::Mail
+        {
+            let in_trash = command_dispatch::build_context(self).thread_in_trash == Some(true);
+            let intent = delete_key_intent(in_trash);
+            let command = match intent {
+                MailActionIntent::PermanentDelete => CommandId::EmailPermanentDelete,
+                _ => CommandId::EmailTrash,
+            };
+            if self.is_command_available(command) {
+                return self.handle_email_action(intent);
+            }
             return Task::none();
         }
 
@@ -201,5 +246,23 @@ impl ReadyApp {
             }
             ResolveResult::NoMatch => Task::none(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delete_key_intent;
+    use crate::action_resolve::MailActionIntent;
+
+    #[test]
+    fn the_delete_key_trashes_and_only_destroys_what_is_already_in_the_trash() {
+        assert!(matches!(
+            delete_key_intent(false),
+            MailActionIntent::Trash
+        ));
+        assert!(matches!(
+            delete_key_intent(true),
+            MailActionIntent::PermanentDelete
+        ));
     }
 }

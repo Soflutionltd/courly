@@ -61,6 +61,14 @@ fn sender_or_unknown<'a>(name: Option<&'a str>, address: Option<&'a str>) -> Cow
 use super::highlighted::highlighted_text_body;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
+/// Pin, delete or flag, from the buttons kept visible on every row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadRowAction {
+    Pin,
+    Trash,
+    Flag,
+}
+
 pub fn thread_card<'a, M: Clone + 'a>(
     thread: &'a Thread,
     index: usize,
@@ -68,6 +76,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
     label_paints: &[LabelPaint],
     bimi_logo: Option<&Path>,
     on_select: impl Fn(usize) -> M,
+    on_action: impl Fn(usize, ThreadRowAction) -> M,
 ) -> Element<'a, M> {
     let sender = sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref());
 
@@ -177,6 +186,28 @@ pub fn thread_card<'a, M: Clone + 'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
+    let pin_style = if thread.is_pinned {
+        theme::TextClass::Accent.style()
+    } else {
+        theme::TextClass::Tertiary.style()
+    };
+    let flag_style = if thread.is_starred {
+        theme::TextClass::Warning.style()
+    } else {
+        theme::TextClass::Tertiary.style()
+    };
+    let actions = row![
+        row_action(icon::pin(), pin_style, on_action(index, ThreadRowAction::Pin)),
+        row_action(
+            icon::trash(),
+            theme::TextClass::Tertiary.style(),
+            on_action(index, ThreadRowAction::Trash),
+        ),
+        row_action(icon::flag(), flag_style, on_action(index, ThreadRowAction::Flag)),
+    ]
+    .spacing(SPACE_XXXS)
+    .align_y(Alignment::Center);
+
     let subject_row = row![
         container(
             text(subject)
@@ -188,7 +219,10 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .width(Length::Fill),
         )
         .width(Length::Fill),
-    ];
+        actions,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
 
     // Phase 7-8: branch the snippet slot. Attachment matches show
     // "in {filename}: {fragment}" (filename italicised, fragment plain)
@@ -258,6 +292,19 @@ pub fn thread_card<'a, M: Clone + 'a>(
     )
     .width(Length::Fill)
     .into()
+}
+
+/// One of the pin, delete and flag buttons kept visible on every row.
+fn row_action<'a, M: Clone + 'a>(
+    ico: iced::widget::Text<'a>,
+    style: fn(&Theme) -> text::Style,
+    on_press: M,
+) -> Element<'a, M> {
+    button(container(ico.size(ICON_SM).style(style)))
+        .on_press(on_press)
+        .padding(SPACE_XXXS)
+        .style(theme::ButtonClass::BareTransparent.style())
+        .into()
 }
 
 pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
