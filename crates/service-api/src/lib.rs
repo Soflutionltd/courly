@@ -82,7 +82,10 @@ pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
-pub use label::{LabelGroupReorderAck, LabelGroupReorderParams};
+pub use label::{
+    LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams,
+    LabelSaveAck, LabelSaveParams,
+};
 pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
 pub use pinned_search::{

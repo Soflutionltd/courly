@@ -21,7 +21,7 @@ use crate::extract::{ExtractStatusParams, IndexRebuildParams};
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
-use crate::label::LabelGroupReorderParams;
+use crate::label::{LabelDeleteParams, LabelGroupReorderParams, LabelSaveParams};
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
     PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -1242,6 +1242,17 @@ pub enum RequestParams {
     LabelGroupReorder {
         params: LabelGroupReorderParams,
     },
+    /// Create, rename or recolour one provider label (Gmail label, Outlook
+    /// category, JMAP keyword) and mirror it locally. Mutating: a replayed
+    /// create would duplicate the label on providers that allow it. 30 s
+    /// timeout: one provider round trip plus a local upsert.
+    LabelSave {
+        params: LabelSaveParams,
+    },
+    /// Delete one provider label and its local rows. Mutating; 30 s timeout.
+    LabelDelete {
+        params: LabelDeleteParams,
+    },
     /// Phase 6a: UPSERT a contact group + replace its member email
     /// list. The plan's original split (group_create / group_update)
     /// collapsed to one method because today's underlying DB function
@@ -1662,6 +1673,8 @@ impl RequestParams {
             Self::SignatureDelete { .. } => "signature.delete",
             Self::SignatureReorder { .. } => "signature.reorder",
             Self::LabelGroupReorder { .. } => "label_group.reorder",
+            Self::LabelSave { .. } => "label.save",
+            Self::LabelDelete { .. } => "label.delete",
             Self::PinnedSearchCreateOrUpdate { .. } => "pinned_search.create_or_update",
             Self::PinnedSearchUpdate { .. } => "pinned_search.update",
             Self::PinnedSearchDelete { .. } => "pinned_search.delete",
@@ -1745,6 +1758,9 @@ impl RequestParams {
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
             Self::ActionMarkChatRead { .. } => RequestTimeoutKind::Finite(Duration::from_secs(10)),
+            Self::LabelSave { .. } | Self::LabelDelete { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(30))
+            }
             // Handler budget: validate + per-attachment SHA-256 verify
             // + atomic rename to vault + journal + ack. SMTP is on the
             // worker. 30 s comfortably covers the verify step for
@@ -1933,6 +1949,8 @@ impl RequestParams {
             | Self::ContactsContactDelete { .. }
             | Self::AccountCreate { .. }
             | Self::AccountDelete { .. }
+            | Self::LabelSave { .. }
+            | Self::LabelDelete { .. }
             | Self::PinnedSearchCreateOrUpdate { .. } => Idempotency::Mutating,
 
             Self::ActionMarkChatRead { .. }
@@ -2057,6 +2075,8 @@ impl RequestParams {
             Self::SignatureDelete { params } => serde_json::json!({ "params": params }),
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
             Self::LabelGroupReorder { params } => serde_json::json!({ "params": params }),
+            Self::LabelSave { params } => serde_json::json!({ "params": params }),
+            Self::LabelDelete { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchCreateOrUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchDelete { params } => serde_json::json!({ "params": params }),
@@ -2339,6 +2359,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("label_group.reorder params: {e}"))?;
                 Ok(Self::LabelGroupReorder { params: p.params })
+            }
+            "label.save" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: LabelSaveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("label.save params: {e}"))?;
+                Ok(Self::LabelSave { params: p.params })
+            }
+            "label.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: LabelDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("label.delete params: {e}"))?;
+                Ok(Self::LabelDelete { params: p.params })
             }
             "contacts.group_save" => {
                 #[derive(Deserialize)]

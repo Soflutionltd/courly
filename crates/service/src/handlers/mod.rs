@@ -111,6 +111,8 @@ pub(crate) async fn dispatch(
         RequestParams::LabelGroupReorder { params } => {
             label::handle_reorder(&boot_state, params).await
         }
+        RequestParams::LabelSave { params } => label::handle_save(&boot_state, params).await,
+        RequestParams::LabelDelete { params } => label::handle_delete(&boot_state, params).await,
         RequestParams::ContactsGroupSave { params } => {
             contacts::handle_group_save(&boot_state, params).await
         }

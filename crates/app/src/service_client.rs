@@ -12,7 +12,8 @@ use service_api::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
     ContactSaveAck, ContactSaveParams, ContactSaveWithWritebackAck, DecryptForStorageAck,
     DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams, HealthPingResponse,
-    JsonRpcErrorObject, JsonRpcRequest, LabelGroupReorderAck, LabelGroupReorderParams,
+    JsonRpcErrorObject, JsonRpcRequest, LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck,
+    LabelGroupReorderParams, LabelSaveAck, LabelSaveParams,
     Notification, OauthExchangeCodeAck, OauthExchangeCodeParams, PROTOCOL_VERSION,
     ParsedServiceMessage, PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams,
     PinnedSearchDeleteAck, PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams,
@@ -1478,6 +1479,28 @@ impl ServiceClient {
         let _ack: LabelGroupReorderAck = self
             .request(RequestParams::LabelGroupReorder {
                 params: LabelGroupReorderParams { orders },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Create (`label_id: None`), rename or recolour one provider label
+    /// via `label.save`. Returns the label's storage id.
+    pub async fn save_label(&self, params: LabelSaveParams) -> Result<String, ClientError> {
+        let ack: LabelSaveAck = self
+            .request(RequestParams::LabelSave { params })
+            .await?;
+        Ok(ack.label_id)
+    }
+
+    /// Delete one provider label via `label.delete`.
+    pub async fn delete_label(&self, account_id: String, label_id: String) -> Result<(), ClientError> {
+        let _ack: LabelDeleteAck = self
+            .request(RequestParams::LabelDelete {
+                params: LabelDeleteParams {
+                    account_id,
+                    label_id,
+                },
             })
             .await?;
         Ok(())
