@@ -77,7 +77,7 @@ pub(super) fn draw_text_area(
     let (text_x, text_y) = text_area_origin(&state.token_bounds, bounds.width, state.chip_v_offset);
 
     let display_text = if widget.text.is_empty() && widget.tokens.is_empty() {
-        widget.placeholder
+        widget.placeholder.as_str()
     } else {
         widget.text
     };

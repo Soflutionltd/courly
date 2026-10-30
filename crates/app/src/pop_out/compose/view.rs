@@ -1,6 +1,7 @@
 use iced::widget::{Space, button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length};
 use rte::rich_text_editor;
+use rust_i18n::t;
 
 use crate::Message;
 use crate::font;
@@ -134,7 +135,7 @@ fn compose_header<'a>(
         fields = fields.push(build_bcc_row(window_id, state));
     }
 
-    let subject_input = text_input("Subject", &state.subject)
+    let subject_input = text_input(t!("compose.subject"), &state.subject)
         .on_input(move |s| {
             Message::PopOut(
                 window_id,
@@ -146,7 +147,7 @@ fn compose_header<'a>(
 
     let subject_row = row![
         container(
-            text("Subject")
+            text(t!("compose.subject"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style())
         )
@@ -180,7 +181,7 @@ fn build_from_row<'a>(
     let from_picker = from_account_picker(window_id, state);
 
     let from_label = container(
-        text("From")
+        text(t!("compose.from"))
             .size(TEXT_SM)
             .style(theme::TextClass::Tertiary.style()),
     )
@@ -195,7 +196,7 @@ fn build_from_row<'a>(
 
     if !state.show_cc {
         from_row = from_row.push(
-            button(text("Cc").size(TEXT_SM))
+            button(text(t!("compose.cc")).size(TEXT_SM))
                 .style(theme::ButtonClass::BareIcon.style())
                 .on_press(Message::PopOut(
                     window_id,
@@ -206,7 +207,7 @@ fn build_from_row<'a>(
     }
     if !state.show_bcc {
         from_row = from_row.push(
-            button(text("Bcc").size(TEXT_SM))
+            button(text(t!("compose.bcc")).size(TEXT_SM))
                 .style(theme::ButtonClass::BareIcon.style())
                 .on_press(Message::PopOut(
                     window_id,
@@ -234,7 +235,7 @@ fn from_account_picker<'a>(
             Some(n) if !n.is_empty() => format!("{n} <{}>", a.email),
             _ => a.email.clone(),
         },
-        None => "Select account".to_string(),
+        None => t!("compose.select_account").into_owned(),
     };
     let account_name = state
         .from_account
@@ -346,13 +347,13 @@ fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         && !state.autocomplete.results.is_empty();
     let autocomplete_dropdown = ac_open.then(|| autocomplete_dropdown(window_id, state));
     build_recipient_row_inner(
-        "To",
+        t!("compose.to").into_owned(),
         &state.to,
         state.selected_to_token,
         ac_open,
         autocomplete_dropdown,
         window_id,
-        "Add recipients...",
+        t!("compose.add_recipients").into_owned(),
         ComposeMessage::ToTokenInput,
     )
 }
@@ -362,13 +363,13 @@ fn build_cc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         && !state.autocomplete.results.is_empty();
     let autocomplete_dropdown = ac_open.then(|| autocomplete_dropdown(window_id, state));
     build_recipient_row_inner(
-        "Cc",
+        t!("compose.cc").into_owned(),
         &state.cc,
         state.selected_cc_token,
         ac_open,
         autocomplete_dropdown,
         window_id,
-        "Add Cc...",
+        t!("compose.add_cc").into_owned(),
         ComposeMessage::CcTokenInput,
     )
 }
@@ -378,13 +379,13 @@ fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> El
         && !state.autocomplete.results.is_empty();
     let autocomplete_dropdown = ac_open.then(|| autocomplete_dropdown(window_id, state));
     build_recipient_row_inner(
-        "Bcc",
+        t!("compose.bcc").into_owned(),
         &state.bcc,
         state.selected_bcc_token,
         ac_open,
         autocomplete_dropdown,
         window_id,
-        "Add Bcc...",
+        t!("compose.add_bcc").into_owned(),
         ComposeMessage::BccTokenInput,
     )
 }
@@ -392,13 +393,13 @@ fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> El
 // TODO(refactor): bundle row params (autocomplete + selection state) into a struct.
 #[allow(clippy::too_many_arguments)]
 fn build_recipient_row_inner<'a>(
-    label: &'a str,
+    label: String,
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
     autocomplete_open: bool,
     autocomplete_dropdown: Option<Element<'a, Message>>,
     window_id: iced::window::Id,
-    placeholder: &'a str,
+    placeholder: String,
     wrap: fn(TokenInputMessage) -> ComposeMessage,
 ) -> Element<'a, Message> {
     let field = token_input::token_input_field(
@@ -606,9 +607,12 @@ fn compose_footer<'a>(
     };
 
     let discard_btn = button(
-        row![icon::trash().size(ICON_LG), text("Discard").size(TEXT_LG),]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center),
+        row![
+            icon::trash().size(ICON_LG),
+            text(t!("compose.discard")).size(TEXT_LG),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
     )
     .style(theme::ButtonClass::Action.style())
     .on_press(Message::PopOut(
@@ -620,7 +624,9 @@ fn compose_footer<'a>(
     let send_btn = button(
         row![
             icon::send().size(ICON_LG).color(theme::ON_AVATAR),
-            text("Send").size(TEXT_LG).color(theme::ON_AVATAR),
+            text(t!("compose.send"))
+                .size(TEXT_LG)
+                .color(theme::ON_AVATAR),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -635,7 +641,7 @@ fn compose_footer<'a>(
     let attach_btn = button(
         row![
             icon::paperclip().size(ICON_LG),
-            text("Attach").size(TEXT_LG),
+            text(t!("compose.attach")).size(TEXT_LG),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -648,9 +654,12 @@ fn compose_footer<'a>(
     .padding(PAD_BUTTON);
 
     let save_btn = button(
-        row![icon::download().size(ICON_LG), text("Save").size(TEXT_LG),]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center),
+        row![
+            icon::download().size(ICON_LG),
+            text(t!("compose.save")).size(TEXT_LG),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
     )
     .style(theme::ButtonClass::Action.style())
     .on_press(Message::PopOut(
@@ -665,7 +674,7 @@ fn compose_footer<'a>(
             button(
                 row![
                     icon::external_link().size(ICON_LG),
-                    text("Pop Out").size(TEXT_LG)
+                    text(t!("compose.pop_out")).size(TEXT_LG)
                 ]
                 .spacing(SPACE_XXS)
                 .align_y(Alignment::Center),

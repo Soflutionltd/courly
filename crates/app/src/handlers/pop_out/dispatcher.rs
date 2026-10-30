@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::handlers::attachments::{
     AttachmentRef, OpenAttachmentParams, SaveAllAttachmentsParams, SaveAttachmentParams,
@@ -213,9 +214,10 @@ impl ReadyApp {
                 if emails.is_empty() {
                     return Task::done(Message::PopOut(
                         window_id,
-                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(
-                            "No valid addresses to save.".to_string(),
-                        ))),
+                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(t!(
+                            "compose.no_valid_addresses"
+                        )
+                        .into_owned()))),
                     ));
                 }
                 let name = state.save_group_name.trim().to_string();
@@ -240,9 +242,10 @@ impl ReadyApp {
                     log::warn!("contacts.group_save: no ServiceClient yet; surfacing error");
                     return Task::done(Message::PopOut(
                         window_id,
-                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(
-                            "Service not ready".to_string(),
-                        ))),
+                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(t!(
+                            "compose.service_not_ready"
+                        )
+                        .into_owned()))),
                     ));
                 };
                 let emails_for_save = emails.clone();
@@ -502,7 +505,7 @@ fn handle_compose_attach_files(window_id: iced::window::Id) -> Task<Message> {
     Task::perform(
         async {
             let handles = rfd::AsyncFileDialog::new()
-                .set_title("Attach Files")
+                .set_title(t!("compose.attach_files"))
                 .pick_files()
                 .await;
 

@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::pop_out::PopOutWindow;
 use crate::pop_out::compose::ComposeMode;
@@ -30,7 +31,7 @@ impl ReadyApp {
             || !state.cc.tokens.is_empty()
             || !state.bcc.tokens.is_empty();
         if !has_recipients {
-            state.status = Some("Add at least one recipient".to_string());
+            state.status = Some(t!("compose.add_recipient_status").into_owned());
             return Task::none();
         }
 
@@ -38,7 +39,7 @@ impl ReadyApp {
         let account_info = match state.from_account.as_ref() {
             Some(a) => a.clone(),
             None => {
-                state.status = Some("No sending account selected".to_string());
+                state.status = Some(t!("compose.no_sending_account").into_owned());
                 return Task::none();
             }
         };
@@ -106,7 +107,7 @@ impl ReadyApp {
 
         // Set sending state and dispatch
         state.sending = true;
-        state.status = Some("Sending\u{2026}".to_string());
+        state.status = Some(t!("compose.sending").into_owned());
 
         self.dispatch_send(window_id, send_req)
     }
@@ -128,7 +129,7 @@ impl ReadyApp {
         let Some(client) = self.service_client.as_ref().cloned() else {
             if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
                 state.sending = false;
-                state.status = Some("Send unavailable \u{2014} Service not connected".to_string());
+                state.status = Some(t!("compose.send_unavailable").into_owned());
             }
             return Task::none();
         };
@@ -148,7 +149,7 @@ impl ReadyApp {
                 if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
-                    state.status = Some(format!("Send failed: {error}"));
+                    state.status = Some(t!("compose.send_failed", error = error).into_owned());
                 }
                 return Task::none();
             }
@@ -205,7 +206,7 @@ impl ReadyApp {
             service_api::actions::ActionOutcome::Success
             | service_api::actions::ActionOutcome::NoOp => {
                 self.status_bar
-                    .show_confirmation("Message sent".to_string());
+                    .show_confirmation(t!("compose.message_sent").into_owned());
                 self.close_compose(window_id)
             }
             // LocalOnly should not occur for send (send uses Failed for all
@@ -215,7 +216,8 @@ impl ReadyApp {
                 if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
-                    state.status = Some(format!("Send failed: {}", error.user_message()));
+                    state.status =
+                        Some(t!("compose.send_failed", error = error.user_message()).into_owned());
                 }
                 Task::none()
             }

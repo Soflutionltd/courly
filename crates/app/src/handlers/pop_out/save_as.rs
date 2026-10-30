@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::db::Db;
 use crate::pop_out::message_view::MessageViewMessage;
@@ -64,10 +65,10 @@ async fn save_message_dialog(
     let safe_name = sanitize_filename(&subject);
 
     let file_handle = rfd::AsyncFileDialog::new()
-        .set_title("Save Message As")
+        .set_title(t!("compose.save_message_as"))
         .set_file_name(format!("{safe_name}.eml"))
-        .add_filter("Email Message (.eml)", &["eml"])
-        .add_filter("Plain Text (.txt)", &["txt"])
+        .add_filter(t!("compose.filter_eml"), &["eml"])
+        .add_filter(t!("compose.filter_txt"), &["txt"])
         .save_file()
         .await;
 

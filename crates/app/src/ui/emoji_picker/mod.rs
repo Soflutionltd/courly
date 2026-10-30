@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -81,19 +82,20 @@ impl EmojiCategory {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Recent => "Recent",
-            Self::Smileys => "Smileys & Emotion",
-            Self::People => "People & Body",
-            Self::Nature => "Animals & Nature",
-            Self::Food => "Food & Drink",
-            Self::Activities => "Activities",
-            Self::Travel => "Travel & Places",
-            Self::Objects => "Objects",
-            Self::Symbols => "Symbols",
-            Self::Flags => "Flags",
+            Self::Recent => t!("compose.emoji.recent"),
+            Self::Smileys => t!("compose.emoji.smileys"),
+            Self::People => t!("compose.emoji.people"),
+            Self::Nature => t!("compose.emoji.nature"),
+            Self::Food => t!("compose.emoji.food"),
+            Self::Activities => t!("compose.emoji.activities"),
+            Self::Travel => t!("compose.emoji.travel"),
+            Self::Objects => t!("compose.emoji.objects"),
+            Self::Symbols => t!("compose.emoji.symbols"),
+            Self::Flags => t!("compose.emoji.flags"),
         }
+        .into_owned()
     }
 }
 
@@ -287,7 +289,7 @@ fn build_search_bar<'a, M: Clone + 'a>(
     state: &'a EmojiPickerState,
     map_msg: impl Fn(EmojiPickerMessage) -> M + Clone + 'a,
 ) -> Element<'a, M> {
-    let input = text_input("Search emoji...", &state.search_text)
+    let input = text_input(t!("compose.emoji.search"), &state.search_text)
         .on_input(move |s| map_msg.clone()(EmojiPickerMessage::SearchChanged(s)))
         .size(TEXT_SM)
         .padding(PAD_INPUT);
@@ -329,7 +331,7 @@ fn build_skin_tone_selector<'a, M: Clone + 'a>(
 
     container(
         row![
-            text("Skin tone:")
+            text(t!("compose.emoji.skin_tone"))
                 .size(TEXT_XS)
                 .style(theme::TextClass::Muted.style()),
             tone_row,
@@ -402,7 +404,7 @@ fn build_emoji_grid<'a, M: Clone + 'a>(
 
     if grid_rows.is_empty() {
         let empty = container(
-            text("No emoji found")
+            text(t!("compose.emoji.none_found"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
         )
