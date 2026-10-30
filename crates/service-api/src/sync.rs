@@ -182,6 +182,27 @@ impl WithGeneration for AccountPausedNotification {
     }
 }
 
+/// Mail view-reload signal: the resident sync engine wrote server-side
+/// changes (new, changed or deleted messages) for this account. `Coalesce`
+/// keyed per account; the UI debounces before reloading the list, so a
+/// burst of batches costs one reload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailboxChanged {
+    pub account_id: String,
+    /// Cross-respawn drop tag. Service emits 0; UI's reader task
+    /// overwrites at enqueue with `current_generation()`.
+    pub service_generation: u32,
+}
+
+impl WithGeneration for MailboxChanged {
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
+}
+
 /// Emitted once per run after the runner has finished (or panicked,
 /// via the supervisor's synthetic emission). `MustDeliver` notification
 /// under the Service IPC notification-class taxonomy: a dropped

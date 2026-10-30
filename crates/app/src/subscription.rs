@@ -179,6 +179,13 @@ impl ReadyApp {
             );
         }
 
+        if self.pending_mailbox_reload.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(250))
+                    .map(|_| Message::MailboxReloadTick),
+            );
+        }
+
         if self
             .settings
             .sheet_anim

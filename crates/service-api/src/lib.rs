@@ -128,9 +128,9 @@ pub use signature::{
 };
 pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
 pub use sync::{
-    AccountPausedNotification, IndexCommitted, SyncCancelAccountParams, SyncCancelAck,
-    SyncCompleted, SyncPauseReason, SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncRunId,
-    SyncStartAccountParams, SyncStartAck,
+    AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCancelAccountParams,
+    SyncCancelAck, SyncCompleted, SyncPauseReason, SyncResult, SyncResumeAccountParams,
+    SyncResumeAck, SyncRunId, SyncStartAccountParams, SyncStartAck,
 };
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use version::{MAX_FRAME_BYTES, PROTOCOL_VERSION};

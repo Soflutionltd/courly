@@ -467,6 +467,11 @@ pub enum Message {
     /// tick. Collapses an N-account kick batch into a single reload.
     CalendarReloadTick,
 
+    /// Debounced mail reload after a `Notification::MailboxChanged`
+    /// arrival, so a server-side change shows without waiting for the
+    /// next `SyncTick`.
+    MailboxReloadTick,
+
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
 

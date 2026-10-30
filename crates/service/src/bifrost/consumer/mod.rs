@@ -7,9 +7,9 @@
 //! Under sustained push with no quiescence window the drive never reaches a
 //! clean idle edge, so the move-vs-purge (`PendingDeletions`), IMAP-threading,
 //! and deferred-ack accumulators would grow unboundedly. `resident_flush_due`
-//! plus the `RESIDENT_FLUSH_INTERVAL` / `RESIDENT_DEFERRED_ACK_CAP` /
-//! `RESIDENT_PENDING_DELETION_CAP` caps force a mid-drive flush so memory stays
-//! bounded regardless of cadence (gated by
+//! plus the `RESIDENT_FLUSH_INTERVAL` / `RESIDENT_DELETION_FLUSH_INTERVAL` /
+//! `RESIDENT_DEFERRED_ACK_CAP` / `RESIDENT_PENDING_DELETION_CAP` caps force a
+//! mid-drive flush so memory stays bounded regardless of cadence (gated by
 //! `bifrost-consumer-sustained-push-bound.lua`). This is a genuine
 //! steady-state memory invariant, NOT a B3b stopgap, and the caps are
 //! unchanged by B3c.
@@ -112,6 +112,11 @@ fn is_lag_warning(event: &bifrost_sync::multiplexer::MultiplexerEvent) -> bool {
 
 const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 const RESIDENT_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+/// How long a Graph deletion candidate may wait for its move destination
+/// while batches keep arriving. Long enough for a hot folder's next poll
+/// to report the destination, short enough that a message deleted in
+/// Outlook disappears here within seconds.
+const RESIDENT_DELETION_FLUSH_INTERVAL: Duration = Duration::from_secs(10);
 const RESIDENT_DEFERRED_ACK_CAP: usize = 128;
 const RESIDENT_PENDING_DELETION_CAP: usize = 4096;
 
@@ -247,6 +252,10 @@ pub struct ChangeStreamConsumer {
     deferred_imap_acks: Vec<(CursorScope, Checkpoint, Option<PublicationId>)>,
     imap_seen_by_scope: HashMap<CursorScope, u64>,
     crash_before_drive_end_threading: bool,
+    /// Raised after every write of server-side changes so the resident
+    /// engine can tell the UI to reload. `Notify` keeps at most one permit,
+    /// which coalesces a burst of batches into one wake-up.
+    mutation_signal: Option<Arc<tokio::sync::Notify>>,
 }
 
 #[derive(Default)]
@@ -324,6 +333,19 @@ impl ChangeStreamConsumer {
             deferred_imap_acks: Vec::new(),
             imap_seen_by_scope: HashMap::new(),
             crash_before_drive_end_threading: false,
+            mutation_signal: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_mutation_signal(mut self, signal: Arc<tokio::sync::Notify>) -> Self {
+        self.mutation_signal = Some(signal);
+        self
+    }
+
+    fn signal_mutation(&self) {
+        if let Some(signal) = &self.mutation_signal {
+            signal.notify_one();
         }
     }
 
@@ -717,7 +739,7 @@ impl ChangeStreamConsumer {
                 // into the drive-level reconcile state (finding A). The actual
                 // deletion of unreconciled candidates is deferred to drive end.
                 pending.live.extend(hydrated.live_ids.iter().cloned());
-                pending.removed.extend(hydrated.removed_ids.iter().cloned());
+                pending.add_removed(&hydrated.removed_ids);
                 let affected = write::persist_in_namespace(
                     &self.stores,
                     &self.account_id.0,
@@ -728,6 +750,7 @@ impl ChangeStreamConsumer {
                 )
                 .await
                 .map_err(|error| Error::Other(format!("bifrost persist: {error}")))?;
+                let wrote_changes = !hydrated.rows.is_empty() || !hydrated.deleted_ids.is_empty();
                 if self.provider == BifrostProviderKind::Imap {
                     // Key the threadable accumulator on the id each row was
                     // PERSISTED under: the IMAP write arm adopts the existing
@@ -754,6 +777,9 @@ impl ChangeStreamConsumer {
                 .await
                 .map_err(|error| Error::Other(format!("bifrost post-persist: {error}")))?;
                 self.stores.search.flush_now().await.map_err(Error::Other)?;
+                if wrote_changes {
+                    self.signal_mutation();
+                }
                 if matches!(hook, Some(ConsumerHook::CrashBeforeAck)) {
                     return Err(Error::Other(
                         "bifrost consumer crash_before_ack hook fired".to_string(),
@@ -996,6 +1022,7 @@ impl ChangeStreamConsumer {
         )
         .await
         .map_err(|error| Error::Other(format!("bifrost drive-end delete: {error}")))?;
+        self.signal_mutation();
         Ok(())
     }
 
@@ -1051,7 +1078,33 @@ impl ChangeStreamConsumer {
             || pending.len() >= RESIDENT_PENDING_DELETION_CAP
             || (!self.deferred_imap_acks.is_empty()
                 && last_flush.elapsed() >= RESIDENT_FLUSH_INTERVAL)
-            || (!pending.is_empty() && last_flush.elapsed() >= RESIDENT_FLUSH_INTERVAL)
+            || pending.deletion_due()
+    }
+}
+
+#[cfg(test)]
+mod deletion_flush_tests {
+    use super::*;
+
+    fn pending_removed_for(age: Duration) -> PendingDeletions {
+        let mut pending = PendingDeletions::default();
+        pending.add_removed(&["msg".to_string()]);
+        pending.removed_since = Instant::now().checked_sub(age);
+        pending
+    }
+
+    #[test]
+    fn a_fresh_deletion_waits_for_its_move_destination() {
+        assert!(!pending_removed_for(Duration::from_secs(1)).deletion_due());
+    }
+
+    #[test]
+    fn the_wait_counts_from_the_oldest_candidate_not_the_newest() {
+        let mut pending = pending_removed_for(Duration::from_secs(11));
+        pending.add_removed(&["later".to_string()]);
+        assert!(pending.deletion_due());
+        pending.clear();
+        assert!(!pending.deletion_due());
     }
 }
 
@@ -1076,16 +1129,28 @@ fn completion_backfill_checkpoint(scope: CursorScope, seen: u64) -> BackfillChec
 struct PendingDeletions {
     removed: HashSet<String>,
     live: HashSet<String>,
+    /// When the oldest candidate still in `removed` arrived.
+    removed_since: Option<Instant>,
 }
 
 impl PendingDeletions {
+    fn add_removed(&mut self, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        self.removed_since.get_or_insert_with(Instant::now);
+        self.removed.extend(ids.iter().cloned());
+    }
+
+    fn deletion_due(&self) -> bool {
+        self.removed_since
+            .is_some_and(|since| since.elapsed() >= RESIDENT_DELETION_FLUSH_INTERVAL)
+    }
+
     fn clear(&mut self) {
         self.removed.clear();
         self.live.clear();
-    }
-
-    fn is_empty(&self) -> bool {
-        self.removed.is_empty() && self.live.is_empty()
+        self.removed_since = None;
     }
 
     fn len(&self) -> usize {

@@ -340,6 +340,10 @@ impl ReadyApp {
                         });
                         Task::none()
                     }
+                    service_api::Notification::MailboxChanged(_) => {
+                        self.pending_mailbox_reload = Some(std::time::Instant::now());
+                        Task::none()
+                    }
                     service_api::Notification::IndexCommitted(_) => {
                         // Phase 3 task 17: stamp the pending reload
                         // deadline; the 200 ms `ReaderReloadTick`
@@ -1029,6 +1033,16 @@ impl ReadyApp {
                 }
                 self.pending_calendar_reload = None;
                 self.reload_calendar_events()
+            }
+            Message::MailboxReloadTick => {
+                let Some(stamp) = self.pending_mailbox_reload else {
+                    return Task::none();
+                };
+                if stamp.elapsed() < std::time::Duration::from_millis(250) {
+                    return Task::none();
+                }
+                self.pending_mailbox_reload = None;
+                self.reload_after_server_change()
             }
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;

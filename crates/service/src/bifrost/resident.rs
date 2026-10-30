@@ -12,7 +12,8 @@ use bifrost_types::{
 use common::types::{FolderKind, SystemFolderId};
 use db::db::ReadDbState;
 use service_api::{
-    AccountPausedNotification, Notification, OperationResult, PushEvent, SyncPauseReason,
+    AccountPausedNotification, MailboxChanged, Notification, OperationResult, PushEvent,
+    SyncPauseReason,
 };
 use service_state::WriteDbState;
 use tokio::sync::{Mutex, broadcast, watch};
@@ -91,6 +92,9 @@ struct ResidentSlot {
     initial_marked: AtomicBool,
     provider: BifrostProviderKind,
     containers: Arc<ContainerIndex>,
+    /// Raised by the consumer after each write of server-side changes;
+    /// `mailbox_changed_loop` turns it into a `MailboxChanged` frame.
+    mutation_signal: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Clone)]
@@ -345,6 +349,7 @@ impl ResidentEngine {
             initial_marked: AtomicBool::new(false),
             provider,
             containers: Arc::clone(&containers),
+            mutation_signal: Arc::new(tokio::sync::Notify::new()),
         });
         let task_slot = Arc::clone(&slot);
         let inner = Arc::clone(&self.inner);
@@ -381,6 +386,12 @@ impl ResidentEngine {
             resident_aux_loop(aux_inner, aux_cancel, aux_account, provider).await;
         });
         *slot.aux_task.lock().await = Some(aux);
+        tokio::spawn(mailbox_changed_loop(
+            Arc::clone(&self.inner),
+            slot.cancel.clone(),
+            account_id.to_string(),
+            Arc::clone(&slot.mutation_signal),
+        ));
         self.inner
             .slots
             .lock()
@@ -874,7 +885,8 @@ async fn resident_consumer_loop(
         )
         .with_containers(containers.clone())
         .with_checkpoint_store(inner.engine.checkpoints())
-        .with_hooks(crate::handlers::test_helpers::bifrost_hooks());
+        .with_hooks(crate::handlers::test_helpers::bifrost_hooks())
+        .with_mutation_signal(Arc::clone(&slot.mutation_signal));
         let result = tokio::select! {
             result = consumer.drive_resident({
                 let inner = Arc::clone(&inner);
@@ -1064,6 +1076,36 @@ fn repush_full_reconcile(inner: &ResidentEngineInner, account_id: &str) {
             },
         },
     );
+}
+
+/// Minimum gap between two `MailboxChanged` frames for one account. An
+/// initial sync writes hundreds of batches; without the gap the UI would
+/// re-query the thread list several times a second for the whole import.
+const MAILBOX_CHANGED_MIN_GAP: Duration = Duration::from_secs(1);
+
+async fn mailbox_changed_loop(
+    inner: Arc<ResidentEngineInner>,
+    cancel: CancellationToken,
+    account_id: String,
+    signal: Arc<tokio::sync::Notify>,
+) {
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            () = signal.notified() => {}
+        }
+        let notif = Notification::MailboxChanged(MailboxChanged {
+            account_id: account_id.clone(),
+            service_generation: inner.service_generation,
+        });
+        if let Err(error) = inner.notification_tx.send(notif).await {
+            log::debug!("emit mailbox changed for {account_id}: {error}");
+        }
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            () = tokio::time::sleep(MAILBOX_CHANGED_MIN_GAP) => {}
+        }
+    }
 }
 
 async fn emit_push_event(inner: &ResidentEngineInner, account_id: &str) {

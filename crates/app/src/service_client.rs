@@ -3898,6 +3898,10 @@ mod tests {
             reason: SyncPauseReason::NeedsAttention,
             service_generation: 0,
         }));
+        catalog.push(Notification::MailboxChanged(service_api::MailboxChanged {
+            account_id: "acc-1".into(),
+            service_generation: 0,
+        }));
         // Phase 5: CalendarRunCompleted (MustDeliver) and CalendarChanged
         // (Coalesce per-account). Both carry service_generation and must
         // round-trip the cross-respawn dispatch filter.

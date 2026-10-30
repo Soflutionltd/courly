@@ -8,7 +8,7 @@ use crate::extract::{
     PrefetchCompleted, PrefetchProgress,
 };
 use crate::push::PushEvent;
-use crate::sync::{AccountPausedNotification, IndexCommitted, SyncCompleted};
+use crate::sync::{AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCompleted};
 use serde::{Deserialize, Serialize};
 
 /// Marker + accessor trait for notification payloads that carry a
@@ -71,6 +71,9 @@ pub enum CoalesceKey {
     /// two for different accounts both pass through. The dispatch-layer
     /// expression of "this account's calendar tables changed - reload."
     CalendarChanged(String),
+    /// Mail view-reload signals keyed per-account, the mail sibling of
+    /// `CalendarChanged`.
+    MailboxChanged(String),
     /// Phase 7-4: ExtractRuntime per-tick progress. No sub-key - latest-
     /// wins globally so the status-bar indicator collapses chatty
     /// per-extraction emissions to one update.
@@ -144,6 +147,12 @@ pub enum Notification {
     /// remain parked until the UI or a re-auth flow clears it.
     #[serde(rename = "sync.account_paused")]
     AccountPaused(AccountPausedNotification),
+    /// Per-account mail view-reload signal from the resident bifrost
+    /// engine, emitted after a batch wrote server-side changes.
+    /// `Coalesce { key: MailboxChanged(account_id) }`: the UI only needs
+    /// to know that a reload is due, so a burst collapses to one frame.
+    #[serde(rename = "sync.mailbox_changed")]
+    MailboxChanged(MailboxChanged),
     /// Tantivy writer-task post-commit notification. `MustDeliver` on
     /// the wire taxonomy, with a 30 s send-deadline degrade in the
     /// writer task (the signal is advisory; the next commit will
@@ -247,6 +256,9 @@ impl Notification {
             },
             Self::SyncCompleted(_) => NotificationClass::MustDeliver,
             Self::AccountPaused(_) => NotificationClass::MustDeliver,
+            Self::MailboxChanged(changed) => NotificationClass::Coalesce {
+                key: CoalesceKey::MailboxChanged(changed.account_id.clone()),
+            },
             Self::IndexCommitted(_) => NotificationClass::MustDeliver,
             Self::PushEvent(event) => NotificationClass::Coalesce {
                 key: CoalesceKey::PushEvent(event.account_id.clone()),
@@ -290,6 +302,7 @@ impl Notification {
             Self::SyncProgress(_) => "sync.progress",
             Self::SyncCompleted(_) => "sync.completed",
             Self::AccountPaused(_) => "sync.account_paused",
+            Self::MailboxChanged(_) => "sync.mailbox_changed",
             Self::IndexCommitted(_) => "index.committed",
             Self::PushEvent(_) => "push.event",
             Self::CalendarRunCompleted(_) => "calendar.run_completed",
@@ -344,6 +357,7 @@ impl Notification {
             Self::SyncProgress(progress) => Some(progress.generation()),
             Self::SyncCompleted(completed) => Some(completed.generation()),
             Self::AccountPaused(paused) => Some(paused.generation()),
+            Self::MailboxChanged(changed) => Some(changed.generation()),
             Self::IndexCommitted(committed) => Some(committed.generation()),
             Self::PushEvent(event) => Some(event.generation()),
             Self::CalendarRunCompleted(completed) => Some(completed.generation()),
@@ -380,6 +394,7 @@ impl Notification {
             Self::SyncProgress(progress) => progress.set_generation(generation),
             Self::SyncCompleted(completed) => completed.set_generation(generation),
             Self::AccountPaused(paused) => paused.set_generation(generation),
+            Self::MailboxChanged(changed) => changed.set_generation(generation),
             Self::IndexCommitted(committed) => committed.set_generation(generation),
             Self::PushEvent(event) => event.set_generation(generation),
             Self::CalendarRunCompleted(completed) => completed.set_generation(generation),
@@ -861,6 +876,35 @@ mod tests {
                 assert_eq!(e.service_generation, 7);
             }
             other => panic!("expected PushEvent notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mailbox_changed_coalesces_per_account_and_round_trips() {
+        let n_a = Notification::MailboxChanged(MailboxChanged {
+            account_id: "acc-a".into(),
+            service_generation: 0,
+        });
+        let n_b = Notification::MailboxChanged(MailboxChanged {
+            account_id: "acc-b".into(),
+            service_generation: 0,
+        });
+        assert_eq!(
+            n_a.class(),
+            NotificationClass::Coalesce {
+                key: CoalesceKey::MailboxChanged("acc-a".into())
+            }
+        );
+        assert_ne!(n_a.class(), n_b.class());
+        assert_eq!(n_a.method_name(), "sync.mailbox_changed");
+
+        let json = serde_json::to_string(&n_a).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        match parse_service_message(&line).expect("parse") {
+            ParsedServiceMessage::Notification(Notification::MailboxChanged(changed)) => {
+                assert_eq!(changed.account_id, "acc-a");
+            }
+            other => panic!("expected MailboxChanged notification, got {other:?}"),
         }
     }
 

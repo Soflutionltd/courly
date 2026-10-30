@@ -267,3 +267,96 @@ async fn graph_drive_reconciles_move_source_first() {
     );
     assert_eq!(purged, 0, "a purged message must be deleted at drive end");
 }
+
+fn graph_consumer(consumer_stores: BifrostConsumerStores) -> ChangeStreamConsumer {
+    let checkpoints: Arc<dyn CheckpointStore> = Arc::new(InMemoryCheckpointStore::new());
+    let engine = Arc::new(
+        SyncEngine::builder()
+            .checkpoints(checkpoints)
+            .build()
+            .unwrap(),
+    );
+    ChangeStreamConsumer::new(
+        engine,
+        AccountId("acc".to_string()),
+        BifrostProviderKind::Graph,
+        consumer_stores,
+    )
+}
+
+async fn signal_raised(signal: &tokio::sync::Notify) -> bool {
+    tokio::time::timeout(Duration::from_millis(50), signal.notified())
+        .await
+        .is_ok()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_written_change_raises_the_mutation_signal() {
+    let (db_state, tmp) = state();
+    let signal = Arc::new(tokio::sync::Notify::new());
+    let mut consumer =
+        graph_consumer(stores(db_state, &tmp)).with_mutation_signal(Arc::clone(&signal));
+
+    let (tx, rx) = broadcast::channel(8);
+    tx.send(batch_event(
+        folder_email_scope("mbx-inbox"),
+        vec![object_updated("msg-flagged", "thread-flagged", &["INBOX"])],
+    ))
+    .unwrap();
+    drop(tx);
+    consumer.drive_injected_stream(rx).await.unwrap();
+
+    assert!(signal_raised(&signal).await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_poll_does_not_raise_the_mutation_signal() {
+    let (db_state, tmp) = state();
+    let signal = Arc::new(tokio::sync::Notify::new());
+    let mut consumer =
+        graph_consumer(stores(db_state, &tmp)).with_mutation_signal(Arc::clone(&signal));
+
+    let (tx, rx) = broadcast::channel(8);
+    tx.send(batch_event(folder_email_scope("mbx-inbox"), Vec::new()))
+        .unwrap();
+    drop(tx);
+    consumer.drive_injected_stream(rx).await.unwrap();
+
+    assert!(!signal_raised(&signal).await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deletion_made_elsewhere_is_applied_and_signalled() {
+    let (db_state, tmp) = state();
+    let consumer_stores = stores(db_state.clone(), &tmp);
+    super::write::persist(
+        &consumer_stores,
+        "acc",
+        BifrostProviderKind::Graph,
+        &[synthetic_row("msg-purge", "thread-purge", &["INBOX"])],
+        &[],
+    )
+    .await
+    .unwrap();
+    let signal = Arc::new(tokio::sync::Notify::new());
+    let mut consumer = graph_consumer(consumer_stores).with_mutation_signal(Arc::clone(&signal));
+
+    let (tx, rx) = broadcast::channel(8);
+    tx.send(batch_event(
+        folder_email_scope("mbx-inbox"),
+        vec![scope_change(
+            "msg-purge",
+            "mbx-inbox",
+            ScopeChangeKind::Removed,
+        )],
+    ))
+    .unwrap();
+    drop(tx);
+    consumer
+        .drive_resident_injected_stream(rx, |_| async {}, None)
+        .await
+        .unwrap();
+
+    assert_eq!(count_messages(&db_state, "msg-purge").await, 0);
+    assert!(signal_raised(&signal).await);
+}

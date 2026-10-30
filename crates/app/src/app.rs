@@ -147,6 +147,9 @@ pub struct ReadyApp {
     /// `CalendarChanged` notifications (one per account in a kick batch)
     /// into a single UI reload.
     pub(crate) pending_calendar_reload: Option<std::time::Instant>,
+    /// Stamped on `Notification::MailboxChanged`; cleared by the 250 ms
+    /// `MailboxReloadTick` handler once it reloads the list and counts.
+    pub(crate) pending_mailbox_reload: Option<std::time::Instant>,
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
@@ -428,6 +431,7 @@ impl ReadyApp {
             index_rebuild_progress: None,
             pending_reader_reload: None,
             pending_calendar_reload: None,
+            pending_mailbox_reload: None,
             chat_timeline: None,
             chat_generation: GenerationCounter::new(),
             chat_list_generation: GenerationCounter::new(),
@@ -783,6 +787,7 @@ impl BootingApp {
                     | service_api::Notification::SyncProgress(_)
                     | service_api::Notification::SyncCompleted(_)
                     | service_api::Notification::AccountPaused(_)
+                    | service_api::Notification::MailboxChanged(_)
                     | service_api::Notification::IndexCommitted(_)
                     | service_api::Notification::PushEvent(_)
                     | service_api::Notification::CalendarRunCompleted(_)

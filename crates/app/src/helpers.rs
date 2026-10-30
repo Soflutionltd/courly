@@ -177,6 +177,23 @@ impl ReadyApp {
         ])
     }
 
+    /// Refresh after the background sync wrote server-side changes. Search
+    /// results and the chat timeline are not a scope listing, so only the
+    /// sidebar counts reload under them.
+    pub(crate) fn reload_after_server_change(&mut self) -> Task<Message> {
+        let token = self.nav_generation.next();
+        let nav_task = self.fire_navigation_load(token);
+        if self.active_chat.is_some()
+            || matches!(
+                self.thread_list.mode,
+                crate::ui::thread_list::ThreadListMode::Search
+            )
+        {
+            return nav_task;
+        }
+        Task::batch([nav_task, self.load_threads_for_current_view(token)])
+    }
+
     pub(crate) fn fire_chat_contacts_load(
         &self,
         load_gen: GenerationToken<ChatList>,
