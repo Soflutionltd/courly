@@ -1,70 +1,256 @@
-use iced::Element;
-use iced::widget::{column, mouse_area};
+use iced::widget::{button, column, container, mouse_area, row, text};
+use iced::{Alignment, Element, Length};
 
 use crate::icon;
 use crate::ui::layout::*;
+use crate::ui::theme;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
 use types::SidebarSelection;
 
-use super::search_here::build_search_here_folder_prefix;
+use super::folders::{AccountForest, account_forest, folder_row_content, is_folder_active};
+use super::order::{SidebarEntry, default_order, resolve, scope_key};
+use super::search_here::{build_search_here_folder_prefix, build_search_here_user_folder_prefix};
 use super::{Sidebar, SidebarMessage, universal_folder_selection};
 
 // ── Nav items ───────────────────────────────────────────
 
-pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
-    let folders = sidebar
+fn universal_folders(sidebar: &Sidebar) -> Vec<&NavigationFolder> {
+    sidebar
         .nav_state
         .as_ref()
         .map(|ns| &ns.folders[..])
-        .unwrap_or(&[]);
-
-    let universal: Vec<&NavigationFolder> = folders
+        .unwrap_or(&[])
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::Universal))
-        .filter(|f| {
-            // All Mail is the per-account "literally everything" view -
-            // doesn't aggregate meaningfully, so single-account only.
-            // Inbox, Spam, Archive all stay visible in both scopes.
-            if sidebar.is_all_accounts() {
-                f.id.as_str() != "all-mail"
-            } else {
-                true
-            }
-        })
-        .collect();
+        // All Mail is the per-account "literally everything" view - it
+        // doesn't aggregate meaningfully, so single-account only.
+        .filter(|f| !(sidebar.is_all_accounts() && f.id == "all-mail"))
+        .collect()
+}
 
-    // User-created folders for the scoped account sit directly below
-    // Inbox in the universal section, per glossary - all folders, system
-    // or user, are containers and share one section. `Option::take()` on
-    // the first INBOX iteration drains them in once.
-    let mut account_folder_rows = Some(super::folders::render_account_folders(sidebar));
+fn order_for(
+    sidebar: &Sidebar,
+    universal: &[&NavigationFolder],
+    forest: &AccountForest<'_>,
+) -> Vec<SidebarEntry> {
+    let universal_ids: Vec<&str> = universal.iter().map(|f| f.id.as_str()).collect();
+    let roots: Vec<(&str, &str)> = forest
+        .roots
+        .iter()
+        .map(|root| (root.folder.id.as_str(), root.folder.name.as_str()))
+        .collect();
+    resolve(
+        default_order(&universal_ids, &roots),
+        sidebar.layouts.get(&scope_key(&sidebar.selected_scope)),
+    )
+}
+
+/// The folder section as currently arranged for the selected scope.
+pub(super) fn current_order(sidebar: &Sidebar) -> Vec<SidebarEntry> {
+    order_for(
+        sidebar,
+        &universal_folders(sidebar),
+        &account_forest(sidebar),
+    )
+}
+
+/// System folders and the account's own folders in one reorderable list:
+/// drag a row onto another to take its place, right-click for separators,
+/// search-here and reset.
+pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let universal = universal_folders(sidebar);
+    let forest = account_forest(sidebar);
+    let order = order_for(sidebar, &universal, &forest);
 
     let mut col = column![].spacing(SPACE_XXS);
-    for f in &universal {
-        let sel = universal_folder_selection(&f.id);
-        let is_active = sidebar_nav_selection_is_active(sidebar, &sel);
-        let nav_btn = widgets::nav_button(
-            Some(universal_folder_icon(&f.id)),
-            &f.name,
-            is_active,
-            widgets::NavSize::Compact,
-            f.universal_unread_count().map(widgets::NavBadge::Universal),
-            SidebarMessage::Select(sel),
-        );
-        let query_prefix = build_search_here_folder_prefix(&f.name, sidebar);
-        col =
-            col.push(mouse_area(nav_btn).on_right_press(SidebarMessage::SearchHere(query_prefix)));
-
-        if f.id == "INBOX"
-            && let Some(rows) = account_folder_rows.take()
-        {
-            for row_el in rows {
-                col = col.push(row_el);
+    for (index, entry) in order.iter().enumerate() {
+        match entry {
+            SidebarEntry::Separator(id) => {
+                let line = container(
+                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Divider.style()),
+                )
+                .padding(PAD_SIDEBAR_SEPARATOR)
+                .width(Length::Fill);
+                col = col.push(reorderable_row(
+                    sidebar,
+                    index,
+                    entry,
+                    line.into(),
+                    false,
+                    SidebarMessage::CloseRowMenu,
+                    RowMenu::Separator(*id),
+                ));
+            }
+            SidebarEntry::Folder(id) => {
+                if let Some(folder) = universal.iter().find(|f| f.id == *id) {
+                    let selection = universal_folder_selection(&folder.id);
+                    let active = sidebar_nav_selection_is_active(sidebar, &selection);
+                    let content = widgets::nav_button_content(
+                        Some(universal_folder_icon(&folder.id)),
+                        &folder.name,
+                        active,
+                        widgets::NavSize::Compact,
+                        folder
+                            .universal_unread_count()
+                            .map(widgets::NavBadge::Universal),
+                    );
+                    col = col.push(reorderable_row(
+                        sidebar,
+                        index,
+                        entry,
+                        content,
+                        active,
+                        SidebarMessage::Select(selection),
+                        RowMenu::Folder(build_search_here_folder_prefix(&folder.name, sidebar)),
+                    ));
+                } else if let Some(root) = forest.roots.iter().find(|r| r.folder.id == *id) {
+                    let active = is_folder_active(sidebar, root.folder);
+                    let content = folder_row_content(
+                        root.folder,
+                        0.0,
+                        forest.root_tree_state(sidebar, root),
+                        active,
+                    );
+                    col = col.push(reorderable_row(
+                        sidebar,
+                        index,
+                        entry,
+                        content,
+                        active,
+                        SidebarMessage::Select(universal_folder_selection(&root.folder.id)),
+                        RowMenu::Folder(build_search_here_user_folder_prefix(
+                            &root.folder.name,
+                            sidebar,
+                        )),
+                    ));
+                    for child in forest.descendant_rows(sidebar, root) {
+                        col = col.push(child);
+                    }
+                }
             }
         }
     }
-    col.into()
+
+    mouse_area(col)
+        .on_release(SidebarMessage::DragEnd)
+        .on_exit(SidebarMessage::DragCancel)
+        .into()
+}
+
+enum RowMenu {
+    /// A folder row; carries its search-here query prefix.
+    Folder(String),
+    Separator(u32),
+}
+
+/// One draggable row. The inner `mouse_area` takes the press (so a press
+/// can start a drag) and the release (a click selects); the outer button
+/// only supplies the hover and active styling.
+fn reorderable_row<'a>(
+    sidebar: &'a Sidebar,
+    index: usize,
+    entry: &SidebarEntry,
+    content: Element<'a, SidebarMessage>,
+    active: bool,
+    on_press: SidebarMessage,
+    menu: RowMenu,
+) -> Element<'a, SidebarMessage> {
+    let hit = mouse_area(content)
+        .on_press(SidebarMessage::RowPress(index))
+        .on_release(SidebarMessage::RowRelease(index))
+        .on_enter(SidebarMessage::RowHover(index))
+        .on_right_press(SidebarMessage::OpenRowMenu(index));
+    let mut row_el: Element<'a, SidebarMessage> = button(hit)
+        .on_press(on_press)
+        .padding(0)
+        .style(theme::ButtonClass::Nav { active }.style())
+        .width(Length::Fill)
+        .into();
+
+    if let Some(drag) = sidebar.drag.as_ref().filter(|drag| drag.moved) {
+        let class = if drag.from == *entry {
+            Some(theme::ContainerClass::DraggingRow)
+        } else if drag.target.as_ref() == Some(entry) {
+            Some(theme::ContainerClass::DropTarget)
+        } else {
+            None
+        };
+        if let Some(class) = class {
+            row_el = container(row_el)
+                .style(class.style())
+                .width(Length::Fill)
+                .into();
+        }
+    }
+
+    if sidebar.row_menu != Some(index) {
+        return row_el;
+    }
+
+    let mut items = column![].spacing(SPACE_XXS);
+    match menu {
+        RowMenu::Folder(query_prefix) => {
+            items = items
+                .push(menu_item(
+                    icon::search(),
+                    "Search Here",
+                    SidebarMessage::SearchHere(query_prefix),
+                ))
+                .push(menu_item(
+                    icon::minus(),
+                    "Add Separator Below",
+                    SidebarMessage::AddSeparatorBelow(index),
+                ));
+        }
+        RowMenu::Separator(id) => {
+            items = items.push(menu_item(
+                icon::x(),
+                "Remove Separator",
+                SidebarMessage::RemoveSeparator(id),
+            ));
+        }
+    }
+    items = items.push(widgets::divider()).push(menu_item(
+        icon::undo(),
+        "Reset Folder Order",
+        SidebarMessage::ResetOrder,
+    ));
+
+    let menu = container(items)
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style());
+    crate::ui::anchored_overlay::anchored_overlay(row_el)
+        .popup(menu)
+        .popup_width(SIDEBAR_MIN_WIDTH)
+        .position(crate::ui::anchored_overlay::AnchorPosition::Below)
+        .on_dismiss(SidebarMessage::CloseRowMenu)
+        .into()
+}
+
+fn menu_item<'a>(
+    ico: iced::widget::Text<'a>,
+    label: &'a str,
+    on_press: SidebarMessage,
+) -> Element<'a, SidebarMessage> {
+    button(
+        row![
+            container(ico.size(ICON_MD).style(text::secondary))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
 }
 
 pub(super) fn sidebar_nav_selection_is_active(

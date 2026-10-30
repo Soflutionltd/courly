@@ -141,6 +141,7 @@ pub struct UiBootstrapSnapshot {
     pub sidebar_nav_config: Option<String>,
     pub email_zoom: Option<String>,
     pub thread_date_groups: bool,
+    pub sidebar_layout: Option<String>,
 }
 
 const SECURE_SETTING_KEYS: &[&str] = &[
@@ -335,6 +336,7 @@ pub fn get_ui_bootstrap_snapshot(
         sidebar_nav_config: get("sidebar_nav_config"),
         email_zoom: get("email_zoom"),
         thread_date_groups: get_bool("thread_date_groups", true),
+        sidebar_layout: get("sidebar_layout"),
     })
 }
 

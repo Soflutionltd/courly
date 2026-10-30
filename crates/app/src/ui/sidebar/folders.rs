@@ -25,38 +25,109 @@ const MAX_TREE_DEPTH: u16 = 10;
 /// Indent step per tree depth level.
 const TREE_INDENT: f32 = SPACE_MD;
 
-/// Render the account's user-created folders inline below Inbox in the
-/// universal section. Returns an empty Vec in All-Accounts scope (user
-/// folders don't aggregate across accounts) or when the current scope
-/// has no `AccountFolder` items. Tree-aware: when any folder has a
-/// parent, renders an indented tree with collapse chevrons; otherwise a
-/// flat list.
-pub(super) fn render_account_folders(sidebar: &Sidebar) -> Vec<Element<'_, SidebarMessage>> {
+/// One top-level user folder with its visible-or-not subtree.
+pub(super) struct AccountRoot<'a> {
+    pub folder: &'a NavigationFolder,
+    descendants: Vec<TreeNode<'a>>,
+}
+
+/// The scoped account's user-created folders as top-level roots, each
+/// carrying its subtree. Empty in All-Accounts scope (user folders don't
+/// aggregate across accounts).
+pub(super) struct AccountForest<'a> {
+    folders: Vec<&'a NavigationFolder>,
+    pub roots: Vec<AccountRoot<'a>>,
+}
+
+pub(super) fn account_forest(sidebar: &Sidebar) -> AccountForest<'_> {
     if sidebar.is_all_accounts() {
-        return Vec::new();
+        return AccountForest {
+            folders: Vec::new(),
+            roots: Vec::new(),
+        };
     }
 
-    let folders = sidebar
+    let folders: Vec<&NavigationFolder> = sidebar
         .nav_state
         .as_ref()
         .map(|ns| &ns.folders[..])
-        .unwrap_or(&[]);
-
-    let account_folders: Vec<&NavigationFolder> = folders
+        .unwrap_or(&[])
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::AccountFolder))
         .collect();
 
-    if account_folders.is_empty() {
-        return Vec::new();
+    let mut roots: Vec<AccountRoot<'_>> = Vec::new();
+    for node in tree_sort(&folders) {
+        match roots.last_mut() {
+            Some(root) if node.depth > 0 => root.descendants.push(node),
+            _ => roots.push(AccountRoot {
+                folder: node.folder,
+                descendants: Vec::new(),
+            }),
+        }
+    }
+    AccountForest { folders, roots }
+}
+
+impl AccountForest<'_> {
+    fn has_children(&self, folder: &NavigationFolder) -> bool {
+        self.folders
+            .iter()
+            .any(|f| f.parent_id.as_deref() == Some(&folder.id))
     }
 
-    let has_hierarchy = account_folders.iter().any(|f| f.parent_id.is_some());
-    if has_hierarchy {
-        render_folder_tree(sidebar, &account_folders)
-    } else {
-        render_folder_flat(sidebar, &account_folders)
+    /// Chevron state for a root row, `None` when it has no subfolders.
+    pub(super) fn root_tree_state(
+        &self,
+        sidebar: &Sidebar,
+        root: &AccountRoot<'_>,
+    ) -> Option<(bool, bool)> {
+        self.has_children(root.folder)
+            .then(|| (true, sidebar.collapsed_folders.contains(&root.folder.id)))
     }
+
+    /// Rows for the subfolders of `root`, skipping collapsed branches.
+    pub(super) fn descendant_rows<'a>(
+        &self,
+        sidebar: &'a Sidebar,
+        root: &AccountRoot<'a>,
+    ) -> Vec<Element<'a, SidebarMessage>> {
+        let id_to_folder: HashMap<&str, &NavigationFolder> =
+            self.folders.iter().map(|f| (f.id.as_str(), *f)).collect();
+
+        root.descendants
+            .iter()
+            .filter(|node| {
+                !is_hidden_by_collapsed_ancestor(
+                    node.folder,
+                    &id_to_folder,
+                    &sidebar.collapsed_folders,
+                )
+            })
+            .map(|node| {
+                let tree_state = Some((
+                    self.has_children(node.folder),
+                    sidebar.collapsed_folders.contains(&node.folder.id),
+                ));
+                let indent = TREE_INDENT * f32::from(node.depth);
+                folder_row(
+                    sidebar,
+                    node.folder,
+                    indent,
+                    tree_state,
+                    is_folder_active(sidebar, node.folder),
+                )
+            })
+            .collect()
+    }
+}
+
+pub(super) fn is_folder_active(sidebar: &Sidebar, folder: &NavigationFolder) -> bool {
+    sidebar.active_pinned_search.is_none()
+        && matches!(
+            &sidebar.selection,
+            SidebarSelection::ProviderFolder(fid) if fid.as_str() == folder.id
+        )
 }
 
 /// Depth-first ordering for tree rendering. Orphans (parent_id pointing
@@ -128,67 +199,10 @@ fn is_hidden_by_collapsed_ancestor(
     false
 }
 
-fn render_folder_tree<'a>(
-    sidebar: &'a Sidebar,
-    folders: &[&'a NavigationFolder],
-) -> Vec<Element<'a, SidebarMessage>> {
-    let tree = tree_sort(folders);
-    let mut elements = Vec::new();
-
-    let id_to_folder: HashMap<&str, &NavigationFolder> =
-        folders.iter().map(|f| (f.id.as_str(), *f)).collect();
-
-    for node in &tree {
-        if is_hidden_by_collapsed_ancestor(node.folder, &id_to_folder, &sidebar.collapsed_folders) {
-            continue;
-        }
-
-        let has_children = folders
-            .iter()
-            .any(|f| f.parent_id.as_deref() == Some(&node.folder.id));
-        let is_collapsed = sidebar.collapsed_folders.contains(&node.folder.id);
-        let active = sidebar.active_pinned_search.is_none()
-            && matches!(
-                &sidebar.selection,
-                SidebarSelection::ProviderFolder(fid) if fid.as_str() == node.folder.id
-            );
-        let indent = TREE_INDENT * f32::from(node.depth);
-
-        elements.push(folder_row(
-            sidebar,
-            node.folder,
-            indent,
-            Some((has_children, is_collapsed)),
-            active,
-        ));
-    }
-
-    elements
-}
-
-fn render_folder_flat<'a>(
-    sidebar: &'a Sidebar,
-    folders: &[&'a NavigationFolder],
-) -> Vec<Element<'a, SidebarMessage>> {
-    folders
-        .iter()
-        .map(|f| {
-            let active = sidebar.active_pinned_search.is_none()
-                && matches!(
-                    &sidebar.selection,
-                    SidebarSelection::ProviderFolder(fid) if fid.as_str() == f.id
-                );
-            folder_row(sidebar, f, 0.0, None, active)
-        })
-        .collect()
-}
-
-/// One folder row. Matches the visual weight of `widgets::nav_button` in
-/// the surrounding universal section: no color dot, no leading icon -
-/// just an optional indent / chevron, the folder name, and the unread
-/// badge. Right-click opens search-here.
-fn folder_row<'a>(
-    sidebar: &'a Sidebar,
+/// Padded content of one folder row: optional indent / chevron, the folder
+/// name, and the unread badge. Matches the visual weight of
+/// `widgets::nav_button` in the surrounding section.
+pub(super) fn folder_row_content<'a>(
     folder: &'a NavigationFolder,
     indent: f32,
     tree_state: Option<(bool, bool)>,
@@ -233,18 +247,29 @@ fn folder_row<'a>(
             .push(widgets::count_badge(folder.unread_count()));
     }
 
-    let label_btn: Element<'_, SidebarMessage> = button(
-        container(item_row)
-            .padding(PAD_NAV_ITEM)
-            .width(Length::Fill),
-    )
-    .on_press(SidebarMessage::Select(SidebarSelection::ProviderFolder(
-        FolderId::from(folder.id.clone()),
-    )))
-    .padding(0)
-    .style(theme::ButtonClass::Nav { active }.style())
-    .width(Length::Fill)
-    .into();
+    container(item_row)
+        .padding(PAD_NAV_ITEM)
+        .width(Length::Fill)
+        .into()
+}
+
+/// A subfolder row: selectable, right-click opens search-here.
+fn folder_row<'a>(
+    sidebar: &'a Sidebar,
+    folder: &'a NavigationFolder,
+    indent: f32,
+    tree_state: Option<(bool, bool)>,
+    active: bool,
+) -> Element<'a, SidebarMessage> {
+    let label_btn: Element<'_, SidebarMessage> =
+        button(folder_row_content(folder, indent, tree_state, active))
+            .on_press(SidebarMessage::Select(SidebarSelection::ProviderFolder(
+                FolderId::from(folder.id.clone()),
+            )))
+            .padding(0)
+            .style(theme::ButtonClass::Nav { active }.style())
+            .width(Length::Fill)
+            .into();
 
     let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar);
     mouse_area(label_btn)

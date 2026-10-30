@@ -15,6 +15,7 @@ mod chats;
 mod folders;
 mod labels;
 mod nav;
+pub(crate) mod order;
 mod pinned_searches;
 mod public_folders;
 mod scope;
@@ -24,6 +25,7 @@ mod smart;
 use chats::chats_section;
 use labels::labels_section;
 use nav::nav_items;
+use order::{SidebarEntry, SidebarLayouts};
 pub(crate) use pinned_searches::format_relative_time;
 use public_folders::pinned_public_folders_section;
 use scope::scope_dropdown;
@@ -63,6 +65,27 @@ pub enum SidebarMessage {
     /// Select a pinned public folder.
     /// Carries (account_id, folder_id).
     SelectPublicFolder(String, String),
+    /// Left press on a folder-section row: a click or the start of a drag.
+    RowPress(usize),
+    RowRelease(usize),
+    RowHover(usize),
+    /// Left release anywhere in the folder section: drops a moved row.
+    DragEnd,
+    DragCancel,
+    OpenRowMenu(usize),
+    CloseRowMenu,
+    AddSeparatorBelow(usize),
+    RemoveSeparator(u32),
+    ResetOrder,
+}
+
+/// A press on a folder-section row, tracked until release.
+#[derive(Debug, Clone)]
+pub struct SidebarDrag {
+    pub from: SidebarEntry,
+    pub target: Option<SidebarEntry>,
+    /// The cursor reached another row, so release drops instead of clicking.
+    pub moved: bool,
 }
 
 /// Events the sidebar emits upward to the App.
@@ -101,6 +124,8 @@ pub enum SidebarEvent {
         account_id: String,
         folder_id: String,
     },
+    /// The folder arrangement changed; carries the `sidebar_layout` JSON.
+    LayoutChanged(String),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -130,6 +155,11 @@ pub struct Sidebar {
     pub active_chat: Option<String>,
     /// Whether the CHATS section is expanded.
     pub chats_expanded: bool,
+    /// Saved folder arrangements per scope.
+    pub layouts: SidebarLayouts,
+    pub drag: Option<SidebarDrag>,
+    /// Folder-section row whose right-click menu is open.
+    pub row_menu: Option<usize>,
 }
 
 impl Sidebar {
@@ -150,7 +180,27 @@ impl Sidebar {
             chat_contacts: Vec::new(),
             active_chat: None,
             chats_expanded: true,
+            layouts: SidebarLayouts::default(),
+            drag: None,
+            row_menu: None,
         }
+    }
+
+    fn entry_at(&self, index: usize) -> Option<SidebarEntry> {
+        nav::current_order(self).into_iter().nth(index)
+    }
+
+    fn save_order(
+        &mut self,
+        order: Vec<SidebarEntry>,
+    ) -> (Task<SidebarMessage>, Option<SidebarEvent>) {
+        self.row_menu = None;
+        self.layouts
+            .set(order::scope_key(&self.selected_scope), order);
+        (
+            Task::none(),
+            Some(SidebarEvent::LayoutChanged(self.layouts.to_json())),
+        )
     }
 
     pub fn is_all_accounts(&self) -> bool {
@@ -209,6 +259,7 @@ impl Component for Sidebar {
                 }
             }
             SidebarMessage::Select(sel) => {
+                self.row_menu = None;
                 self.selection = sel.clone();
                 (Task::none(), Some(SidebarEvent::SelectionChanged(sel)))
             }
@@ -250,10 +301,98 @@ impl Component for Sidebar {
                 (Task::none(), Some(SidebarEvent::ChatSelected(email)))
             }
             SidebarMessage::ToggleMode => (Task::none(), Some(SidebarEvent::ModeToggled)),
-            SidebarMessage::SearchHere(query_prefix) => (
-                Task::none(),
-                Some(SidebarEvent::SearchHere { query_prefix }),
-            ),
+            SidebarMessage::SearchHere(query_prefix) => {
+                self.row_menu = None;
+                (
+                    Task::none(),
+                    Some(SidebarEvent::SearchHere { query_prefix }),
+                )
+            }
+            SidebarMessage::RowPress(index) => {
+                self.row_menu = None;
+                self.drag = self.entry_at(index).map(|from| SidebarDrag {
+                    from,
+                    target: None,
+                    moved: false,
+                });
+                (Task::none(), None)
+            }
+            SidebarMessage::RowHover(index) => {
+                let entry = self.drag.as_ref().and_then(|_| self.entry_at(index));
+                if let (Some(drag), Some(entry)) = (self.drag.as_mut(), entry) {
+                    drag.moved |= entry != drag.from;
+                    if drag.moved {
+                        drag.target = Some(entry);
+                    }
+                }
+                (Task::none(), None)
+            }
+            SidebarMessage::RowRelease(index) => {
+                let clicked = self.drag.as_ref().is_some_and(|drag| {
+                    !drag.moved && Some(&drag.from) == self.entry_at(index).as_ref()
+                });
+                if !clicked {
+                    return (Task::none(), None);
+                }
+                self.drag = None;
+                match self.entry_at(index) {
+                    Some(SidebarEntry::Folder(id)) => {
+                        self.update(SidebarMessage::Select(universal_folder_selection(&id)))
+                    }
+                    _ => (Task::none(), None),
+                }
+            }
+            SidebarMessage::DragEnd => {
+                let Some(drag) = self.drag.take() else {
+                    return (Task::none(), None);
+                };
+                let Some(target) = drag.target.filter(|_| drag.moved) else {
+                    return (Task::none(), None);
+                };
+                let mut order = nav::current_order(self);
+                let from = order.iter().position(|e| *e == drag.from);
+                let to = order.iter().position(|e| *e == target);
+                match (from, to) {
+                    (Some(from), Some(to)) if from != to => {
+                        order::move_entry(&mut order, from, to);
+                        self.save_order(order)
+                    }
+                    _ => (Task::none(), None),
+                }
+            }
+            SidebarMessage::DragCancel => {
+                self.drag = None;
+                (Task::none(), None)
+            }
+            SidebarMessage::OpenRowMenu(index) => {
+                self.drag = None;
+                self.row_menu = Some(index);
+                (Task::none(), None)
+            }
+            SidebarMessage::CloseRowMenu => {
+                self.row_menu = None;
+                (Task::none(), None)
+            }
+            SidebarMessage::AddSeparatorBelow(index) => {
+                let mut order = nav::current_order(self);
+                order::insert_separator_after(&mut order, index);
+                self.save_order(order)
+            }
+            SidebarMessage::RemoveSeparator(id) => {
+                let mut order = nav::current_order(self);
+                order::remove_separator(&mut order, id);
+                self.save_order(order)
+            }
+            SidebarMessage::ResetOrder => {
+                self.row_menu = None;
+                if !self.layouts.reset(&order::scope_key(&self.selected_scope)) {
+                    return (Task::none(), None);
+                }
+                (
+                    Task::none(),
+                    Some(SidebarEvent::LayoutChanged(self.layouts.to_json())),
+                )
+            }
             SidebarMessage::SelectSmartFolder { id, query } => {
                 self.selection = SidebarSelection::SmartFolder { id: id.clone() };
                 (
@@ -379,5 +518,98 @@ pub(crate) fn universal_folder_selection(id: &str) -> SidebarSelection {
         "TASKS" => SidebarSelection::FeatureView(FeatureView::Tasks),
         "ATTACHMENTS" => SidebarSelection::FeatureView(FeatureView::Attachments),
         other => SidebarSelection::ProviderFolder(FolderId::from(other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::order::SidebarEntry;
+    use super::*;
+    use rtsk::db::queries_extra::navigation::NavigationFolder;
+    use rtsk::db::types::AccountScope;
+
+    fn folder(id: &str, name: &str, kind: &str) -> NavigationFolder {
+        let unread = if kind == "Universal" {
+            serde_json::json!({ "universal": 0 })
+        } else {
+            serde_json::json!({ "general": 0 })
+        };
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": name,
+            "folderKind": kind,
+            "unreadCount": unread,
+            "accountId": null,
+            "parentId": null,
+            "query": null,
+        }))
+        .expect("valid navigation folder")
+    }
+
+    fn sidebar() -> Sidebar {
+        let mut sidebar = Sidebar::new();
+        sidebar.selected_scope = ViewScope::Account("acc".to_string());
+        sidebar.nav_state = Some(NavigationState {
+            scope: AccountScope::Single("acc".to_string()),
+            folders: vec![
+                folder("INBOX", "Inbox", "Universal"),
+                folder("SENT", "Sent", "Universal"),
+                folder("TRASH", "Trash", "Universal"),
+                folder("g-hotel", "Hotel", "AccountFolder"),
+            ],
+        });
+        sidebar
+    }
+
+    fn ids(sidebar: &Sidebar) -> Vec<String> {
+        nav::current_order(sidebar)
+            .into_iter()
+            .map(|entry| match entry {
+                SidebarEntry::Folder(id) => id,
+                SidebarEntry::Separator(id) => format!("sep{id}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn press_and_release_on_one_row_selects_it() {
+        let mut sidebar = sidebar();
+        sidebar.update(SidebarMessage::RowPress(3));
+        let (_, event) = sidebar.update(SidebarMessage::RowRelease(3));
+        assert!(matches!(
+            event,
+            Some(SidebarEvent::SelectionChanged(SidebarSelection::ProviderFolder(ref id)))
+                if id.as_str() == "g-hotel"
+        ));
+        assert!(sidebar.drag.is_none());
+    }
+
+    #[test]
+    fn dragging_trash_onto_inbox_moves_it_first_and_saves() {
+        let mut sidebar = sidebar();
+        assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
+        sidebar.update(SidebarMessage::RowPress(2));
+        sidebar.update(SidebarMessage::RowHover(1));
+        sidebar.update(SidebarMessage::RowHover(0));
+        let (_, release) = sidebar.update(SidebarMessage::RowRelease(0));
+        assert!(release.is_none(), "a drag release must not select");
+        let (_, event) = sidebar.update(SidebarMessage::DragEnd);
+        assert_eq!(ids(&sidebar), ["TRASH", "INBOX", "SENT", "g-hotel"]);
+        let Some(SidebarEvent::LayoutChanged(json)) = event else {
+            panic!("expected LayoutChanged");
+        };
+        assert_eq!(order::SidebarLayouts::parse(Some(&json)), sidebar.layouts);
+    }
+
+    #[test]
+    fn separators_and_reset_round_trip() {
+        let mut sidebar = sidebar();
+        sidebar.update(SidebarMessage::AddSeparatorBelow(2));
+        assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "sep0", "g-hotel"]);
+        sidebar.update(SidebarMessage::RemoveSeparator(0));
+        assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
+        let (_, event) = sidebar.update(SidebarMessage::ResetOrder);
+        assert!(matches!(event, Some(SidebarEvent::LayoutChanged(_))));
+        assert_eq!(sidebar.layouts.get("acc"), None);
     }
 }

@@ -57,6 +57,8 @@ pub enum SettingValue {
     EmailZoom(String),
     /// Group the thread list under Today / Yesterday / ... headers.
     ThreadDateGroups(bool),
+    /// Sidebar folder order and separators per scope, as JSON.
+    SidebarLayout(String),
 }
 
 impl SettingValue {
@@ -77,6 +79,7 @@ impl SettingValue {
             Self::OpenedFilesCleanupDays(_) => "opened_files_cleanup_days",
             Self::EmailZoom(_) => "email_zoom",
             Self::ThreadDateGroups(_) => "thread_date_groups",
+            Self::SidebarLayout(_) => "sidebar_layout",
         }
     }
 
@@ -104,7 +107,8 @@ impl SettingValue {
             | Self::ReadingPanePosition(s)
             | Self::SyncPeriodDays(s)
             | Self::OpenedFilesCleanupDays(s)
-            | Self::EmailZoom(s) => s.clone(),
+            | Self::EmailZoom(s)
+            | Self::SidebarLayout(s) => s.clone(),
         }
     }
 }

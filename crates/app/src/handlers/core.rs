@@ -72,7 +72,28 @@ impl ReadyApp {
                 self.load_navigation_and_threads()
             }
             SidebarEvent::ChatSelected(email) => self.enter_chat_view(&email),
+            SidebarEvent::LayoutChanged(json) => self.persist_sidebar_layout(json),
         }
+    }
+
+    fn persist_sidebar_layout(&self, json: String) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("settings.set: no ServiceClient yet; sidebar layout not persisted");
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                client
+                    .set_settings(vec![SettingValue::SidebarLayout(json)])
+                    .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::warn!("settings.set sidebar_layout failed: {e}");
+                }
+                Message::Noop
+            },
+        )
     }
 
     /// Full view-transition reset: clear search, pinned search, thread
@@ -1148,6 +1169,8 @@ impl ReadyApp {
                 }
             };
         self.settings.apply_bootstrap(&ui_snap, &settings_snap);
+        self.sidebar.layouts =
+            crate::ui::sidebar::order::SidebarLayouts::parse(ui_snap.sidebar_layout.as_deref());
         self.settings.persisted_preferences = Some(self.settings.committed_preferences.clone());
     }
 

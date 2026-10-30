@@ -56,6 +56,23 @@ pub fn nav_button<'a, M: Clone + 'a>(
     badge: Option<NavBadge>,
     on_press: M,
 ) -> Element<'a, M> {
+    button(nav_button_content(ico, label, active, size, badge))
+        .on_press(on_press)
+        .padding(0)
+        .style(theme::ButtonClass::Nav { active }.style())
+        .width(Length::Fill)
+        .into()
+}
+
+/// The padded inside of a `nav_button`, for callers that wrap it in their
+/// own interaction (the reorderable sidebar rows).
+pub fn nav_button_content<'a, M: 'a>(
+    ico: Option<iced::widget::Text<'a>>,
+    label: &'a str,
+    active: bool,
+    size: NavSize,
+    badge: Option<NavBadge>,
+) -> Element<'a, M> {
     let label_style: fn(&Theme) -> text::Style = if active {
         text::primary
     } else {
@@ -97,12 +114,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
             .push(count_badge(count));
     }
 
-    button(content)
-        .on_press(on_press)
-        .padding(pad)
-        .style(theme::ButtonClass::Nav { active }.style())
-        .width(Length::Fill)
-        .into()
+    container(content).padding(pad).width(Length::Fill).into()
 }
 
 pub struct NavItem<'a> {

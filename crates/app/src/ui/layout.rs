@@ -161,6 +161,13 @@ pub const LABEL_DOT_SIZE: f32 = 6.0;
 
 /// Thread card fixed height (three lines + padding)
 pub const THREAD_CARD_HEIGHT: f32 = 68.0;
+/// User-added separator line between sidebar folders.
+pub const PAD_SIDEBAR_SEPARATOR: Padding = Padding {
+    top: 6.0,
+    right: 8.0,
+    bottom: 6.0,
+    left: 8.0,
+};
 /// Date group header above thread cards ("Today", "Yesterday", ...).
 pub const PAD_THREAD_GROUP_HEADER: Padding = Padding {
     top: 10.0,

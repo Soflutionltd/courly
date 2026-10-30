@@ -44,6 +44,8 @@ pub enum ContainerClass {
     KeyBadge,
     /// Active drag-reorder row highlight.
     DraggingRow,
+    /// Drop target outline while a drag-reorder hovers a row.
+    DropTarget,
     /// Status bar background.
     StatusBar,
     /// Palette card (elevated container with shadow).
@@ -115,6 +117,7 @@ impl ContainerClass {
             Self::ColorSwatchSelectedRing => style_color_swatch_selected_ring,
             Self::KeyBadge => style_key_badge_container,
             Self::DraggingRow => style_dragging_row_container,
+            Self::DropTarget => style_drop_target_container,
             Self::StatusBar => style_status_bar_container,
             Self::PaletteCard => style_palette_card_container,
             Self::PaletteSelectedRow => style_palette_selected_row_container,
@@ -437,6 +440,17 @@ fn style_dragging_row_container(theme: &Theme) -> container::Style {
         background: Some(p.primary.base.color.scale_alpha(0.1).into()),
         border: iced::Border {
             color: p.primary.base.color.scale_alpha(0.3),
+            width: 1.0,
+            radius: RADIUS_SM.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_drop_target_container(theme: &Theme) -> container::Style {
+    container::Style {
+        border: iced::Border {
+            color: theme.palette().primary.base.color,
             width: 1.0,
             radius: RADIUS_SM.into(),
         },

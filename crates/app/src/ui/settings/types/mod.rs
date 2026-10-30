@@ -739,6 +739,7 @@ mod tests {
             sidebar_nav_config: None,
             email_zoom: None,
             thread_date_groups: true,
+            sidebar_layout: None,
         }
     }
 
