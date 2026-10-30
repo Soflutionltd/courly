@@ -567,12 +567,23 @@ impl NetHandler for ResourceHandler<ImageHandler> {
     }
 }
 
+/// Mail images are untrusted: without limits a few KB of PNG can declare
+/// 11000x11000 pixels and make the decoder allocate hundreds of MB.
+fn mail_image_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    limits
+}
+
 impl ImageHandler {
     fn parse(&self, bytes: Bytes) -> Result<Resource, String> {
-        let image_err = match image::ImageReader::new(Cursor::new(&bytes))
+        let mut reader = image::ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
-            .expect("IO errors impossible with Cursor")
-            .decode()
+            .expect("IO errors impossible with Cursor");
+        reader.limits(mail_image_limits());
+        let image_err = match reader.decode()
         {
             Ok(image) => {
                 let width = image.width();
@@ -611,6 +622,21 @@ mod tests {
     use super::*;
     use parley::fontique::FontStyle as Fq;
     use style::values::specified::Angle;
+
+    fn png(width: u32, height: u32) -> Bytes {
+        let mut encoded = Vec::new();
+        image::RgbaImage::new(width, height)
+            .write_to(&mut Cursor::new(&mut encoded), image::ImageFormat::Png)
+            .expect("encode png");
+        Bytes::from(encoded)
+    }
+
+    #[test]
+    fn mail_images_beyond_the_dimension_limit_are_refused() {
+        let handler = ImageHandler::new(ImageType::Image);
+        assert!(handler.parse(png(16, 16)).is_ok());
+        assert!(handler.parse(png(9000, 1)).is_err());
+    }
 
     fn oblique(min_deg: f32, max_deg: f32) -> FontStyleRange {
         FontStyleRange::Oblique(Angle::from_degrees(min_deg), Angle::from_degrees(max_deg))
