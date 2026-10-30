@@ -66,7 +66,42 @@ impl ReadyApp {
             layout
         };
 
-        if self.palette.is_open() {
+        if let Some(threads) = self.pending_permanent_delete.as_ref() {
+            use ui::dialog::{DialogAction, alert_dialog};
+            let count = threads.len();
+            let (title, body) = if count == 1 {
+                (
+                    t!("main.permanent_delete.title_one"),
+                    t!("main.permanent_delete.body_one"),
+                )
+            } else {
+                (
+                    t!("main.permanent_delete.title_other", count = count),
+                    t!("main.permanent_delete.body_other", count = count),
+                )
+            };
+            let dialog = alert_dialog(
+                title,
+                body,
+                vec![
+                    DialogAction::default_action(
+                        t!("main.permanent_delete.cancel"),
+                        Message::CancelPermanentDelete,
+                    ),
+                    DialogAction::destructive(
+                        t!("main.permanent_delete.confirm"),
+                        Message::ConfirmPermanentDelete,
+                    ),
+                ],
+                None,
+            );
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                dialog,
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
+        } else if self.palette.is_open() {
             let palette_widget = self.palette.view().map(Message::Palette);
 
             let palette_positioned = container(palette_widget)

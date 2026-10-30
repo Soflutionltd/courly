@@ -279,6 +279,14 @@ impl ReadingPane {
     }
 
     /// Set the currently viewed thread. Called by App on thread selection.
+    /// Whether the messages of this thread are loaded and on display.
+    pub fn has_loaded_thread(&self, account_id: &str, thread_id: &str) -> bool {
+        self.current_thread
+            .as_ref()
+            .is_some_and(|t| t.account_id == account_id && t.id == thread_id)
+            && !self.thread_messages.is_empty()
+    }
+
     pub fn set_thread(&mut self, thread: Option<&Thread>) {
         self.current_thread = thread.map(|t| ThreadRef {
             account_id: t.account_id.clone(),

@@ -9,6 +9,7 @@ use crate::component::Component;
 use crate::db::Thread;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::thread_menu::{RowMenu, RowMenuItem, RowMenuPage, RowMenuPages};
 use crate::ui::widgets;
 
 // ── Auto-advance direction ─────────────────────────────
@@ -111,6 +112,14 @@ pub enum ThreadListMessage {
         index: usize,
         action: widgets::ThreadRowAction,
     },
+    /// Right-click on a row, `offset` measured from the row's corner.
+    OpenRowMenu {
+        index: usize,
+        offset: iced::Vector,
+    },
+    RowMenuShowPage(RowMenuPage),
+    RowMenuPick(RowMenuItem),
+    CloseRowMenu,
     /// Dismiss the typeahead dropdown.
     TypeaheadDismiss,
 }
@@ -153,6 +162,13 @@ pub enum ThreadListEvent {
         index: usize,
         action: widgets::ThreadRowAction,
     },
+    /// The right-click menu opened; the app fills its pages. A row outside
+    /// the selection became the only selected one.
+    RowMenuOpened {
+        index: usize,
+        selection_changed: bool,
+    },
+    RowMenuPicked(RowMenuItem),
 }
 
 // ── Thread list mode ───────────────────────────────────
@@ -194,6 +210,8 @@ pub struct ThreadList {
     pub bimi_cache: Arc<rtsk::bimi::BimiLruCache>,
     /// Show Today / Yesterday / ... headers. Mirrors the user preference.
     pub date_groups: bool,
+    /// Open right-click menu, if any.
+    pub row_menu: Option<RowMenu>,
 }
 
 impl ThreadList {
@@ -212,6 +230,13 @@ impl ThreadList {
             typeahead: TypeaheadState::default(),
             bimi_cache,
             date_groups: true,
+            row_menu: None,
+        }
+    }
+
+    pub fn set_row_menu_pages(&mut self, pages: RowMenuPages) {
+        if let Some(menu) = self.row_menu.as_mut() {
+            menu.pages = pages;
         }
     }
 
@@ -242,6 +267,7 @@ impl ThreadList {
         };
         let selected = self.selected_thread.and_then(key_at);
         let anchor = self.last_selected_anchor.and_then(key_at);
+        let menu_row = self.row_menu.as_ref().and_then(|menu| key_at(menu.index));
         let multi: Vec<_> = self
             .selected_threads
             .iter()
@@ -256,6 +282,10 @@ impl ThreadList {
         self.selected_thread = selected.as_ref().and_then(index_of);
         self.last_selected_anchor = anchor.as_ref().and_then(index_of);
         self.selected_threads = multi.iter().filter_map(index_of).collect();
+        match (menu_row.as_ref().and_then(index_of), self.row_menu.as_mut()) {
+            (Some(index), Some(menu)) => menu.index = index,
+            _ => self.row_menu = None,
+        }
     }
 
     pub fn set_context(&mut self, folder_name: String, scope_name: String) {
@@ -571,6 +601,44 @@ impl Component for ThreadList {
                     Some(ThreadListEvent::RowAction { index, action }),
                 )
             }
+            ThreadListMessage::OpenRowMenu { index, offset } => {
+                // Selecting a local draft opens it in a compose window.
+                if self.threads.get(index).is_none_or(|t| t.is_local_draft) {
+                    return (Task::none(), None);
+                }
+                // As in Outlook: inside the selection the menu acts on all
+                // of it, outside it selects that row alone.
+                let selection_changed = !self.is_selected(index);
+                if selection_changed {
+                    self.clear_multi_select();
+                    self.selected_thread = Some(index);
+                    self.last_selected_anchor = Some(index);
+                }
+                self.row_menu = Some(RowMenu::new(index, offset));
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::RowMenuOpened {
+                        index,
+                        selection_changed,
+                    }),
+                )
+            }
+            ThreadListMessage::RowMenuShowPage(page) => {
+                if let Some(menu) = self.row_menu.as_mut() {
+                    menu.page = page;
+                }
+                (Task::none(), None)
+            }
+            ThreadListMessage::RowMenuPick(item) => {
+                if self.row_menu.take().is_none() {
+                    return (Task::none(), None);
+                }
+                (Task::none(), Some(ThreadListEvent::RowMenuPicked(item)))
+            }
+            ThreadListMessage::CloseRowMenu => {
+                self.row_menu = None;
+                (Task::none(), None)
+            }
         }
     }
 
@@ -794,7 +862,7 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
                     _ => None,
                 }
             });
-        list = list.push(widgets::thread_card(
+        let card = widgets::thread_card(
             thread,
             i,
             state.is_selected(i),
@@ -802,7 +870,17 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             bimi_logo.as_deref(),
             ThreadListMessage::SelectThread,
             |index, action| ThreadListMessage::RowAction { index, action },
-        ));
+        );
+        let mut row_el = super::anchored_overlay::anchored_overlay(card)
+            .on_right_press_offset(move |offset| ThreadListMessage::OpenRowMenu { index: i, offset });
+        if let Some(menu) = state.row_menu.as_ref().filter(|menu| menu.index == i) {
+            row_el = row_el
+                .popup(super::thread_menu::row_menu_card(menu))
+                .anchor_offset(menu.offset)
+                .popup_width(ROW_MENU_WIDTH)
+                .on_dismiss(ThreadListMessage::CloseRowMenu);
+        }
+        list = list.push(row_el);
     }
     scrollable(list)
         .spacing(SCROLLBAR_SPACING)
@@ -918,5 +996,100 @@ mod tests {
         threads.set_threads(vec![thread("two", "t"), thread("one", "t")]);
 
         assert_eq!(threads.selected_thread, Some(0));
+    }
+
+    fn open_menu(threads: &mut ThreadList, index: usize) -> Option<ThreadListEvent> {
+        threads
+            .update(ThreadListMessage::OpenRowMenu {
+                index,
+                offset: iced::Vector::new(10.0, 5.0),
+            })
+            .1
+    }
+
+    #[test]
+    fn a_right_click_inside_the_selection_keeps_all_of_it() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c"]));
+        threads.selected_thread = Some(0);
+        threads.selected_threads = HashSet::from([0, 1]);
+
+        let event = open_menu(&mut threads, 1);
+
+        assert_eq!(threads.selected_threads, HashSet::from([0, 1]));
+        assert_eq!(threads.row_menu.as_ref().map(|menu| menu.index), Some(1));
+        assert_eq!(
+            event,
+            Some(ThreadListEvent::RowMenuOpened {
+                index: 1,
+                selection_changed: false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_right_click_outside_the_selection_selects_that_row_alone() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c"]));
+        threads.selected_thread = Some(0);
+        threads.selected_threads = HashSet::from([0, 1]);
+
+        let event = open_menu(&mut threads, 2);
+
+        assert_eq!(threads.selected_thread, Some(2));
+        assert!(threads.selected_threads.is_empty());
+        assert_eq!(
+            event,
+            Some(ThreadListEvent::RowMenuOpened {
+                index: 2,
+                selection_changed: true,
+            })
+        );
+    }
+
+    #[test]
+    fn a_local_draft_has_no_right_click_menu() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        let mut draft = thread("acc", "draft");
+        draft.is_local_draft = true;
+        threads.set_threads(vec![thread("acc", "a"), draft]);
+        threads.selected_thread = Some(0);
+
+        assert_eq!(open_menu(&mut threads, 1), None);
+        assert_eq!(threads.selected_thread, Some(0));
+        assert!(threads.row_menu.is_none());
+    }
+
+    #[test]
+    fn picking_an_entry_closes_the_menu_and_reports_it_once() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a"]));
+        open_menu(&mut threads, 0);
+        let (_, shown) = threads.update(ThreadListMessage::RowMenuShowPage(RowMenuPage::Snooze));
+        assert_eq!(shown, None);
+        assert_eq!(
+            threads.row_menu.as_ref().map(|menu| menu.page),
+            Some(RowMenuPage::Snooze)
+        );
+
+        let (_, event) = threads.update(ThreadListMessage::RowMenuPick(RowMenuItem::Archive));
+        assert_eq!(event, Some(ThreadListEvent::RowMenuPicked(RowMenuItem::Archive)));
+        assert!(threads.row_menu.is_none());
+
+        let (_, again) = threads.update(ThreadListMessage::RowMenuPick(RowMenuItem::Archive));
+        assert_eq!(again, None);
+    }
+
+    #[test]
+    fn the_menu_follows_its_row_through_a_reload_and_closes_when_it_goes() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c"]));
+        open_menu(&mut threads, 2);
+
+        threads.set_threads(list(&["b", "c"]));
+        assert_eq!(threads.row_menu.as_ref().map(|menu| menu.index), Some(1));
+
+        threads.set_threads(list(&["b"]));
+        assert!(threads.row_menu.is_none());
     }
 }

@@ -86,6 +86,22 @@ impl ReadyApp {
         status: iced::event::Status,
         window_id: iced::window::Id,
     ) -> Task<Message> {
+        use iced::keyboard::{Key, key::Named};
+
+        // 0. The permanent-delete confirmation takes Enter and Escape, and
+        //    holds back every other shortcut while it is up.
+        if self.pending_permanent_delete.is_some() && window_id == self.main_window_id {
+            return match key {
+                Key::Named(Named::Enter) => self.update(Message::ConfirmPermanentDelete),
+                Key::Named(Named::Escape) => self.update(Message::CancelPermanentDelete),
+                _ => Task::none(),
+            };
+        }
+        if self.thread_list.row_menu.is_some() && *key == Key::Named(Named::Escape) {
+            self.thread_list.row_menu = None;
+            return Task::none();
+        }
+
         // 1. If palette is open, route to palette-specific handler
         if self.palette.is_open() {
             return self.handle_palette_key(key);

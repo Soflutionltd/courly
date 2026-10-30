@@ -148,6 +148,16 @@ pub const RADIUS_LG: f32 = 8.0;
 // ── Item heights ────────────────────────────────────────
 
 pub const DROPDOWN_ITEM_HEIGHT: f32 = 32.0;
+/// Right-click menu on a thread row: denser than a dropdown, like a
+/// native context menu, so its twenty entries fit on a laptop screen.
+pub const ROW_MENU_ITEM_HEIGHT: f32 = 26.0;
+pub const ROW_MENU_ITEM_PADDING: Padding = Padding {
+    top: 0.0,
+    right: SPACE_XS,
+    bottom: 0.0,
+    left: SPACE_XS,
+};
+pub const ROW_MENU_WIDTH: f32 = 280.0;
 pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
 
 // ── Panel widths ────────────────────────────────────────

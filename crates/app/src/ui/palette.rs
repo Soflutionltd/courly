@@ -22,6 +22,9 @@ use crate::handlers::commands::build_command_args;
 pub enum PaletteMessage {
     /// Open the palette. Carries the current command context for registry queries.
     Open(CommandContext),
+    /// Open the palette straight on a command, at its option picker when it
+    /// takes one (a menu entry like "Move…").
+    OpenCommand(CommandId, CommandContext),
     /// Close the palette (Escape or backdrop click).
     /// Carries context for re-querying when backing from stage 2 to stage 1.
     Close(CommandContext),
@@ -368,6 +371,18 @@ impl Component for Palette {
                 let task =
                     iced::widget::operation::focus::<PaletteMessage>("palette-input".to_string());
                 (task, None)
+            }
+            PaletteMessage::OpenCommand(id, ctx) => {
+                self.open = true;
+                self.query.clear();
+                self.results = self.registry.query(&ctx, "");
+                self.stage = PaletteStage::CommandSearch;
+                let Some(index) = self.results.iter().position(|result| result.id == id) else {
+                    self.close();
+                    return (Task::none(), None);
+                };
+                self.selected_index = index;
+                self.confirm(&ctx)
             }
             PaletteMessage::Close(ctx) => {
                 // In any stage 2, Escape goes back to stage 1 instead of closing.
@@ -737,7 +752,7 @@ pub fn chord_indicator<'a, M: 'a>(chord_display: &str) -> Element<'a, M> {
 /// Build snooze preset options as `OptionItem`s for the DateTime picker.
 ///
 /// These are hardcoded presets - a proper date/time picker is deferred.
-fn snooze_preset_options() -> Vec<OptionItem> {
+pub(crate) fn snooze_preset_options() -> Vec<OptionItem> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[allow(clippy::cast_possible_wrap)]

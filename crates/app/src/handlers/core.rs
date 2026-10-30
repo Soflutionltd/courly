@@ -230,6 +230,11 @@ impl ReadyApp {
                 }
                 Task::batch([select, self.handle_email_action(intent)])
             }
+            ThreadListEvent::RowMenuOpened {
+                index,
+                selection_changed,
+            } => self.handle_row_menu_opened(index, selection_changed),
+            ThreadListEvent::RowMenuPicked(item) => self.handle_row_menu_picked(item),
         }
     }
 
@@ -1102,6 +1107,7 @@ impl ReadyApp {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
+        self.pending_row_action = None;
         let thread = self.thread_list.threads.get(idx);
         if let Some(t) = thread {
             log::debug!("Thread selected: {}", t.id);

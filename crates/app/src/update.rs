@@ -562,6 +562,11 @@ impl ReadyApp {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
+            Message::ConfirmPermanentDelete => self.confirm_permanent_delete(),
+            Message::CancelPermanentDelete => {
+                self.pending_permanent_delete = None;
+                Task::none()
+            }
             Message::ActionCompleted {
                 ref plan,
                 ref outcomes,
@@ -844,7 +849,8 @@ impl ReadyApp {
             }
             Message::ThreadDetailLoaded(_, Ok(detail)) => {
                 self.reading_pane.load_thread_detail(detail);
-                self.load_meeting_invites()
+                let invites = self.load_meeting_invites();
+                Task::batch([invites, self.run_pending_row_action()])
             }
             Message::MeetingInviteResponded {
                 message_id,

@@ -113,6 +113,30 @@ impl ReadyApp {
             return Task::none();
         }
 
+        // Deleting from the trash cannot be undone: ask first.
+        if matches!(intent, crate::action_resolve::MailActionIntent::PermanentDelete) {
+            self.pending_permanent_delete = Some(selected_threads);
+            return Task::none();
+        }
+
+        self.run_email_action(intent, &selected_threads)
+    }
+
+    pub(crate) fn confirm_permanent_delete(&mut self) -> Task<Message> {
+        let Some(threads) = self.pending_permanent_delete.take() else {
+            return Task::none();
+        };
+        self.run_email_action(
+            crate::action_resolve::MailActionIntent::PermanentDelete,
+            &threads,
+        )
+    }
+
+    fn run_email_action(
+        &mut self,
+        intent: crate::action_resolve::MailActionIntent,
+        selected_threads: &[(String, String)],
+    ) -> Task<Message> {
         // ── Resolve → Plan → Dispatch ───────────────────────────
         use crate::action_resolve::{self as ar, OptimisticMutation, UiContext};
         let ui_ctx = UiContext {
@@ -121,7 +145,7 @@ impl ReadyApp {
         let outcome = ar::resolve_intent(intent, &ui_ctx);
 
         let Some(plan) =
-            ar::build_execution_plan(outcome, &selected_threads, &mut self.thread_list)
+            ar::build_execution_plan(outcome, selected_threads, &mut self.thread_list)
         else {
             // NoOp (Unsubscribe)
             self.status_bar

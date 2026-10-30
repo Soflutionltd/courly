@@ -231,6 +231,8 @@ pub enum Message {
     NavigateTo(NavigationTarget),
     Escape,
     EmailAction(MailActionIntent),
+    ConfirmPermanentDelete,
+    CancelPermanentDelete,
     /// Action service completed - carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         plan: crate::action_resolve::ActionExecutionPlan,

@@ -98,6 +98,12 @@ pub struct ReadyApp {
     pub(crate) focused_region: Option<FocusedRegion>,
     pub(crate) is_online: bool,
     pub(crate) pending_chord: Option<PendingChord>,
+    /// Threads (account id, thread id) waiting for the user to confirm they
+    /// go for good. Only asked in the trash, where nothing can bring them back.
+    pub(crate) pending_permanent_delete: Option<Vec<(String, String)>>,
+    /// Row menu action that needs the conversation's messages, held until
+    /// the reading pane has loaded that thread (account id, thread id).
+    pub(crate) pending_row_action: Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
     pub(crate) palette: Palette,
     pub(crate) undo_stack: UndoStack<crate::action_resolve::MailUndoPayload>,
 
@@ -424,6 +430,8 @@ impl ReadyApp {
             focused_region: None,
             is_online: true,
             pending_chord: None,
+            pending_permanent_delete: None,
+            pending_row_action: None,
             palette: Palette::new(CommandRegistry::new(), resolver),
             undo_stack: UndoStack::default(),
             search_state,
