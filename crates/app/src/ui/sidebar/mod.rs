@@ -43,6 +43,8 @@ pub enum SidebarMessage {
     CycleAccount,
     Select(SidebarSelection),
     ToggleScopeDropdown,
+    /// Fold or unfold the whole folder list under the scope selector.
+    ToggleFolders,
     ToggleLabelsSection,
     ToggleSmartFoldersSection,
     ToggleFolderExpand(String),
@@ -187,6 +189,7 @@ pub struct Sidebar {
     pub selected_scope: ViewScope,
     pub selection: SidebarSelection,
     pub scope_dropdown_open: bool,
+    pub folders_expanded: bool,
     pub labels_expanded: bool,
     pub smart_folders_expanded: bool,
     /// Set of folder IDs whose children are collapsed (hidden).
@@ -240,6 +243,7 @@ impl Sidebar {
             selected_scope: ViewScope::AllAccounts,
             selection: SidebarSelection::Inbox,
             scope_dropdown_open: false,
+            folders_expanded: true,
             labels_expanded: true,
             smart_folders_expanded: true,
             collapsed_folders: HashSet::new(),
@@ -402,6 +406,11 @@ impl Component for Sidebar {
             }
             SidebarMessage::ToggleScopeDropdown => {
                 self.scope_dropdown_open = !self.scope_dropdown_open;
+                (Task::none(), None)
+            }
+            SidebarMessage::ToggleFolders => {
+                self.folders_expanded = !self.folders_expanded;
+                self.row_menu = None;
                 (Task::none(), None)
             }
             SidebarMessage::ToggleLabelsSection => {
@@ -647,6 +656,7 @@ impl Component for Sidebar {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, SidebarMessage> {
         let header_row = row![
+            scope::folders_toggle(self.folders_expanded),
             container(scope_dropdown(self)).width(Length::Fill),
             widgets::add_button(SidebarMessage::AddAccount),
         ]
@@ -663,13 +673,15 @@ impl Component for Sidebar {
             scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
         }
 
-        scroll_content = scroll_content.push(Space::new().height(SPACE_XS));
-        scroll_content = scroll_content.push(if self.shows_tree() {
-            tree::tree_view(self)
-        } else {
-            nav_items(self, &self.selected_scope)
-        });
-        scroll_content = scroll_content.push(widgets::section_break());
+        if self.folders_expanded {
+            scroll_content = scroll_content.push(Space::new().height(SPACE_XS));
+            scroll_content = scroll_content.push(if self.shows_tree() {
+                tree::tree_view(self)
+            } else {
+                nav_items(self, &self.selected_scope)
+            });
+            scroll_content = scroll_content.push(widgets::section_break());
+        }
         scroll_content = scroll_content.push(smart_folders(self));
 
         let has_label_groups = self.nav_state.as_ref().is_some_and(|ns| {

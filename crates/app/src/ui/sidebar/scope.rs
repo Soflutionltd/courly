@@ -1,14 +1,36 @@
 use std::borrow::Cow;
 
-use iced::Element;
+use iced::widget::{button, container};
+use iced::{Alignment, Element};
 use rust_i18n::t;
 
 use crate::icon;
+use crate::ui::layout::{ICON_SM, PAD_DROPDOWN, SIDEBAR_SECTION_CHEVRON_SLOT};
 use crate::ui::theme;
 use crate::ui::widgets::{self, DropdownEntry, DropdownIcon};
 use rtsk::scope::ViewScope;
 
 use super::{Sidebar, SidebarMessage};
+
+// ── Folders fold toggle ─────────────────────────────────
+
+/// Chevron left of the scope selector that folds the whole folder list.
+pub(super) fn folders_toggle<'a>(expanded: bool) -> Element<'a, SidebarMessage> {
+    let chevron = if expanded {
+        icon::chevron_down()
+    } else {
+        icon::chevron_right()
+    };
+    button(
+        container(chevron.size(ICON_SM).style(theme::TextClass::Tertiary.style()))
+            .width(SIDEBAR_SECTION_CHEVRON_SLOT)
+            .align_x(Alignment::Center),
+    )
+    .on_press(SidebarMessage::ToggleFolders)
+    .padding(PAD_DROPDOWN)
+    .style(theme::ButtonClass::Ghost.style())
+    .into()
+}
 
 // ── Scope dropdown ──────────────────────────────────────
 
