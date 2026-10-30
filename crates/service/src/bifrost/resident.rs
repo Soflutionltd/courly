@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
-    AccountControl, AccountId, CursorScope, FolderId, HintPayload, InvalidationHint, ObjectType,
-    PauseReason, PushSource, WatchEvent,
+    AccountControl, AccountId, CursorScope, FolderId, FolderRole, HintPayload, InvalidationHint,
+    ObjectType, PauseReason, PushSource, WatchEvent,
 };
-use common::types::{FolderKind, SystemFolderId};
+use common::types::{FolderKind, NamespaceAttribution, SystemFolderId};
 use db::db::ReadDbState;
 use service_api::{
     AccountPausedNotification, MailboxChanged, Notification, OperationResult, PushEvent,
@@ -1129,13 +1129,19 @@ fn repush_full_reconcile(inner: &ResidentEngineInner, account_id: &str) {
     );
 }
 
-/// Cadence for the system folders and the focused folder of a Graph
-/// account. Graph has no push a desktop client can receive (webhooks need a
-/// public endpoint; EWS streaming is being retired), and its delta query on
-/// an unchanged folder is a few hundred bytes, so a short re-read is how a
-/// change made in Outlook shows here within seconds. Six or seven folders
-/// every 5 s stay far below Outlook's 10,000 requests per 10 minutes.
-const HOT_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// Cadence for the inbox and the focused folder of a Graph account. Graph
+/// has no push a desktop client can receive (webhooks need a public
+/// endpoint; EWS streaming is being retired), and its delta query on an
+/// unchanged folder is a few hundred bytes, so a short re-read is how a
+/// change made on another machine shows here within seconds.
+///
+/// Outlook's limit (10,000 requests per 10 minutes) is per app and mailbox,
+/// so every machine sharing the mailbox draws from it: four machines at
+/// 2 s for two hot folders plus 6 s for the five others make about 4,400.
+const HOT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The other system folders are re-read every this many hot ticks.
+const COLD_FOLDER_TICKS: u32 = 3;
 
 async fn hot_poll_loop(
     inner: Arc<ResidentEngineInner>,
@@ -1143,19 +1149,35 @@ async fn hot_poll_loop(
     account_id: String,
 ) {
     let account = AccountId(account_id);
-    let system = slot.containers.personal_system_folders();
+    let inbox = slot
+        .containers
+        .role_target(&NamespaceAttribution::Personal, FolderRole::Inbox)
+        .map(str::to_string);
+    let cold: Vec<String> = slot
+        .containers
+        .personal_system_folders()
+        .into_iter()
+        .filter(|native| Some(native) != inbox.as_ref())
+        .collect();
+    let mut tick: u32 = 0;
     loop {
         tokio::select! {
             () = slot.cancel.cancelled() => return,
             () = tokio::time::sleep(HOT_POLL_INTERVAL) => {}
         }
+        tick = tick.wrapping_add(1);
         let focused = slot
             .focused_folder
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .filter(|native| !system.contains(native));
-        for native in system.iter().cloned().chain(focused) {
+            .filter(|native| Some(native) != inbox.as_ref());
+        let cold_due = tick.is_multiple_of(COLD_FOLDER_TICKS);
+        let cold_folders = cold
+            .iter()
+            .filter(|native| cold_due && Some(*native) != focused.as_ref())
+            .cloned();
+        for native in inbox.iter().chain(focused.iter()).cloned().chain(cold_folders) {
             invalidate_folder(&inner, &account, native);
         }
     }
@@ -1163,7 +1185,8 @@ async fn hot_poll_loop(
 
 /// How often Outlook's category list (names and colours) is re-read. A
 /// category's colour is not a message change, so no delta ever reports it.
-const CATEGORY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+/// One request per tick, so 15 s costs 40 per machine per 10 minutes.
+const CATEGORY_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 
 async fn category_refresh_loop(
     inner: Arc<ResidentEngineInner>,
