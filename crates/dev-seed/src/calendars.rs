@@ -248,6 +248,70 @@ fn seed_secondary_events(
     Ok(())
 }
 
+/// Turn the latest inbound Microsoft 365 message into a meeting request
+/// whose synced event overlaps another busy event, so the reading pane
+/// shows the invite card with a conflict.
+pub fn seed_meeting_invite(
+    conn: &Connection,
+    rng: &mut impl RngExt,
+    accounts: &[Account],
+) -> Result<(), String> {
+    let Some(account) = accounts.iter().find(|account| account.provider == "graph") else {
+        return Ok(());
+    };
+    let calendar_id: String = conn
+        .query_row(
+            "SELECT id FROM calendars WHERE account_id = ?1 AND is_primary = 1",
+            params![account.id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("invite calendar: {e}"))?;
+    let message_id: String = conn
+        .query_row(
+            "SELECT id FROM messages WHERE account_id = ?1 AND from_address != ?2 \
+             ORDER BY date DESC LIMIT 1",
+            params![account.id, account.email],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("invite message: {e}"))?;
+    let today = Zoned::now().date();
+    let mut slot = |title: &str, from: u32, to: u32, rsvp: &str| -> Result<SeededEvent, String> {
+        Ok(SeededEvent {
+            id: crate::next_uuid(rng),
+            account_id: account.id.clone(),
+            calendar_id: calendar_id.clone(),
+            google_event_id: format!("devseed-invite-{}", title.to_lowercase().replace(' ', "-")),
+            title: title.to_string(),
+            description: "Join: https://teams.microsoft.com/l/meetup-join/devseed".to_string(),
+            location: "Microsoft Teams Meeting".to_string(),
+            start_time: local_timestamp(today, from, 0)?,
+            end_time: local_timestamp(today, to, 0)?,
+            is_all_day: false,
+            organizer_name: "Nora Berg".to_string(),
+            organizer_email: "nora.berg@example.com".to_string(),
+            rsvp_status: rsvp.to_string(),
+            availability: "busy".to_string(),
+            visibility: "default".to_string(),
+        })
+    };
+    let invite = slot("Partner Review", 15, 16, "needs-action")?;
+    let busy = slot("Supplier Call", 15, 17, "accepted")?;
+    insert_event(conn, &invite)?;
+    insert_event(conn, &busy)?;
+    conn.execute(
+        "UPDATE calendar_events SET uid = 'devseed-invite' WHERE id = ?1",
+        params![invite.id],
+    )
+    .map_err(|e| format!("invite uid: {e}"))?;
+    conn.execute(
+        "UPDATE messages SET has_meeting_invite = 1, meeting_invite_method = 'REQUEST', \
+         meeting_invite_uid = 'devseed-invite' WHERE id = ?1 AND account_id = ?2",
+        params![message_id, account.id],
+    )
+    .map_err(|e| format!("invite message flag: {e}"))?;
+    Ok(())
+}
+
 fn insert_calendar(conn: &Connection, calendar: &SeededCalendar) -> Result<(), String> {
     conn.execute(
         "INSERT INTO calendars (

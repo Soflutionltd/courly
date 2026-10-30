@@ -125,6 +125,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         &mut pending_inline_images,
         &mut stats,
     )?;
+    calendars::seed_meeting_invite(&conn, &mut rng, &accs)?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
     contacts::seed_groups(&conn, &mut rng, &pools.combined, &accs)?;
     label_groups::seed_label_groups(&conn, &mut rng, &accs)?;
