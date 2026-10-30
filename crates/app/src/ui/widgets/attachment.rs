@@ -270,14 +270,14 @@ fn attachment_sender(att: &ThreadAttachment) -> Cow<'_, str> {
         .map_or_else(|| t!("compose.unknown_attachment_sender"), Cow::Borrowed)
 }
 
-fn mime_to_type_label(mime: Option<&str>) -> &'static str {
+fn mime_to_type_label(mime: Option<&str>) -> Cow<'static, str> {
     match mime.unwrap_or("") {
-        t if t.starts_with("image/") => "Image",
-        t if t.contains("pdf") => "PDF",
-        t if t.contains("spreadsheet") || t.contains("excel") => "Excel",
-        t if t.contains("word") || t.contains("document") => "Word",
-        t if t.contains("zip") || t.contains("archive") => "Archive",
-        _ => "File",
+        t if t.starts_with("image/") => t!("compose.attachment_type.image"),
+        t if t.contains("pdf") => Cow::Borrowed("PDF"),
+        t if t.contains("spreadsheet") || t.contains("excel") => Cow::Borrowed("Excel"),
+        t if t.contains("word") || t.contains("document") => Cow::Borrowed("Word"),
+        t if t.contains("zip") || t.contains("archive") => t!("compose.attachment_type.archive"),
+        _ => t!("compose.attachment_type.file"),
     }
 }
 
