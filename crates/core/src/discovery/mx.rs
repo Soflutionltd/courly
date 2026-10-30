@@ -1,6 +1,6 @@
 use crate::discovery::autoconfig;
 use crate::discovery::registry;
-use crate::discovery::types::{DiscoverySource, ProtocolOption};
+use crate::discovery::types::{DiscoverySource, Protocol, ProtocolOption};
 use hickory_resolver::TokioResolver;
 use std::time::Duration;
 
@@ -76,13 +76,26 @@ fn try_registry_match(mx_host: &str) -> Option<(Vec<ProtocolOption>, Option<Stri
     let segments: Vec<&str> = mx_host.split('.').collect();
     for start in 0..segments.len().saturating_sub(1) {
         let candidate = segments[start..].join(".");
-        let results = registry::lookup(&candidate);
+        let mut results = registry::lookup(&candidate);
+        if is_microsoft_365_mx(mx_host) {
+            // The outlook.com entry also offers consumer IMAP, whose
+            // `consumers` endpoint rejects work and school accounts.
+            results.retain(|opt| matches!(opt.protocol, Protocol::MicrosoftGraph));
+        }
         if !results.is_empty() {
             let retagged = retag_results(results, mx_host);
             return Some((retagged, Some(candidate)));
         }
     }
     None
+}
+
+/// Exchange Online routes every Microsoft 365 tenant domain through
+/// `<tenant>.mail.protection.outlook.com`.
+fn is_microsoft_365_mx(mx_host: &str) -> bool {
+    mx_host
+        .to_ascii_lowercase()
+        .ends_with(".mail.protection.outlook.com")
 }
 
 fn retag_results(results: Vec<ProtocolOption>, mx_host: &str) -> Vec<ProtocolOption> {
@@ -121,5 +134,32 @@ fn extract_base_domain(hostname: &str) -> Option<String> {
         Some(format!("{}.{last_two}", segments[segments.len() - 3],))
     } else {
         Some(last_two)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn protocols(mx_host: &str) -> Vec<Protocol> {
+        try_registry_match(mx_host)
+            .expect("registry match")
+            .0
+            .into_iter()
+            .map(|opt| opt.protocol)
+            .collect()
+    }
+
+    #[test]
+    fn microsoft_365_mx_offers_only_graph() {
+        let found = protocols("pinelli-fr.mail.protection.outlook.com");
+        assert_eq!(found.len(), 1);
+        assert!(matches!(found[0], Protocol::MicrosoftGraph));
+    }
+
+    #[test]
+    fn consumer_outlook_mx_keeps_imap() {
+        let found = protocols("outlook-com.olc.protection.outlook.com");
+        assert!(found.iter().any(|p| matches!(p, Protocol::Imap { .. })));
     }
 }

@@ -24,9 +24,15 @@ impl AddAccountWizard {
 
         self.discovery = Some(config.clone());
 
-        // Auto-proceed when exactly one high-confidence option
-        let auto_proceed =
-            config.options.len() == 1 && config.options[0].source.is_high_confidence();
+        // Auto-proceed when exactly one high-confidence option. A provider
+        // API (Gmail, Microsoft Graph) only comes from a known-provider match,
+        // so it qualifies even when found through the MX record.
+        let auto_proceed = config.options.len() == 1
+            && (config.options[0].source.is_high_confidence()
+                || matches!(
+                    config.options[0].protocol,
+                    Protocol::GmailApi | Protocol::MicrosoftGraph
+                ));
 
         if auto_proceed {
             self.selected_option = Some(0);
