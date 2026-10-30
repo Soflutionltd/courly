@@ -102,7 +102,7 @@ impl HtmlBlock {
         let fields = header_fields(source);
         let header_html = fields
             .iter()
-            .map(|(label, value)| format!("<b>{label}:</b> {}", escape(value)))
+            .map(|(label, value)| format!("<b>{label}</b> {}", escape(value)))
             .collect::<Vec<_>>()
             .join("<br>");
         let html = format!(
@@ -115,7 +115,7 @@ impl HtmlBlock {
 
         let header_text = fields
             .iter()
-            .map(|(label, value)| format!("{label}: {value}"))
+            .map(|(label, value)| format!("{label} {value}"))
             .collect::<Vec<_>>()
             .join("\n");
         let text = format!("{TEXT_RULE}\n{header_text}\n\n{body_text}");

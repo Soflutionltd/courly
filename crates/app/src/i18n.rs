@@ -53,13 +53,15 @@ pub struct QuoteLabels {
     pub subject: String,
 }
 
+/// Each label carries its colon, spaced as the language wants ("De :").
 pub fn quote_labels() -> QuoteLabels {
+    let label = |name: std::borrow::Cow<'_, str>| t!("quote.label", label = name).into_owned();
     QuoteLabels {
-        from: t!("quote.from").into_owned(),
-        sent: t!("quote.sent").into_owned(),
-        to: t!("quote.to").into_owned(),
-        cc: t!("quote.cc").into_owned(),
-        subject: t!("quote.subject").into_owned(),
+        from: label(t!("quote.from")),
+        sent: label(t!("quote.sent")),
+        to: label(t!("quote.to")),
+        cc: label(t!("quote.cc")),
+        subject: label(t!("quote.subject")),
     }
 }
 
