@@ -4,8 +4,7 @@
 //! a full month grid and a compact mini-month navigation widget.
 
 use jiff::civil::{Date as NaiveDate, Weekday};
-use jiff::tz::TimeZone;
-use jiff::{Span, Timestamp};
+use jiff::Span;
 use rust_i18n::t;
 
 /// Days from Monday, in the `i64` this module's week arithmetic wants. jiff
@@ -115,18 +114,11 @@ pub fn build_month_grid(
         // Distribute events into this week's cells.
         // Multi-day events appear on every day they span, not just the start date.
         for event in events {
-            let Ok(start_dt) = Timestamp::from_second(event.start_time) else {
+            let Some((event_start, event_end)) =
+                super::calendar::event_day_span(event.start_time, event.end_time)
+            else {
                 continue;
             };
-            let Ok(end_dt) = Timestamp::from_second(event.end_time) else {
-                continue;
-            };
-            // Host zone, agreeing with `CalendarState::rebuild_view_data`,
-            // which derives the same span locally. The chrono-era UTC read
-            // could place a late-evening event on a different grid day than
-            // the other rendering path.
-            let event_start = start_dt.to_zoned(TimeZone::system()).date();
-            let event_end = end_dt.to_zoned(TimeZone::system()).date();
             for day in &mut week {
                 if day.date >= event_start && day.date <= event_end {
                     day.events.push(MonthEvent {

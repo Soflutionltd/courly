@@ -363,6 +363,19 @@ pub(crate) fn local_midnight_unix(date: Date) -> i64 {
         .map_or(0, |zoned| zoned.timestamp().as_second())
 }
 
+/// The first and last local day an event covers. The end is exclusive: an
+/// all-day event ends at the next midnight, and a meeting ending at 00:00
+/// does not reach that day. `None` when a timestamp is out of range.
+pub(crate) fn event_day_span(start: i64, end: i64) -> Option<(Date, Date)> {
+    let local_date = |seconds: i64| {
+        Timestamp::from_second(seconds)
+            .ok()
+            .map(|instant| instant.to_zoned(TimeZone::system()).date())
+    };
+    let last_second = end.max(start.saturating_add(1)) - 1;
+    Some((local_date(start)?, local_date(last_second)?))
+}
+
 /// Persistent calendar state (survives mode switches).
 pub struct CalendarState {
     /// The currently selected/focused date.
@@ -576,14 +589,9 @@ impl CalendarState {
 
         self.dates_with_events.clear();
         for e in events {
-            if let Ok(start_dt) = Timestamp::from_second(e.start_time) {
-                let zone = TimeZone::system();
-                let start_date = start_dt.to_zoned(zone.clone()).date();
-                let end_dt = Timestamp::from_second(e.end_time)
-                    .map(|ts| ts.to_zoned(zone).date())
-                    .unwrap_or(start_date);
+            if let Some((start_date, end_date)) = event_day_span(e.start_time, e.end_time) {
                 let mut d = start_date;
-                while d <= end_dt {
+                while d <= end_date {
                     self.dates_with_events.insert(d);
                     match d.tomorrow() {
                         Ok(next) => d = next,
@@ -630,5 +638,53 @@ impl CalendarState {
                 calendar_time_grid::build_day_view(self.selected_date, events, today)
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(month: i8, day: i8) -> Date {
+        jiff::civil::date(2026, month, day)
+    }
+
+    fn at(date: Date, hour: i64) -> i64 {
+        local_midnight_unix(date) + hour * 3600
+    }
+
+    #[test]
+    fn all_day_event_covers_only_its_day() {
+        let start = local_midnight_unix(day(10, 30));
+        let end = local_midnight_unix(day(10, 31));
+        assert_eq!(event_day_span(start, end), Some((day(10, 30), day(10, 30))));
+    }
+
+    #[test]
+    fn multi_day_all_day_event_stops_before_its_end() {
+        let start = local_midnight_unix(day(10, 30));
+        let end = local_midnight_unix(day(11, 2));
+        assert_eq!(event_day_span(start, end), Some((day(10, 30), day(11, 1))));
+    }
+
+    #[test]
+    fn meeting_ending_at_midnight_stays_on_its_day() {
+        let span = event_day_span(at(day(10, 30), 23), local_midnight_unix(day(10, 31)));
+        assert_eq!(span, Some((day(10, 30), day(10, 30))));
+    }
+
+    #[test]
+    fn overnight_meeting_reaches_the_next_day() {
+        let span = event_day_span(at(day(10, 30), 23), at(day(10, 31), 1));
+        assert_eq!(span, Some((day(10, 30), day(10, 31))));
+    }
+
+    #[test]
+    fn zero_length_event_keeps_its_day() {
+        let start = at(day(10, 30), 9);
+        assert_eq!(
+            event_day_span(start, start),
+            Some((day(10, 30), day(10, 30)))
+        );
     }
 }

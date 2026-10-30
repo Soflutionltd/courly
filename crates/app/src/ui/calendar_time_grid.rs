@@ -793,15 +793,8 @@ pub fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGri
     events
         .iter()
         .filter(|e| {
-            // Use local time for date filtering - an event at 23:00 local
-            // should appear on the correct local day, not the UTC day.
-            let start = local_dt(e.start_time).map(|dt| dt.date());
-            let end = local_dt(e.end_time).map(|dt| dt.date());
-            match (start, end) {
-                (Some(s), Some(e_date)) => date >= s && date <= e_date,
-                (Some(s), None) => date == s,
-                _ => false,
-            }
+            super::calendar::event_day_span(e.start_time, e.end_time)
+                .is_some_and(|(first, last)| date >= first && date <= last)
         })
         .cloned()
         .collect()

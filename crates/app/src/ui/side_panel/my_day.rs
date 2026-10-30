@@ -11,7 +11,7 @@ use jiff::civil::{Date, Weekday};
 use rust_i18n::t;
 
 use crate::icon;
-use crate::ui::calendar::local_midnight_unix;
+use crate::ui::calendar::{event_day_span, local_midnight_unix};
 use crate::ui::calendar_month::{self, DayGrid};
 use crate::ui::calendar_time_grid::TimeGridEvent;
 use crate::ui::layout::*;
@@ -150,15 +150,11 @@ fn add_days(date: Date, days: i64) -> Date {
     date.checked_add(Span::new().days(days)).unwrap_or(date)
 }
 
-/// Every day an event covers. An end is exclusive: an all-day event ends at
-/// the next midnight, and a meeting ending at 00:00 does not reach that day.
+/// Every day the events cover.
 fn event_dates(events: &[TimeGridEvent]) -> HashSet<Date> {
     let mut dates = HashSet::new();
     for event in events {
-        let (Some(mut day), Some(last)) = (
-            local_date(event.start_time),
-            local_date(event.end_time.max(event.start_time + 1) - 1),
-        ) else {
+        let Some((mut day, last)) = event_day_span(event.start_time, event.end_time) else {
             continue;
         };
         while day <= last {
