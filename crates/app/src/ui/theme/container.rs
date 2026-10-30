@@ -264,10 +264,35 @@ fn style_badge_container(theme: &Theme) -> container::Style {
     }
 }
 
+fn theme_is_light(theme: &Theme) -> bool {
+    let bg = theme.palette().background.base.color;
+    0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b > 0.5
+}
+
+fn email_body_is_white(theme: &Theme) -> bool {
+    match EMAIL_BODY_BG_PREF.get() {
+        EmailBodyBackground::AlwaysWhite => true,
+        EmailBodyBackground::MatchTheme => false,
+        EmailBodyBackground::Auto => theme_is_light(theme),
+    }
+}
+
+/// In a light theme with white email bodies the whole card is white, so
+/// the email reads on one sheet like Outlook instead of a white box framed
+/// by the theme's tinted surface.
+fn message_card_is_white(theme: &Theme) -> bool {
+    email_body_is_white(theme) && theme_is_light(theme)
+}
+
 fn style_message_card_container(theme: &Theme) -> container::Style {
     let p = theme.palette();
+    let background = if message_card_is_white(theme) {
+        Color::WHITE
+    } else {
+        p.background.weaker.color
+    };
     container::Style {
-        background: Some(p.background.weaker.color.into()),
+        background: Some(background.into()),
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.15),
             width: 1.0,
@@ -278,22 +303,13 @@ fn style_message_card_container(theme: &Theme) -> container::Style {
 }
 
 fn style_email_body_container(theme: &Theme) -> container::Style {
-    let pref = EMAIL_BODY_BG_PREF.get();
-    let theme_bg = theme.palette().background.base.color;
-    let use_white = match pref {
-        EmailBodyBackground::AlwaysWhite => true,
-        EmailBodyBackground::MatchTheme => false,
-        EmailBodyBackground::Auto => {
-            // Luminance check: if the theme background is light, use white.
-            let lum = 0.299 * theme_bg.r + 0.587 * theme_bg.g + 0.114 * theme_bg.b;
-            lum > 0.5
-        }
-    };
-    let (bg, border_color) = if use_white {
+    let (bg, border_color) = if message_card_is_white(theme) {
+        (Color::WHITE, Color::TRANSPARENT)
+    } else if email_body_is_white(theme) {
         (Color::WHITE, Color::BLACK.scale_alpha(0.08))
     } else {
         (
-            theme_bg,
+            theme.palette().background.base.color,
             theme.palette().background.strongest.color.scale_alpha(0.15),
         )
     };
