@@ -888,7 +888,7 @@ impl ReadyApp {
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(
-                "Service not connected".to_owned(),
+                t!("settings.labels.service_not_connected").into_owned(),
             ))));
         };
         let account_names: Vec<String> = account_ids
@@ -932,7 +932,7 @@ impl ReadyApp {
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(
-                "Service not connected".to_owned(),
+                t!("settings.labels.service_not_connected").into_owned(),
             ))));
         };
         Task::perform(
