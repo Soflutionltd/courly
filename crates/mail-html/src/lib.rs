@@ -77,6 +77,9 @@ impl Drop for RenderingGuard {
 /// templates set `display: block !important` on cells, which Blitz's table
 /// layout drops entirely. User-agent `!important` outranks author
 /// `!important`, so this wins over inline styles.
+///
+/// Blitz does not map the legacy `align="center"` attribute on tables, which
+/// most newsletter and receipt templates use to center their 600px column.
 const EMAIL_UA_CSS: &str = r#"
 html {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -84,6 +87,7 @@ html {
     color: #1f1f1f;
 }
 td, th { display: table-cell !important; }
+table[align=center] { margin-left: auto; margin-right: auto; }
 "#;
 
 static EMAIL_UA_SHEET: LazyLock<UserAgentStylesheet> =
@@ -391,6 +395,36 @@ mod tests {
     fn script_links_are_ignored() {
         let mail = render_html(r#"<a href="javascript:alert(1)">x</a>"#);
         assert!(mail.links.is_empty());
+    }
+
+    fn first_link_x(html: &str) -> f32 {
+        render_html(html).links.first().expect("link rendered").x
+    }
+
+    #[test]
+    fn align_center_tables_are_centered() {
+        let x = first_link_x(
+            r#"<table align="center" width="200"><tr><td><a href="https://e.x/">x</a></td></tr></table>"#,
+        );
+        assert!(x > 150.0, "link x was {x}");
+    }
+
+    #[test]
+    fn tables_inside_centered_cells_are_centered() {
+        let x = first_link_x(
+            r#"<table width="100%"><tr><td align="center">
+            <table width="200"><tr><td><a href="https://e.x/">x</a></td></tr></table>
+            </td></tr></table>"#,
+        );
+        assert!(x > 150.0, "link x was {x}");
+    }
+
+    #[test]
+    fn center_elements_center_their_tables() {
+        let x = first_link_x(
+            r#"<center><table width="200"><tr><td><a href="https://e.x/">x</a></td></tr></table></center>"#,
+        );
+        assert!(x > 150.0, "link x was {x}");
     }
 
     #[test]
