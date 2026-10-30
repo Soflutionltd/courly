@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+
+use rust_i18n::t;
+
 use crate::ui::undoable::UndoableText;
 
 /// Which field in the contact editor changed.
@@ -75,18 +79,18 @@ impl ImportContactField {
         ImportContactField::Group,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> Cow<'static, str> {
         match self {
-            ImportContactField::DisplayName => "Name",
-            ImportContactField::FirstName => "First Name",
-            ImportContactField::LastName => "Last Name",
-            ImportContactField::Email => "Email",
-            ImportContactField::Email2 => "Email 2",
-            ImportContactField::Phone => "Phone",
-            ImportContactField::Company => "Company",
-            ImportContactField::Notes => "Notes",
-            ImportContactField::Group => "Group",
-            ImportContactField::Ignore => "Ignore",
+            ImportContactField::DisplayName => t!("settings.import.field_name"),
+            ImportContactField::FirstName => t!("settings.import.field_first_name"),
+            ImportContactField::LastName => t!("settings.import.field_last_name"),
+            ImportContactField::Email => t!("settings.import.field_email"),
+            ImportContactField::Email2 => t!("settings.import.field_email2"),
+            ImportContactField::Phone => t!("settings.import.field_phone"),
+            ImportContactField::Company => t!("settings.import.field_company"),
+            ImportContactField::Notes => t!("settings.import.field_notes"),
+            ImportContactField::Group => t!("settings.import.field_group"),
+            ImportContactField::Ignore => t!("settings.import.field_ignore"),
         }
     }
 
@@ -125,6 +129,6 @@ impl ImportContactField {
 
 impl std::fmt::Display for ImportContactField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
+        f.write_str(&self.label())
     }
 }
