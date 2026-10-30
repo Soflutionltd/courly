@@ -219,8 +219,9 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
     }
 }
 
-/// Lay the popup out in its own subtree and place it under the anchor,
-/// clamped horizontally so it stays inside the window.
+/// Lay the popup out in its own subtree and place it under the anchor (or
+/// above it when only that side has room), clamped horizontally so it stays
+/// inside the window.
 #[allow(clippy::too_many_arguments)]
 fn layout_popup<Message>(
     popup: &mut iced::Element<'_, Message>,
@@ -239,19 +240,27 @@ fn layout_popup<Message>(
         anchor_size.width
     });
     let below_y = anchor_position.y + anchor_size.height;
-    let available_height = (window.height - below_y).max(0.0);
+    let space_below = (window.height - below_y).max(0.0);
+    let space_above = anchor_position.y.max(0.0);
 
     let limits = layout::Limits::new(
         Size::ZERO,
         Size {
             width: popup_width,
-            height: available_height,
+            height: space_below.max(space_above),
         },
     )
     .width(Length::Fill);
 
     popup.as_widget_mut().layout(tree, renderer, &limits);
     let size = tree.size;
+
+    // Open upward when the popup does not fit below and the room above is larger.
+    let y = if size.height > space_below && space_above > space_below {
+        (anchor_position.y - size.height).max(0.0)
+    } else {
+        below_y
+    };
 
     // Calculate X based on position mode
     let x = match position {
@@ -265,7 +274,7 @@ fn layout_popup<Message>(
     // Clamp so popup stays within viewport
     let x = x.clamp(0.0, (window.width - size.width).max(0.0));
 
-    Layout::new(size).move_to(Point::new(x, below_y))
+    Layout::new(size).move_to(Point::new(x, y))
 }
 
 impl<'a, Message: Clone + 'a> From<AnchoredOverlay<'a, Message>> for iced::Element<'a, Message> {
