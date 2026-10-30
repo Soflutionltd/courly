@@ -27,7 +27,7 @@ pub fn set_email_body_background(pref: EmailBodyBackground) {
 /// Text/icon color on top of avatar circles and primary buttons.
 pub const ON_AVATAR: Color = Color::WHITE;
 
-pub use avatar::{avatar_color, initial};
+pub use avatar::{avatar_color, initials};
 pub use button::{
     ButtonClass, RowPosition, style_filter_container, style_pill_card_button,
     style_recessed_list_panel, style_settings_row_button,

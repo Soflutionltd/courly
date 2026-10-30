@@ -111,6 +111,9 @@ pub const AVATAR_DROPDOWN_TRIGGER: f32 = 24.0;
 pub const AVATAR_THREAD_CARD: f32 = 28.0;
 /// 32px - Message cards in reading pane
 pub const AVATAR_MESSAGE_CARD: f32 = 32.0;
+/// Avatar text size as a fraction of the circle diameter.
+pub const AVATAR_ONE_LETTER_FONT_RATIO: f32 = 0.45;
+pub const AVATAR_TWO_LETTER_FONT_RATIO: f32 = 0.38;
 /// 56px - Contact sidebar hero
 pub const AVATAR_CONTACT_HERO: f32 = 56.0;
 

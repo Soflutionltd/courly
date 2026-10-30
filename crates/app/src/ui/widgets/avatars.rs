@@ -7,11 +7,19 @@ use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse}
 
 use crate::font;
 use crate::ui::label_paint::LabelPaint;
-use crate::ui::layout::{DOT_SIZE, LABEL_DOT_SIZE, RADIO_CIRCLE_SIZE};
+use crate::ui::layout::{
+    AVATAR_ONE_LETTER_FONT_RATIO, AVATAR_TWO_LETTER_FONT_RATIO, DOT_SIZE, LABEL_DOT_SIZE,
+    RADIO_CIRCLE_SIZE,
+};
 use crate::ui::theme;
 
 fn avatar_circle_with_color<'a, M: 'a>(name: &str, size: f32, color: Color) -> Element<'a, M> {
-    let letter = theme::initial(name);
+    let letters = theme::initials(name);
+    let font_ratio = if letters.chars().count() > 1 {
+        AVATAR_TWO_LETTER_FONT_RATIO
+    } else {
+        AVATAR_ONE_LETTER_FONT_RATIO
+    };
 
     let circle = Canvas::new(CirclePainter { color, size })
         .width(size)
@@ -20,8 +28,8 @@ fn avatar_circle_with_color<'a, M: 'a>(name: &str, size: f32, color: Color) -> E
     iced::widget::stack![
         circle,
         container(
-            text(letter)
-                .size(size * 0.45)
+            text(letters)
+                .size(size * font_ratio)
                 .color(theme::ON_AVATAR)
                 .font(iced::Font {
                     weight: iced::font::Weight::Bold,
