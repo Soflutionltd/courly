@@ -37,6 +37,7 @@ members = [
 
 exclude = [
 "docs/research/slug-glyph-proto",
+"vendor/blitz-dom",
 ]
 
 [workspace.package]
@@ -158,3 +159,6 @@ opt-level = 2
 # enables. See crates/vtimezones-empty.
 [patch.crates-io]
 vtimezones-rs = { path = "crates/vtimezones-empty" }
+# blitz-dom 0.3.0-beta.4 with auto-layout tables taking the widest cell
+# width of every row, as browsers do (upstream only reads the first row).
+blitz-dom = { path = "vendor/blitz-dom" }

@@ -481,6 +481,24 @@ mod tests {
     }
 
     #[test]
+    fn cell_widths_from_later_rows_size_auto_tables() {
+        let table = |address_style: &str| {
+            render_html(&format!(
+                r#"<table><tr><td style="width:96pt">+33</td></tr>
+                <tr><td style="font-size:10pt;{address_style}">Chemin notre dame de la serra, 20260 CALVI</td></tr></table>"#
+            ))
+        };
+        let later = table("width:225pt");
+        let one_line = table("white-space:nowrap");
+        assert!(
+            (later.height - one_line.height).abs() < 1.0,
+            "address wrapped: {} vs {}",
+            later.height,
+            one_line.height
+        );
+    }
+
+    #[test]
     fn tiles_cover_the_full_height() {
         let mail = render_html(r#"<div style="height:5000px">tall</div>"#);
         let covered: f32 = mail.tiles.iter().map(|t| t.height).sum();
