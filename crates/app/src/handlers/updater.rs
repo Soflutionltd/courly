@@ -10,6 +10,11 @@ impl ReadyApp {
         match msg {
             UpdaterMessage::Check { forced } => self.start_update_check(forced),
             UpdaterMessage::CheckRequestedByUser => {
+                if updater::installed_bundle().is_none() {
+                    self.settings.update_check_note =
+                        Some(t!("updater.error.not_installed").into_owned());
+                    return Task::none();
+                }
                 let task = self.start_update_check(true);
                 if self.updater.checking {
                     self.updater.report_outcome = true;
