@@ -43,6 +43,8 @@ aes-gcm = "0.11"
 getrandom = { version = "0.4.2", features = ["std"] }
 hotpath = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "net", "io-util"] }
 
 [features]
 hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "seen/hotpath", "types/hotpath"]

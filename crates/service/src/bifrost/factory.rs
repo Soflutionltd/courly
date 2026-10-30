@@ -711,7 +711,7 @@ impl DecryptedAccountCredentials {
                 TokenMode::WriteBack(writer) => writer.clone(),
                 TokenMode::Static(_) => unreachable!("static tokens returned above"),
             },
-            reqwest::Client::new(),
+            common::http::oauth_token_http_client().clone(),
         );
         let source: Arc<dyn TokenSource> = Arc::new(source);
         Ok(Arc::new(OAuthRefresher::new(source)))

@@ -8,6 +8,25 @@ pub fn shared_http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
+/// Client for OAuth token endpoint POSTs (code exchange and refresh). The
+/// form body carries the code or refresh token and the client secret, so
+/// redirects are refused (a 307/308 would replay that body to the new
+/// location), and a hung endpoint times out instead of stalling every
+/// refresh behind it.
+pub fn oauth_token_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            // Same failure mode as `reqwest::Client::new`: only a TLS
+            // backend that cannot initialise.
+            .expect("TLS backend initialises")
+    })
+}
+
 /// Check HTTP response status, returning error details on failure.
 ///
 /// `provider` is a prefix for error messages (e.g. "Gmail API", "Graph API").
@@ -79,4 +98,41 @@ pub fn compute_retry_delay(
         return secs * 1000;
     }
     config.initial_backoff_ms * 2u64.pow(attempt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A 307 would make reqwest replay the POST body (refresh token,
+    /// client secret) to the Location; the token client must stop there.
+    #[tokio::test]
+    async fn oauth_token_client_does_not_follow_redirects() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let reply = format!(
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{addr}/stolen\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+            }
+        });
+
+        // Following would loop on the 307 until reqwest's redirect limit
+        // turns it into an error.
+        let response = oauth_token_http_client()
+            .post(format!("http://{addr}/token"))
+            .form(&[("refresh_token", "secret")])
+            .send()
+            .await
+            .expect("send");
+        server.abort();
+        assert_eq!(response.status().as_u16(), 307);
+    }
 }

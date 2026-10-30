@@ -56,7 +56,7 @@ const MICROSOFT_GRAPH_SCOPES: [&str; 12] = [
     "User.ReadBasic.All",
 ];
 
-use common::http::shared_http_client;
+use common::http::{oauth_token_http_client, shared_http_client};
 
 type OAuthFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -574,7 +574,7 @@ pub async fn oauth_exchange_token(
         params.push(("scope", s));
     }
 
-    let response = shared_http_client()
+    let response = oauth_token_http_client()
         .post(&token_url)
         .form(&params)
         .send()
