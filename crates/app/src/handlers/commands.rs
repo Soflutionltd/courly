@@ -58,6 +58,17 @@ impl ReadyApp {
         self.save_usage_counts();
         match command_dispatch::dispatch_command(id, self) {
             Some(msg) => self.update(msg),
+            // A folder, label or date is needed first: ask in the palette.
+            None if self
+                .registry
+                .get(id)
+                .is_some_and(|desc| desc.input_schema.is_some()) =>
+            {
+                self.handle_palette(crate::ui::palette::PaletteMessage::OpenCommand(
+                    id,
+                    cmdk::CommandContext::default(),
+                ))
+            }
             None => Task::none(),
         }
     }
