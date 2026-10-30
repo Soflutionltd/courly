@@ -197,6 +197,36 @@ fn device_pixels(value: f32) -> u32 {
     value.round().to_u32().unwrap_or(1).max(1)
 }
 
+/// A viewport `width` CSS px wide. Text is shaped at `hidpi * zoom`, so
+/// the scene must be painted at that same scale.
+fn layout_viewport(width: f32, zoom: f32, hidpi: f32) -> Viewport {
+    let scale = hidpi * zoom;
+    let mut viewport = Viewport::new(
+        device_pixels(width * scale),
+        device_pixels(LAYOUT_VIEWPORT_HEIGHT as f32 * scale),
+        hidpi,
+        ColorScheme::Light,
+    );
+    viewport.set_zoom(zoom);
+    viewport
+}
+
+/// Width and height of the laid out page in display px.
+fn content_size(document: &HtmlDocument, width: f32, zoom: f32) -> (f32, f32) {
+    let layout = document.as_ref().root_element().final_layout();
+    let height = layout
+        .size
+        .height
+        .max(layout.scrollable_overflow_rect.bottom)
+        .clamp(1.0, MAX_HEIGHT)
+        .ceil();
+    let content_width = width
+        .max(layout.scrollable_overflow_rect.right)
+        .min(MAX_WIDTH / zoom)
+        .ceil();
+    ((content_width * zoom).ceil(), (height * zoom).ceil())
+}
+
 /// Lay out and rasterise one HTML email. CPU only; call from a blocking
 /// worker, never from the UI thread.
 pub fn render(request: RenderRequest) -> RenderedMail {
@@ -220,12 +250,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     let mut document = HtmlDocument::from_html(
         &request.html,
         DocumentConfig {
-            viewport: Some(Viewport::new(
-                device_pixels(width * HIDPI_SCALE),
-                device_pixels(LAYOUT_VIEWPORT_HEIGHT as f32 * HIDPI_SCALE),
-                HIDPI_SCALE,
-                ColorScheme::Light,
-            )),
+            viewport: Some(layout_viewport(width, zoom, HIDPI_SCALE)),
             base_url: Some(format!("https://{BASE_HOST}/")),
             net_provider: Some(Arc::clone(&net) as Arc<dyn NetProvider>),
             ua_stylesheets: vec![UserAgentStylesheet::default_sheet(), EMAIL_UA_SHEET.clone()],
@@ -243,20 +268,13 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     }
     document.as_mut().resolve(0.0);
 
-    let layout = document.as_ref().root_element().final_layout();
-    let content_height = layout
-        .size
-        .height
-        .max(layout.scrollable_overflow_rect.bottom)
-        .clamp(1.0, MAX_HEIGHT)
-        .ceil();
-    let content_width = width
-        .max(layout.scrollable_overflow_rect.right)
-        .min(MAX_WIDTH / zoom)
-        .ceil();
-    let content_height = (content_height * zoom).ceil();
-    let content_width = (content_width * zoom).ceil();
+    let (mut content_width, mut content_height) = content_size(&document, width, zoom);
     let scale = if content_height > HIDPI_MAX_HEIGHT {
+        document
+            .as_mut()
+            .set_viewport(layout_viewport(width, zoom, 1.0));
+        document.as_mut().resolve(0.0);
+        (content_width, content_height) = content_size(&document, width, zoom);
         1.0
     } else {
         HIDPI_SCALE
@@ -495,6 +513,57 @@ mod tests {
             "address wrapped: {} vs {}",
             later.height,
             one_line.height
+        );
+    }
+
+    /// Rightmost painted (non-white) column of the first tile, in display px.
+    fn ink_right(mail: &RenderedMail) -> f32 {
+        let tile = &mail.tiles[0];
+        let px_width = tile.px_width as usize;
+        let rightmost = tile
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, px)| px[0] < 128)
+            .map(|(i, _)| i % px_width)
+            .max()
+            .expect("text painted");
+        (rightmost + 1) as f32 * mail.width / px_width as f32
+    }
+
+    fn render_line(body: &str, zoom: f32) -> RenderedMail {
+        render(RenderRequest {
+            html: format!(
+                r#"<body style="margin:0"><p style="margin:0;font-size:40px;white-space:nowrap">MMMMMMMM</p>{body}</body>"#
+            ),
+            width: 600.0,
+            zoom,
+            inline_images: HashMap::new(),
+            remote: None,
+        })
+    }
+
+    #[test]
+    fn zoom_scales_text_with_its_layout() {
+        let actual = ink_right(&render_line("", 1.0));
+        let zoomed = ink_right(&render_line("", 0.5));
+        assert!(
+            (zoomed / (actual * 0.5) - 1.0).abs() < 0.05,
+            "text at 50% ends at {zoomed}, at 100% at {actual}"
+        );
+    }
+
+    #[test]
+    fn tall_emails_paint_text_at_its_layout_size() {
+        let short = ink_right(&render_line("", 1.0));
+        let tall = render_line(r#"<div style="height:7000px"></div>"#, 1.0);
+        assert!(tall.height > HIDPI_MAX_HEIGHT);
+        let tall = ink_right(&tall);
+        assert!(
+            (tall / short - 1.0).abs() < 0.05,
+            "tall text ends at {tall}, short at {short}"
         );
     }
 
