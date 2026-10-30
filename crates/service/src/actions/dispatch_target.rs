@@ -994,6 +994,10 @@ pub(crate) fn engine_error_to_action_error(error: EngineError) -> ActionError {
         EngineError::Account(error)
         | EngineError::OpenFailed(error)
         | EngineError::EstablishCursorTerminated(error) => {
+            log::warn!(
+                "remote action rejected: {:?}",
+                error.support_internal()
+            );
             crate::bifrost::account_error_to_action_error(&error)
         }
         EngineError::AccountNotAttached(account) => ActionError::remote_with_kind(
