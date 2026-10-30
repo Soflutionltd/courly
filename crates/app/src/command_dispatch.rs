@@ -500,29 +500,22 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
     }
 }
 
-/// NavNext: select the next thread in the list.
+/// NavNext: select the next shown thread in the list.
 fn dispatch_nav_next(app: &ReadyApp) -> Option<Message> {
-    let current = app.thread_list.selected_thread.unwrap_or(0);
-    let next = current.saturating_add(1);
-    if next < app.thread_list.threads.len() {
-        Some(Message::ThreadList(
-            crate::ui::thread_list::ThreadListMessage::SelectThread(next),
-        ))
-    } else {
-        None
+    if app.thread_list.threads.is_empty() {
+        return None;
     }
+    Some(Message::ThreadList(
+        crate::ui::thread_list::ThreadListMessage::SelectNext,
+    ))
 }
 
-/// NavPrev: select the previous thread in the list.
+/// NavPrev: select the previous shown thread in the list.
 fn dispatch_nav_prev(app: &ReadyApp) -> Option<Message> {
-    let current = app.thread_list.selected_thread?;
-    if current > 0 {
-        Some(Message::ThreadList(
-            crate::ui::thread_list::ThreadListMessage::SelectThread(current.saturating_sub(1)),
-        ))
-    } else {
-        None
-    }
+    app.thread_list.selected_thread?;
+    Some(Message::ThreadList(
+        crate::ui::thread_list::ThreadListMessage::SelectPrevious,
+    ))
 }
 
 /// NavOpen: open the currently selected thread.
