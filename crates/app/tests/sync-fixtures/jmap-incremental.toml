@@ -54,7 +54,7 @@ body_text = "Free at 12:30?"
 message_id = ["<003@example.com>"]
 
 # Step 2: an existing email's flags change. Drives the "update only
-# keywords" path that ratatoskr's incremental sync collapses into a
+# keywords" path that courly's incremental sync collapses into a
 # metadata-only refetch.
 [[change]]
 id = "change"

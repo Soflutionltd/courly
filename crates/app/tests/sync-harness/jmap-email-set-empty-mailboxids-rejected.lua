@@ -9,7 +9,7 @@
 -- per-item `invalidProperties` SetError (RFC 8621 has no All Mail, so the
 -- state is unrepresentable), with no partial mutation and no change-log
 -- transition. This is deliberately the OPPOSITE of Gmail, whose same shape
--- is an archive. Ratatoskr's own client never emits the empty shape (bulk
+-- is an archive. Courly's own client never emits the empty shape (bulk
 -- move REPLACES membership), so the consumer-side stake is different: a mock
 -- that silently manufactured mailbox-less emails would feed our sync tests
 -- unrepresentable state. Here we drive the refused shapes at the mock

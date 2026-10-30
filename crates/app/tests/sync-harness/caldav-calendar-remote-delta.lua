@@ -21,7 +21,7 @@ local function ical_event(uid, summary, description, location, dtstart, dtend)
     return table.concat({
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//Ratatoskr Harness//CalDAV//EN",
+        "PRODID:-//Courly Harness//CalDAV//EN",
         "BEGIN:VEVENT",
         "UID:" .. uid,
         "DTSTAMP:20260101T000000Z",

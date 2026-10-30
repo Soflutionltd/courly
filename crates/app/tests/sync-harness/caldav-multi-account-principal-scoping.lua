@@ -36,7 +36,7 @@ local ready, ready_err = client:request("BootReady")
 harness.assert(ready_err == nil, "boot.ready failed")
 harness.assert(ready.ready, "boot.ready returned ready=false")
 
--- Each ratatoskr account points at the same CalDAV endpoint but
+-- Each courly account points at the same CalDAV endpoint but
 -- authenticates as a different fixture principal via caldav_username.
 -- Saehrimnir's CalDAV layer mounts /principals/{user}/ and
 -- /calendars/{user}/... per the username, and 404s cross-account

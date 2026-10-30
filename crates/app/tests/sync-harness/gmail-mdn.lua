@@ -52,7 +52,7 @@ local token_response = harness.http_json({
         grant_type = "authorization_code",
         account_id = "account-1",
         code = "harness-gmail-mdn-account-1",
-        client_id = "ratatoskr-gmail-harness",
+        client_id = "courly-gmail-harness",
         redirect_uri = "http://127.0.0.1/oauth-callback",
     },
 })
@@ -77,7 +77,7 @@ local account, account_err = client:request("TestSeedAccount", {
     refresh_token = "gmail-mdn-refresh-unused",
     token_expires_at = 2000000000,
     oauth_provider = "google",
-    oauth_client_id = "ratatoskr-gmail-harness",
+    oauth_client_id = "courly-gmail-harness",
     oauth_token_url = token_url,
     read_receipt_policy = "always",
 })

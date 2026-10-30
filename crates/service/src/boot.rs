@@ -2,7 +2,7 @@
 //!
 //! Runs concurrently with the dispatch loop so `health.ping` continues to
 //! round-trip while migrations run. Implements the full Phase 1.5 sequence:
-//! key load -> DB open + velo->ratatoskr rename + schema migrations ->
+//! key load -> DB open + file rename + schema migrations ->
 //! pending-ops recovery -> queued-drafts sweep -> thread-participants
 //! backfill. Each step emits a corresponding `BootPhase` notification so
 //! the splash can render progress.

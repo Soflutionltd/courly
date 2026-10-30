@@ -43,7 +43,7 @@ harness.assert(ready_err == nil, "boot.ready failed")
 harness.assert(ready.ready, "boot.ready returned ready=false")
 
 -- TestSeedAccount wires imap_username = email, so the username the
--- ratatoskr client logs in with matches the fixture's account name.
+-- courly client logs in with matches the fixture's account name.
 -- saehrimnir's IMAP LOGIN handler looks up the fixture account by
 -- username and binds the connection to that account for the rest of
 -- the session.

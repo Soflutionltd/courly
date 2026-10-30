@@ -13,7 +13,7 @@
 
 **File-path drift since this doc was written:**
 
-- Shared-mailbox sync orchestration no longer exists anywhere in ratatoskr. It moved to `crates/provider-sync/src/graph/shared_mailbox_sync.rs` during the provider-sync extraction, then that whole path went caller-free at the bifrost B12 namespace landing (superseded by container-owned discovery), and B15 deleted `crates/provider-sync/` and `crates/graph/` outright along with the dead file.
+- Shared-mailbox sync orchestration no longer exists anywhere in courly. It moved to `crates/provider-sync/src/graph/shared_mailbox_sync.rs` during the provider-sync extraction, then that whole path went caller-free at the bifrost B12 namespace landing (superseded by container-owned discovery), and B15 deleted `crates/provider-sync/` and `crates/graph/` outright along with the dead file.
 - `graph_shared_mailbox_delta_tokens` was dropped from schema at B15 (it had been caller-free since B12). `shared_mailbox_sync_state` was renamed to `shared_mailboxes` at the B12 namespace landing and is the surviving discovery-and-visibility registry (`crates/db/src/db/schema/10_sync.sql`); `crates/db/src/db/schema/02_mail.sql` still carries `labels.namespace_type`. `migrations.rs` only carries a top-level comment referencing them - the v51/v54 numbered-migration scheme was replaced by a single v100 schema split across SQL files.
 - `crates/graph/src/sync.rs` is a single file, not a directory. Earlier references to `graph/src/sync/` are stale.
 - Sidebar code split into `crates/app/src/ui/sidebar/` (subdirectory); the scope dropdown specifically lives in `crates/app/src/ui/sidebar/scope.rs`, sidebar state in `mod.rs`.
@@ -33,7 +33,7 @@ When you add a corporate Exchange account, Outlook may auto-populate additional 
 
 **Exchange auto-mapping does not distinguish between these types.** If a user has Full Access to any mailbox - shared, user, or resource - Exchange can auto-map it. The Graph API treats them uniformly: access via `/users/{mailbox-id}/messages` regardless of type.
 
-This means Ratatoskr doesn't need to care what *kind* of mailbox it is. The implementation is mailbox-type-agnostic: discover what the user has access to, present them uniformly, respect permissions.
+This means Courly doesn't need to care what *kind* of mailbox it is. The implementation is mailbox-type-agnostic: discover what the user has access to, present them uniformly, respect permissions.
 
 ## Permission types (Exchange)
 
@@ -59,7 +59,7 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 ## Pain points
 
 - **Discovery is the hardest problem (Exchange)**: there is no clean Graph API to ask "what mailboxes does this user have access to?" Auto-mapping is an Exchange/Outlook concept not fully surfaced in Graph. Options: (a) call EWS autodiscover (additional protocol dependency), (b) let the user manually add delegated mailboxes by typing the email address (Outlook does this too - "Open Another Mailbox"), (c) try to hit `/users/{email}/mailFolders` for known mailboxes and see if it succeeds or 403s. Likely need option (b) as the baseline with (a) as an enhancement.
-- **Identity switching on send**: when replying from a shared mailbox, the "From" address must be the shared mailbox, not the user's personal address. Users frequently forget to check this in other clients. Ratatoskr should auto-set the From based on which mailbox the message was read in - this is a place to be better than Outlook. Must also distinguish Send As vs Send on Behalf (different headers, different recipient experience).
+- **Identity switching on send**: when replying from a shared mailbox, the "From" address must be the shared mailbox, not the user's personal address. Users frequently forget to check this in other clients. Courly should auto-set the From based on which mailbox the message was read in - this is a place to be better than Outlook. Must also distinguish Send As vs Send on Behalf (different headers, different recipient experience).
 - **Notification routing**: new mail in a shared mailbox - does every delegate get notified? Exchange has per-user notification settings for shared mailboxes. The client needs to respect these. Spamming 10 delegates with notifications for every incoming support@ email is unusable.
 - **Shared state visibility**: when User A reads/flags/categorizes/moves a message in a shared mailbox, User B must see that state change. This is the core value of shared mailboxes - team triage. Categories on shared mailbox messages are shared (unlike personal mailboxes). Flags may or may not be shared depending on Exchange configuration.
 - **Sent Items routing**: when sending from a shared mailbox, where does the Sent copy go? Exchange has a setting: copy to the sender's Sent Items, the shared mailbox's Sent Items, or both. Must respect this per-mailbox setting via Graph.
@@ -295,7 +295,7 @@ Priority rules:
 4. **Composing from personal context**: Account's primary identity
 5. **Fallback**: Account's primary identity
 
-This is where Ratatoskr can be significantly better than Outlook. The common failure mode in every client: user replies from personal address when they meant to reply from shared mailbox.
+This is where Courly can be significantly better than Outlook. The common failure mode in every client: user replies from personal address when they meant to reply from shared mailbox.
 
 #### How other clients handle it
 

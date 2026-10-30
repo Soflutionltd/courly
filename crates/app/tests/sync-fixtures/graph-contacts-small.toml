@@ -48,7 +48,7 @@ folder_id = "cf-default"
 display_name = "Bob Bell"
 emails = ["bob@example.com"]
 
-# A contact with no display name and no emails: ratatoskr's
+# A contact with no display name and no emails: courly's
 # extract_emails should skip it cleanly. Useful for negative coverage.
 [[contact]]
 id = "contact-003"

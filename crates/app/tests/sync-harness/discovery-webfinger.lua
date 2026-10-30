@@ -4,7 +4,7 @@
 -- protocol: discovery
 -- ceiling: 30s
 
--- Saehrimnir mounts discovery on its JMAP listener; ratatoskr reuses the
+-- Saehrimnir mounts discovery on its JMAP listener; courly reuses the
 -- JMAP endpoint env var as the discovery base.
 local discovery_base = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(discovery_base ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
@@ -19,7 +19,7 @@ harness.assert(ready.ready, "boot.ready returned ready=false")
 
 -- Run the discovery cascade. Saehrimnir's fixture wires WebFinger at the
 -- corp.test prefix delegating to /idp/realms/corp, and the chained OIDC
--- discovery doc at that prefix. Ratatoskr's WebFinger probe should fire
+-- discovery doc at that prefix. Courly's WebFinger probe should fire
 -- first, follow the href, then probe_issuer should pick up the document.
 local config, config_err = client:request("TestRunDiscovery", {
     email = "user@corp.test",

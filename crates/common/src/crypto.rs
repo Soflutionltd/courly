@@ -28,7 +28,7 @@ impl AppCryptoState {
 
 /// Load the AES-256-GCM encryption key from the key file.
 ///
-/// Tries `courly.key` first, falls back to legacy `velo.key`. Thin
+/// Reads `courly.key`, renaming a key left under the previous name. Thin
 /// wrapper around `crypto_key::load_encryption_key` that flattens the
 /// structured `LoadError` into a `String` for backward-compat with
 /// existing callers (the `rtsk::load_encryption_key` re-export and

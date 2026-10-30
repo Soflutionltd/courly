@@ -9,7 +9,7 @@
 //!
 //! Why this is a file comparison and not a check against the mock's
 //! `GET /test/fixture/identity` digest: brokkr passes the mock OUR fixture
-//! file (`[ratatoskr] fixtures_dir`), so the running mock's digest is
+//! file (`[courly] fixtures_dir`), so the running mock's digest is
 //! computed over the very copy we would compare it to - a tautology. The
 //! meaningful pair is our copy vs the saehrimnir REPO copy, reachable here
 //! through the in-tree `./research/saehrimnir` working copy. That clone is

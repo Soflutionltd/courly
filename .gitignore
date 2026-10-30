@@ -69,9 +69,9 @@ nul
 # The three-step form is required: git will not re-include a file whose
 # parent directory is excluded, so the directories must stay walkable.
 .brokkr/*
-!.brokkr/ratatoskr/
-.brokkr/ratatoskr/*
-!.brokkr/ratatoskr/gate.db
+!.brokkr/courly/
+.brokkr/courly/*
+!.brokkr/courly/gate.db
 
 # Signing keys
 *.key

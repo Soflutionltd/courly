@@ -19,7 +19,7 @@ timeline instead of a traditional threaded email view.
 This gives users the immediacy and lightness of chat without abandoning email's
 strengths: it works across organizations, it's archival, it's searchable, and
 it doesn't require the other party to be on any particular platform. The
-recipient sees a normal email. Only the Ratatoskr user sees the chat view.
+recipient sees a normal email. Only the Courly user sees the chat view.
 
 ## The Problem
 
@@ -158,7 +158,7 @@ The Chats section is **not affected by scope**. Like pinned searches, smart
 folders, and labels, it is always the same regardless of which account is
 selected. A chat contact may correspond across multiple accounts - the chat
 view aggregates this naturally (though threads themselves are always
-single-account, per Ratatoskr's threading model).
+single-account, per Courly's threading model).
 
 The Chats section should be **collapsible** like the other sidebar sections,
 and **absent entirely** when the user has no chat contacts designated (no empty
@@ -166,7 +166,7 @@ section cluttering the sidebar).
 
 ### Conversation grouping
 
-Ratatoskr's threading engine (JWZ algorithm in `crates/sync/`) already groups
+Courly's threading engine (JWZ algorithm in `crates/sync/`) already groups
 messages into threads. Threads are always single-account - a thread belongs to
 one account.
 
@@ -201,7 +201,7 @@ seen-address records linking both addresses, they are the same contact.
 In chat view, messages from all accounts appear in the same timeline, ordered
 chronologically. Each message bubble can show a subtle account indicator (the
 account's color dot or abbreviation) so the user knows which account context
-they're in. This is the same approach used elsewhere in Ratatoskr's
+they're in. This is the same approach used elsewhere in Courly's
 multi-account model.
 
 When composing a reply from the chat view, the default account is determined by
@@ -324,7 +324,7 @@ When confidence is low (new contact, unusual message format):
 
 ### Relationship to the signatures subsystem
 
-Ratatoskr already has a signatures system for compose (`docs/signatures/`).
+Courly already has a signatures system for compose (`docs/signatures/`).
 Signature stripping for chat view is a **separate concern** - the compose
 signatures system manages the user's own outgoing signatures, while chat
 stripping removes incoming signatures from display. These are different
@@ -339,7 +339,7 @@ high-confidence stripping source for sent messages (layer 3 above).
 - **Not a chat protocol** - no XMPP, no Matrix, no proprietary messaging. These
   are emails.
 - **Not presence/typing indicators** - there is no real-time channel. The other
-  person is using regular email. (Though if both parties use Ratatoskr, presence
+  person is using regular email. (Though if both parties use Courly, presence
   could be explored as a future extension.)
 - **Not group chat** - this is 1:1 only. Group email dynamics are different
   enough that forcing them into a chat view would be awkward. (Could be explored
@@ -399,7 +399,7 @@ high-confidence stripping source for sent messages (layer 3 above).
    no clear use case.
 
 5. ~~**Notification behavior**~~ **Resolved: no special treatment.**
-   Ratatoskr does not have notifications. If notifications are added later,
+   Courly does not have notifications. If notifications are added later,
    chat contacts can be revisited then.
 
 6. ~~**Chat threads and search/Inbox interaction**~~ **Resolved.** Chat

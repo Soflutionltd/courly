@@ -27,7 +27,7 @@ local good, good_err = client:request("TestSeedAccount", {
     refresh_token = "pre-open-refresh-token",
     token_expires_at = 2000000000,
     oauth_provider = "oidc:saehrimnir",
-    oauth_client_id = "ratatoskr-harness",
+    oauth_client_id = "courly-harness",
     oauth_token_url = token_url,
     jmap_url = session_url,
 })
@@ -39,7 +39,7 @@ local exchanged, exchange_err = client:request("oauth.exchange_code", {
     scopes = { "openid", "email", "profile" },
     user_info_url = harness.join_url(jmap_endpoint, "oauth/userinfo"),
     use_pkce = false,
-    client_id = "ratatoskr-harness",
+    client_id = "courly-harness",
     redirect_uri = "http://127.0.0.1/oauth-callback",
     code = "harness-auth-code-bifrost-open",
     reauth_account_id = good.account_id,
@@ -85,7 +85,7 @@ local bad, bad_seed_err = client:request("TestSeedAccount", {
     refresh_token = "pre-open-refresh-token",
     token_expires_at = 2000000000,
     oauth_provider = "generic-not-fastmail",
-    oauth_client_id = "ratatoskr-harness",
+    oauth_client_id = "courly-harness",
     jmap_url = session_url,
 })
 harness.assert(bad_seed_err == nil, "TestSeedAccount bad failed")

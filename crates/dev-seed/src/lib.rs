@@ -62,7 +62,7 @@ pub fn next_message_id(rng: &mut impl RngExt) -> String {
     let mut bytes = [0u8; 8];
     rng.fill(&mut bytes);
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    format!("<{hex}@mail.ratatoskr.test>")
+    format!("<{hex}@mail.courly.test>")
 }
 
 /// Seed a fresh database at the given data directory.

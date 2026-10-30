@@ -7,7 +7,7 @@
 -- Scheduled-send round-trip gate (B5-GATES). The capable-provider counterpart
 -- to gmail-/imap-scheduled-send-rejected.lua: JMAP advertises a non-zero
 -- maxDelayedSend, so bifrost reports pim_methods.scheduled_send = true and
--- ratatoskr's send_scheduled passes the capability gate and dispatches the send
+-- courly's send_scheduled passes the capability gate and dispatches the send
 -- with a FUTURERELEASE (holduntil) envelope parameter rather than rejecting it.
 --
 -- Verification mirrors jmap-send-writeback: the action.completed summary shows a

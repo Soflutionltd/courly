@@ -252,7 +252,7 @@ Microsoft does not publish official hex values. These are approximations from Ou
 
 #### Unified Color Model Options
 
-**Option A: Exchange presets as the canonical palette.** Map every category color to one of the 25 presets. Perfect Exchange round-trip. Gmail users lose precise color choices when viewed in Ratatoskr.
+**Option A: Exchange presets as the canonical palette.** Map every category color to one of the 25 presets. Perfect Exchange round-trip. Gmail users lose precise color choices when viewed in Courly.
 
 - Pros: Perfect Exchange fidelity (the provider that matters most for enterprise users). 25 colors is plenty - Outlook itself only offers these.
 - Cons: Gmail's ~92 colors get quantized down.

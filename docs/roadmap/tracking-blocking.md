@@ -24,7 +24,7 @@ Default-block remote images in HTML render, strip/suppress `Disposition-Notifica
 
 ### 1. HTML email rendering in iced - the core challenge
 
-Ratatoskr is a native iced app (no webview). This is the single most architecturally significant decision for the application because it determines how *all* email bodies are displayed.
+Courly is a native iced app (no webview). This is the single most architecturally significant decision for the application because it determines how *all* email bodies are displayed.
 
 #### Rendering backend options
 
@@ -236,7 +236,7 @@ Content-Type: text/plain
 
 --boundary
 Content-Type: message/disposition-notification
-Reporting-UA: Ratatoskr; 1.0
+Reporting-UA: Courly; 1.0
 Final-Recipient: rfc822;user@example.com
 Original-Message-ID: <original-msg-id>
 Disposition: manual-action/MDN-sent-manually; displayed
@@ -366,7 +366,7 @@ The tracking domain list should be a shipped resource file (like ad-blocker filt
 
 ### 8. Comparison with other email clients
 
-| Feature | **Thunderbird** | **Apple Mail** | **Fastmail (web)** | **Outlook (desktop)** | **Ratatoskr (planned)** |
+| Feature | **Thunderbird** | **Apple Mail** | **Fastmail (web)** | **Outlook (desktop)** | **Courly (planned)** |
 |---------|----------------|---------------|-------------------|----------------------|------------------------|
 | Block remote images by default | Yes | Opt-in (Block All Remote Content) | Opt-in (per-account setting) | No (on by default in some configs) | **Yes** |
 | Per-sender image allowlist | No (load per-message only) | No | Yes (contacts-based) | Limited (safe senders list) | **Yes** (existing `image_allowlist` table) |
@@ -378,7 +378,7 @@ The tracking domain list should be a shipped resource file (like ad-blocker filt
 | Link tracking detection | No | No | No | Safelinks (rewrites through Microsoft proxy, not privacy-focused) | **Planned** (tracking domain list + visual indicator) |
 | CSS tracking vector blocking | Yes (blocks external CSS) | Via proxy | Via proxy | No | **Yes** (strip `<link>`, `@import`, inline via `css-inline` then sanitize) |
 
-#### Key differentiators for Ratatoskr
+#### Key differentiators for Courly
 
 1. **Per-sender read receipt policy** - no mainstream client offers this granularity. Corporate users need "always send to my boss, never send to marketing" rules.
 2. **Defense-in-depth sanitization** - the `css-inline` + `lol_html` + `ammonia` pipeline is more thorough than any single-pass approach. Most clients either block images (Thunderbird) or proxy them (Apple Mail) but do not sanitize CSS tracking vectors.

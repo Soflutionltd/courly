@@ -32,7 +32,7 @@ pub enum SidebarSelection {
 }
 
 /// Real system-folder rows present on every email account. Each variant
-/// corresponds to a `folders.id` row using a canonical Ratatoskr ID.
+/// corresponds to a `folders.id` row using a canonical Courly ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SystemFolder {
     Sent,

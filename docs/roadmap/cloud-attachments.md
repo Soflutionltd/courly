@@ -1,7 +1,7 @@
 # Cloud Attachment Linking (OneDrive / Google Drive)
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: [~] **Partially implemented, relocated onto bifrost (bifrost-migration B9)** - the hand-rolled resumable-upload + share-link code this section originally described (`crates/gmail/src/gdrive.rs`, `crates/graph/src/onedrive.rs`) has been DELETED: it had no production caller anywhere in `service` / `app` / `core`. Outgoing hosting is now bifrost's capability-gated `Account::host_attachment` (Google -> Drive, Graph -> OneDrive), reached through `AttachmentByteSource::host_large_attachment` (`crates/service/src/bifrost/attachment.rs`) via a `SyncEngine::host_attachment` passthrough. That surface still has no caller - the underlying resumable-upload + sharing-permission capability exists provider-side, but nothing in ratatoskr drives it yet, same as before the rewire. `crates/core/src/cloud_attachments.rs` now holds only the INCOMING half: `detect_cloud_links()` (URL patterns for OneDrive, GDrive, Dropbox, Box) and the `enrich_onedrive_link()` / `enrich_gdrive_link()` metadata fetchers; the outgoing `UploadStatus` state machine, `supports_cloud_upload()`, `large_attachment_warning()`, and `LARGE_ATTACHMENT_THRESHOLD` were deleted with the dead code. The `cloud_attachments` DB table is kept for its incoming-link writer (`insert_incoming_cloud_links_sync`); its outgoing upload-status/session/bytes-uploaded columns lost their writers. **Remaining**: wiring `detect_cloud_links()` into the sync pipeline, a compose-side UI against `host_large_attachment` (threshold check, upload progress, link insertion), offline upload queue, cloud attachment cards in thread detail view.
+**Status**: [~] **Partially implemented, relocated onto bifrost (bifrost-migration B9)** - the hand-rolled resumable-upload + share-link code this section originally described (`crates/gmail/src/gdrive.rs`, `crates/graph/src/onedrive.rs`) has been DELETED: it had no production caller anywhere in `service` / `app` / `core`. Outgoing hosting is now bifrost's capability-gated `Account::host_attachment` (Google -> Drive, Graph -> OneDrive), reached through `AttachmentByteSource::host_large_attachment` (`crates/service/src/bifrost/attachment.rs`) via a `SyncEngine::host_attachment` passthrough. That surface still has no caller - the underlying resumable-upload + sharing-permission capability exists provider-side, but nothing in courly drives it yet, same as before the rewire. `crates/core/src/cloud_attachments.rs` now holds only the INCOMING half: `detect_cloud_links()` (URL patterns for OneDrive, GDrive, Dropbox, Box) and the `enrich_onedrive_link()` / `enrich_gdrive_link()` metadata fetchers; the outgoing `UploadStatus` state machine, `supports_cloud_upload()`, `large_attachment_warning()`, and `LARGE_ATTACHMENT_THRESHOLD` were deleted with the dead code. The `cloud_attachments` DB table is kept for its incoming-link writer (`insert_incoming_cloud_links_sync`); its outgoing upload-status/session/bytes-uploaded columns lost their writers. **Remaining**: wiring `detect_cloud_links()` into the sync pipeline, a compose-side UI against `host_large_attachment` (threshold check, upload progress, link insertion), offline upload queue, cloud attachment cards in thread detail view.
 
 ---
 
@@ -103,7 +103,7 @@ Two-phase process via upload sessions:
 | `organization` | Anyone in the tenant | OneDrive for Business / SharePoint only |
 | `users` | Specific people only | OneDrive for Business / SharePoint only |
 
-If `scope` is omitted, the organization default is used. For enterprise accounts this is typically `organization` - a safe default for Ratatoskr since most enterprise admins disable anonymous links anyway.
+If `scope` is omitted, the organization default is used. For enterprise accounts this is typically `organization` - a safe default for Courly since most enterprise admins disable anonymous links anyway.
 
 **Response**: A `Permission` resource with `link.webUrl` containing the shareable URL (e.g., `https://1drv.ms/...` or `https://contoso-my.sharepoint.com/...`).
 
@@ -142,7 +142,7 @@ Three upload types, all via `POST https://www.googleapis.com/upload/drive/v3/fil
 | `drive.file` | Files created/opened by the app only | Non-sensitive (preferred) |
 | `drive` | All Drive files | Sensitive, requires verification |
 
-`drive.file` is strongly preferred. It gives Ratatoskr access only to files it creates (the uploaded attachments) without touching the user's entire Drive. Google's OAuth consent screen is simpler with non-sensitive scopes.
+`drive.file` is strongly preferred. It gives Courly access only to files it creates (the uploaded attachments) without touching the user's entire Drive. Google's OAuth consent screen is simpler with non-sensitive scopes.
 
 #### Creating sharing permissions
 
@@ -164,7 +164,7 @@ For email cloud attachments, the typical permission is `{ "role": "reader", "typ
 
 #### Gmail's native behavior
 
-When a Gmail user attaches a file > 25 MB, Gmail web UI prompts to upload to Google Drive and insert a link. This is a **client-side behavior** - the Gmail API itself does not automatically convert large attachments to Drive links. To replicate this in Ratatoskr, we must handle it ourselves: detect the attachment size, upload to Drive via the Drive API, create a sharing permission, and insert the link into the message body.
+When a Gmail user attaches a file > 25 MB, Gmail web UI prompts to upload to Google Drive and insert a link. This is a **client-side behavior** - the Gmail API itself does not automatically convert large attachments to Drive links. To replicate this in Courly, we must handle it ourselves: detect the attachment size, upload to Drive via the Drive API, create a sharing permission, and insert the link into the message body.
 
 The Gmail API upload limit for inline attachments is 25 MB for the simple upload method and 35 MB total message size via the resumable upload method.
 
@@ -312,8 +312,8 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 
 | Provider | Metadata source | Auth required? |
 |---|---|---|
-| OneDrive / SharePoint | Graph API `GET /shares/{encoded-url}/driveItem` | Yes (user must have a Microsoft account in Ratatoskr) |
-| Google Drive | Drive API `GET /files/{id}?fields=name,size,mimeType,iconLink` | Yes (user must have a Google account in Ratatoskr) |
+| OneDrive / SharePoint | Graph API `GET /shares/{encoded-url}/driveItem` | Yes (user must have a Microsoft account in Courly) |
+| Google Drive | Drive API `GET /files/{id}?fields=name,size,mimeType,iconLink` | Yes (user must have a Google account in Courly) |
 | Dropbox, Box | No public metadata API for shared links without auth | No practical way to enrich |
 
 **Fallback**: If no authenticated account is available or the API call fails, display the link text (or filename extracted from URL path) with a generic cloud icon. The user can still click to open in browser.
@@ -331,7 +331,7 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 | [`graph-rs-sdk`](https://crates.io/crates/graph-rs-sdk) | 3.0.1 | 77K total, 8.5K recent | Yes (145 stars) | Full Graph SDK. Covers drives, upload sessions, sharing. Heavy dependency (pulls in wry/tao for webview auth). v3.0.1 failed to build on docs.rs. |
 | [`onedrive-api`](https://crates.io/crates/onedrive-api) | 0.11.0 | 35K total, 942 recent | Low activity (42 stars) | Focused OneDrive binding. Upload sessions, permissions, change tracking. Lighter than graph-rs-sdk. No sharing link creation documented. |
 
-**Verdict**: Neither crate is a clear win. `graph-rs-sdk` is comprehensive but heavy, has build issues, and pulls in webview dependencies we do not want (Ratatoskr uses iced, not webview). `onedrive-api` is lighter but does not clearly cover the `createLink` endpoint we need for sharing.
+**Verdict**: Neither crate is a clear win. `graph-rs-sdk` is comprehensive but heavy, has build issues, and pulls in webview dependencies we do not want (Courly uses iced, not webview). `onedrive-api` is lighter but does not clearly cover the `createLink` endpoint we need for sharing.
 
 **Recommendation**: Use **raw reqwest** against the Graph API, same as our existing Exchange provider. We already have Graph API authentication, token refresh, and request infrastructure in the `graph` crate (`crates/graph/`). Adding OneDrive upload + sharing is a handful of endpoints - the overhead of an SDK crate is not justified. The upload session flow is ~100 lines of Rust (create session, loop uploading chunks, handle resume). The sharing link call is a single POST.
 
@@ -372,7 +372,7 @@ eM Client has the most mature cloud attachment implementation among third-party 
 - Configurable via Settings > Mail > Attachments - user adds cloud providers with OAuth consent.
 - Size threshold is configurable per provider.
 
-**Key takeaway**: eM Client's model of a dedicated attachments folder in cloud storage is a good UX pattern - it keeps uploaded attachments organized and easy to find/clean up. We should adopt this: create a `Ratatoskr Attachments` folder in OneDrive / Google Drive on first use.
+**Key takeaway**: eM Client's model of a dedicated attachments folder in cloud storage is a good UX pattern - it keeps uploaded attachments organized and easy to find/clean up. We should adopt this: create a `Courly Attachments` folder in OneDrive / Google Drive on first use.
 
 #### Mailspring
 
@@ -422,7 +422,7 @@ CREATE INDEX idx_cloud_attachments_status ON cloud_attachments(upload_status)
     WHERE upload_status IN ('pending', 'uploading');
 ```
 
-This table lives in the main `ratatoskr.db` (not in `bodies.db` - cloud attachment metadata is small and queried alongside message metadata).
+This table lives in the main `courly.db` (not in `bodies.db` - cloud attachment metadata is small and queried alongside message metadata).
 
 The `upload_session_url` is transient - it is only valid during an active upload session and should be cleared on app restart (sessions expire server-side anyway). On restart, any `uploading` status entries should be reset to `pending` for retry.
 
@@ -479,7 +479,7 @@ When the user composes offline with a large attachment destined for cloud upload
 
 ~~This is the Tier 1 blocker. Enterprise Outlook users constantly send and receive OneDrive/SharePoint links.~~
 
-1. **Outgoing**: [~] The Ratatoskr-specific implementation described here (a dedicated `Ratatoskr Attachments` folder, `referenceAttachment` creation via the Graph beta endpoint) was hand-rolled in `crates/graph/src/onedrive.rs` / `crates/graph/src/ops.rs` and has since been DELETED (bifrost-migration B9) - it had no production caller. Graph -> OneDrive resumable upload + `organization`-scoped sharing-link creation is now reached through bifrost's capability-gated `Account::host_attachment` (`AttachmentByteSource::host_large_attachment`, `crates/service/src/bifrost/attachment.rs`), but nothing calls it - the folder-naming and `referenceAttachment` behavior described above is not reimplemented and would need to be re-specified against the bifrost surface if wanted.
+1. **Outgoing**: [~] The Courly-specific implementation described here (a dedicated `Courly Attachments` folder, `referenceAttachment` creation via the Graph beta endpoint) was hand-rolled in `crates/graph/src/onedrive.rs` / `crates/graph/src/ops.rs` and has since been DELETED (bifrost-migration B9) - it had no production caller. Graph -> OneDrive resumable upload + `organization`-scoped sharing-link creation is now reached through bifrost's capability-gated `Account::host_attachment` (`AttachmentByteSource::host_large_attachment`, `crates/service/src/bifrost/attachment.rs`), but nothing calls it - the folder-naming and `referenceAttachment` behavior described above is not reimplemented and would need to be re-specified against the bifrost surface if wanted.
 
 2. **Incoming**: [-] Not started. Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
 
@@ -503,4 +503,4 @@ Compile `RegexSet` for all major cloud providers (OneDrive, Google Drive, Dropbo
 - SharePoint document library browsing/upload (only personal OneDrive).
 - Dropbox/Box upload integration (low enterprise demand relative to OneDrive/Drive).
 - Password-protected or expiring links (complexity, low initial value).
-- File preview rendering within Ratatoskr (open in browser is sufficient).
+- File preview rendering within Courly (open in browser is sufficient).

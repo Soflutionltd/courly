@@ -1,7 +1,7 @@
 # IMAP CONDSTORE/QRESYNC (RFC 7162)
 
 **Tier**: 1 - Blocks switching from Outlook
-**Status**: [x] **Delivered, then migrated to bifrost.** IMAP delta sync - including CONDSTORE/QRESYNC capability negotiation, the `CHANGEDSINCE` flag delta, mod-sequence tracking, and `VANISHED`/UID-diff expunge detection - now runs inside bifrost's IMAP `Account`, reached through ratatoskr's bifrost change-stream consumer (`crates/service/src/bifrost/`) as of the B3a-cut-imap bifrost-migration landing. That cut DELETED the ratatoskr-side sync orchestration this section originally described (`crates/provider-sync/src/imap/imap_delta.rs`, `sync_pipeline.rs`, `imap_delta_janitor.rs`, `imap_initial.rs`, `thread_store.rs`); for those legacy implementations read git history before the B3a-cut-imap commit. B15 deleted `crates/imap/` outright, along with `ProviderOps` and every other legacy provider crate - there is no longer a ratatoskr-side IMAP client at any layer, action or sync. QRESYNC `VANISHED` handling (the former Phase 3 gap) is provided by bifrost; the prior async-imap note below is retained as historical research. The research that follows predates the migration and describes the original ratatoskr implementation; treat its file/path references as historical.
+**Status**: [x] **Delivered, then migrated to bifrost.** IMAP delta sync - including CONDSTORE/QRESYNC capability negotiation, the `CHANGEDSINCE` flag delta, mod-sequence tracking, and `VANISHED`/UID-diff expunge detection - now runs inside bifrost's IMAP `Account`, reached through courly's bifrost change-stream consumer (`crates/service/src/bifrost/`) as of the B3a-cut-imap bifrost-migration landing. That cut DELETED the courly-side sync orchestration this section originally described (`crates/provider-sync/src/imap/imap_delta.rs`, `sync_pipeline.rs`, `imap_delta_janitor.rs`, `imap_initial.rs`, `thread_store.rs`); for those legacy implementations read git history before the B3a-cut-imap commit. B15 deleted `crates/imap/` outright, along with `ProviderOps` and every other legacy provider crate - there is no longer a courly-side IMAP client at any layer, action or sync. QRESYNC `VANISHED` handling (the former Phase 3 gap) is provided by bifrost; the prior async-imap note below is retained as historical research. The research that follows predates the migration and describes the original courly implementation; treat its file/path references as historical.
 
 The original async-imap issue [chatmail/async-imap#130](https://github.com/chatmail/async-imap/issues/130) was closed `not_planned` after we confirmed CHANGEDSINCE works by appending the modifier to the `uid_fetch` query string.
 
@@ -145,7 +145,7 @@ Combined with the Gmail SELECT crash (Himalaya issue #641) and the broader matur
 | **hMailServer** | No | No | Limited | Windows-only, minimal extension support. No CONDSTORE/QRESYNC. |
 | **Postfix + Dovecot** | Yes | Yes | Yes | Common Linux combo; IMAP capability comes from Dovecot. |
 
-**Key takeaway:** CONDSTORE is available on all the servers that matter for Ratatoskr's target users (Dovecot, Cyrus, Gmail, Yahoo, iCloud). QRESYNC is available on all of those except Gmail. Exchange IMAP lacks both, but we already have a Microsoft Graph provider that handles Exchange/O365 with proper delta sync. The servers that lack CONDSTORE (Courier, hMailServer) are legacy/niche and need the UID-comparison fallback regardless.
+**Key takeaway:** CONDSTORE is available on all the servers that matter for Courly's target users (Dovecot, Cyrus, Gmail, Yahoo, iCloud). QRESYNC is available on all of those except Gmail. Exchange IMAP lacks both, but we already have a Microsoft Graph provider that handles Exchange/O365 with proper delta sync. The servers that lack CONDSTORE (Courier, hMailServer) are legacy/niche and need the UID-comparison fallback regardless.
 
 ### Implementation patterns in other clients
 
@@ -201,7 +201,7 @@ The RFC does not mandate that IDLE notifications include MODSEQ data. In practic
 - However, EXPUNGE notifications during IDLE do NOT include MODSEQ. With QRESYNC enabled, the server sends VANISHED instead of EXPUNGE, which includes UIDs (but still not MODSEQ).
 - EXISTS notifications (new messages) during IDLE never include MODSEQ. The client must issue a FETCH after leaving IDLE to get the new message's metadata.
 
-**Practical impact for Ratatoskr:** Our IDLE handler currently exits IDLE and does a delta check on any notification. With CONDSTORE, the delta check uses CHANGEDSINCE instead of UID SEARCH for flag changes. This is already implemented in `crates/imap/src/imap_delta.rs`.
+**Practical impact for Courly:** Our IDLE handler currently exits IDLE and does a delta check on any notification. With CONDSTORE, the delta check uses CHANGEDSINCE instead of UID SEARCH for flag changes. This is already implemented in `crates/imap/src/imap_delta.rs`.
 
 ### Data model for mod-seq tracking
 
@@ -248,7 +248,7 @@ This is the same approach every IMAP client without CONDSTORE uses. The cost is 
 - Gmail supports CONDSTORE but NOT QRESYNC. It is reportedly the only major provider in this configuration.
 - Thunderbird encountered multiple bugs with Gmail's CONDSTORE: new mail notifications not showing when CONDSTORE is active ([Bug 885220](https://bugzilla.mozilla.org/show_bug.cgi?id=885220)), EXPUNGE responses being lost when CONDSTORE is used without IDLE ([Bug 1124569](https://bugzilla.mozilla.org/show_bug.cgi?id=1124569)).
 - Gmail may not consistently report `HIGHESTMODSEQ` in all SELECT responses. Some clients have observed `CONDSTORE` in the capability list but no `HIGHESTMODSEQ` in the SELECT response, which per the RFC means the server doesn't support persistent mod-sequences for that mailbox.
-- Since Ratatoskr has a dedicated Gmail API provider, Gmail IMAP CONDSTORE is lower priority - but it matters for users who configure Gmail via generic IMAP rather than the Gmail API path.
+- Since Courly has a dedicated Gmail API provider, Gmail IMAP CONDSTORE is lower priority - but it matters for users who configure Gmail via generic IMAP rather than the Gmail API path.
 
 **iCloud IMAP QRESYNC quirks:**
 - iCloud advertises QRESYNC but doesn't send the required `ENABLED` untagged response after `ENABLE QRESYNC`.

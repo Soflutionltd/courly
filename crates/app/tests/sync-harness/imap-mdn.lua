@@ -8,7 +8,7 @@
 -- carries a Disposition-Notification-To header (via body_raw_bytes), so the
 -- consumer sets mdn_requested = 1 at hydrate time. Seeding the account with an
 -- "always" read-receipt policy forces the auto-send branch. When the thread is
--- marked read (SetRead), ratatoskr composes an RFC 8098 MDN and sends it via
+-- marked read (SetRead), courly composes an RFC 8098 MDN and sends it via
 -- engine.send_raw_message -> the IMAP account's SMTP backend. The gate verifies
 -- the MDN reached the server by inspecting the mock's SMTP submission log: a
 -- submission FROM the account TO the original sender.

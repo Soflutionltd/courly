@@ -133,7 +133,7 @@ impl AddAccountWizard {
 
                 // RFC 7591 dynamic registration: when the user didn't
                 // provide a client_id and the IdP advertised a
-                // registration endpoint, register Ratatoskr as a public
+                // registration endpoint, register Courly as a public
                 // client and use the resulting credentials.
                 let (resolved_client_id, resolved_client_secret) = if initial_client_id.is_empty() {
                     if let Some(endpoint) = registration_endpoint.as_deref() {

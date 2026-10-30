@@ -75,7 +75,7 @@ impl AttachmentByteSource {
     ///
     /// IMAP is the only provider that routes bytes through the whole message:
     /// bifrost IMAP `open_blob` (`BODY.PEEK[section]`) returns the part still
-    /// in its content-transfer-encoding, and ratatoskr keeps no per-part CTE to
+    /// in its content-transfer-encoding, and courly keeps no per-part CTE to
     /// decode it, whereas `open_raw_rfc822` + `extract_attachment_from_rfc822`
     /// (mail-parser) decodes exactly as the legacy fetch did. The single
     /// message parse is the batching artifact that keeps per-part reuse cheap.
@@ -100,7 +100,7 @@ impl AttachmentByteSource {
     /// Capability-dispatched cloud hosting for a future compose caller. The
     /// resident handle attaches cold accounts before forwarding to bifrost;
     /// unsupported accounts retain their structured AccountError instead of a
-    /// provider branch in ratatoskr.
+    /// provider branch in courly.
     #[allow(dead_code)] // pinned compose surface; B9 intentionally adds no UI caller
     pub(crate) async fn host_large_attachment(
         &self,

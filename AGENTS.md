@@ -1,4 +1,4 @@
-# Ratatoskr
+# Courly
 
 Rust desktop enterprise email client:
 
@@ -20,7 +20,7 @@ Cargo workspace. Key crates:
 - `types` (`crates/types/`) - Lightweight shared types (`FolderId`, `TagId`, `SidebarSelection`). Minimal deps (serde only).
 - `dev-seed` (`crates/dev-seed/`) - Deterministic test database generator. See dev-seed section below.
 
-There are no ratatoskr-owned provider crates. Every mail protocol (Gmail, JMAP, Graph, IMAP) is implemented in the external `bifrost` workspace and reached exclusively through the resident `SyncEngine` from `crates/service/src/bifrost/`; `app` and `rtsk` never depend on a protocol client directly.
+There are no courly-owned provider crates. Every mail protocol (Gmail, JMAP, Graph, IMAP) is implemented in the external `bifrost` workspace and reached exclusively through the resident `SyncEngine` from `crates/service/src/bifrost/`; `app` and `rtsk` never depend on a protocol client directly.
 
 Bifrost is a SERVICE-side dependency, and that boundary is machine-enforced by the `app-no-bifrost` / `core-no-bifrost` rules in `brokkr.toml`, not just convention: the app depends on `rtsk` plus `service-api` wire types only, so a bifrost type reaching `rtsk` would be pulled into the UI build. The service-to-app IPC contract is the firewall - `AccountError` never crosses it. `action-types` and `cal` carry `bifrost-types` alone, deliberately, for the `CalendarAccountOpener` seam. Bifrost and the `saehrimnir` mock are sibling repos we own and change ourselves; the procedure for doing so is `docs/side-quests.md`.
 
@@ -33,7 +33,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 - Anything touching (email provider) folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync - `reference/glossary/folders-labels.md`.
 - Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface - `reference/glossary/overlay-surfaces.md`.
 - Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
-- Any change to `bifrost` or `saehrimnir` (the sibling dependency repos), or any ratatoskr work blocked on one - `docs/side-quests.md`. Read it BEFORE editing anything under `./research/`, `../bifrost`, or `../sæhrimnir`.
+- Any change to `bifrost` or `saehrimnir` (the sibling dependency repos), or any courly work blocked on one - `docs/side-quests.md`. Read it BEFORE editing anything under `./research/`, `../bifrost`, or `../sæhrimnir`.
 
 ## Rules
 
@@ -72,7 +72,7 @@ Use `brokkr` (not `cargo`) for check/test. Output is never capped or scoped: eve
 ### brokkr baselines and gate.db
 
 - brokkr writes TWO databases with DIFFERENT dirty-tree policies. `.brokkr/results.db`
-  stores nothing on a dirty tree; `.brokkr/ratatoskr/gate.db` records EVERY gated run by
+  stores nothing on a dirty tree; `.brokkr/courly/gate.db` records EVERY gated run by
   design, so a failure stays inspectable. `--force` therefore does write `gate.db`, and
   always has - the row is tagged dirty. A dirty-tagged baseline is real and usable; it is
   not lost work and does not need re-recording for the numbers to exist.
@@ -100,20 +100,20 @@ Sync harness scripts live under `crates/app/tests/sync-harness/`.
 - `brokkr sync <SCRIPT> --bench [N]` - measure one (N defaults to 3).
 - `brokkr sync --gate all --bench [N]` - sweep every configured gate.
 
-`brokkr.toml` has two ratatoskr sections:
+`brokkr.toml` has two courly sections:
 
-- `[ratatoskr.harness]` describes the orchestration build: `package`
+- `[courly.harness]` describes the orchestration build: `package`
   to build (defaults to also being the spawned `binary`) and `debug`
   to pick the dev profile. Self-contained; not referenced by bare
   `brokkr check`.
-- `[ratatoskr]` wires sync-harness mock servers: installed
+- `[courly]` wires sync-harness mock servers: installed
   `saehrimnir` binary, fixture dir, endpoint env var names, and
   `sync_script_dir`.
 
 `saehrimnir` is the external mock-provider server used by sync harness
 scripts. Brokkr starts it, injects
 `COURLY_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, and scripts
-exercise ratatoskr's real provider sync against those endpoints.
+exercise courly's real provider sync against those endpoints.
 
 ## Dev-Seed
 
@@ -152,7 +152,7 @@ iced is depended on in 3 places: `crates/app/Cargo.toml` (full iced umbrella), `
 
 ## Encryption
 
-AES-256-GCM (`crates/common/src/crypto.rs` for the cipher; key load lives in the dep-free `crates/crypto-key/` crate shared between `common` and `service`). Key file: `ratatoskr.key` (or legacy `velo.key`) in app data dir. Format: base64-encoded 32 bytes. Encrypted-value wire format: `base64(iv):base64(ct+tag)`.
+AES-256-GCM (`crates/common/src/crypto.rs` for the cipher; key load lives in the dep-free `crates/crypto-key/` crate shared between `common` and `service`). Key file: `courly.key` in app data dir (a key under the previous name is renamed on load). Format: base64-encoded 32 bytes. Encrypted-value wire format: `base64(iv):base64(ct+tag)`.
 
 Boot path: Service loads + validates the key during `BootPhase::LoadingKey`. A missing or unreadable key file is a fatal Service exit (`BootExitCode::KeyLoadFailure = 73`); there is no zero-key fallback. The `crypto-key` crate enforces TOCTOU-safe permission repair (`O_NOFOLLOW` + `fchmod` via the open fd), file-owner UID validation on Unix, and unconditional rejection of an all-zero key (which would silently downgrade AES-256-GCM to a known-public key); dev-seed writes a non-zero deterministic pattern so dev workflows pass that gate cleanly. Loaded keys are returned in a `SecretKey` wrapper that zeroizes its buffer on drop.
 

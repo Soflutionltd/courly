@@ -1,5 +1,5 @@
 -- Three separate JMAP messages sharing the same Message-ID header.
--- Ratatoskr should import all rows rather than deduplicating by header.
+-- Courly should import all rows rather than deduplicating by header.
 
 fixture({ name = "jmap-duplicate-message-id" })
 

@@ -18,7 +18,7 @@
 
 ## Pain points
 
-- IMAP fallback: the client must keep the message and send it at the scheduled time. If the client is closed/offline at send time, the message doesn't go. Need to communicate this clearly ("this will only send if Ratatoskr is running at the scheduled time") or implement a send-on-next-wake queue.
+- IMAP fallback: the client must keep the message and send it at the scheduled time. If the client is closed/offline at send time, the message doesn't go. Need to communicate this clearly ("this will only send if Courly is running at the scheduled time") or implement a send-on-next-wake queue.
 - Time zones: user schedules for "9 AM Monday" - whose Monday? Need explicit time zone handling in the schedule picker. Display in local time, store as UTC, convert to recipient's time zone for preview ("arrives ~9 AM EST for recipient").
 - Cancellation: for server-side scheduled send, need to support cancel/reschedule. For Exchange this means deleting the deferred message from Drafts. For local fallback, just remove from the local queue.
 - Scheduled view: need a "Scheduled" mailbox/view showing all pending scheduled messages across accounts, with ability to edit, reschedule, or cancel. This is a virtual folder, not a real server-side mailbox.
@@ -79,7 +79,7 @@ The Gmail API does **not** support scheduled send. `messages.send` and `drafts.s
 
 Google Issue Tracker #140922183 has been open since 2019 and remains unresolved.
 
-**Implication**: Gmail accounts must always use local scheduling. The UI should display a clear warning: "This message will only send if Ratatoskr is open at the scheduled time."
+**Implication**: Gmail accounts must always use local scheduling. The UI should display a clear warning: "This message will only send if Courly is open at the scheduled time."
 
 ---
 
@@ -124,7 +124,7 @@ RFC 4865 defines FUTURERELEASE on SMTP submission ports (587). **Real-world adop
 **Hybrid approach for reliability**:
 1. In-process timer handles sending while the app is running
 2. On app startup, immediately check for overdue scheduled emails and send them
-3. Show a notification: "2 scheduled emails were sent (they were due while Ratatoskr was closed)"
+3. Show a notification: "2 scheduled emails were sent (they were due while Courly was closed)"
 4. If overdue by >24h, prompt user rather than sending silently
 
 ---

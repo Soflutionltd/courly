@@ -12,7 +12,7 @@ is_personal = true
 # (saehrimnir returns 404), fall through, and probe OIDC directly at the
 # email domain.
 #
-# The issuer field is the absolute URL ratatoskr believes it's talking
+# The issuer field is the absolute URL courly believes it's talking
 # to ("https://corp.test"), not a path-relative one. Reason: in the
 # bare-domain branch the cascade passes the literal "https://corp.test"
 # to probe_issuer, and that's what gets compared against doc.issuer in

@@ -19,7 +19,7 @@
 // it up internally under hotpath-alloc. Without this, --alloc builds fall back
 // to the system allocator and track_alloc/track_dealloc never fire, so every
 // measured function silently reports 0 bytes. This lives in the crate root so
-// it applies to both the `app` dev binary and the `runner` (`ratatoskr`)
+// it applies to both the `app` dev binary and the `runner` (`courly`)
 // binary that links `app`.
 #[cfg(feature = "hotpath-alloc")]
 #[global_allocator]
@@ -98,7 +98,7 @@ pub fn run_app_blocking() -> RunResult {
     log::info!("Courly starting");
     i18n::init();
     #[cfg(feature = "hotpath")]
-    let _hotpath = hotpath::HotpathGuardBuilder::new("ratatoskr::main")
+    let _hotpath = hotpath::HotpathGuardBuilder::new("courly::main")
         .percentiles(&[50.0, 95.0, 99.0])
         .functions_limit(0)
         .build();

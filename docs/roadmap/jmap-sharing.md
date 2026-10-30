@@ -23,11 +23,11 @@
 > pull in `crates/service/src/bifrost/contacts/` (B8), and the other three
 > rode a second relocation at B15, which deleted `crates/jmap/`,
 > `crates/provider-sync/`, and `jmap_sync_state` outright:
-> - Shared-account owner-email resolution (Phase 6) is no longer a ratatoskr
+> - Shared-account owner-email resolution (Phase 6) is no longer a courly
 >   aux pass at all. bifrost-jmap's `containers_list` resolves the owner
 >   email for `Shared`-namespace containers during container sync and
 >   projects it as `Container.owner_email`, reproducing the legacy two-level
->   RFC 9670 principals gate fail-soft; ratatoskr persists it into the
+>   RFC 9670 principals gate fail-soft; courly persists it into the
 >   existing `shared_mailboxes.email_address` cache via
 >   `set_shared_mailbox_email`, write-once (never overwriting an already-cached
 >   value), from `crates/service/src/bifrost/containers.rs` after the owning
@@ -35,7 +35,7 @@
 > - ShareNotification polling (Phase 5) was deleted, not ported. Its only
 >   durable effects were its own `jmap_sync_state` cursor and best-effort
 >   server-side notification cleanup; shared-mailbox discovery has been
->   container-owned since B6/B12, and no ratatoskr feature reads
+>   container-owned since B6/B12, and no courly feature reads
 >   ShareNotification objects. RFC 9670 servers expire them on their own.
 > There is no longer a `crates/jmap/src/` or `crates/provider-sync/src/jmap/`
 > at any layer - action or sync - and the only remaining JMAP dependency is
@@ -151,7 +151,7 @@ All sync operations use `request.default_account_id()` - only the primary accoun
 
 1. **Read `session.accounts()` during sync** (`crates/jmap/src/sync/mod.rs`). After the initial mailbox sync completes, iterate the Session's accounts map. For each account where `is_personal == false`, extract the account ID, display name, and `is_read_only` flag.
 
-2. **Persist as shared mailbox entries**. The `shared_mailbox_sync_state` table and `SharedMailbox` app type already exist. Use the JMAP account ID as the `mailbox_id`. The `mailbox_id` column is a provider-opaque unique identifier - Graph uses an email address, JMAP uses an account ID string like `"a1234"`. Both are unique within a Ratatoskr account and that's all the column requires. Call `upsert_shared_mailbox()` to insert with `is_sync_enabled = 1` so the shared account auto-appears in the sidebar (coarse-grained account-level discovery). Fine-grained per-mailbox subscription control is added in Phase 4.
+2. **Persist as shared mailbox entries**. The `shared_mailbox_sync_state` table and `SharedMailbox` app type already exist. Use the JMAP account ID as the `mailbox_id`. The `mailbox_id` column is a provider-opaque unique identifier - Graph uses an email address, JMAP uses an account ID string like `"a1234"`. Both are unique within a Courly account and that's all the column requires. Call `upsert_shared_mailbox()` to insert with `is_sync_enabled = 1` so the shared account auto-appears in the sidebar (coarse-grained account-level discovery). Fine-grained per-mailbox subscription control is added in Phase 4.
 
 3. **Wire into existing sidebar flow**. No sidebar changes needed - `get_shared_mailboxes()` already reads from `shared_mailbox_sync_state` and the sidebar already renders them. The only new code is in the JMAP sync pipeline.
 
@@ -169,7 +169,7 @@ All sync operations use `request.default_account_id()` - only the primary accoun
 
 **What to do**:
 
-1. **Parameterize the sync pipeline by JMAP account ID**. Currently `sync/mailbox.rs` uses `request.default_account_id()` everywhere. The jmap-client `MailboxGet::new(account_id)` and `EmailGet::new(account_id)` already accept an arbitrary account ID - the server will return data for any account the authenticated user has access to. `SyncCtx` is an existing struct in `crates/jmap/src/sync/mod.rs` (lines 42-50) holding `client`, `account_id`, `db`, `body_store`, `inline_images`, `search`, and `progress`. Its `account_id` field is the Ratatoskr account ID used for DB writes. Add a `jmap_account_id: Option<String>` field - when `Some`, sync functions pass it to `MailboxGet::new()` / `EmailGet::new()` instead of `request.default_account_id()`.
+1. **Parameterize the sync pipeline by JMAP account ID**. Currently `sync/mailbox.rs` uses `request.default_account_id()` everywhere. The jmap-client `MailboxGet::new(account_id)` and `EmailGet::new(account_id)` already accept an arbitrary account ID - the server will return data for any account the authenticated user has access to. `SyncCtx` is an existing struct in `crates/jmap/src/sync/mod.rs` (lines 42-50) holding `client`, `account_id`, `db`, `body_store`, `inline_images`, `search`, and `progress`. Its `account_id` field is the Courly account ID used for DB writes. Add a `jmap_account_id: Option<String>` field - when `Some`, sync functions pass it to `MailboxGet::new()` / `EmailGet::new()` instead of `request.default_account_id()`.
 
 2. **Create `jmap_shared_mailbox_sync()`** in a new `crates/jmap/src/shared_mailbox_sync.rs`, following the `graph/src/shared_mailbox_sync.rs` pattern. For each enabled shared mailbox in `shared_mailbox_sync_state`:
    - Build a `SyncCtx` with the shared account's JMAP ID as the target account.
@@ -177,7 +177,7 @@ All sync operations use `request.default_account_id()` - only the primary accoun
    - Run email sync (initial or delta based on existing JMAP sync state for that account).
    - Each shared account has independent Mailbox and Email state tokens.
 
-3. **Add JMAP sync state per shared account**. Extend the existing `jmap_sync_state` table with a `shared_account_id TEXT` column defaulting to `NULL` for the primary account. The primary key becomes `(account_id, shared_account_id, state_type)`. This is simpler than a new table and consistent with JMAP's account-centric model - each shared account gets its own Mailbox and Email state tokens under the same Ratatoskr account. Migration: `ALTER TABLE jmap_sync_state ADD COLUMN shared_account_id TEXT; DROP INDEX IF EXISTS ...; CREATE UNIQUE INDEX ... ON jmap_sync_state(account_id, COALESCE(shared_account_id, ''), state_type);`
+3. **Add JMAP sync state per shared account**. Extend the existing `jmap_sync_state` table with a `shared_account_id TEXT` column defaulting to `NULL` for the primary account. The primary key becomes `(account_id, shared_account_id, state_type)`. This is simpler than a new table and consistent with JMAP's account-centric model - each shared account gets its own Mailbox and Email state tokens under the same Courly account. Migration: `ALTER TABLE jmap_sync_state ADD COLUMN shared_account_id TEXT; DROP INDEX IF EXISTS ...; CREATE UNIQUE INDEX ... ON jmap_sync_state(account_id, COALESCE(shared_account_id, ''), state_type);`
 
 4. **Wire into the sync orchestration**. After the primary account's delta sync, call `sync_all_shared_mailboxes()` to iterate enabled shared mailboxes. Failures are independent - one shared mailbox timing out doesn't block others.
 

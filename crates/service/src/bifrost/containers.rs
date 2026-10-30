@@ -67,7 +67,7 @@ pub(crate) async fn sync_containers(
         .await
 }
 
-/// Map a bifrost `FolderRole` to ratatoskr's canonical system-folder id.
+/// Map a bifrost `FolderRole` to courly's canonical system-folder id.
 ///
 /// The ONE place per-provider system-role normalisation lives after B6.
 /// Pinned by `container_role_maps_to_canonical_id` against the glossary
@@ -97,7 +97,7 @@ enum Classified {
 }
 
 /// Attach-time container snapshot used everywhere a bifrost native scope id
-/// crosses into Ratatoskr. It is deliberately the sole native-id lookup
+/// crosses into Courly. It is deliberately the sole native-id lookup
 /// surface: unknown folder scopes return `None`, never Personal.
 #[derive(Debug, Clone, Default)]
 pub struct ContainerIndex {
@@ -144,7 +144,7 @@ impl ContainerIndex {
 
     /// Resolve a system destination without crossing a mailbox namespace.
     /// The returned value is the bifrost-native container id, suitable for a
-    /// provider mutation, rather than Ratatoskr's namespaced storage id.
+    /// provider mutation, rather than Courly's namespaced storage id.
     pub fn role_target(&self, namespace: &NamespaceAttribution, role: FolderRole) -> Option<&str> {
         self.roles
             .get(&(namespace.clone(), role))

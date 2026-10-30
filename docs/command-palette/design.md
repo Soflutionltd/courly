@@ -16,7 +16,7 @@ Tier 3 drives the registry/resolver split: the static command list is a `Command
 
 ## Cross-account label/folder disambiguation
 
-Ratatoskr is multi-account across four providers. The unified ("All Accounts") sidebar deliberately omits per-account labels - they're provider-specific noise in a cross-account context. **The palette becomes the primary way to navigate to a label or folder when in unified view.** The unified sidebar's removability of per-account labels is contingent on the palette doing this well.
+Courly is multi-account across four providers. The unified ("All Accounts") sidebar deliberately omits per-account labels - they're provider-specific noise in a cross-account context. **The palette becomes the primary way to navigate to a label or folder when in unified view.** The unified sidebar's removability of per-account labels is contingent on the palette doing this well.
 
 The mechanism is `OptionItem`: a flat list (no trees) with `id`, `label`, optional `path: Vec<String>`, optional `keywords`, and `disabled`. In a single-account scope `path` carries hierarchy. In All Accounts the resolver prefixes `path` with the account display name. Fuzzy search runs over `label`, joined `path` segments, and `keywords`, so "work clients" finds "Clients" under "Work Exchange" without the user knowing the exact hierarchy. The UI reconstructs hierarchical display from `path`. Execution uses `id`. System folders (`INBOX`, `SENT`, etc.) are excluded - those have universal sidebar destinations and dedicated palette commands.
 

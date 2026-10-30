@@ -7,7 +7,7 @@ name = "stub@example.test"
 is_personal = true
 
 # Autoconfig XML served at the autoconfig.{domain} prefix - the first URL
-# ratatoskr's autoconfig stage tries. authentication="oauth2" produces an
+# courly's autoconfig stage tries. authentication="oauth2" produces an
 # AuthMethod::OAuth2Unsupported result; the cascade then upgrades it to
 # OAuth2 using the OIDC discovery document below (matching email domain).
 [discovery."autoconfig.corp.test".autoconfig]

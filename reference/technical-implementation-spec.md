@@ -21,7 +21,7 @@ the same artifact.
 ## What it must also pin (or it is aspiration, not a spec)
 
 5. **Verification per brick.** Every change names its gate, matched to what the
-   change can break, drawn from ratatoskr's full gate surface:
+   change can break, drawn from courly's full gate surface:
    - a named `brokkr test -p <crate> <NAME>` case for any behavior a
      deterministic unit or in-process integration test can pin (parser,
      encoder, type-level check, serde round-trip, error classification, DB
@@ -32,7 +32,7 @@ the same artifact.
    - a named `brokkr sync <script> --gate <name> --bench` run, held against its
      recorded `brokkr.toml` baseline, for provider-sync behavior and for any
      hot path carrying a performance, provider-request-count, or memory budget.
-     Ratatoskr DOES measure performance: these baselines (elapsed, provider
+     Courly DOES measure performance: these baselines (elapsed, provider
      requests, peak RSS) are part of the contract and gate landings;
    - and `brokkr check` (gremlins + clippy + the changed-files test sweep) as
      the universal green-tree gate every landing must hold.
@@ -81,7 +81,7 @@ the same artifact.
     feature area. A spec citing these references must direct its reviewers and
     implementers to READ them, not merely name them - they are the ground the
     work is built on and judged against. A spec missing any of these is
-    incomplete. Unlike the bifrost dependency, ratatoskr DOES keep performance
+    incomplete. Unlike the bifrost dependency, courly DOES keep performance
     baselines: a spec touching a sync, provider, storage, or Service hot path
     owes the relevant `brokkr sync --bench` gate recorded against its
     `brokkr.toml` baseline (elapsed, provider-request count, peak RSS), so

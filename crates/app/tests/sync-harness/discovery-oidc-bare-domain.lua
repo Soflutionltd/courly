@@ -25,7 +25,7 @@ harness.assert(config_err == nil, config_err or "TestRunDiscovery failed")
 harness.assert(config.oidcEndpoints ~= nil, "no oidcEndpoints in result")
 local oidc = config.oidcEndpoints
 -- Bare-domain probe: issuer URL stays in pre-rewrite space (what
--- ratatoskr believes the IdP is at). Endpoint URLs below get
+-- courly believes the IdP is at). Endpoint URLs below get
 -- emit-time-prefixed to saehrimnir because they were path-relative
 -- in the fixture.
 harness.assert_eq(oidc.issuerUrl, "https://corp.test", "issuerUrl")

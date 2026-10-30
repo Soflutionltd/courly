@@ -1,7 +1,7 @@
-# IT-distributable defaults for the Ratatoskr add-account wizard.
+# IT-distributable defaults for the Courly add-account wizard.
 #
-# Copy to ~/.config/ratatoskr/config.toml (Linux), ~/Library/Application
-# Support/ratatoskr/config.toml (macOS), or %APPDATA%\ratatoskr\config.toml
+# Copy to ~/.config/courly/config.toml (Linux), ~/Library/Application
+# Support/courly/config.toml (macOS), or %APPDATA%\courly\config.toml
 # (Windows).
 #
 # All sub-tables and all fields are optional. Whichever fields are
@@ -20,7 +20,7 @@ issuer_url = "https://auth.corp.example"
 
 # Client ID. Leave blank to attempt RFC 7591 dynamic registration when
 # the IdP advertises a registration endpoint.
-client_id = "ratatoskr-corp"
+client_id = "courly-corp"
 
 # Client secret. Leave blank for public clients (PKCE only - the
 # default for native apps per RFC 8252).

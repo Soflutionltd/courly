@@ -3,7 +3,7 @@
 
 -- The Service is spawned with `PR_SET_PDEATHSIG = SIGTERM` set on the
 -- child via `pre_exec`. When the parent process (the parent-death helper,
--- a hidden `--parent-death-helper` mode of the `ratatoskr` binary) is
+-- a hidden `--parent-death-helper` mode of the `courly` binary) is
 -- SIGKILLed, the kernel delivers SIGTERM to the Service, which then
 -- exits within ~2s. This is the kernel-side line of defense for orphan
 -- Services if the App crashes hard; cross-platform fallback paths

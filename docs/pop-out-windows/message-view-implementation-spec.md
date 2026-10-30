@@ -50,7 +50,7 @@ The current `main()` initializer:
 
 ```rust
 let mut app = iced::application(App::boot, App::update, App::view)
-    .title("Ratatoskr (iced prototype)")
+    .title("Courly (iced prototype)")
     .theme(App::theme)
     .scale_factor(|app| app.settings.scale)
     .subscription(App::subscription)
@@ -158,7 +158,7 @@ The existing `view()` body moves into `view_main_window()`.
 ```rust
 fn title(&self, window_id: window::Id) -> String {
     if window_id == self.main_window_id {
-        return "Ratatoskr".to_string();
+        return "Courly".to_string();
     }
 
     if let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get(&window_id) {
@@ -167,7 +167,7 @@ fn title(&self, window_id: window::Id) -> String {
         return format!("{subject} \u{2014} {sender}");
     }
 
-    "Ratatoskr".to_string()
+    "Courly".to_string()
 }
 ```
 

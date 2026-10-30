@@ -4681,7 +4681,7 @@ mod tests {
                 refresh_token: Some("refresh-token".into()),
                 token_expires_at: Some(1_800_000_000),
                 oauth_provider: Some("oidc:saehrimnir".into()),
-                oauth_client_id: Some("ratatoskr-harness".into()),
+                oauth_client_id: Some("courly-harness".into()),
                 oauth_token_url: Some("http://127.0.0.1:12345/oauth/token".into()),
                 jmap_url: Some("http://127.0.0.1:12345/jmap".into()),
                 delegate_discovery_enabled: true,

@@ -2,7 +2,7 @@ name = "multi-account-attach"
 
 # Two JMAP accounts whose inboxes both contain a message with the
 # same attachment bytes. The shared data_path makes saehrimnir serve
-# byte-identical blobs to both accounts, so ratatoskr's BLAKE3
+# byte-identical blobs to both accounts, so courly's BLAKE3
 # content-addressing collapses them into a single attachment_blobs
 # row. Alice also has an unshared attachment to exercise the
 # orphan-tombstoning branch on her own deletion.

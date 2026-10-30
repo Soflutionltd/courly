@@ -1,4 +1,4 @@
-//! Translation between bifrost calendar values and Ratatoskr's calendar cache.
+//! Translation between bifrost calendar values and Courly's calendar cache.
 //!
 //! This is deliberately the single consumer-side place that understands
 //! protocol identity.  In particular Google and Graph expose composite

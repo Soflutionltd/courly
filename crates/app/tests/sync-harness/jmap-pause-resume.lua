@@ -37,7 +37,7 @@ local token = harness.http_json({
         grant_type = "authorization_code",
         account_id = "account-1",
         code = "harness-jmap-pause-resume",
-        client_id = "ratatoskr-jmap-pause-resume",
+        client_id = "courly-jmap-pause-resume",
         redirect_uri = "http://127.0.0.1/oauth-callback",
     },
 })
@@ -63,7 +63,7 @@ local account, account_err = client:request("TestSeedAccount", {
     refresh_token = "jmap-pause-resume-refresh-unused",
     token_expires_at = 2000000000,
     oauth_provider = "oidc:saehrimnir",
-    oauth_client_id = "ratatoskr-jmap-pause-resume",
+    oauth_client_id = "courly-jmap-pause-resume",
     oauth_token_url = token_url,
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")

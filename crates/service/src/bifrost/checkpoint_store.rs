@@ -223,7 +223,7 @@ impl CheckpointStore for SqliteCheckpointStore {
     /// this on a real reopen/recovery is exercised by the
     /// `jmap-oauth-recovery.lua` sync-harness gate. Per the § 4.5 feasibility
     /// hedge (review finding F6), seeding a sub-`MIN_MIGRATABLE` poison
-    /// envelope to drive the engine-internal dispatch from a ratatoskr service
+    /// envelope to drive the engine-internal dispatch from a courly service
     /// test is not done here: `MIN_MIGRATABLE` is a bifrost-internal const not
     /// exposed at the frozen surface, so the documented store + recovery-gate
     /// coverage stands in for the bespoke `restart_scope_clears_durable_cursor`

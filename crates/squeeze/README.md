@@ -198,7 +198,7 @@ All pure Rust except optional HEIC:
 - `quick-xml` 0.37 -- SVG parsing
 - `clap` 4 -- CLI argument parsing
 
-## Integration with Ratatoskr
+## Integration with Courly
 
 Designed as a standalone crate for now. Later integration as optional dependency:
 

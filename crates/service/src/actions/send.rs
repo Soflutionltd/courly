@@ -523,7 +523,7 @@ async fn scheduled_send_lifecycle(
 /// `pim_methods.scheduled_send` flag is the single source of truth: a
 /// `false` flag yields a user-safe `Unsupported`-class `ActionError`
 /// before any wire round-trip. IMAP is statically `false` (FUTURERELEASE
-/// is a per-connection EHLO truth ratatoskr treats as absent); Gmail
+/// is a per-connection EHLO truth courly treats as absent); Gmail
 /// advertises as PIM-rich yet its REST API has no delayed-send lever, so
 /// it too reports `false` - read the flag, never a hardcoded provider
 /// allowlist.

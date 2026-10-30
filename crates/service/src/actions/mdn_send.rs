@@ -7,7 +7,7 @@
 //! the pre-assembled bytes through the resident engine's raw-send
 //! passthrough (`engine.send_raw_message`) - bifrost's structured
 //! `SendRequest` cannot express a `multipart/report`, so the MDN keeps
-//! ratatoskr's assembler while the transport is bifrost's.
+//! courly's assembler while the transport is bifrost's.
 //!
 //! Failures are soft: a send error logs and continues to the next
 //! candidate. Unmarking the read state would be a worse outcome than a

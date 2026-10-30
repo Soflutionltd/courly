@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ratatoskr needs contact management as a first-class feature. Enterprise users maintain large address books across multiple accounts, rely on organization directories (GAL) to find colleagues, and use contact groups for recurring communication patterns.
+Courly needs contact management as a first-class feature. Enterprise users maintain large address books across multiple accounts, rely on organization directories (GAL) to find colleagues, and use contact groups for recurring communication patterns.
 
 The contact system serves three user profiles:
 

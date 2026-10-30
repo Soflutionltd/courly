@@ -1,6 +1,6 @@
 # Drafts Glossary
 
-A "draft" in Ratatoskr is one of two distinct things stored in two distinct tables. The sidebar's Drafts view shows both as a single chronological list. This document defines what each is, how they relate, and where the boundary between them lives in the code.
+A "draft" in Courly is one of two distinct things stored in two distinct tables. The sidebar's Drafts view shows both as a single chronological list. This document defines what each is, how they relate, and where the boundary between them lives in the code.
 
 If you're touching anything that lists, counts, opens, sends, or syncs a draft, read this first.
 

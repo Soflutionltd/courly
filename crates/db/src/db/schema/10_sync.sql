@@ -3,7 +3,7 @@
 -- Bifrost opaque cursor store (B2). Replaces the per-protocol cursor
 -- tables.
 -- bifrost owns the protocol-minted envelope bytes serialized by its
--- encode_envelope codec; ratatoskr owns the SQLite storage and lookup keys.
+-- encode_envelope codec; courly owns the SQLite storage and lookup keys.
 -- `checkpoint_blob` is the self-describing envelope (scope, protocol, BOTH
 -- envelope versions, server_state bytes, advanced_through, partition,
 -- progress_marker, BackfillProgress) and is the single source of truth for

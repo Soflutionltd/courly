@@ -162,7 +162,7 @@ fn imap_thread_message_id(row: &ConsumerMessageRow, stored_id: &str) -> String {
     row.message
         .message_id_header
         .clone()
-        .unwrap_or_else(|| format!("synthetic-{stored_id}@ratatoskr.local"))
+        .unwrap_or_else(|| format!("synthetic-{stored_id}@courly.local"))
 }
 
 fn store_threads(

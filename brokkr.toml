@@ -1,4 +1,4 @@
-project = "ratatoskr"
+project = "courly"
 
 [test]
 debug = true
@@ -18,7 +18,7 @@ debug = true
 # the first warms the timing store by test count and is always the slow one,
 # and a `claims 1-1` line on the second means the budget is too small for the
 # pole binary and needs raising explicitly (see brokkr man config parallel).
-# The [ratatoskr.gate.*] sync-harness gates below are untouched - they run
+# The [courly.gate.*] sync-harness gates below are untouched - they run
 # through `brokkr sync`, not the check test phase.
 [[check]]
 name = "default"
@@ -132,8 +132,8 @@ name = "smart-folder-reader-only"
 from = "smart-folder"
 forbid = ["db"]
 
-[ratatoskr]
-mock_server_binary = "/home/folk/.cargo/bin/saehrimnir"
+[courly]
+mock_server_binary = "~/.cargo/bin/saehrimnir"
 fixtures_dir = "crates/app/tests/sync-fixtures"
 test_endpoint_env_jmap = "COURLY_TEST_JMAP_ENDPOINT"
 test_endpoint_env_imap = "COURLY_TEST_IMAP_ENDPOINT"
@@ -146,114 +146,114 @@ test_endpoint_env_people = "COURLY_TEST_PEOPLE_ENDPOINT"
 test_endpoint_env_gcal = "COURLY_TEST_GCAL_ENDPOINT"
 sync_script_dir = "crates/app/tests/sync-harness"
 
-[ratatoskr.harness]
+[courly.harness]
 package = "runner"
 binary = "courly"
 debug = true
 
-[ratatoskr.gate.jmap_steady_state_delta]
+[courly.gate.jmap_steady_state_delta]
 script = "crates/app/tests/sync-harness/jmap-steady-state-delta.lua"
 baseline_label = "2026-07-28 aux-quiesced steady-state delta kick (provider_requests=2: Mailbox/changes + Email/changes; the resident aux pass is waited out and cleared before the measured window)"
 
-[ratatoskr.gate.jmap_steady_state_delta.baseline]
+[courly.gate.jmap_steady_state_delta.baseline]
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 plantasjen = "437cb48e530d4bdc9ad3e5b08c90cd2c"
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics.elapsed_ms]
+[courly.gate.jmap_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
 # gross hangs even when a local baseline is already slow.
 max_relative = 1.25
 max = 5000
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics.success]
+[courly.gate.jmap_steady_state_delta.metrics.success]
 equal = 1
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics.exit_code]
+[courly.gate.jmap_steady_state_delta.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics."sidecar.rss_peak_kb"]
+[courly.gate.jmap_steady_state_delta.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics."meta.provider_requests"]
+[courly.gate.jmap_steady_state_delta.metrics."meta.provider_requests"]
 # Exact-match by design: any new provider request should be reviewed
 # and either justified with a new baseline or fixed.
 max_delta = 0
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics."meta.message_count"]
+[courly.gate.jmap_steady_state_delta.metrics."meta.message_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.jmap_steady_state_delta.metrics."meta.correct"]
+[courly.gate.jmap_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.graph_steady_state_delta]
+[courly.gate.graph_steady_state_delta]
 script = "crates/app/tests/sync-harness/graph-steady-state-delta.lua"
 baseline_label = "2026-07-27 post-B12 steady-state delta kick (provider_requests=2: mail delta only; the resident aux pass - B8 contacts pull etc - is waited out and cleared before the measured window)"
 
-[ratatoskr.gate.graph_steady_state_delta.baseline]
+[courly.gate.graph_steady_state_delta.baseline]
 plantasjen = "7cccd36c5d2d4a64823b9bded75d7dbc"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
-[ratatoskr.gate.graph_steady_state_delta.metrics.elapsed_ms]
+[courly.gate.graph_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
 # gross hangs even when a local baseline is already slow.
 max_relative = 1.25
 max = 5000
 
-[ratatoskr.gate.graph_steady_state_delta.metrics.success]
+[courly.gate.graph_steady_state_delta.metrics.success]
 equal = 1
 
-[ratatoskr.gate.graph_steady_state_delta.metrics.exit_code]
+[courly.gate.graph_steady_state_delta.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.graph_steady_state_delta.metrics."sidecar.rss_peak_kb"]
+[courly.gate.graph_steady_state_delta.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.graph_steady_state_delta.metrics."meta.provider_requests"]
+[courly.gate.graph_steady_state_delta.metrics."meta.provider_requests"]
 # Exact-match by design: any new provider request should be reviewed
 # and either justified with a new baseline or fixed.
 max_delta = 0
 
-[ratatoskr.gate.graph_steady_state_delta.metrics."meta.message_count"]
+[courly.gate.graph_steady_state_delta.metrics."meta.message_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.graph_steady_state_delta.metrics."meta.correct"]
+[courly.gate.graph_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.gmail_steady_state_delta]
+[courly.gate.gmail_steady_state_delta]
 script = "crates/app/tests/sync-harness/gmail-steady-state-delta.lua"
 baseline_label = "2026-07-28 aux-quiesced steady-state delta kick (provider_requests=2: profile + history; the resident aux pass is waited out and cleared before the measured window)"
 
-[ratatoskr.gate.gmail_steady_state_delta.baseline]
+[courly.gate.gmail_steady_state_delta.baseline]
 plantasjen = "e27deb6e07a9474a9cccb84082b83805"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics.elapsed_ms]
+[courly.gate.gmail_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
 # gross hangs even when a local baseline is already slow.
 max_relative = 1.25
 max = 5000
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics.success]
+[courly.gate.gmail_steady_state_delta.metrics.success]
 equal = 1
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics.exit_code]
+[courly.gate.gmail_steady_state_delta.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics."sidecar.rss_peak_kb"]
+[courly.gate.gmail_steady_state_delta.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics."meta.provider_requests"]
+[courly.gate.gmail_steady_state_delta.metrics."meta.provider_requests"]
 # Exact-match by design: any new provider request should be reviewed
 # and either justified with a new baseline or fixed.
 max_delta = 0
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics."meta.message_count"]
+[courly.gate.gmail_steady_state_delta.metrics."meta.message_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.gmail_steady_state_delta.metrics."meta.correct"]
+[courly.gate.gmail_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
 # ── B7a calendar steady-state pull gates ────────────────────────────
@@ -262,229 +262,229 @@ equal = 1
 # a rolling-window fetch. These host-recorded baselines pin its request count,
 # elapsed time, RSS, and cache correctness for future changes.
 
-[ratatoskr.gate.gcal_calendar_steady_state]
+[courly.gate.gcal_calendar_steady_state]
 script = "crates/app/tests/sync-harness/gcal-calendar-steady-state.lua"
 baseline_label = "2026-07-18 bifrost B7a Google Calendar rolling-window steady-state pull"
 
-[ratatoskr.gate.gcal_calendar_steady_state.baseline]
+[courly.gate.gcal_calendar_steady_state.baseline]
 plantasjen = "c014da524a57445383186e6fee714025"
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics.elapsed_ms]
+[courly.gate.gcal_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics.success]
+[courly.gate.gcal_calendar_steady_state.metrics.success]
 equal = 1
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics.exit_code]
+[courly.gate.gcal_calendar_steady_state.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+[courly.gate.gcal_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.provider_requests"]
+[courly.gate.gcal_calendar_steady_state.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.calendar_count"]
+[courly.gate.gcal_calendar_steady_state.metrics."meta.calendar_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.calendar_event_count"]
+[courly.gate.gcal_calendar_steady_state.metrics."meta.calendar_event_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.gcal_calendar_steady_state.metrics."meta.correct"]
+[courly.gate.gcal_calendar_steady_state.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.graph_calendar_steady_state]
+[courly.gate.graph_calendar_steady_state]
 script = "crates/app/tests/sync-harness/graph-calendar-steady-state.lua"
 baseline_label = "2026-07-18 bifrost B7a Graph Calendar rolling-window steady-state pull"
 
-[ratatoskr.gate.graph_calendar_steady_state.baseline]
+[courly.gate.graph_calendar_steady_state.baseline]
 plantasjen = "b1b9e84e3d6d47bcafbcba33fe25045a"
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics.elapsed_ms]
+[courly.gate.graph_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics.success]
+[courly.gate.graph_calendar_steady_state.metrics.success]
 equal = 1
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics.exit_code]
+[courly.gate.graph_calendar_steady_state.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+[courly.gate.graph_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.provider_requests"]
+[courly.gate.graph_calendar_steady_state.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.calendar_count"]
+[courly.gate.graph_calendar_steady_state.metrics."meta.calendar_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.calendar_event_count"]
+[courly.gate.graph_calendar_steady_state.metrics."meta.calendar_event_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.graph_calendar_steady_state.metrics."meta.correct"]
+[courly.gate.graph_calendar_steady_state.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.jmap_calendar_steady_state]
+[courly.gate.jmap_calendar_steady_state]
 script = "crates/app/tests/sync-harness/jmap-calendar-steady-state.lua"
 baseline_label = "2026-07-18 bifrost B7a JMAP Calendar rolling-window steady-state pull"
 
-[ratatoskr.gate.jmap_calendar_steady_state.baseline]
+[courly.gate.jmap_calendar_steady_state.baseline]
 plantasjen = "ad2f2ec2180f4bdd82fd5bb3d28a915d"
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics.elapsed_ms]
+[courly.gate.jmap_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics.success]
+[courly.gate.jmap_calendar_steady_state.metrics.success]
 equal = 1
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics.exit_code]
+[courly.gate.jmap_calendar_steady_state.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+[courly.gate.jmap_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.provider_requests"]
+[courly.gate.jmap_calendar_steady_state.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.calendar_count"]
+[courly.gate.jmap_calendar_steady_state.metrics."meta.calendar_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.calendar_event_count"]
+[courly.gate.jmap_calendar_steady_state.metrics."meta.calendar_event_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.jmap_calendar_steady_state.metrics."meta.correct"]
+[courly.gate.jmap_calendar_steady_state.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.caldav_calendar_steady_state]
+[courly.gate.caldav_calendar_steady_state]
 script = "crates/app/tests/sync-harness/caldav-calendar-steady-state.lua"
 baseline_label = "2026-07-18 bifrost B7a CalDAV Calendar rolling-window steady-state pull"
 
-[ratatoskr.gate.caldav_calendar_steady_state.baseline]
+[courly.gate.caldav_calendar_steady_state.baseline]
 plantasjen = "7faca03a89754668be066f8dc70ba620"
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics.elapsed_ms]
+[courly.gate.caldav_calendar_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics.success]
+[courly.gate.caldav_calendar_steady_state.metrics.success]
 equal = 1
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics.exit_code]
+[courly.gate.caldav_calendar_steady_state.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
+[courly.gate.caldav_calendar_steady_state.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.provider_requests"]
+[courly.gate.caldav_calendar_steady_state.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.calendar_count"]
+[courly.gate.caldav_calendar_steady_state.metrics."meta.calendar_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.calendar_event_count"]
+[courly.gate.caldav_calendar_steady_state.metrics."meta.calendar_event_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.caldav_calendar_steady_state.metrics."meta.correct"]
+[courly.gate.caldav_calendar_steady_state.metrics."meta.correct"]
 equal = 1
 
 # B8 contacts: the resident auxiliary pass keeps its source-specific request
 # budgets. The script exports the four divisors as gate metadata so a baseline
 # cannot accidentally bless a uniform cadence.
-[ratatoskr.gate.contacts_cadence]
+[courly.gate.contacts_cadence]
 script = "crates/app/tests/sync-harness/contacts_cadence.lua"
 baseline_label = "2026-07-19 B8 contact pull cadence: jmap=1 graph=5 google=20 carddav=5"
 
-[ratatoskr.gate.contacts_cadence.baseline]
+[courly.gate.contacts_cadence.baseline]
 plantasjen = "3ede120913a24d62ac57b79adfbeda51"
 
-[ratatoskr.gate.contacts_cadence.metrics.success]
+[courly.gate.contacts_cadence.metrics.success]
 equal = 1
 
-[ratatoskr.gate.contacts_cadence.metrics.exit_code]
+[courly.gate.contacts_cadence.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.contacts_cadence.metrics."meta.correct"]
+[courly.gate.contacts_cadence.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.contacts_cadence.metrics."meta.jmap_divisor"]
+[courly.gate.contacts_cadence.metrics."meta.jmap_divisor"]
 equal = 1
 
-[ratatoskr.gate.contacts_cadence.metrics."meta.graph_divisor"]
+[courly.gate.contacts_cadence.metrics."meta.graph_divisor"]
 equal = 5
 
-[ratatoskr.gate.contacts_cadence.metrics."meta.google_divisor"]
+[courly.gate.contacts_cadence.metrics."meta.google_divisor"]
 equal = 20
 
-[ratatoskr.gate.contacts_cadence.metrics."meta.carddav_divisor"]
+[courly.gate.contacts_cadence.metrics."meta.carddav_divisor"]
 equal = 5
 
 # B8-groups: explicit directory-group pull after the resident aux window has
 # settled. The request count is exact so new protocol calls require review.
-[ratatoskr.gate.graph_groups_pull]
+[courly.gate.graph_groups_pull]
 script = "crates/app/tests/sync-harness/contacts/graph_groups_pull.lua"
 baseline_label = "2026-07-28 B8-groups explicit directory-group snapshot pull (graph-groups.lua fixture: memberOf enumeration + one transitiveMembers expansion per imported group, provider_requests=15)"
 
-[ratatoskr.gate.graph_groups_pull.baseline]
+[courly.gate.graph_groups_pull.baseline]
 plantasjen = "5f84d09622884854adf8fdd3b96639f6"
 
-[ratatoskr.gate.graph_groups_pull.metrics.elapsed_ms]
+[courly.gate.graph_groups_pull.metrics.elapsed_ms]
 max_relative = 1.25
 max = 30000
 
-[ratatoskr.gate.graph_groups_pull.metrics.success]
+[courly.gate.graph_groups_pull.metrics.success]
 equal = 1
 
-[ratatoskr.gate.graph_groups_pull.metrics.exit_code]
+[courly.gate.graph_groups_pull.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.graph_groups_pull.metrics."sidecar.rss_peak_kb"]
+[courly.gate.graph_groups_pull.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.graph_groups_pull.metrics."meta.correct"]
+[courly.gate.graph_groups_pull.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.graph_groups_pull.metrics."meta.group_count"]
+[courly.gate.graph_groups_pull.metrics."meta.group_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.graph_groups_pull.metrics."meta.provider_requests"]
+[courly.gate.graph_groups_pull.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.imap_steady_state_delta]
+[courly.gate.imap_steady_state_delta]
 script = "crates/app/tests/sync-harness/imap-steady-state-delta.lua"
 baseline_label = "2026-07-27 post-B12 steady-state delta kick (CONDSTORE no-op delta, provider_requests=6: per folder EXAMINE + flags UID FETCH CHANGEDSINCE + UID SEARCH x2 folders, 0 body fetches; no per-kick reattach on a personal-only server - the rebuild is gated on foreign_namespaces_advertised - and the aux pass is waited out and cleared before the measured window)"
 
-[ratatoskr.gate.imap_steady_state_delta.baseline]
+[courly.gate.imap_steady_state_delta.baseline]
 plantasjen = "236834c767ba4f8e94531f92f133635c"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
-[ratatoskr.gate.imap_steady_state_delta.metrics.elapsed_ms]
+[courly.gate.imap_steady_state_delta.metrics.elapsed_ms]
 # Relative catches normal drift from the host baseline; absolute catches
 # gross hangs even when a local baseline is already slow.
 max_relative = 1.25
 max = 5000
 
-[ratatoskr.gate.imap_steady_state_delta.metrics.success]
+[courly.gate.imap_steady_state_delta.metrics.success]
 equal = 1
 
-[ratatoskr.gate.imap_steady_state_delta.metrics.exit_code]
+[courly.gate.imap_steady_state_delta.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.imap_steady_state_delta.metrics."sidecar.rss_peak_kb"]
+[courly.gate.imap_steady_state_delta.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.imap_steady_state_delta.metrics."meta.provider_requests"]
+[courly.gate.imap_steady_state_delta.metrics."meta.provider_requests"]
 # Exact-match by design: any new provider request should be reviewed
 # and either justified with a new baseline or fixed.
 max_delta = 0
 
-[ratatoskr.gate.imap_steady_state_delta.metrics."meta.message_count"]
+[courly.gate.imap_steady_state_delta.metrics."meta.message_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.imap_steady_state_delta.metrics."meta.correct"]
+[courly.gate.imap_steady_state_delta.metrics."meta.correct"]
 equal = 1
 
 # ── B12 namespaced steady-state gates ────────────────────────────────
@@ -498,75 +498,75 @@ equal = 1
 # pin count, never the hierarchy size (obstacle O), and a foreign-delta
 # count change means duplicated or dropped namespace legs.
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state]
+[courly.gate.graph_shared_mailbox_steady_state]
 script = "crates/app/tests/sync-harness/graph-shared-mailbox-steady-state.lua"
 baseline_label = "2026-07-27 B12 shared-mailbox steady-state delta kick (provider_requests=3: 1 personal + 2 foreign mail deltas on shared-graph-small; no delegate rediscovery)"
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.baseline]
+[courly.gate.graph_shared_mailbox_steady_state.baseline]
 plantasjen = "9097613a934042dab95802903b207a91"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics.elapsed_ms]
+[courly.gate.graph_shared_mailbox_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics.success]
+[courly.gate.graph_shared_mailbox_steady_state.metrics.success]
 equal = 1
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics.exit_code]
+[courly.gate.graph_shared_mailbox_steady_state.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."sidecar.rss_peak_kb"]
+[courly.gate.graph_shared_mailbox_steady_state.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.provider_requests"]
+[courly.gate.graph_shared_mailbox_steady_state.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.graph_personal_mail_requests"]
+[courly.gate.graph_shared_mailbox_steady_state.metrics."meta.graph_personal_mail_requests"]
 equal = 1
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.graph_foreign_mail_requests"]
+[courly.gate.graph_shared_mailbox_steady_state.metrics."meta.graph_foreign_mail_requests"]
 equal = 2
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.message_count"]
+[courly.gate.graph_shared_mailbox_steady_state.metrics."meta.message_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.graph_shared_mailbox_steady_state.metrics."meta.correct"]
+[courly.gate.graph_shared_mailbox_steady_state.metrics."meta.correct"]
 equal = 1
 
-[ratatoskr.gate.graph_public_folder_steady_state]
+[courly.gate.graph_public_folder_steady_state]
 script = "crates/app/tests/sync-harness/graph-public-folder-steady-state.lua"
 baseline_label = "2026-07-27 B12 public-folder steady-state delta kick (provider_requests=2: one EWS FindItem watermark poll per pinned folder on public-folder-small, pins=2 of 3 staged folders; unpinned folders unpolled, no hierarchy re-walk)"
 
-[ratatoskr.gate.graph_public_folder_steady_state.baseline]
+[courly.gate.graph_public_folder_steady_state.baseline]
 plantasjen = "c90520db1ba34cd385657c27c5105e90"
 # Other hosts and CI must record their own baseline with --as-baseline
 # before running this gate.
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics.elapsed_ms]
+[courly.gate.graph_public_folder_steady_state.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics.success]
+[courly.gate.graph_public_folder_steady_state.metrics.success]
 equal = 1
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics.exit_code]
+[courly.gate.graph_public_folder_steady_state.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics."sidecar.rss_peak_kb"]
+[courly.gate.graph_public_folder_steady_state.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.provider_requests"]
+[courly.gate.graph_public_folder_steady_state.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.ews_find_item_requests"]
+[courly.gate.graph_public_folder_steady_state.metrics."meta.ews_find_item_requests"]
 equal = 2
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.message_count"]
+[courly.gate.graph_public_folder_steady_state.metrics."meta.message_count"]
 equal_to_baseline = true
 
-[ratatoskr.gate.graph_public_folder_steady_state.metrics."meta.correct"]
+[courly.gate.graph_public_folder_steady_state.metrics."meta.correct"]
 equal = 1
 
 # ── B6a containers-attach gates ──────────────────────────────────────
@@ -582,110 +582,110 @@ equal = 1
 # round trip. Baselines are host-specific - record with
 # `brokkr sync <script> --gate <name> --bench --as-baseline` before gating.
 
-[ratatoskr.gate.jmap_containers_attach]
+[courly.gate.jmap_containers_attach]
 script = "crates/app/tests/sync-harness/jmap-initial.lua"
 baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_jmap_mailbox_folder_map)"
 
-[ratatoskr.gate.jmap_containers_attach.baseline]
+[courly.gate.jmap_containers_attach.baseline]
 plantasjen = "0c58ef8a3ae843ac82ef1933fc0122c3"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
-[ratatoskr.gate.jmap_containers_attach.metrics.elapsed_ms]
+[courly.gate.jmap_containers_attach.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.jmap_containers_attach.metrics.success]
+[courly.gate.jmap_containers_attach.metrics.success]
 equal = 1
 
-[ratatoskr.gate.jmap_containers_attach.metrics.exit_code]
+[courly.gate.jmap_containers_attach.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.jmap_containers_attach.metrics."sidecar.rss_peak_kb"]
+[courly.gate.jmap_containers_attach.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.jmap_containers_attach.metrics."meta.provider_requests"]
+[courly.gate.jmap_containers_attach.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.graph_containers_attach]
+[courly.gate.graph_containers_attach]
 script = "crates/app/tests/sync-harness/graph-initial.lua"
 baseline_label = "2026-07-28 B8-groups cycle-zero directory-group pull joins the Graph attach window (provider_requests=21)"
 
-[ratatoskr.gate.graph_containers_attach.baseline]
+[courly.gate.graph_containers_attach.baseline]
 plantasjen = "734ca90dd5d94abaa671f65960697779"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
-[ratatoskr.gate.graph_containers_attach.metrics.elapsed_ms]
+[courly.gate.graph_containers_attach.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.graph_containers_attach.metrics.success]
+[courly.gate.graph_containers_attach.metrics.success]
 equal = 1
 
-[ratatoskr.gate.graph_containers_attach.metrics.exit_code]
+[courly.gate.graph_containers_attach.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.graph_containers_attach.metrics."sidecar.rss_peak_kb"]
+[courly.gate.graph_containers_attach.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.graph_containers_attach.metrics."meta.provider_requests"]
+[courly.gate.graph_containers_attach.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.gmail_containers_attach]
+[courly.gate.gmail_containers_attach]
 script = "crates/app/tests/sync-harness/gmail-initial.lua"
 baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_gmail_label_folder_map)"
 
-[ratatoskr.gate.gmail_containers_attach.baseline]
+[courly.gate.gmail_containers_attach.baseline]
 plantasjen = "21db214172fd4c689437016ce1e0f74b"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
-[ratatoskr.gate.gmail_containers_attach.metrics.elapsed_ms]
+[courly.gate.gmail_containers_attach.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.gmail_containers_attach.metrics.success]
+[courly.gate.gmail_containers_attach.metrics.success]
 equal = 1
 
-[ratatoskr.gate.gmail_containers_attach.metrics.exit_code]
+[courly.gate.gmail_containers_attach.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.gmail_containers_attach.metrics."sidecar.rss_peak_kb"]
+[courly.gate.gmail_containers_attach.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.gmail_containers_attach.metrics."meta.provider_requests"]
+[courly.gate.gmail_containers_attach.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.imap_containers_attach]
+[courly.gate.imap_containers_attach]
 script = "crates/app/tests/sync-harness/imap-initial.lua"
 baseline_label = "2026-06-27 bifrost B6a containers_list attach (single containers_list pass replaces sync_imap_folder_map)"
 
-[ratatoskr.gate.imap_containers_attach.baseline]
+[courly.gate.imap_containers_attach.baseline]
 plantasjen = "6d13d5d15cf641ce810ebbcac10fac13"
 # Other hosts and CI must record their own baseline with --as-baseline.
 
-[ratatoskr.gate.imap_containers_attach.metrics.elapsed_ms]
+[courly.gate.imap_containers_attach.metrics.elapsed_ms]
 max_relative = 1.25
 max = 10000
 
-[ratatoskr.gate.imap_containers_attach.metrics.success]
+[courly.gate.imap_containers_attach.metrics.success]
 equal = 1
 
-[ratatoskr.gate.imap_containers_attach.metrics.exit_code]
+[courly.gate.imap_containers_attach.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.imap_containers_attach.metrics."sidecar.rss_peak_kb"]
+[courly.gate.imap_containers_attach.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.imap_containers_attach.metrics."meta.provider_requests"]
+[courly.gate.imap_containers_attach.metrics."meta.provider_requests"]
 max_delta = 0
 
-[ratatoskr.gate.bifrost-consumer-hot-path]
+[courly.gate.bifrost-consumer-hot-path]
 script = "crates/app/tests/sync-harness/bifrost-consumer-hot-path.lua"
 baseline_label = "2026-06-18 B3a bifrost consumer hot-path baseline"
 
-[ratatoskr.gate.bifrost-consumer-hot-path.baseline]
+[courly.gate.bifrost-consumer-hot-path.baseline]
 plantasjen = "088ecb3ef7724690a625a9e627f33b1f"
 
-[ratatoskr.gate.bifrost-consumer-hot-path.metrics.elapsed_ms]
+[courly.gate.bifrost-consumer-hot-path.metrics.elapsed_ms]
 # MARKED measurement: the script emits SYNC_START/SYNC_END around exactly the
 # consumer draining the injected synthetic batch (inject -> durable ack ->
 # probe-confirmed drain), so `elapsed_ms` here is the hot-path duration ONLY,
@@ -699,16 +699,16 @@ plantasjen = "088ecb3ef7724690a625a9e627f33b1f"
 max_relative = 1.6
 max = 2000
 
-[ratatoskr.gate.bifrost-consumer-hot-path.metrics.success]
+[courly.gate.bifrost-consumer-hot-path.metrics.success]
 equal = 1
 
-[ratatoskr.gate.bifrost-consumer-hot-path.metrics.exit_code]
+[courly.gate.bifrost-consumer-hot-path.metrics.exit_code]
 equal = 0
 
-[ratatoskr.gate.bifrost-consumer-hot-path.metrics."sidecar.rss_peak_kb"]
+[courly.gate.bifrost-consumer-hot-path.metrics."sidecar.rss_peak_kb"]
 max_relative = 1.20
 
-[ratatoskr.gate.bifrost-consumer-hot-path.metrics."meta.messages_per_second"]
+[courly.gate.bifrost-consumer-hot-path.metrics."meta.messages_per_second"]
 # Measured absolute floor (2026-07-28, plantasjen): best-of-5 gave 888.9 msg/s
 # at 225ms; the documented 228-331ms noise band maps to ~604-877 msg/s. 300
 # sits well below sampling jitter but catches a ~3x throughput collapse, and
@@ -717,7 +717,7 @@ max_relative = 1.20
 # was satisfiable by any number and functioned only as a presence check.
 min = 300
 
-[ratatoskr.gate.bifrost-consumer-hot-path.metrics."meta.marker_rows"]
+[courly.gate.bifrost-consumer-hot-path.metrics."meta.marker_rows"]
 # One acked advancing checkpoint leaves exactly one replay-safety marker
 # (the recent-window prune keeps it; 1 < 256). A regression that fails to
 # write the marker (0) or writes one per message (200) is caught here.

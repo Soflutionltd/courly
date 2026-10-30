@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ratatoskr needs a full calendar as a first-class view alongside email. Enterprise users live in their calendar as much as their inbox - an email client without calendar is not a serious tool for enterprise adoption. This is not a "nice to have" feature; it is a blocker.
+Courly needs a full calendar as a first-class view alongside email. Enterprise users live in their calendar as much as their inbox - an email client without calendar is not a serious tool for enterprise adoption. This is not a "nice to have" feature; it is a blocker.
 
 The calendar exists at two layers:
 

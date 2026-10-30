@@ -69,7 +69,7 @@ fn parse_addresses(values: &[String]) -> Result<Vec<Address>, SendError> {
     values.iter().map(|addr| parse_address(addr)).collect()
 }
 
-/// Map ratatoskr's consumer-facing send request to bifrost's structured
+/// Map courly's consumer-facing send request to bifrost's structured
 /// `SendRequest`. Each `to` / `cc` / `bcc` entry is parsed as one full RFC
 /// 5322 address. Do not comma-split these Vec entries.
 pub fn to_bifrost_send_request(

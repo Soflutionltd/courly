@@ -139,7 +139,7 @@ local personal_event_url = personal_url .. "ev-personal-reap.ics"
 local personal_event_ics = table.concat({
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//ratatoskr//harness//EN",
+    "PRODID:-//courly//harness//EN",
     "BEGIN:VEVENT",
     "UID:ev-personal-reap",
     "SUMMARY:Personal survives the reap",

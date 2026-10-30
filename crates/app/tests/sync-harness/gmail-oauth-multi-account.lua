@@ -14,7 +14,7 @@ local function mint_token(token_url, account_id, label)
             grant_type = "authorization_code",
             account_id = account_id,
             code = "harness-gmail-oauth-" .. account_id,
-            client_id = "ratatoskr-gmail-oauth-harness",
+            client_id = "courly-gmail-oauth-harness",
             redirect_uri = "http://127.0.0.1/oauth-callback",
         },
     })
@@ -82,7 +82,7 @@ local primary, primary_err = client:request("TestSeedAccount", {
     refresh_token = primary_token.refresh_token,
     token_expires_at = future_expiry,
     oauth_provider = "google",
-    oauth_client_id = "ratatoskr-gmail-oauth-harness",
+    oauth_client_id = "courly-gmail-oauth-harness",
     oauth_token_url = token_url,
 })
 harness.assert(primary_err == nil, "primary TestSeedAccount failed")
@@ -96,7 +96,7 @@ local secondary, secondary_err = client:request("TestSeedAccount", {
     refresh_token = secondary_token.refresh_token,
     token_expires_at = future_expiry,
     oauth_provider = "google",
-    oauth_client_id = "ratatoskr-gmail-oauth-harness",
+    oauth_client_id = "courly-gmail-oauth-harness",
     oauth_token_url = token_url,
 })
 harness.assert(secondary_err == nil, "secondary TestSeedAccount failed")

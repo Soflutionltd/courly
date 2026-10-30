@@ -4,7 +4,7 @@
 -- protocol: jmap
 -- ceiling: 180s
 --
--- Deliberately NOT a `[ratatoskr.gate.*]` bench gate. The load-bearing
+-- Deliberately NOT a `[courly.gate.*]` bench gate. The load-bearing
 -- property (a 10k-message steady state must never fall back to
 -- Email/query) is asserted inline below, so any suite/smoke run enforces
 -- it; the per-kick request-count budget is already pinned by the

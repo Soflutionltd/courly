@@ -68,8 +68,8 @@ claims and unknown IDs. It does not make missing claims a hard loader error yet.
 
 The workspace crate exposes a small process entrypoint for the tool-first stage:
 
-- `ratatoskr-coverage lint-docs [DOCS_ROOT]` lints doc markers only.
-- `ratatoskr-coverage report [WORKSPACE_ROOT] [--area ID_PREFIX] [--strict]`
+- `courly-coverage lint-docs [DOCS_ROOT]` lints doc markers only.
+- `courly-coverage report [WORKSPACE_ROOT] [--area ID_PREFIX] [--strict]`
   prints registered contracts, doc diagnostics, Lua claim diagnostics,
   registered contracts with no Lua claim, Lua tests with no claim, and Lua
   claims that reference unknown IDs. `--area` filters contract and claim lists
@@ -84,4 +84,4 @@ repository smoke tests. `brokkr check -p coverage` fails if
 
 The eventual `brokkr coverage` command can shell out to this entrypoint or
 reimplement the same parser on the brokkr side. That integration point remains
-an explicit cross-repository decision because brokkr is not a Ratatoskr crate.
+an explicit cross-repository decision because brokkr is not a Courly crate.

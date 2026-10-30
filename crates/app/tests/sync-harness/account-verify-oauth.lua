@@ -14,7 +14,7 @@ local token = harness.http_json({
         grant_type = "authorization_code",
         account_id = "account-1",
         code = "account-verify-oauth",
-        client_id = "ratatoskr-gmail-harness",
+        client_id = "courly-gmail-harness",
         redirect_uri = "http://127.0.0.1/oauth-callback",
     },
 })

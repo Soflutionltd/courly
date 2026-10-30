@@ -1,6 +1,6 @@
 name = "contacts-dedup"
 
-# Cross-provider dedup gate. dedup_claims.lua seeds two ratatoskr accounts (one
+# Cross-provider dedup gate. dedup_claims.lua seeds two courly accounts (one
 # Google, one Graph) that both talk to this single mock, so the same email
 # alice@example.com is claimed by both providers. The unified `contact_claims`
 # ledger records one claim per (account, source); the deduplicated `contacts`

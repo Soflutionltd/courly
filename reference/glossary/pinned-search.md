@@ -15,7 +15,7 @@ A pinned search is an **ephemeral, local, query-keyed snapshot of thread IDs**, 
 
 ## Storage
 
-`crates/db/src/db/schema/07_smart.sql` defines two tables in the main `ratatoskr.db`:
+`crates/db/src/db/schema/07_smart.sql` defines two tables in the main `courly.db`:
 
 - `pinned_searches(id, query, created_at, updated_at, scope_account_id)` - one row per snapshot. `scope_account_id` is NULL for cross-account searches and records the sidebar scope at execution time so refresh hits the same account set. `UNIQUE(query)` enforces dedup.
 - `pinned_search_threads(pinned_search_id, thread_id, account_id)` - the snapshot. `ON DELETE CASCADE` from the parent. Not a foreign key into `threads` - threads can be deleted by sync while a pinned search persists; the join simply returns fewer rows.

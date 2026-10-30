@@ -11,7 +11,7 @@ fn main() -> ExitCode {
         "report" => report(&rest),
         _ => {
             eprintln!(
-                "usage: ratatoskr-coverage [lint-docs [DOCS_ROOT] | report [ROOT] [--area ID_PREFIX] [--strict]]"
+                "usage: courly-coverage [lint-docs [DOCS_ROOT] | report [ROOT] [--area ID_PREFIX] [--strict]]"
             );
             ExitCode::FAILURE
         }
@@ -180,7 +180,7 @@ fn parse_report_args(args: &[String]) -> Option<ReportArgs> {
         if arg == "--area" {
             index += 1;
             let Some(value) = args.get(index) else {
-                eprintln!("usage: ratatoskr-coverage report [ROOT] [--area ID_PREFIX] [--strict]");
+                eprintln!("usage: courly-coverage report [ROOT] [--area ID_PREFIX] [--strict]");
                 return None;
             };
             area = Some(value.clone());
@@ -191,7 +191,7 @@ fn parse_report_args(args: &[String]) -> Option<ReportArgs> {
         } else if root.is_none() {
             root = Some(PathBuf::from(arg));
         } else {
-            eprintln!("usage: ratatoskr-coverage report [ROOT] [--area ID_PREFIX] [--strict]");
+            eprintln!("usage: courly-coverage report [ROOT] [--area ID_PREFIX] [--strict]");
             return None;
         }
         index += 1;
@@ -217,7 +217,7 @@ fn matches_area(id: &str, area: Option<&str>) -> bool {
 
 fn optional_path_arg(args: &[String], command: &str, default: PathBuf) -> Option<PathBuf> {
     if args.len() > 1 {
-        eprintln!("usage: ratatoskr-coverage {command} [PATH]");
+        eprintln!("usage: courly-coverage {command} [PATH]");
         return None;
     }
     Some(args.iter().next().map(PathBuf::from).unwrap_or(default))

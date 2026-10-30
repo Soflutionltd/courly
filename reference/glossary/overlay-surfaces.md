@@ -1,6 +1,6 @@
 # Overlay Surfaces Glossary
 
-Canonical terminology for overlay-like UI surfaces in Ratatoskr.
+Canonical terminology for overlay-like UI surfaces in Courly.
 
 This glossary entry defines the semantic surface types used across the app. Implementation plans and refactors should reference these terms rather than inventing local names like "popup" or overloading primitive names.
 

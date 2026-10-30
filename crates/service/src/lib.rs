@@ -121,7 +121,7 @@ pub fn run_service_blocking() -> ! {
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .thread_name("ratatoskr-service")
+        .thread_name("courly-service")
         .build()
     {
         Ok(runtime) => runtime,

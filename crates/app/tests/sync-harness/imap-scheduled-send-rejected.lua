@@ -4,15 +4,15 @@
 -- ceiling: 120s
 --
 -- B5c capability-gate gate (read the B5 spec section 4.4). FUTURERELEASE is a
--- per-connection SMTP EHLO truth ratatoskr treats as statically absent, so
+-- per-connection SMTP EHLO truth courly treats as statically absent, so
 -- bifrost reports `capabilities().pim_methods.scheduled_send = false` for IMAP
--- accounts. ratatoskr's `send_scheduled` reads that flag and rejects an
+-- accounts. courly's `send_scheduled` reads that flag and rejects an
 -- `action.send` carrying `scheduled_at` before any SMTP submission - the
 -- unwired local-delegation scaffold stays unwired for incapable providers.
 --
 -- This gate issues a scheduled `action.send` against an IMAP account and
 -- asserts the journaled send finalizes FAILED (the gate rejected it). No SMTP
--- submission should fire; the rejection is entirely in ratatoskr.
+-- submission should fire; the rejection is entirely in courly.
 
 local function smtp_log_url()
     local base = harness.env("COURLY_TEST_JMAP_ENDPOINT")

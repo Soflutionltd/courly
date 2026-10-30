@@ -257,7 +257,7 @@ RFC 3676 Section 4.3 defines the signature separator: `-- ` (dash dash space, fo
 | Reply (top-posting) | Between new content and quoted text |
 | Forward | Same as reply top-posting |
 
-Wrap the signature in `<div id="ratatoskr-signature" data-signature-id="{uuid}">` for replacement, stripping on reply, and edit boundary handling.
+Wrap the signature in `<div id="courly-signature" data-signature-id="{uuid}">` for replacement, stripping on reply, and edit boundary handling.
 
 #### `is_default` vs `is_reply_default`
 

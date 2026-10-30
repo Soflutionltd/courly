@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ratatoskr targets mailboxes with hundreds of thousands of messages and 150+ GB of cached content. The current thread list, sidebar trees, and search-result list all materialise their entire backing dataset up front - the thread list renders every visible card inside a `column![]` wrapped in a `scrollable`, the sidebar's per-account label tree loads all labels eagerly, and search returns a single capped batch. None of these scale to the project's target volume.
+Courly targets mailboxes with hundreds of thousands of messages and 150+ GB of cached content. The current thread list, sidebar trees, and search-result list all materialise their entire backing dataset up front - the thread list renders every visible card inside a `column![]` wrapped in a `scrollable`, the sidebar's per-account label tree loads all labels eagerly, and search returns a single capped batch. None of these scale to the project's target volume.
 
 The right behaviour is an *endless* lazy-loaded list: the user scrolls, and rows materialise as they come into view, with no end-of-list pagination control and no visible page boundaries. This document captures the surfaces that need it, the constraints, what we already know from a prior attempt, and the open design questions.
 
@@ -50,7 +50,7 @@ The strong implication is that this work is **not** a pure "swap a `column!` for
 
 - Is the iced fork itself the right venue for a virtualised container? If so, this work involves an upstream change to `crates/sluggrs/...`, not just an app-level widget. The build infrastructure has the iced source in-tree so the change is mechanically possible, but it's a bigger commitment than an app-only widget.
 - How does the widget interact with iced's `responsive` layout, scrollbar styling, and overlay surfaces (context menus on cards, drag-and-drop)?
-- Do we keep a fixed-height card assumption, or support variable-height cards? Fixed-height makes the math trivial; thread cards in Ratatoskr are very nearly fixed-height already but not exactly.
+- Do we keep a fixed-height card assumption, or support variable-height cards? Fixed-height makes the math trivial; thread cards in Courly are very nearly fixed-height already but not exactly.
 - How do we handle selection-rooted navigation (j/k, page up/down, home/end) when the underlying dataset is paged? `end` in particular has to be a backend-side query, not a "jump to row N-1."
 - What's the eviction policy? Time-based, distance-based, fixed pool? The "iced re-diffs everything anyway" hypothesis would steer us toward a fixed pool that never deallocates.
 

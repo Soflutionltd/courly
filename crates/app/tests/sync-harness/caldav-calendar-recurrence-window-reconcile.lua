@@ -27,7 +27,7 @@
 --     the active window. It is returned by the active-window pull (still live),
 --     and is the resource REMOVED below to exercise a real delete.
 --
--- This script drives the ratatoskr side end-to-end; only the fixture + the
+-- This script drives the courly side end-to-end; only the fixture + the
 -- assertions' exact google_event_ids depend on the side-quest.
 
 local function event_by_google_event_id(events, google_event_id)

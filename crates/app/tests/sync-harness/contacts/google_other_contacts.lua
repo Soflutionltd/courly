@@ -12,7 +12,7 @@ harness.assert(admin ~= nil, "saehrimnir admin endpoint missing")
 local token_url = harness.join_url(admin, "oauth/token")
 local minted = harness.http_json({ method = "POST", url = token_url, body = {
     grant_type = "authorization_code", account_id = "account-1",
-    code = "harness-contacts-google-other", client_id = "ratatoskr-contacts-harness",
+    code = "harness-contacts-google-other", client_id = "courly-contacts-harness",
     redirect_uri = "http://127.0.0.1/oauth-callback",
 } })
 harness.assert(minted.access_token ~= nil, "/oauth/token did not return access_token")
@@ -26,7 +26,7 @@ local account, seed_err = client:request("TestSeedAccount", {
     email = "b8-other@example.test", provider = "gmail_api",
     access_token = minted.access_token, refresh_token = "b8-other-refresh-unused",
     token_expires_at = 2000000000, oauth_provider = "google",
-    oauth_client_id = "ratatoskr-contacts-harness", oauth_token_url = token_url,
+    oauth_client_id = "courly-contacts-harness", oauth_token_url = token_url,
 })
 harness.assert(seed_err == nil, "seed Google account")
 

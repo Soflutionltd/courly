@@ -71,7 +71,7 @@ harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 local token_url = harness.join_url(admin_endpoint, "oauth/token")
 harness.clear_mock_requests(admin_endpoint)
 
--- Two ratatoskr-side JMAP accounts both syncing against saehrimnir
+-- Two courly-side JMAP accounts both syncing against saehrimnir
 -- requires per-bearer routing through `oauth::account_from_bearer` -
 -- basic-auth pins every connection to the fixture's `primary = true`
 -- account regardless of credentials.
@@ -83,7 +83,7 @@ local function mint_token(account_id, label)
             grant_type = "authorization_code",
             account_id = account_id,
             code = "harness-jmap-shared-blob-" .. account_id,
-            client_id = "ratatoskr-jmap-shared-blob-harness",
+            client_id = "courly-jmap-shared-blob-harness",
             redirect_uri = "http://127.0.0.1/oauth-callback",
         },
     })
@@ -118,7 +118,7 @@ local alice, alice_err = client:request("TestSeedAccount", {
     refresh_token = "alice-refresh-unused",
     token_expires_at = future_expiry,
     oauth_provider = "google",
-    oauth_client_id = "ratatoskr-jmap-shared-blob-harness",
+    oauth_client_id = "courly-jmap-shared-blob-harness",
     oauth_token_url = token_url,
 })
 harness.assert(alice_err == nil, "alice TestSeedAccount failed")
@@ -133,7 +133,7 @@ local bob, bob_err = client:request("TestSeedAccount", {
     refresh_token = "bob-refresh-unused",
     token_expires_at = future_expiry,
     oauth_provider = "google",
-    oauth_client_id = "ratatoskr-jmap-shared-blob-harness",
+    oauth_client_id = "courly-jmap-shared-blob-harness",
     oauth_token_url = token_url,
 })
 harness.assert(bob_err == nil, "bob TestSeedAccount failed")

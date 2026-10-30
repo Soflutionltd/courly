@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ratatoskr's main window is where users spend 90% of their time. The layout must serve enterprise power users processing 200+ emails/day across 3+ accounts - people who are stuck on Outlook because nothing else handles their volume. The design takes cues from Superhuman's speed and focus, but adds the depth (folder trees, multi-account, bulk operations) that enterprise users require.
+Courly's main window is where users spend 90% of their time. The layout must serve enterprise power users processing 200+ emails/day across 3+ accounts - people who are stuck on Outlook because nothing else handles their volume. The design takes cues from Superhuman's speed and focus, but adds the depth (folder trees, multi-account, bulk operations) that enterprise users require.
 
 This document covers the main window's structure, the thread list, the conversation/reading pane, and the interaction model that ties them together. It does not cover the sidebar (see `docs/sidebar/problem-statement.md`) or the command palette (see `docs/cmdk/problem-statement.md`), though both are integral to the experience.
 
@@ -456,7 +456,7 @@ This matches Superhuman and Gmail's keyboard model. The shortcuts are registered
 
 The target workflow for processing a full inbox:
 
-1. User opens Ratatoskr, sees unified inbox sorted by date
+1. User opens Courly, sees unified inbox sorted by date
 2. First unread thread is auto-selected, conversation visible in reading pane
 3. User reads → presses `e` to archive → selection auto-advances to next thread
 4. User reads → presses `r` to reply → types response → presses Cmd+Enter to send → auto-archives and advances
@@ -494,8 +494,8 @@ Some shortcuts change meaning based on context:
 1. **Full folder/label tree** - Superhuman has splits (inbox sections) but no traditional folder navigation. Enterprise users need their folder trees, accessed via sidebar + palette.
 2. **Multi-account depth** - Superhuman supports multiple accounts but doesn't have the scope selector / unified view model we've designed. Our sidebar handles this.
 3. **Bulk operations** - Superhuman is one-at-a-time by design. Enterprise users need multi-select + bulk archive/move/label.
-4. **Offline-first** - Superhuman is online-only. Ratatoskr works offline with an action queue.
-5. **Open/local** - Superhuman is a cloud service. Ratatoskr is a local application with local data. No server dependency, no subscription.
+4. **Offline-first** - Superhuman is online-only. Courly works offline with an action queue.
+5. **Open/local** - Superhuman is a cloud service. Courly is a local application with local data. No server dependency, no subscription.
 6. **Command palette as primary** - Superhuman has Cmd+K but it's a feature. For us it's *the* interface - every action, every navigation, every setting.
 
 ## Implementation Sequence

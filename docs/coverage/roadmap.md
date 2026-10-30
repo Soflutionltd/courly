@@ -25,7 +25,7 @@ The foundational decision. The marker scheme is what makes a doc section a regis
 
 **Current implementation notes:**
 
-- The initial parser lives in `crates/coverage/` and exposes a `ratatoskr-coverage` process entrypoint. This keeps Ratatoskr independent of brokkr's source while leaving a concrete command brokkr can wrap later.
+- The initial parser lives in `crates/coverage/` and exposes a `courly-coverage` process entrypoint. This keeps Courly independent of brokkr's source while leaving a concrete command brokkr can wrap later.
 - The smoke catalog currently marks five sections in `reference/architecture.md`: action service gate, provider trait abstraction, generation counters, folder-vs-label semantics, and adding a new email action.
 - The parser ignores fenced code blocks so docs can show marker examples without registering duplicate contracts.
 
@@ -80,7 +80,7 @@ The first user-visible deliverable. A subcommand that reads doc anchors and Lua 
 
 **Current implementation notes:**
 
-- `ratatoskr-coverage report [WORKSPACE_ROOT]` already produces the read-only plain-text report shape from the Ratatoskr side. The brokkr integration remains pending because brokkr lives in a separate repository.
+- `courly-coverage report [WORKSPACE_ROOT]` already produces the read-only plain-text report shape from the Courly side. The brokkr integration remains pending because brokkr lives in a separate repository.
 - Contracts with `status=gap`, `status=retired`, `status=compile-enforced`, or `enforcement=compiler` remain visible in the report but are excluded from the "registered contracts with no Lua claim" list.
 
 **Design decisions to resolve in this slice:**
@@ -117,7 +117,7 @@ The first real use of the system. Pick one bounded area, bring its contracts to 
 **Current implementation notes:**
 
 - Pilot area chosen: folders-labels semantics. The pilot contracts live in `reference/glossary/folders-labels.md`, backed by focused sync-harness claims for Graph categories as tag labels, JMAP mailboxes as container folders, account-scoped Gmail label identity, canonical system IDs, and provider-prefixed non-system IDs.
-- `ratatoskr-coverage report --area glossary.folders_labels` is the narrow report loop for this pilot. `ratatoskr-coverage report --area architecture` shows the architecture-level smoke catalog.
+- `courly-coverage report --area glossary.folders_labels` is the narrow report loop for this pilot. `courly-coverage report --area architecture` shows the architecture-level smoke catalog.
 - `brokkr check -p coverage` now enforces the pilot report shape through a repository smoke test: `glossary.folders_labels` must have no uncovered contracts and no unknown Lua claims.
 
 **Out of scope for this slice:**
@@ -140,7 +140,7 @@ Flip the switch on the pilot. The harness loader rejects pilot-area tests that f
 
 **Current implementation notes:**
 
-- The Ratatoskr-side equivalent exists as `ratatoskr-coverage report --area glossary.folders_labels --strict`.
+- The Courly-side equivalent exists as `courly-coverage report --area glossary.folders_labels --strict`.
 - The dedicated brokkr command and harness-loader rejection are still pending. Until then, the coverage crate smoke test gives the pilot an in-workspace regression gate.
 
 **Design decisions to resolve in this slice:**

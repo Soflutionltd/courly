@@ -52,7 +52,7 @@ harness.assert(not before_hello.is_read, "Hello unexpectedly read before mutatio
 
 -- `account-1` and `email-001` are fixture IDs from jmap-small.toml.
 -- The raw JMAP mutation intentionally targets the same message that
--- ratatoskr imported during the initial sync.
+-- courly imported during the initial sync.
 local mutation = harness.http_json({
     method = "POST",
     url = jmap_api_url,

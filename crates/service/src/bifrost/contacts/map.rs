@@ -122,7 +122,7 @@ mod tests {
             is_primary: true,
         }];
         source.organizations = vec![ContactOrganization {
-            name: "Ratatoskr AS".into(),
+            name: "Courly AS".into(),
             title: None,
         }];
         source.notes = Some("A note".into());
@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(row.id, "carddav-account-contact@example.test");
         assert_eq!(row.display_name.as_deref(), Some("Contact Name"));
         assert_eq!(row.phone.as_deref(), Some("+47 123 45 678"));
-        assert_eq!(row.company.as_deref(), Some("Ratatoskr AS"));
+        assert_eq!(row.company.as_deref(), Some("Courly AS"));
         assert_eq!(row.notes.as_deref(), Some("A note"));
         assert_eq!(
             row.avatar_url.as_deref(),

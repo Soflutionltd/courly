@@ -2,7 +2,7 @@ name = "mdn-small"
 
 # Fixture for the read-receipt (MDN) path. The Inbox carries one received
 # message whose raw bytes request a disposition notification
-# (Disposition-Notification-To). When ratatoskr marks it read, it must compose
+# (Disposition-Notification-To). When courly marks it read, it must compose
 # and send an RFC 8098 MDN back to the requesting sender. Sent is present so an
 # IMAP MDN send can append the MDN copy; Drafts is present because the
 # HTTP-API providers (JMAP Email/import, Graph raw draft create) stage the

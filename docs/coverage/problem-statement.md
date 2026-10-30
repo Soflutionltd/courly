@@ -2,7 +2,7 @@
 
 ## Overview
 
-Ratatoskr needs a coverage system that answers one question precisely:
+Courly needs a coverage system that answers one question precisely:
 
 > Which behavioral contracts do we require, which do we have tests for, and which are missing?
 
@@ -12,7 +12,7 @@ The system is modeled on the command palette principle. The command palette prob
 
 The coverage system applies the same shape to behavioral contracts and tests:
 
-> Every behavioral contract in Ratatoskr must be a registered requirement with a stable identity, and every test must claim at least one registered requirement. There is no way to add a contract without registering it, and no way to add a test without claiming what it covers.
+> Every behavioral contract in Courly must be a registered requirement with a stable identity, and every test must claim at least one registered requirement. There is no way to add a contract without registering it, and no way to add a test without claiming what it covers.
 
 This is not currently true. It must become true. Ideally the code architecture enforces it, the way the `CommandId` enum forces every command to be handled in `update()`.
 
@@ -171,7 +171,7 @@ The backfill is staged by doc area so it does not block on a single giant commit
 
 ## Open Questions
 
-1. **How does brokkr consume the Ratatoskr parser?** The initial parser lives in Ratatoskr's `coverage` crate and exposes a process entrypoint. Brokkr is a separate repository and should not take a source dependency on Ratatoskr. The integration choice is whether `brokkr coverage` shells out to `ratatoskr-coverage`, reimplements the same parser in brokkr, or both repositories depend on a third shared tool crate.
+1. **How does brokkr consume the Courly parser?** The initial parser lives in Courly's `coverage` crate and exposes a process entrypoint. Brokkr is a separate repository and should not take a source dependency on Courly. The integration choice is whether `brokkr coverage` shells out to `courly-coverage`, reimplements the same parser in brokkr, or both repositories depend on a third shared tool crate.
 
 2. **Where does the `ContractId` enum live?** Candidate: a new `coverage` crate in the workspace whose build script discovers harness scripts and generates the enum. Affects how Rust integration tests reference the IDs.
 

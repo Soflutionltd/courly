@@ -6,7 +6,7 @@
 -- B5c capability-gate gate (read the B5 spec section 4.4). Gmail advertises as
 -- a PIM-rich provider, but its REST API has NO server-side delayed-send lever
 -- (web-UI only), so bifrost reports `capabilities().pim_methods.scheduled_send
--- = false` for Gmail. ratatoskr's `send_scheduled` reads that flag as the
+-- = false` for Gmail. courly's `send_scheduled` reads that flag as the
 -- single source of truth and rejects an `action.send` carrying `scheduled_at`
 -- BEFORE any provider round-trip - the capability flag, never a hardcoded
 -- provider allowlist, decides.
@@ -14,7 +14,7 @@
 -- This gate issues a scheduled `action.send` against a Gmail account and
 -- asserts the journaled send finalizes FAILED (the gate rejected it) rather
 -- than dispatching. It needs no saehrimnir send surface: the rejection fires in
--- ratatoskr before the engine would touch the wire.
+-- courly before the engine would touch the wire.
 
 local function wait_for_action_completed(queue, plan_id, timeout)
     local deadline = harness.now_ms() + timeout * 1000

@@ -91,7 +91,7 @@ Microsoft has announced that after October 2026:
 
 This creates an impossible situation for third-party clients: the only API that supports public folders (EWS) is being retired, and no replacement is offered. Microsoft's recommended migration path is to move public folder content to M365 Groups, but enterprise customers have resisted this for over a decade.
 
-#### What this means for Ratatoskr
+#### What this means for Courly
 
 Three scenarios, in order of likelihood:
 
@@ -215,7 +215,7 @@ Thunderbird (Mozilla) has built a Rust EWS crate: [thunderbird/ews-rs](https://g
 - **Scope**: Focuses on mail operations (the operations Thunderbird needs). Does not appear to cover public folder-specific operations.
 - **Issues**: Bug reports go to Mozilla's Bugzilla, not GitHub Issues.
 
-#### Options for Ratatoskr
+#### Options for Courly
 
 **Option A: Use ews-rs directly.** Fork or depend on it. Add public folder operations (FindFolder with public folder root, PR_REPLICA_LIST property, etc.). Benefit: leverages Thunderbird's XML serialization infrastructure. Risk: MPL 2.0 requires file-level copyleft, and the crate's API is designed around Thunderbird's architecture.
 
@@ -430,7 +430,7 @@ Thunderbird 145 (November 2025) shipped native Exchange support via EWS built in
 
 Thunderbird's `ews-rs` crate (MPL 2.0) provides the EWS type system and XML serialization infrastructure. It focuses on the operations Thunderbird needs for personal mail. Public folder operations (FindFolder on `publicfoldersroot`, `PR_REPLICA_LIST` handling, content mailbox routing) would need to be added.
 
-**Relevance**: Thunderbird is in the same position as Ratatoskr - EWS-dependent for public folders, with no Graph alternative. Their approach is to build EWS support incrementally, starting with personal mail. Public folders are on their roadmap but not yet implemented.
+**Relevance**: Thunderbird is in the same position as Courly - EWS-dependent for public folders, with no Graph alternative. Their approach is to build EWS support incrementally, starting with personal mail. Public folders are on their roadmap but not yet implemented.
 
 ---
 

@@ -32,8 +32,8 @@ different licenses, a structural separation is maintained:
   implementations and are consulted for analysis, comparison, and critique -
   but they produce analysis and critique, never code, pseudocode, or
   structural blueprints.
-- This separation is enforced by tooling
-  ([review](https://github.com/folknor/review)), not by convention alone.
+- This separation is enforced by tooling,
+  not by convention alone.
 
 This mirrors the clean-room design pattern: one team reads the reference
 material and produces a specification, a separate team writes the

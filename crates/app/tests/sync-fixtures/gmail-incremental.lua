@@ -1,6 +1,6 @@
 -- Gmail incremental-sync scenario: a steady-state baseline plus a
 -- four-step change script that exercises the Gmail `history.list`
--- record types ratatoskr's `changes_from_history` consumes:
+-- record types courly's `changes_from_history` consumes:
 --   1. a new message               -> messagesAdded
 --   2. a deleted message           -> messagesDeleted
 --   3. a label add + remove        -> labelsAdded + labelsRemoved

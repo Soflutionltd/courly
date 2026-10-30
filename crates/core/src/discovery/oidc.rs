@@ -1,7 +1,7 @@
 //! OIDC Discovery - fetch `.well-known/openid-configuration` and extract
 //! OAuth2 endpoints for generic OIDC providers (Keycloak, Authentik, etc.).
 //!
-//! This enables Ratatoskr to authenticate against any standards-compliant
+//! This enables Courly to authenticate against any standards-compliant
 //! OIDC provider, not just hardcoded Google/Microsoft flows.
 
 use serde::Deserialize;

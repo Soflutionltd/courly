@@ -1,8 +1,8 @@
-# Ratatoskr UI Conventions
+# Courly UI Conventions
 
-iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
+iced UI for the Courly email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
-**iced fork:** `https://github.com/folknor/iced`, branch `sluggrs`. Local checkout at `/home/folk/Programs/sluggrs/repos/iced`. When you need to check what API is available in our iced version, read files in that directory - do not assume upstream iced APIs exist.
+**iced fork:** `https://github.com/Soflutionltd/iced`, branch `sluggrs`. Local checkout at `../sluggrs/repos/iced`. When you need to check what API is available in our iced version, read files in that directory - do not assume upstream iced APIs exist.
 
 ## App module structure (`crates/app/src/`)
 

@@ -15,7 +15,7 @@ scopes_supported = ["openid"]
 code_challenge_methods_supported = ["S256"]
 token_endpoint_auth_methods_supported = ["none"]
 
-# Malformed JRD: ratatoskr's WebFinger parser should fail JSON parse,
+# Malformed JRD: courly's WebFinger parser should fail JSON parse,
 # the probe returns None, no chained OIDC fetch happens. The cascade
 # then tries the bare-domain OIDC probe, which 404s (no
 # malformed.test.oidc table), so oidcEndpoints stays None.

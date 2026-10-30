@@ -20,8 +20,8 @@ Do not use your Memory functionality. Durable context belongs in CLAUDE.md or th
 ### git commit rules
 
 - Always run `brokkr fmt` before a commit.
-- Never commit markdown changes, `Cargo.lock`, or `.brokkr/ratatoskr/gate.db` alone. Bundle them with upcoming code commits.
-- When committing other changes: always tag along markdown files, `Cargo.lock`, and `.brokkr/ratatoskr/gate.db` if dirty.
+- Never commit markdown changes, `Cargo.lock`, or `.brokkr/courly/gate.db` alone. Bundle them with upcoming code commits.
+- When committing other changes: always tag along markdown files, `Cargo.lock`, and `.brokkr/courly/gate.db` if dirty.
 - Write substantive engineering-focused commit messages.
 - Never `git push` unless the user explicitly asks. Stop after the commit.
 

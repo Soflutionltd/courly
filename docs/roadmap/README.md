@@ -6,7 +6,7 @@ Features needed to close the gap with Outlook for enterprise M365/Exchange users
 
 ## Cross-Provider Architecture
 
-Ratatoskr supports four providers: **Exchange (Graph)**, **Gmail API**, **JMAP (Stalwart)**, **IMAP**. Most features on this roadmap are natively supported by only one or two providers. The architecture must handle this gracefully.
+Courly supports four providers: **Exchange (Graph)**, **Gmail API**, **JMAP (Stalwart)**, **IMAP**. Most features on this roadmap are natively supported by only one or two providers. The architecture must handle this gracefully.
 
 ### The Local Fallback Principle
 

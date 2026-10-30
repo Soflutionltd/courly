@@ -1,14 +1,14 @@
 # Folders and Labels Glossary
 
-This document is the single source of truth for everything Ratatoskr classifies as a folder, a label, or neither. If code disagrees with this document, the code is wrong.
+This document is the single source of truth for everything Courly classifies as a folder, a label, or neither. If code disagrees with this document, the code is wrong.
 
-The whole job of this glossary is to answer one question: **for any primitive coming out of any provider, what is it in Ratatoskr?** Each rule below is binding on both user-facing copy and code identifiers.
+The whole job of this glossary is to answer one question: **for any primitive coming out of any provider, what is it in Courly?** Each rule below is binding on both user-facing copy and code identifiers.
 
 ---
 
 ## The Rule
 
-Ratatoskr has exactly two organisation primitives: **folders** and **labels**. Everything else is either message state (a per-message boolean like read / starred) or transient (expunge markers, deprecated flags).
+Courly has exactly two organisation primitives: **folders** and **labels**. Everything else is either message state (a per-message boolean like read / starred) or transient (expunge markers, deprecated flags).
 
 ### Folder
 <!-- coverage: glossary.folders_labels.folder_rows_are_containers enforcement=lua-harness -->
@@ -50,7 +50,7 @@ For each provider, exhaustively: what counts as a folder, what counts as a label
 
 ### Gmail
 
-| Provider primitive | Ratatoskr classification |
+| Provider primitive | Courly classification |
 |---|---|
 | System labels (`INBOX`, `SENT`, `DRAFT`, `TRASH`, `SPAM`, `IMPORTANT`, `CHAT`, `CATEGORY_*`) | **Folder** |
 | User-created labels | **Label** |
@@ -58,26 +58,26 @@ For each provider, exhaustively: what counts as a folder, what counts as a label
 | `STARRED` system label | Message state - starred (also rendered as the universal Starred folder for navigation; the underlying signal is the `is_starred` boolean) |
 | Replied / forwarded | Message state - derived from `SENT` thread membership (see "Message state" below) |
 
-Gmail's API permits system labels and user labels to coexist on a single message. Ratatoskr models the system ones as containers anyway because their UI semantics are move-style (archive removes `INBOX`, trash moves to `TRASH`, etc.).
+Gmail's API permits system labels and user labels to coexist on a single message. Courly models the system ones as containers anyway because their UI semantics are move-style (archive removes `INBOX`, trash moves to `TRASH`, etc.).
 
-`STARRED` is intentionally absent from the system-labels row above. It is **not** a folder in Ratatoskr - it is the message-state row below, backed by `threads.is_starred`. The universal Starred sidebar entry is a virtual navigation handle queried via `get_starred_threads`, not a `folders` row; see "Identity" below for the virtual navigation IDs that never appear in any membership table.
+`STARRED` is intentionally absent from the system-labels row above. It is **not** a folder in Courly - it is the message-state row below, backed by `threads.is_starred`. The universal Starred sidebar entry is a virtual navigation handle queried via `get_starred_threads`, not a `folders` row; see "Identity" below for the virtual navigation IDs that never appear in any membership table.
 
 ### Microsoft Graph (Exchange)
 
-| Provider primitive | Ratatoskr classification |
+| Provider primitive | Courly classification |
 |---|---|
 | Mail folders (`inbox`, `sentItems`, `drafts`, `deletedItems`, `junkEmail`, `archive`, user-created) | **Folder** |
 | `categories[]` | **Label** |
 | `importance` enum (`low` / `high`) | **Label** - synthesised `"Low importance"` / `"High importance"`. `normal` synthesises nothing. Mutually exclusive at write time: the action service clears the opposite slot when one is set. |
 | `isRead` | Message state - read |
-| `flag.flagStatus` | Message state - starred. Outlook's follow-up flag is the closest native analog; Ratatoskr loses the optional `startDateTime` / `dueDateTime` metadata. |
+| `flag.flagStatus` | Message state - starred. Outlook's follow-up flag is the closest native analog; Courly loses the optional `startDateTime` / `dueDateTime` metadata. |
 | `PR_LAST_VERB_EXECUTED` (extended MAPI property 0x1081) | Message state - replied / forwarded (see "Message state" below) |
 
-Graph has no native starring primitive; the follow-up flag is the only option. This is an explicit, accepted trade-off - across providers a Ratatoskr "star" maps to whatever each provider's closest single-bit favourite-marker is.
+Graph has no native starring primitive; the follow-up flag is the only option. This is an explicit, accepted trade-off - across providers a Courly "star" maps to whatever each provider's closest single-bit favourite-marker is.
 
 ### IMAP
 
-| Provider primitive | Ratatoskr classification |
+| Provider primitive | Courly classification |
 |---|---|
 | Mailboxes - special-use (`\Inbox`, `\Sent`, `\Drafts`, `\Trash`, `\Junk`, `\Archive`) and user-created | **Folder** |
 | Custom keywords (anything not in the system-flag list below) | **Label** |
@@ -88,11 +88,11 @@ Graph has no native starring primitive; the follow-up flag is the only option. T
 | `\Draft` | Folded into Drafts-folder membership; not a separate primitive |
 | `\Deleted`, `\Recent` | Transient / deprecated; ignored |
 
-`$Forwarded` lives in the IMAP keyword namespace technically, but Ratatoskr treats it as message state, not a user-visible label. The RFC 5788 system keywords (`$Forwarded`, `$MDNSent`, `$Junk`, `$NotJunk`, `$Phishing`) are all reserved and never appear in the LABELS section. Per RFC 5788 section 2.1 the `$` prefix is reserved for IETF-defined system keywords, so Ratatoskr filters every `$`-prefixed keyword from the LABELS section, not just the named five - this is intentionally stricter than the named-set rule, on the principle that a server's future-defined `$Whatever` should never silently appear as a user label.
+`$Forwarded` lives in the IMAP keyword namespace technically, but Courly treats it as message state, not a user-visible label. The RFC 5788 system keywords (`$Forwarded`, `$MDNSent`, `$Junk`, `$NotJunk`, `$Phishing`) are all reserved and never appear in the LABELS section. Per RFC 5788 section 2.1 the `$` prefix is reserved for IETF-defined system keywords, so Courly filters every `$`-prefixed keyword from the LABELS section, not just the named five - this is intentionally stricter than the named-set rule, on the principle that a server's future-defined `$Whatever` should never silently appear as a user label.
 
 ### JMAP
 
-| Provider primitive | Ratatoskr classification |
+| Provider primitive | Courly classification |
 |---|---|
 | Mailboxes (system-role and user-created) | **Folder** |
 | Custom keywords (anything outside the RFC system set) | **Label** |
@@ -102,7 +102,7 @@ Graph has no native starring primitive; the follow-up flag is the only option. T
 | `$forwarded` | Message state - forwarded |
 | `$draft` | Folded into Drafts-folder membership; not a separate primitive |
 
-JMAP technically allows a message to belong to multiple mailboxes (Gmail-influenced). Ratatoskr models system mailboxes as containers anyway, mirroring the Gmail treatment, because the UI semantics are move-style.
+JMAP technically allows a message to belong to multiple mailboxes (Gmail-influenced). Courly models system mailboxes as containers anyway, mirroring the Gmail treatment, because the UI semantics are move-style.
 
 ---
 
@@ -146,9 +146,9 @@ Same-client moves are correct under both schemes because the action service upda
 
 The identifier for a folder is `(account_id, folder_id)`. The identifier for a raw provider label is `(account_id, label_id)`. Names are presentational only; two raw labels with the same display name on different accounts are distinct objects unless the user explicitly groups them.
 
-For **system folders**, Ratatoskr defines its own canonical label IDs that are provider-independent. The sync pipeline normalises provider-native IDs to these on ingest.
+For **system folders**, Courly defines its own canonical label IDs that are provider-independent. The sync pipeline normalises provider-native IDs to these on ingest.
 
-| Ratatoskr label ID | What it represents |
+| Courly label ID | What it represents |
 |---|---|
 | `"INBOX"` | Inbox |
 | `"SENT"` | Sent |
@@ -227,7 +227,7 @@ Raw provider-label apply/remove exists for sync, Settings, and the composite gro
 
 Not folder or label operations. Read and starred have UI controls. Replied and forwarded are derived from outgoing sends, not toggled directly. The action service routes the change to the appropriate provider primitive per the per-provider mapping above.
 
-**Replied / forwarded write semantics on send.** When the user sends a Reply or Forward from Ratatoskr, two writes happen, in order:
+**Replied / forwarded write semantics on send.** When the user sends a Reply or Forward from Courly, two writes happen, in order:
 
 1. **Local mark.** The action service flips `messages.is_replied` (or `is_forwarded`) on the source message immediately via `service::send::mark_send_intent_local`. This is authoritative: the glyph appears in the UI on the next thread-list decoration, no sync round-trip required.
 2. **Provider write-back, best-effort.** The provider's `mark_send_intent` is then called with the source message's local DB ID and the `SendIntent`. Per provider:
@@ -253,7 +253,7 @@ An action that intentionally has no provider dispatch. Pin and mute are local-on
 ### `folders` table
 
 Provider folders and canonical system folders for all accounts. Key columns:
-- `id` - folder ID (Ratatoskr canonical for system folders, provider-native with prefix for others).
+- `id` - folder ID (Courly canonical for system folders, provider-native with prefix for others).
 - `account_id` - which account.
 - `name` - display name.
 - `parent_id` - optional folder hierarchy.
@@ -286,7 +286,7 @@ Synthesised `importance:high` / `importance:low` rows in `labels` always carry `
 Per-message keyword membership for IMAP and JMAP. Columns: `(account_id, message_id, keyword, label_id)` with PK `(account_id, message_id, label_id)`. The thread-level `kw:%` rows in `thread_labels` are derived from the union of `message_keywords` rows for messages in the thread - this is what makes keyword removal observable. Incoming IMAP and JMAP message changes replace the message's keyword rows, then recompute the thread aggregate from the union. Graph categories are not keyword-shaped and are reconciled through the provider category path instead.
 
 The retired account-wide IMAP keyword-capability flag is gone. Bifrost IMAP
-owns any per-mailbox keyword refusal; ratatoskr does not project that protocol
+owns any per-mailbox keyword refusal; courly does not project that protocol
 verdict into the accounts table. Graph master categories are fetched by the
 resident Graph auxiliary pass through bifrost and persisted as `cat:` labels.
 
@@ -300,20 +300,20 @@ resident Graph auxiliary pass through bifrost and persisted as `cat:` labels.
 
 ---
 
-## Terms NOT Used in Ratatoskr
+## Terms NOT Used in Courly
 
-These terms appear in provider documentation but are not Ratatoskr concepts. They never appear in user-facing copy and never appear in code identifiers except inside transport-layer or sync-layer code that's literally talking to a provider.
+These terms appear in provider documentation but are not Courly concepts. They never appear in user-facing copy and never appear in code identifiers except inside transport-layer or sync-layer code that's literally talking to a provider.
 
-- **Tag** - not used. What providers call tags, categories, or keywords are *labels* in Ratatoskr.
-- **Mailbox** - not used. What IMAP and JMAP call mailboxes are *folders* in Ratatoskr.
-- **Category** - not used. What Exchange calls categories are *labels* in Ratatoskr.
+- **Tag** - not used. What providers call tags, categories, or keywords are *labels* in Courly.
+- **Mailbox** - not used. What IMAP and JMAP call mailboxes are *folders* in Courly.
+- **Category** - not used. What Exchange calls categories are *labels* in Courly.
 - **Flag** (Outlook) - not used. The follow-up flag is mapped to the *starred* message state.
 - **Verb** (Outlook) - not used. `PR_LAST_VERB_EXECUTED` is mapped to the *replied* and *forwarded* message states.
-- **Importance** - not used as a top-level Ratatoskr concept. The `high` / `low` values become the synthesised labels `"High importance"` / `"Low importance"`; `normal` is no label.
+- **Importance** - not used as a top-level Courly concept. The `high` / `low` values become the synthesised labels `"High importance"` / `"Low importance"`; `normal` is no label.
 
-Provider-native names still appear in code and docs where Ratatoskr is translating provider behaviour rather than defining user-facing concepts. For example:
+Provider-native names still appear in code and docs where Courly is translating provider behaviour rather than defining user-facing concepts. For example:
 
-- Exchange still has a `masterCategories` API even though Ratatoskr treats those objects as labels.
-- Gmail still exposes provider-native `CATEGORY_*` bundle labels even though Ratatoskr treats inbox bundling as a separate bundles/classification system.
+- Exchange still has a `masterCategories` API even though Courly treats those objects as labels.
+- Gmail still exposes provider-native `CATEGORY_*` bundle labels even though Courly treats inbox bundling as a separate bundles/classification system.
 
-When those provider-native names appear, they are transport-layer or sync-layer terminology, not Ratatoskr concepts. They must not leak into core types, UI code, or user-facing strings.
+When those provider-native names appear, they are transport-layer or sync-layer terminology, not Courly concepts. They must not leak into core types, UI code, or user-facing strings.

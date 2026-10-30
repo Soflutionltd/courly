@@ -1,6 +1,6 @@
 # Side-quests: changing a dependency repo
 
-Ratatoskr depends on two sibling repositories that we own and can change:
+Courly depends on two sibling repositories that we own and can change:
 
 - **bifrost** - the provider stack. All mail, calendar, and contact protocol
   I/O, the unified `Account` surface, `AccountError` / `RecoveryClass`, and the
@@ -14,11 +14,11 @@ that is a **side-quest**. This document is the procedure.
 
 ## The governing rule
 
-The dependencies exist to serve ratatoskr. Where a dependency's shape is
+The dependencies exist to serve courly. Where a dependency's shape is
 sub-optimal for us, the dependency is fixed FIRST, in its own repo, before the
-ratatoskr work that needs it.
+courly work that needs it.
 
-Ratatoskr is never contorted around a dependency wart. Provider-reality
+Courly is never contorted around a dependency wart. Provider-reality
 differences (Gmail has no separate attachment-upload endpoint, IMAP has no
 native send) are absorbed by bifrost behind the uniform `Account` surface, or
 expressed as `AccountCapabilities` flags we read declaratively. They never leak
@@ -27,7 +27,7 @@ becomes a capability flag the UI consults, not a code branch.
 
 Corollary worth stating because it comes up often: if a capability looks
 mysteriously absent from bifrost, that is usually not a design gap to engineer
-around. Bifrost was started by ripping ratatoskr's own provider code out and
+around. Bifrost was started by ripping courly's own provider code out and
 unifying it, so an absence generally means that part was not carried over yet.
 Git history is the reference for what it should already do.
 
@@ -76,9 +76,9 @@ Launch ONE Opus agent (the Agent tool, never codex) to do the work. Its prompt
 must state, in unambiguous terms:
 
 - It works EXCLUSIVELY inside `./research/<repo>`. It must not read, edit, or
-  otherwise touch any part of ratatoskr proper, under any circumstance. If it
-  finds itself blocked on something that would require a ratatoskr change, it
-  STOPS WORK immediately and reports back - it never improvises a ratatoskr
+  otherwise touch any part of courly proper, under any circumstance. If it
+  finds itself blocked on something that would require a courly change, it
+  STOPS WORK immediately and reports back - it never improvises a courly
   edit.
 - It must `cd` into the relevant `./research/<repo>` folder before doing
   anything, and stay there. (A guardrail, not a wall - the fence is the
@@ -145,11 +145,11 @@ A sync-touching side-quest wants both.
 
 - **In place**, before promotion (above): gates the change inside the research
   copy.
-- **Post-promotion, ratatoskr-side** from the repo root: for bifrost - a path
-  dep compiled from source - the authoritative gate is ratatoskr's own
+- **Post-promotion, courly-side** from the repo root: for bifrost - a path
+  dep compiled from source - the authoritative gate is courly's own
   `brokkr check` after `bifrost.sh`. For saehrimnir - an installed binary -
   `saehrimnir.sh`'s `cargo install` compile-gates it, and the behavioral gate is
-  a ratatoskr sync-harness run against the reinstalled mock.
+  a courly sync-harness run against the reinstalled mock.
 
 ## Freeze discipline
 
@@ -158,25 +158,25 @@ item, and the dependency stays pinned there for the item's full duration -
 including the hours a single implement run can take.
 
 This is load-bearing: bifrost compiles from source, so a `../bifrost` that is
-red OR merely mutating underneath an in-flight step makes every ratatoskr gate
+red OR merely mutating underneath an in-flight step makes every courly gate
 meaningless, and a later change would silently shift the surface the work was
 built against.
 
 ## Working in the research copies
 
 The repo's bash rules (no `git -C`, one command per invocation, no chaining) are
-written for ratatoskr proper. `./research/bifrost` and `./research/saehrimnir`
+written for courly proper. `./research/bifrost` and `./research/saehrimnir`
 are separate repos the orchestrator legitimately manages, so the orchestrator is
 exempt there for the review / validate / commit / discard it owns:
 
 - **Git**: run `git -C <abs-path>/research/<repo> ...` directly. The Bash
   working directory also persists between calls, so a bare
   `cd ./research/<repo>` followed by a separate `git` / `brokkr` command works
-  equally well - just `cd` back to the ratatoskr root afterward, since later
+  equally well - just `cd` back to the courly root afterward, since later
   steps assume it.
 - **Validate in place**: this works because each research repo is its own
   standalone Cargo workspace root that brokkr resolves instead of walking up
-  into ratatoskr's. Bifrost already is a workspace; saehrimnir needed a bare
+  into courly's. Bifrost already is a workspace; saehrimnir needed a bare
   `[workspace]` table in its `Cargo.toml` so cargo would not adopt the parent
   manifest.
 - **The `CARGO_MANIFEST_DIR` gotcha**: brokkr builds a nested research workspace

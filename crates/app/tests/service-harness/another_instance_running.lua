@@ -6,7 +6,7 @@
 -- exits with `BootExitCode::AnotherInstanceRunning` (code 71) before
 -- responding to the version-check ping. The spawn flow's exit-code
 -- elevation classifies this as `BootFailure { AnotherInstanceRunning }`,
--- which is what makes the App surface "Ratatoskr is already running."
+-- which is what makes the App surface "Courly is already running."
 -- rather than "Service boot failed: service crashed."
 --
 -- The covered-from-libtest version asserted only the OS exit code is 71.

@@ -1,8 +1,8 @@
 # Service test harness
 
-Lua-driven test runtime for Service IO-boundary tests. Lives in ratatoskr's `app` crate; orchestrated from outside by brokkr. Remaining harness work is in the root `TODO.md`.
+Lua-driven test runtime for Service IO-boundary tests. Lives in courly's `app` crate; orchestrated from outside by brokkr. Remaining harness work is in the root `TODO.md`.
 
-The architecture is mirrored on the brokkr side as `notes/ratatoskr-service-harness.md` in the brokkr repository. Both documents stay in sync; this one is authoritative for the ratatoskr side.
+The architecture is mirrored on the brokkr side as `notes/courly-service-harness.md` in the brokkr repository. Both documents stay in sync; this one is authoritative for the courly side.
 
 The target cohort is Service tests that start the Service behind an **OS-level IO boundary** - a subprocess - and then wait on boot, dispatch, drain, crash, or framing behaviour. The wall-clock-timeout and child-exit-race failure modes that motivate the harness only apply when there's a real child process to race against.
 
@@ -26,17 +26,17 @@ The harness fixes these by making waits deterministic by construction and by pre
 
 ## Brokkr context
 
-Brokkr is a single-binary Rust dev tool, **external to ratatoskr** - its source lives in a separate repository and it is installed via `cargo install --path ~/Programs/brokkr`. It is not a ratatoskr crate, not a workspace member, and not a build dependency. From ratatoskr's side, brokkr is a binary on `$PATH` invoked from any project root. Brokkr reads `./brokkr.toml` to detect the active project and exposes project-gated commands tagged `[ratatoskr]`. The harness commands (`service`, `sync`) are an extension of that surface.
+Brokkr is a single-binary Rust dev tool, **external to courly** - its source lives in a separate repository and it is installed via `cargo install --path ~/Programs/brokkr`. It is not a courly crate, not a workspace member, and not a build dependency. From courly's side, brokkr is a binary on `$PATH` invoked from any project root. Brokkr reads `./brokkr.toml` to detect the active project and exposes project-gated commands tagged `[courly]`. The harness commands (`service`, `sync`) are an extension of that surface.
 
-## Brokkr / ratatoskr split
+## Brokkr / courly split
 
-Two repositories. Ratatoskr's `app` crate hosts the Lua VM and the `ServiceClient` userdata bindings (the runtime); brokkr orchestrates from outside (build, spawn, artefact dir, history). Concretely:
+Two repositories. Courly's `app` crate hosts the Lua VM and the `ServiceClient` userdata bindings (the runtime); brokkr orchestrates from outside (build, spawn, artefact dir, history). Concretely:
 
 ```
 brokkr service foo.lua
     |
-    +-- builds [ratatoskr.harness].package (defaults: binary=package, dev profile per debug=true)
-    +-- allocates .brokkr/ratatoskr/<test>/run-N/ as artefact dir
+    +-- builds [courly.harness].package (defaults: binary=package, dev profile per debug=true)
+    +-- allocates .brokkr/courly/<test>/run-N/ as artefact dir
     +-- spawns: <project_root>/<target>/<profile>/<binary> --test-harness foo.lua
     |       env: BROKKR_HARNESS_ARTEFACT_DIR=<artefact dir>
     |            BROKKR_TEST_BIN_DIR=<bin dir>
@@ -55,15 +55,15 @@ Inside `app --test-harness`:
     BROKKR_HARNESS_ARTEFACT_DIR
 ```
 
-Brokkr's responsibilities at a glance: project gating + CLI surface, self-contained build of `[ratatoskr.harness].package` (no `[[check]]` cross-reference - bare `brokkr check` is blind to orchestration blocks), subprocess spawn + capture at `std::process::Command::output()` concurrency, per-run artefact directory lifecycle, script discovery (recursive over `crates/app/tests/service-harness/**/*.lua` with frontmatter parsing), soak (`-N`) and serial suite runners, history-DB recording, and an optional sidecar `/proc` profiler. None of this machinery is part of the harness contract - see Contract surface below.
+Brokkr's responsibilities at a glance: project gating + CLI surface, self-contained build of `[courly.harness].package` (no `[[check]]` cross-reference - bare `brokkr check` is blind to orchestration blocks), subprocess spawn + capture at `std::process::Command::output()` concurrency, per-run artefact directory lifecycle, script discovery (recursive over `crates/app/tests/service-harness/**/*.lua` with frontmatter parsing), soak (`-N`) and serial suite runners, history-DB recording, and an optional sidecar `/proc` profiler. None of this machinery is part of the harness contract - see Contract surface below.
 
 ## Dependency direction
 
-**Both directions are off the table for source-level deps.** Ratatoskr must not depend on brokkr; brokkr must not depend on ratatoskr. Cross-process communication is by subprocess spawn + env vars only.
+**Both directions are off the table for source-level deps.** Courly must not depend on brokkr; brokkr must not depend on courly. Cross-process communication is by subprocess spawn + env vars only.
 
-The Lua VM and `ServiceClient` userdata bindings live in ratatoskr's `app` crate (already where `ServiceClient` is defined); ratatoskr takes an unconditional `dellingr` dep and exposes the runtime via `app --test-harness`. Brokkr orchestrates only: project gating, self-contained orchestration build, lockfile, per-run artefact-dir lifecycle, history-DB recording, soak/suite. Brokkr ships zero ratatoskr or dellingr deps; brokkr stays sync (no tokio).
+The Lua VM and `ServiceClient` userdata bindings live in courly's `app` crate (already where `ServiceClient` is defined); courly takes an unconditional `dellingr` dep and exposes the runtime via `app --test-harness`. Brokkr orchestrates only: project gating, self-contained orchestration build, lockfile, per-run artefact-dir lifecycle, history-DB recording, soak/suite. Brokkr ships zero courly or dellingr deps; brokkr stays sync (no tokio).
 
-The harness needs `ServiceClient`'s typed classification (boot exit codes, `ClientError` variants, `SchemaVersionChanged { was, now }`, generation-tag tracking on notifications) - hundreds of lines of stateful protocol logic. Embedding it in brokkr would force tokio in and either a heavy `app`-crate dep or a parallel JSON-RPC client implementation. Hosting the VM in ratatoskr keeps the protocol logic where the protocol is.
+The harness needs `ServiceClient`'s typed classification (boot exit codes, `ClientError` variants, `SchemaVersionChanged { was, now }`, generation-tag tracking on notifications) - hundreds of lines of stateful protocol logic. Embedding it in brokkr would force tokio in and either a heavy `app`-crate dep or a parallel JSON-RPC client implementation. Hosting the VM in courly keeps the protocol logic where the protocol is.
 
 `ServiceClient` stays in `app`. A slim `crates/service-client` carve-out is a compile-time-hygiene refactor, not a correctness requirement; revisit only if a second crate genuinely needs the client API or compile-time profiling shows pressure.
 
@@ -73,7 +73,7 @@ The harness needs `ServiceClient`'s typed classification (boot exit codes, `Clie
 
 - Argv: `app --test-harness <script.lua>` (script path; brokkr resolves it relative to the project root before passing).
 - Env var `BROKKR_HARNESS_ARTEFACT_DIR` - absolute path to the per-run artefact directory (brokkr creates it before spawning).
-- Env var `BROKKR_TEST_BIN_DIR` - absolute path to the directory containing the built `ratatoskr` binary. The parent-death test helper is a hidden mode of that same binary (`ratatoskr --parent-death-helper <service_binary> <data_dir>`), not a separate sibling executable - the harness build emits only the one configured `binary`, so folding the helper in keeps the capability from silently going missing when no separate helper bin is built.
+- Env var `BROKKR_TEST_BIN_DIR` - absolute path to the directory containing the built `courly` binary. The parent-death test helper is a hidden mode of that same binary (`courly --parent-death-helper <service_binary> <data_dir>`), not a separate sibling executable - the harness build emits only the one configured `binary`, so folding the helper in keeps the capability from silently going missing when no separate helper bin is built.
 - The harness binary's stdout/stderr are piped by brokkr; brokkr writes them to `binary-stdout.log` and `binary-stderr.log` in the artefact dir after the process exits. The runtime can `println!` for human-readable progress, but that is not a structured protocol.
 
 **What brokkr expects in return:**
@@ -89,7 +89,7 @@ The harness needs `ServiceClient`'s typed classification (boot exit codes, `Clie
 - Brokkr's lockfile coordination - the lock acquires before spawn and releases after wait; the runtime sees neither.
 - Brokkr's source code - the contract is process-level, not source-level.
 
-If you find yourself wanting more from brokkr than argv, env vars, stdout/stderr capture, brokkr-owned artefacts, and exit status, **stop and surface it as an explicit design change** rather than reaching across the contract. Both this document and `notes/ratatoskr-service-harness.md` in the brokkr repo would need to change in lockstep.
+If you find yourself wanting more from brokkr than argv, env vars, stdout/stderr capture, brokkr-owned artefacts, and exit status, **stop and surface it as an explicit design change** rather than reaching across the contract. Both this document and `notes/courly-service-harness.md` in the brokkr repo would need to change in lockstep.
 
 ## Determinism rule
 
@@ -148,11 +148,11 @@ Notification payloads are the exception to typed request/response decoding: they
 
 Capability backlog (generic `wait_for`, full `NotificationQueue` userdata, sentinel-file watch, parent-death helper bindings, generic `wait_exit`, resource-budget summaries, parsed `frames.jsonl` payloads) is in TODO.md and lands when a future test names coverage those capabilities unblock.
 
-## Stable Service entrypoints (ratatoskr-side contract)
+## Stable Service entrypoints (courly-side contract)
 
 `app --service --app-data-dir <dir>` is the canonical Service subprocess entrypoint. `app --test-harness <script.lua>` is its sibling.
 
-Test-only flags are intentional and unconditionally compiled in (ratatoskr is pre-release; there is no production binary surface to guard):
+Test-only flags are intentional and unconditionally compiled in (courly is pre-release; there is no production binary surface to guard):
 
 - fake protocol version (`--test-fake-version=N`),
 - fake schema (`--test-fake-schema=N`),
@@ -195,7 +195,7 @@ The B8-groups landing added the directory-group scripts under `crates/app/tests/
 
 ## Deterministic app-data fixtures
 
-Brokkr does not create app-data directories itself - Lua scripts do. `harness.data_dir(suffix, with_key)` creates a per-run app-data directory and, by default, a deterministic non-zero `ratatoskr.key`. The missing-key wedge passes `false`.
+Brokkr does not create app-data directories itself - Lua scripts do. `harness.data_dir(suffix, with_key)` creates a per-run app-data directory and, by default, a deterministic non-zero `courly.key`. The missing-key wedge passes `false`.
 
 `TestSeedAccount` (and friends) creates accounts, labels, and FK-constrained adjacent rows. This must not rely on the dev app's "wipe and seed on every launch" behavior - some tests need to shut down and respawn against the same data directory.
 
@@ -233,7 +233,7 @@ When failure-triage tooling starts reading these files, factor the schemas into 
 
 ## Failure model
 
-When a test fails, brokkr preserves a self-contained artefact dir at `.brokkr/ratatoskr/<test-name>/<run-N>/`. Brokkr writes the run metadata (`run.toml`, copied script, `binary-stdout.log`, `binary-stderr.log`, `spawn-error.txt`); the runtime writes Service diagnostics:
+When a test fails, brokkr preserves a self-contained artefact dir at `.brokkr/courly/<test-name>/<run-N>/`. Brokkr writes the run metadata (`run.toml`, copied script, `binary-stdout.log`, `binary-stderr.log`, `spawn-error.txt`); the runtime writes Service diagnostics:
 
 - `frames.jsonl` - every JSON-RPC frame, both directions, timestamped from spawn. Single most useful artefact for drain-ordering / framing bugs.
 - `events.jsonl` - every spawn/runtime event observed (`ChildSpawned`, `BootReady`, `Terminal`).
@@ -286,7 +286,7 @@ runs, `--all` sweeps. The old names are gone, not aliased.
   the exit error names failures without repeating their messages. See `brokkr man sync`.
 
 - `--all [--filter X] [--include-ignored]` is the unmeasured sweep - the sync counterpart to
-  `service --all`. Discovery walks `[ratatoskr] sync_script_dir` (default
+  `service --all`. Discovery walks `[courly] sync_script_dir` (default
   `crates/app/tests/sync-harness`). `--filter` substring-matches the discovered script name,
   not its path. Scripts carrying `ignored` frontmatter are skipped unless `--include-ignored`
   is passed. An empty discovery directory, or a `--filter` that matches nothing, is a hard
@@ -298,7 +298,7 @@ runs, `--all` sweeps. The old names are gone, not aliased.
   `--commit <REF>` both require `--bench`. `--debug` / `--release` are mutually exclusive.
 - `--gate <name>|all` requires `--bench` - a gate rule compares measured numbers, so an
   unmeasured run has nothing to evaluate against. `--gate all` sweeps every gate configured
-  under `[ratatoskr.gate.*]` in name order (stable reports); passing a `SCRIPT` alongside
+  under `[courly.gate.*]` in name order (stable reports); passing a `SCRIPT` alongside
   `--gate all` is an error, since each gate already supplies its own script from config. Every
   gate's script is existence-checked up front, before anything builds, so a typo in a late gate
   surfaces immediately rather than after a long sweep. A breach does not stop a `--gate all`
@@ -339,10 +339,10 @@ why the new number is correct - never to make a red gate green.
 
 ## Out of scope
 
-- **Replacing ratatoskr's correctness assertions.** The Lua scripts drive `ServiceClient` methods and assert on returned values; they don't bypass ratatoskr's invariants.
-- **Speaking JSON-RPC from brokkr.** `ServiceClient` lives in ratatoskr; brokkr spawns the binary that embeds it and never parses the wire.
+- **Replacing courly's correctness assertions.** The Lua scripts drive `ServiceClient` methods and assert on returned values; they don't bypass courly's invariants.
+- **Speaking JSON-RPC from brokkr.** `ServiceClient` lives in courly; brokkr spawns the binary that embeds it and never parses the wire.
 - **Replacing `brokkr test`.** The cargo single-test runner stays. Service IO-boundary tests use the new harness; everything else uses `brokkr test`.
 - **Fixing the underlying Service bugs.** The harness exists to make bugs deterministic and diagnosable, not to hide them. The Service side owns the drain-ordering / class-aware emit / crashloop fixes.
 - **Migrating every existing tokio test.** The new harness coexists with libtest. Unit-style `#[tokio::test]` functions stay there. The migration target is the Service IO-boundary cohort.
-- **Owning the mock servers.** Sync-bench reuses the artefact / lockfile / history machinery and the harness binary, but protocol mocks live in `../sæhrimnir` and orchestration lives in brokkr. Ratatoskr owns only the test-only endpoint overrides, sync-trigger requests, and sync-harness scripts.
+- **Owning the mock servers.** Sync-bench reuses the artefact / lockfile / history machinery and the harness binary, but protocol mocks live in `../sæhrimnir` and orchestration lives in brokkr. Courly owns only the test-only endpoint overrides, sync-trigger requests, and sync-harness scripts.
 - **CI-only features.** First user is a local developer root-causing a flake. CI integration follows once the local story works.

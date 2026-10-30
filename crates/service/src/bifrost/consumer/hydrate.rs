@@ -903,7 +903,7 @@ fn normalized_flags(
 /// Unwrap a bifrost `SystemTime` into the epoch seconds our schema stores.
 ///
 /// DELIBERATE SEAM - do not "modernize" this to `jiff::Timestamp` when the
-/// rest of ratatoskr is on jiff. `bifrost-types` speaks `std::time::SystemTime`
+/// rest of courly is on jiff. `bifrost-types` speaks `std::time::SystemTime`
 /// across its whole public time surface (`Message.date`, `Identity` vacation
 /// windows, filter/search `after`/`before`, `RetryAfter::At`, the scheduled-send
 /// path, the header date parser's return type), and that is a deliberate API
@@ -1277,7 +1277,7 @@ fn synthetic_to_row(
         list_unsubscribe: None,
         list_unsubscribe_post: None,
         auth_results: None,
-        message_id_header: Some(format!("<{}@synthetic.ratatoskr>", synthetic.id)),
+        message_id_header: Some(format!("<{}@synthetic.courly>", synthetic.id)),
         references_header: None,
         in_reply_to_header: None,
         body_cached: body_text.is_some(),

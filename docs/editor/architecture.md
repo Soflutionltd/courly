@@ -599,4 +599,4 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 | research/frostmark `renderer.rs` | ChildData bitflags - adopted for html_parse.rs StyleContext |
 | research/halloy `selectable_rich_text.rs` | Selection math reference |
 | **Email rendering** | |
-| `/home/folk/Programs/litehtml-rs/` | Separate HTML email viewer - editor does NOT handle arbitrary HTML |
+| `../litehtml-rs/` | Separate HTML email viewer - editor does NOT handle arbitrary HTML |

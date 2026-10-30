@@ -1,7 +1,7 @@
 //! Drag-and-drop widget for iced.
 //!
 //! Vendored from <https://github.com/jhannyj/iced_drop> (v0.2.2) and adapted
-//! for the Halloy/folknor iced fork used by Ratatoskr.
+//! for the Halloy-derived iced fork used by Courly.
 //!
 //! # Public API
 //!

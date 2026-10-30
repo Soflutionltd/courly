@@ -21,7 +21,7 @@ local minted = harness.http_json({
     body = {
         grant_type = "authorization_code",
         code = "harness-auth-code-revoked",
-        client_id = "ratatoskr-harness",
+        client_id = "courly-harness",
         redirect_uri = "http://127.0.0.1/oauth-callback",
     },
 })
@@ -56,7 +56,7 @@ local account, account_err = client:request("TestSeedAccount", {
     refresh_token = minted.refresh_token,
     token_expires_at = 2000000000,
     oauth_provider = "oidc:saehrimnir",
-    oauth_client_id = "ratatoskr-harness",
+    oauth_client_id = "courly-harness",
     oauth_token_url = token_url,
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")

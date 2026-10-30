@@ -15,7 +15,7 @@ pub enum BootExitCode {
     /// Single-instance lock contended; another Service is holding the lock
     /// for this data dir.
     AnotherInstanceRunning = 71,
-    /// Schema migration (or the velo-&gt;ratatoskr rename that precedes it)
+    /// Schema migration (or the database file rename that precedes it)
     /// failed. Includes partial-rename recovery failures.
     MigrationFailure = 72,
     /// `courly.key` could not be loaded. Phase 1 silently fell back to a

@@ -16,7 +16,7 @@ use rust_i18n::t;
 pub const REPOSITORY: &str = "Soflutionltd/courly";
 const MANIFEST_URL: &str =
     "https://github.com/Soflutionltd/courly/releases/latest/download/latest.json";
-/// Public half of `~/.tauri/ratatoskr_updater.key` (base64 of the minisign
+/// Public half of `~/.tauri/courly_updater.key` (base64 of the minisign
 /// public key file, as written by `tauri signer generate`).
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4REQxQUQ2MzUxNTk1RjAKUldUd2xSVTExaHJkQ0t1Z1pUQUJmNlpiWVk5WmdsK0NoNTlmN2o4ck4vQkZ3UXIvMDRNbTB0ZGMK";
 const PLATFORM: &str = "darwin-aarch64";
@@ -452,12 +452,12 @@ mod tests {
     #[test]
     fn replace_bundle_swaps_in_the_new_app() {
         let root = tempfile::tempdir().expect("tempdir");
-        let bundle = root.path().join("Ratatoskr.app");
+        let bundle = root.path().join("Courly.app");
         std::fs::create_dir_all(bundle.join("Contents")).expect("old bundle");
         std::fs::write(bundle.join("Contents/Info.plist"), "old").expect("old plist");
 
         let source = tempfile::tempdir().expect("source");
-        let new_bundle = source.path().join("Ratatoskr.app/Contents");
+        let new_bundle = source.path().join("Courly.app/Contents");
         std::fs::create_dir_all(&new_bundle).expect("new bundle");
         std::fs::write(new_bundle.join("Info.plist"), "new").expect("new plist");
         let archive = source.path().join("update.tar.gz");
@@ -466,7 +466,7 @@ mod tests {
             .arg(&archive)
             .arg("-C")
             .arg(source.path())
-            .arg("Ratatoskr.app")
+            .arg("Courly.app")
             .status()
             .expect("tar");
         assert!(status.success());
@@ -474,14 +474,14 @@ mod tests {
         replace_bundle(&bundle, &std::fs::read(&archive).expect("archive")).expect("replace");
         let plist = std::fs::read_to_string(bundle.join("Contents/Info.plist")).expect("plist");
         assert_eq!(plist, "new");
-        assert!(!root.path().join(".Ratatoskr.app.update").exists());
-        assert!(!root.path().join(".Ratatoskr.app.previous").exists());
+        assert!(!root.path().join(".Courly.app.update").exists());
+        assert!(!root.path().join(".Courly.app.previous").exists());
     }
 
     #[test]
     fn replace_bundle_keeps_the_old_app_when_the_archive_is_wrong() {
         let root = tempfile::tempdir().expect("tempdir");
-        let bundle = root.path().join("Ratatoskr.app");
+        let bundle = root.path().join("Courly.app");
         std::fs::create_dir_all(bundle.join("Contents")).expect("old bundle");
         std::fs::write(bundle.join("Contents/Info.plist"), "old").expect("old plist");
 

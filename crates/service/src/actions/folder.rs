@@ -27,7 +27,7 @@ use super::outcome::{ActionError, ActionOutcome};
 use crate::bifrost::BifrostProviderKind;
 use crate::bifrost::resident::ResidentActionAccount;
 
-/// Resolve a ratatoskr storage `FolderId` to the provider-native
+/// Resolve a courly storage `FolderId` to the provider-native
 /// `ContainerId` the engine addresses, via the cached folder map. Only
 /// folders appear in the map, so a miss means "not a (known) folder".
 fn native_container_id(

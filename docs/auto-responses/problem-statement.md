@@ -2,7 +2,7 @@
 
 ## Overview
 
-Auto-responses let users configure automatic reply messages that the **server sends on their behalf** while they're away. This is a server-side feature - the client configures it, the server executes it. The user can close Ratatoskr, shut down their computer, and replies still go out.
+Auto-responses let users configure automatic reply messages that the **server sends on their behalf** while they're away. This is a server-side feature - the client configures it, the server executes it. The user can close Courly, shut down their computer, and replies still go out.
 
 Every major provider has a full read/write API for this. Unlike reactions or signatures, there is no provider gap - this is one of the few features with genuine cross-provider parity.
 
@@ -105,7 +105,7 @@ This requires:
 
 **Rust ManageSieve crates:** None of note. Would need raw protocol implementation or shelling out.
 
-**Recommendation:** IMAP auto-responses are a stretch goal. The three API providers (Exchange, Gmail, JMAP) cover the vast majority of users. For IMAP accounts without ManageSieve, show a message: "Your email server doesn't support auto-replies through Ratatoskr. Configure auto-replies in your server's webmail interface."
+**Recommendation:** IMAP auto-responses are a stretch goal. The three API providers (Exchange, Gmail, JMAP) cover the vast majority of users. For IMAP accounts without ManageSieve, show a message: "Your email server doesn't support auto-replies through Courly. Configure auto-replies in your server's webmail interface."
 
 ## Unified Data Model
 
@@ -164,4 +164,4 @@ These two cover the majority of enterprise and consumer users.
 
 ### Sync on account add
 
-On first account setup, fetch the current auto-reply state and display it. If the user already has auto-replies configured (e.g., they set it up in Outlook before switching), Ratatoskr should show the existing configuration, not a blank form.
+On first account setup, fetch the current auto-reply state and display it. If the user already has auto-replies configured (e.g., they set it up in Outlook before switching), Courly should show the existing configuration, not a blank form.

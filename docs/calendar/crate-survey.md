@@ -16,7 +16,7 @@ The five Tier 1+2 source trees are checked out under `research/` for
 follow-up reading. Per-crate deep-read reports were used to produce this
 document; the durable findings have been folded in here.
 
-## Where ratatoskr stands today
+## Where courly stands today
 
 Snapshot of the calendar surface as of the survey date, so the rest of the
 document has somewhere concrete to land. Verify line numbers if you're
@@ -82,7 +82,7 @@ acting on this - they will drift.
 | defernodate | RRULE expansion only (struct API, no parser) | ~1k | MIT | Tier 3 |
 | ezcal | iCal + vCard parser/serializer | ~5k | MIT | Tier 3 |
 
-Tiers reflect adoptability for ratatoskr's profile (high-volume Exchange /
+Tiers reflect adoptability for courly's profile (high-volume Exchange /
 CalDAV import, 5+ years of history, deep search, deduplication). Tier 1 is
 viable today; Tier 2 has design ideas worth lifting but is not adoptable
 whole; Tier 3 is informative-or-not, but not a candidate.
@@ -105,7 +105,7 @@ calcard goes one step further: errors are `Entry` variants, not a `Result`.
 The caller decides whether to halt or skip. For a CalDAV importer ingesting
 mixed-quality bodies that's the right shape.
 
-*Ratatoskr today:* consumes calcard's streaming `Parser::next() → Entry`
+*Courly today:* consumes calcard's streaming `Parser::next() → Entry`
 in `caldav/parse/ical/mod.rs`. Already on the right shape.
 
 ### AST shape
@@ -132,7 +132,7 @@ Strategy 1+2 hybrid (caldata's approach) is the strongest design for our
 needs: typed access for consumers we own, lossless round-trip for the long
 tail.
 
-*Ratatoskr today:* we don't have our own AST - we walk calcard's typed
+*Courly today:* we don't have our own AST - we walk calcard's typed
 enums at ~32 match sites in iCal + ~16 in vCard. If we owned an AST, the
 1+2 hybrid is what we'd build.
 
@@ -147,7 +147,7 @@ All Tier-1 unfolders handle both CRLF and bare LF correctly - this matters
 because lots of real-world iCal data is LF-only despite RFC 5545 mandating
 CRLF.
 
-*Ratatoskr today:* calcard's tokenizer-internal Cow unfolder is the path
+*Courly today:* calcard's tokenizer-internal Cow unfolder is the path
 we're on. Nothing to change.
 
 ### Escape handling
@@ -165,7 +165,7 @@ caldata explicitly **does not unescape** in the parser (values stored raw)
 - the caller unescapes on consumption. That's a defensible choice for
 round-trip fidelity but pushes work onto every consumer site.
 
-*Ratatoskr today:* we get pre-unescaped values from calcard. If we
+*Courly today:* we get pre-unescaped values from calcard. If we
 switched to caldata, every consumer site (~48 across iCal + vCard
 parsers) would need an explicit unescape pass. Real cost.
 
@@ -173,10 +173,10 @@ parsers) would need an explicit unescape pass. Real cost.
 
 Only **caldata-rs** distinguishes `SUMMARY:` (present, empty) from no
 SUMMARY at all in its public API. calcard's parser drops empty values at
-parse time (this is the upstream blocker on ratatoskr's review-findings
+parse time (this is the upstream blocker on courly's review-findings
 #47). icalendar and ezcal don't expose the distinction at all.
 
-*Ratatoskr today:* blocked on calcard upstream. Switching to caldata
+*Courly today:* blocked on calcard upstream. Switching to caldata
 would unblock review-findings #47 by itself - the only candidate where
 this is true.
 
@@ -194,7 +194,7 @@ Three different policies:
 For an importer that wants to tag-and-ingest rather than reject, collected
 + caller-decides is the right shape.
 
-*Ratatoskr today:* we wrote `pick_datetime_property` to deal with calcard's
+*Courly today:* we wrote `pick_datetime_property` to deal with calcard's
 non-deterministic iteration order on duplicates. With caldata's strict
 mode we'd drop that helper but might lose ingest robustness on malformed
 real-world input - tradeoff.
@@ -211,11 +211,11 @@ Three approaches, in descending sophistication:
 - **calico**: parses TZID, never resolves it.
 - **icalendar / ezcal**: store TZID as a string, hand it to the consumer.
 
-Anyone replacing calcard while keeping ratatoskr's Microsoft Exchange
+Anyone replacing calcard while keeping courly's Microsoft Exchange
 support pulls in this Windows alias table somehow. The CLDR `windowsZones.xml`
 is the upstream canonical source.
 
-*Ratatoskr today:* parse-time uses calcard's `TzResolver` (via
+*Courly today:* parse-time uses calcard's `TzResolver` (via
 `caldav/parse/ical/mod.rs`); RRULE expansion re-parses the resolved name
 with `chrono_tz::Tz::from_str` (in `view/rrule/mod.rs`). The Graph crate
 uses `Tz::from_str` directly to consume calcard's Windows alias table -
@@ -248,7 +248,7 @@ it inside the iterator using calcard's own `Tz` enum (`Floating` /
 `resolve_local` that picks the pre-gap offset and threads `intended_time`
 through `skip_subdaily_to_matching_day` so wall-clock time doesn't drift.
 
-*Ratatoskr today:* hand-rolled engine in `view/rrule/mod.rs` (1243 +
+*Courly today:* hand-rolled engine in `view/rrule/mod.rs` (1243 +
 928 LOC). Post-4-rounds. Open items #9 (DST-gap zero-duration) and #16
 (sparse YEARLY 40k-step walk) live here. None of the survey candidates
 solve #9 cleanly except eventix's pre-gap-offset pattern, which is a
@@ -263,7 +263,7 @@ calcard issue #14 (in their tracker, see "calcard open issues" in the
 calcard verdict below) is about this same bug being still present in a
 corner case despite the engine generally getting it right.
 
-*Ratatoskr today:* our `expand_recurrence_with_overrides` in the RRULE
+*Courly today:* our `expand_recurrence_with_overrides` in the RRULE
 engine handles RECURRENCE-ID by collecting overrides into a HashSet
 keyed on canonical recurrence-id form, then skipping master instances
 that match. RANGE=THISANDFUTURE is not handled - that's a known gap.
@@ -505,7 +505,7 @@ clean module structure.
 
 ## Ideas worth lifting (with attribution)
 
-For ratatoskr's calendar code generally:
+For courly's calendar code generally:
 
 - **`TzResolver` as a first-class type** (calcard) - exposing TZID
   resolution as an API surface rather than always-implicit. Useful when

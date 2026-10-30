@@ -12,7 +12,7 @@ name = "coverage"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ratatoskr-coverage"
+name = "courly-coverage"
 path = "src/main.rs"
 
 [lints]

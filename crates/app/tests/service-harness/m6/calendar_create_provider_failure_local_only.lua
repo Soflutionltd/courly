@@ -54,7 +54,7 @@ local oauth, oauth_err = client:request("oauth.exchange_code", {
     scopes = { "openid", "email", "profile" },
     user_info_url = harness.join_url(jmap_endpoint, "oauth/userinfo"),
     use_pkce = false,
-    client_id = "ratatoskr-harness",
+    client_id = "courly-harness",
     redirect_uri = "http://127.0.0.1/oauth-callback",
     code = "harness-auth-code-calendar-local-only",
 })
@@ -73,7 +73,7 @@ local account, account_err = client:request("TestSeedAccount", {
     refresh_token = oauth.refresh_token,
     token_expires_at = oauth.token_expires_at,
     oauth_provider = "oidc:saehrimnir",
-    oauth_client_id = "ratatoskr-harness",
+    oauth_client_id = "courly-harness",
     oauth_token_url = token_url,
 })
 harness.assert(account_err == nil, "TestSeedAccount failed")

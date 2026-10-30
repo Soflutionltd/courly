@@ -15,7 +15,7 @@ Almost every modern mail server supports OAuth2 authentication via SASL OAUTHBEA
 
 On-prem email is not a niche. Universities, hospitals, government agencies, defense contractors, and privacy-conscious companies all run their own mail infrastructure. Many have invested heavily in SSO (Keycloak, Authentik, Okta, Azure AD on-prem, ADFS) and require 2FA across all services. Email is often the last holdout - the one service where users still type a password because their client can't do anything else.
 
-Ratatoskr would be the first desktop email client to close this gap.
+Courly would be the first desktop email client to close this gap.
 
 ## What We Have Today
 
@@ -63,7 +63,7 @@ For on-prem deployments, IT can publish a Mozilla autoconfig XML that includes t
 
 This is the hardest UX problem. Unlike Google/Microsoft where we ship a client ID, custom OIDC providers require the client to be registered. Options:
 
-**A. Pre-registered client ID** - The IT admin registers Ratatoskr as a client in their IdP and gives the user a client ID (and optionally secret). We provide documentation and a recommended configuration (redirect URI: `http://localhost:17248/callback`, grant type: authorization code, PKCE enabled). This is the most common pattern for desktop apps against corporate SSO.
+**A. Pre-registered client ID** - The IT admin registers Courly as a client in their IdP and gives the user a client ID (and optionally secret). We provide documentation and a recommended configuration (redirect URI: `http://localhost:17248/callback`, grant type: authorization code, PKCE enabled). This is the most common pattern for desktop apps against corporate SSO.
 
 **B. RFC 7591 Dynamic Client Registration** - If the OIDC provider supports it, we can register automatically. Check `registration_endpoint` in the discovery document. This is elegant but not universally supported.
 
@@ -115,6 +115,6 @@ Most of this already works. One consideration for on-prem: refresh token rotatio
 ## Open Questions
 
 - Should we support SASL OAUTHBEARER in addition to XOAUTH2, or is XOAUTH2 sufficient for the on-prem providers we're targeting?
-- How much of the "corporate setup" flow should be configurable via a JSON/TOML file that IT departments can distribute? (e.g., a `ratatoskr-config.json` that pre-fills issuer, mail servers, client ID)
+- How much of the "corporate setup" flow should be configurable via a JSON/TOML file that IT departments can distribute? (e.g., a `courly-config.json` that pre-fills issuer, mail servers, client ID)
 - Do we want to support OAuth2 for SMTP submission as well, or is IMAP-only sufficient for the first pass?
 - Should we validate ID token signatures (requires fetching JWKS), or is the fact that we're exchanging an auth code over TLS sufficient trust?

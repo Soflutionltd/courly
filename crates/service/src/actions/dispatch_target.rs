@@ -123,7 +123,7 @@ impl RemoteBatchKey {
     }
 }
 
-/// Resolve a ratatoskr `thread_id` to the set of provider message `ObjectId`s
+/// Resolve a courly `thread_id` to the set of provider message `ObjectId`s
 /// the action dispatch mutates (the consumer-side thread->message expansion,
 /// spec 2.2.2). For IMAP the object id is reconstructed from the persisted
 /// `(imap_folder, imap_uid, imap_uidvalidity)` triple; every other provider

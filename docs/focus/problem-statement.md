@@ -18,7 +18,7 @@ The field is initialized to `None` and never written to anywhere in the codebase
 
 ### Iced's focus model is text-input-only
 
-The fork at `https://github.com/folknor/iced` exposes a small set of focus operations via `iced::widget::operation`: `focus(id)`, `unfocus()`, `focus_next()`, `focus_previous()`, `count()`, `find_focused()`, `is_focused(id)`. These walk the widget tree and act on nodes that implement the `Focusable` trait.
+The fork at `https://github.com/Soflutionltd/iced` exposes a small set of focus operations via `iced::widget::operation`: `focus(id)`, `unfocus()`, `focus_next()`, `focus_previous()`, `count()`, `find_focused()`, `is_focused(id)`. These walk the widget tree and act on nodes that implement the `Focusable` trait.
 
 The only widgets that implement `Focusable` are `text_input` and `text_editor`. Buttons, mouse_areas, list rows, containers, the composer body, navigation items - none of them participate. Click-to-focus is hard-coded inside `text_input::update`; there is no generic mechanism. There are no focus events: a widget that gains or loses focus does not emit a message, so the app cannot react to focus changes through the normal `update()` flow. To know whether something is focused the app must run an operation that reads the state.
 
