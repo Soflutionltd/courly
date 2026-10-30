@@ -81,6 +81,7 @@ pub enum ComposeMessage {
     FormatStrikethrough,
     /// List toggle via SetBlockType.
     FormatList,
+    FormatOrderedList,
     /// Open the link insertion dialog.
     FormatLink,
     /// Toggle the emoji-picker overlay anchored at the toolbar button.

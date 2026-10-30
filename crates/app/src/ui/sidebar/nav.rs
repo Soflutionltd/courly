@@ -126,10 +126,7 @@ pub(super) fn nav_items<'a>(
                             shift: Some(shift(index)),
                             folder: MenuFolder::System {
                                 account_ids: scope_accounts(sidebar, scope),
-                                folder_id: SYSTEM_FOLDER_ROLES
-                                    .iter()
-                                    .any(|role| role.label_id == folder.id)
-                                    .then(|| folder.id.clone()),
+                                folder_id: holds_messages(&folder.id).then(|| folder.id.clone()),
                             },
                         }),
                     ));
@@ -231,8 +228,16 @@ impl MenuFolder {
     }
 }
 
+/// Whether a system row is a real mail folder, whose messages can be
+/// marked read (not a view such as Starred or Snoozed).
+pub(super) fn holds_messages(folder_id: &str) -> bool {
+    SYSTEM_FOLDER_ROLES
+        .iter()
+        .any(|role| role.label_id == folder_id)
+}
+
 /// The accounts a system row of `scope` covers.
-fn scope_accounts(sidebar: &Sidebar, scope: &ViewScope) -> Vec<String> {
+pub(super) fn scope_accounts(sidebar: &Sidebar, scope: &ViewScope) -> Vec<String> {
     match scope {
         ViewScope::Account(id) => vec![id.clone()],
         ViewScope::AllAccounts => sidebar

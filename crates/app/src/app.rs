@@ -88,6 +88,10 @@ pub struct ReadyApp {
     /// state lives in `pop_out_windows` under this id, which no real window
     /// uses, so every compose handler works for it unchanged.
     pub(crate) inline_compose: Option<iced::window::Id>,
+    /// The window last brought to the front.
+    pub(crate) focused_window: iced::window::Id,
+    #[cfg(target_os = "macos")]
+    pub(crate) menu_bar: Option<crate::menu_bar::MenuBar>,
     pub(crate) pop_out_generation: GenerationCounter<PopOut>,
     pub(crate) nav_generation: GenerationCounter<Nav>,
     pub(crate) thread_generation: GenerationCounter<ThreadDetail>,
@@ -426,6 +430,9 @@ impl ReadyApp {
             main_window_id,
             pop_out_windows: HashMap::new(),
             inline_compose: None,
+            focused_window: main_window_id,
+            #[cfg(target_os = "macos")]
+            menu_bar: None,
             pop_out_generation: GenerationCounter::new(),
             nav_generation: GenerationCounter::new(),
             thread_generation: GenerationCounter::new(),
@@ -995,6 +1002,8 @@ impl App {
                     if let Some(mode) = booting.appearance_mode.take() {
                         ready.mode = mode;
                     }
+                    #[cfg(target_os = "macos")]
+                    ready.install_menu_bar();
                     *self = App::Ready(ready);
                     task
                 }
@@ -1002,6 +1011,8 @@ impl App {
             App::Ready(ready) => {
                 let task = ready.update(message);
                 ready.thread_list.date_groups = ready.settings.thread_date_groups;
+                #[cfg(target_os = "macos")]
+                ready.refresh_menu_bar();
                 Task::batch([task, ready.persist_preferences_if_changed()])
             }
         }

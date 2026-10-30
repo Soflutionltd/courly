@@ -1047,13 +1047,18 @@ impl ReadyApp {
                 self.pending_calendar_reload = None;
                 self.reload_calendar_events()
             }
-            Message::WindowFocused => {
+            Message::WindowFocused(id) => {
+                self.focused_window = id;
                 let updater =
                     self.update(Message::Updater(crate::updater::UpdaterMessage::Check {
                         forced: false,
                     }));
                 Task::batch([updater, self.sync_on_window_focus()])
             }
+            #[cfg(target_os = "macos")]
+            Message::MenuBar(id) => self.handle_menu_bar(&id),
+            #[cfg(not(target_os = "macos"))]
+            Message::MenuBar(_) => Task::none(),
             Message::MailboxReloadTick => {
                 let Some(stamp) = self.pending_mailbox_reload else {
                     return Task::none();

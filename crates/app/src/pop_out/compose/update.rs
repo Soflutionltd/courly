@@ -469,6 +469,12 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             )));
             state.draft_dirty = true;
         }
+        ComposeMessage::FormatOrderedList => {
+            state.body.perform(RteAction::Edit(EditAction::SetBlockType(
+                rte::BlockKind::ListItem { ordered: true },
+            )));
+            state.draft_dirty = true;
+        }
         ComposeMessage::ToggleEmojiPicker => {
             state.emoji_picker_open = !state.emoji_picker_open;
             if !state.emoji_picker_open {

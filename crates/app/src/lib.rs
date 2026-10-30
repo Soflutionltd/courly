@@ -44,6 +44,8 @@ mod helpers;
 mod i18n;
 mod icon;
 mod main_view;
+#[cfg(target_os = "macos")]
+mod menu_bar;
 mod message;
 pub mod notification_queue;
 mod pop_out;

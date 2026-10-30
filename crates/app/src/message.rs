@@ -481,7 +481,9 @@ pub enum Message {
     MailboxReloadTick,
 
     /// A window of the app came to the front.
-    WindowFocused,
+    WindowFocused(iced::window::Id),
+    /// A click in the macOS menu bar, with the item id.
+    MenuBar(String),
 
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),

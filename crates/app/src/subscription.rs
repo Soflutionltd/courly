@@ -18,7 +18,7 @@ impl ReadyApp {
                 iced::Event::Window(iced::window::Event::Moved(point)) => {
                     Some(Message::WindowMoved(id, point))
                 }
-                iced::Event::Window(iced::window::Event::Focused) => Some(Message::WindowFocused),
+                iced::Event::Window(iced::window::Event::Focused) => Some(Message::WindowFocused(id)),
                 _ => None,
             }),
             iced::time::every(updater::CHECK_INTERVAL)
@@ -50,6 +50,8 @@ impl ReadyApp {
             self.status_bar.subscription().map(Message::StatusBar),
             sync_progress_subscription(&self.sync_receiver).map(Message::SyncProgress),
         ];
+        #[cfg(target_os = "macos")]
+        subs.push(crate::menu_bar::events());
 
         // Follow the pointer anywhere in the window while the toolbar is
         // being customized, including over the panel, which captures the

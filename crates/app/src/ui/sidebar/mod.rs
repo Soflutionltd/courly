@@ -113,7 +113,7 @@ pub enum SidebarMessage {
 
 /// A provider-folder operation picked from the right-click menu, carried
 /// up to the App, which asks for a name, a parent or a confirmation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FolderCommand {
     Create {
         account_id: String,
@@ -144,6 +144,21 @@ pub enum FolderCommand {
         folder_id: String,
         name: String,
     },
+}
+
+/// The folder open in the thread list, for the menu bar's folder actions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectedFolder {
+    /// The accounts it covers: one, or every account for a system folder
+    /// of the all-accounts view.
+    pub account_ids: Vec<String>,
+    pub folder_id: String,
+    pub name: String,
+    /// One of the account's own folders, which can be renamed, moved,
+    /// emptied and deleted.
+    pub own: bool,
+    /// A real mail folder whose messages can be marked read.
+    pub holds_messages: bool,
 }
 
 /// A folder another one can move under; `parent_id: None` is the top level.
@@ -398,6 +413,31 @@ impl Sidebar {
             orders.push((account.id.clone(), position));
         }
         Some(SidebarEvent::AccountsReordered(orders))
+    }
+
+    /// The folder open in the thread list, `None` for a view that is no
+    /// folder (pinned search, smart folder, shared mailbox...).
+    pub fn selected_folder(&self) -> Option<SelectedFolder> {
+        if self.active_pinned_search.is_some() {
+            return None;
+        }
+        let scope = &self.selected_scope;
+        let folder = self.section_nav(scope)?.folders.iter().find(|f| {
+            matches!(f.folder_kind, FolderKind::Universal | FolderKind::AccountFolder)
+                && universal_folder_selection(&f.id) == self.selection
+        })?;
+        let own = matches!(folder.folder_kind, FolderKind::AccountFolder);
+        let account_ids = nav::scope_accounts(self, scope);
+        if account_ids.is_empty() || (own && account_ids.len() != 1) {
+            return None;
+        }
+        Some(SelectedFolder {
+            account_ids,
+            folder_id: folder.id.clone(),
+            name: folder.name.clone(),
+            own,
+            holds_messages: own || nav::holds_messages(&folder.id),
+        })
     }
 
     /// Return the selected account index, if scope is a single account.
