@@ -424,8 +424,11 @@ pub async fn bind_oauth_listener(port: u16) -> Result<(TcpListener, u16), String
     Ok((listener, actual_port))
 }
 
-/// Wait for a single OAuth callback on an already-bound listener. Validates the
-/// CSRF state, sends a success page, and returns the auth code.
+/// Wait for the OAuth callback on an already-bound listener, validate the
+/// CSRF state, send a success page, and return the auth code. Requests that
+/// do not carry our state (a favicon fetch, or any web page pointing an
+/// `<img>` at the loopback port) get a 400 and the wait goes on, so they
+/// cannot abort the sign-in.
 pub async fn await_oauth_callback(
     listener: TcpListener,
     state: &str,
@@ -434,12 +437,54 @@ pub async fn await_oauth_callback(
         .local_addr()
         .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?
         .port();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
 
-    let (mut stream, _) = tokio::time::timeout(Duration::from_secs(300), listener.accept())
-        .await
-        .map_err(|_| "OAuth timed out - please try again".to_string())?
-        .map_err(|e| format!("Failed to accept OAuth connection: {e}"))?;
+    loop {
+        let (mut stream, _) = tokio::time::timeout_at(deadline, listener.accept())
+            .await
+            .map_err(|_| "OAuth timed out - please try again".to_string())?
+            .map_err(|e| format!("Failed to accept OAuth connection: {e}"))?;
 
+        let request = match read_callback_request(&mut stream).await {
+            Ok(request) => request,
+            Err(error) => {
+                log::debug!("ignoring unreadable OAuth callback connection: {error}");
+                continue;
+            }
+        };
+
+        match parse_callback(&request, state) {
+            CallbackOutcome::Code(code) => {
+                let html = oauth_success_html();
+                let html_len = html.len();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {html_len}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{html}"
+                );
+                _ = stream.write_all(response.as_bytes()).await;
+                _ = stream.flush().await;
+                return Ok(OAuthResult {
+                    code,
+                    state: state.to_string(),
+                    actual_port,
+                });
+            }
+            CallbackOutcome::ProviderError(error) => {
+                _ = stream.write_all(CALLBACK_DONE_RESPONSE.as_bytes()).await;
+                return Err(format!("OAuth error: {error}"));
+            }
+            CallbackOutcome::Unrelated => {
+                _ = stream.write_all(CALLBACK_REJECTED_RESPONSE.as_bytes()).await;
+            }
+        }
+    }
+}
+
+const CALLBACK_DONE_RESPONSE: &str =
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const CALLBACK_REJECTED_RESPONSE: &str =
+    "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+async fn read_callback_request(stream: &mut tokio::net::TcpStream) -> Result<String, String> {
     const MAX_REQUEST_SIZE: usize = 16384;
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
@@ -459,28 +504,36 @@ pub async fn await_oauth_callback(
             break;
         }
     }
-    let request = String::from_utf8_lossy(&buf);
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
 
-    let (code, returned_state) = parse_auth_code_and_state(&request)?;
+#[derive(Debug, PartialEq, Eq)]
+enum CallbackOutcome {
+    Code(String),
+    ProviderError(String),
+    /// No state, or not ours: not the provider's redirect.
+    Unrelated,
+}
 
-    if returned_state != state {
-        return Err("OAuth state mismatch - possible CSRF attack".to_string());
+fn parse_callback(request: &str, expected_state: &str) -> CallbackOutcome {
+    let Some(path) = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+    else {
+        return CallbackOutcome::Unrelated;
+    };
+    let params = parse_query_string(path);
+    if params.get("state").map(String::as_str) != Some(expected_state) {
+        return CallbackOutcome::Unrelated;
     }
-
-    let html = oauth_success_html();
-    let html_len = html.len();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {html_len}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{html}"
-    );
-
-    _ = stream.write_all(response.as_bytes()).await;
-    _ = stream.flush().await;
-
-    Ok(OAuthResult {
-        code,
-        state: returned_state,
-        actual_port,
-    })
+    if let Some(error) = params.get("error") {
+        return CallbackOutcome::ProviderError(error.clone());
+    }
+    match params.get("code").filter(|code| !code.is_empty()) {
+        Some(code) => CallbackOutcome::Code(code.clone()),
+        None => CallbackOutcome::Unrelated,
+    }
 }
 
 fn oauth_success_html() -> &'static str {
@@ -494,34 +547,6 @@ fn oauth_success_html() -> &'static str {
 </div>
 </body>
 </html>"#
-}
-
-fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> {
-    let first_line = request.lines().next().ok_or("Empty request")?;
-
-    let path = first_line
-        .split_whitespace()
-        .nth(1)
-        .ok_or("No path in request")?;
-
-    if path.contains("error=") {
-        let params = parse_query_string(path);
-        let error = params.get("error").cloned().unwrap_or_default();
-        return Err(format!("OAuth error: {error}"));
-    }
-
-    let params = parse_query_string(path);
-    let code = params
-        .get("code")
-        .filter(|v| !v.is_empty())
-        .cloned()
-        .ok_or_else(|| "No auth code in redirect".to_string())?;
-    let state = params
-        .get("state")
-        .filter(|v| !v.is_empty())
-        .cloned()
-        .ok_or_else(|| "No state in redirect".to_string())?;
-    Ok((code, state))
 }
 
 fn parse_query_string(path: &str) -> HashMap<String, String> {
@@ -796,6 +821,55 @@ mod tests {
         microsoft_userinfo_from_me,
     };
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    #[test]
+    fn callback_requests_without_our_state_are_unrelated() {
+        use super::{CallbackOutcome, parse_callback};
+
+        let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        assert_eq!(
+            parse_callback(&get("/?code=abc&state=s1"), "s1"),
+            CallbackOutcome::Code("abc".to_string())
+        );
+        assert_eq!(
+            parse_callback(&get("/?error=access_denied&state=s1"), "s1"),
+            CallbackOutcome::ProviderError("access_denied".to_string())
+        );
+        for unrelated in [
+            "/?error=x",
+            "/?code=abc&state=other",
+            "/?code=abc",
+            "/favicon.ico",
+            "/?state=s1",
+        ] {
+            assert_eq!(
+                parse_callback(&get(unrelated), "s1"),
+                CallbackOutcome::Unrelated,
+                "{unrelated}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stray_request_does_not_abort_the_sign_in() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (listener, port) = super::bind_oauth_listener(0).await.expect("bind");
+        let waiter = tokio::spawn(super::await_oauth_callback(listener, "s1"));
+        for path in ["/?error=x", "/?code=abc&state=s1"] {
+            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .expect("connect");
+            stream
+                .write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+                .await
+                .expect("write");
+            let mut reply = Vec::new();
+            let _ = stream.read_to_end(&mut reply).await;
+        }
+        let result = waiter.await.expect("join").expect("sign-in completes");
+        assert_eq!(result.code, "abc");
+    }
 
     fn id_token(claims: &str) -> String {
         format!("e30.{}.c2ln", URL_SAFE_NO_PAD.encode(claims))
