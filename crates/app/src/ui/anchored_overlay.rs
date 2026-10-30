@@ -14,6 +14,7 @@ pub struct AnchoredOverlay<'a, Message> {
     popup_width: Option<f32>,
     position: AnchorPosition,
     anchor_point: Option<Point>,
+    on_right_press: Option<Box<dyn Fn(Point) -> Message + 'a>>,
 }
 
 /// Where the popup appears relative to the base widget.
@@ -36,6 +37,7 @@ pub fn anchored_overlay<'a, Message: 'a>(
         popup_width: None,
         position: AnchorPosition::default(),
         anchor_point: None,
+        on_right_press: None,
     }
 }
 
@@ -64,6 +66,13 @@ impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
 
     pub fn anchor_point(mut self, point: Point) -> Self {
         self.anchor_point = Some(point);
+        self
+    }
+
+    /// Report a right-click on the base that no child handled, with the
+    /// cursor's window position (for a context menu at that point).
+    pub fn on_right_press(mut self, on_right_press: impl Fn(Point) -> Message + 'a) -> Self {
+        self.on_right_press = Some(Box::new(on_right_press));
         self
     }
 }
@@ -146,6 +155,18 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
             shell,
             viewport,
         );
+
+        if let Some(on_right_press) = self.on_right_press.as_ref()
+            && !shell.is_event_captured()
+            && let Event::Mouse(mouse::Event::ButtonPressed {
+                button: mouse::Button::Right,
+                ..
+            }) = event
+            && let Some(position) = cursor.position_over(layout.bounds())
+        {
+            shell.publish(on_right_press(position));
+            shell.capture_event();
+        }
     }
 
     fn mouse_interaction(

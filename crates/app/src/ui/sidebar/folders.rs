@@ -11,7 +11,7 @@ use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
 use types::{FolderId, SidebarSelection};
 
 use super::search_here::build_search_here_user_folder_prefix;
-use super::{Sidebar, SidebarMessage};
+use super::{RowMenuAnchor, Sidebar, SidebarMessage};
 
 /// A node in the depth-first tree traversal.
 struct TreeNode<'a> {
@@ -91,6 +91,7 @@ impl AccountForest<'_> {
         &self,
         sidebar: &'a Sidebar,
         root: &AccountRoot<'a>,
+        root_index: usize,
     ) -> Vec<Element<'a, SidebarMessage>> {
         let id_to_folder: HashMap<&str, &NavigationFolder> =
             self.folders.iter().map(|f| (f.id.as_str(), *f)).collect();
@@ -116,6 +117,7 @@ impl AccountForest<'_> {
                     indent,
                     tree_state,
                     is_folder_active(sidebar, node.folder),
+                    root_index,
                 )
             })
             .collect()
@@ -253,13 +255,15 @@ pub(super) fn folder_row_content<'a>(
         .into()
 }
 
-/// A subfolder row: selectable, right-click opens search-here.
+/// A subfolder row: selectable, right-click opens search-here and
+/// add-separator (below its top-level ancestor at `root_index`).
 fn folder_row<'a>(
     sidebar: &'a Sidebar,
     folder: &'a NavigationFolder,
     indent: f32,
     tree_state: Option<(bool, bool)>,
     active: bool,
+    root_index: usize,
 ) -> Element<'a, SidebarMessage> {
     let label_btn: Element<'_, SidebarMessage> =
         button(folder_row_content(folder, indent, tree_state, active))
@@ -272,7 +276,21 @@ fn folder_row<'a>(
             .into();
 
     let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar);
-    mouse_area(label_btn)
-        .on_right_press(SidebarMessage::SearchHere(query_prefix))
-        .into()
+    let row_el: Element<'a, SidebarMessage> = mouse_area(label_btn)
+        .on_right_press(SidebarMessage::OpenChildMenu {
+            folder_id: folder.id.clone(),
+            root_index,
+        })
+        .into();
+    let menu_open = matches!(
+        &sidebar.row_menu,
+        Some(RowMenuAnchor::Child { folder_id, .. }) if *folder_id == folder.id
+    );
+    if !menu_open {
+        return row_el;
+    }
+    super::nav::with_row_menu(
+        row_el,
+        super::nav::folder_menu_items(query_prefix, root_index),
+    )
 }

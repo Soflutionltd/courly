@@ -73,6 +73,13 @@ pub enum SidebarMessage {
     DragEnd,
     DragCancel,
     OpenRowMenu(usize),
+    /// Right-click on a subfolder row.
+    OpenChildMenu {
+        folder_id: String,
+        root_index: usize,
+    },
+    /// Right-click anywhere else in the sidebar, at this window position.
+    OpenBackgroundMenu(iced::Point),
     CloseRowMenu,
     AddSeparatorBelow(usize),
     RemoveSeparator(u32),
@@ -159,7 +166,22 @@ pub struct Sidebar {
     pub layouts: SidebarLayouts,
     pub drag: Option<SidebarDrag>,
     /// Folder-section row whose right-click menu is open.
-    pub row_menu: Option<usize>,
+    pub row_menu: Option<RowMenuAnchor>,
+}
+
+/// Where the folder-section right-click menu is open.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RowMenuAnchor {
+    /// A top-level row, by its index in the folder order.
+    Entry(usize),
+    /// A subfolder row; separators go below its top-level ancestor, since
+    /// only top-level rows can be reordered.
+    Child {
+        folder_id: String,
+        root_index: usize,
+    },
+    /// Empty space or a non-folder row, at the clicked window position.
+    Background(iced::Point),
 }
 
 impl Sidebar {
@@ -366,7 +388,23 @@ impl Component for Sidebar {
             }
             SidebarMessage::OpenRowMenu(index) => {
                 self.drag = None;
-                self.row_menu = Some(index);
+                self.row_menu = Some(RowMenuAnchor::Entry(index));
+                (Task::none(), None)
+            }
+            SidebarMessage::OpenChildMenu {
+                folder_id,
+                root_index,
+            } => {
+                self.drag = None;
+                self.row_menu = Some(RowMenuAnchor::Child {
+                    folder_id,
+                    root_index,
+                });
+                (Task::none(), None)
+            }
+            SidebarMessage::OpenBackgroundMenu(point) => {
+                self.drag = None;
+                self.row_menu = Some(RowMenuAnchor::Background(point));
                 (Task::none(), None)
             }
             SidebarMessage::CloseRowMenu => {
@@ -473,19 +511,25 @@ impl Component for Sidebar {
             scroll_content = scroll_content.push(pinned_public_folders_section(self));
         }
 
-        container(
-            column![
-                header_row,
-                scrollable(scroll_content)
-                    .spacing(SCROLLBAR_SPACING)
-                    .height(Length::Fill),
-            ]
-            .spacing(SPACE_XS),
+        let mut scroll_area = crate::ui::anchored_overlay::anchored_overlay(
+            scrollable(scroll_content)
+                .spacing(SCROLLBAR_SPACING)
+                .height(Length::Fill),
         )
-        .padding(PAD_SIDEBAR)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        .on_right_press(SidebarMessage::OpenBackgroundMenu);
+        if let Some(RowMenuAnchor::Background(point)) = self.row_menu {
+            scroll_area = scroll_area
+                .popup(nav::background_menu(self))
+                .anchor_point(point)
+                .popup_width(SIDEBAR_MIN_WIDTH)
+                .on_dismiss(SidebarMessage::CloseRowMenu);
+        }
+
+        container(column![header_row, scroll_area].spacing(SPACE_XS))
+            .padding(PAD_SIDEBAR)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 

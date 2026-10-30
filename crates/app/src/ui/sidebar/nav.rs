@@ -11,7 +11,7 @@ use types::SidebarSelection;
 use super::folders::{AccountForest, account_forest, folder_row_content, is_folder_active};
 use super::order::{SidebarEntry, default_order, resolve, scope_key};
 use super::search_here::{build_search_here_folder_prefix, build_search_here_user_folder_prefix};
-use super::{Sidebar, SidebarMessage, universal_folder_selection};
+use super::{RowMenuAnchor, Sidebar, SidebarMessage, universal_folder_selection};
 
 // ── Nav items ───────────────────────────────────────────
 
@@ -125,7 +125,7 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                             sidebar,
                         )),
                     ));
-                    for child in forest.descendant_rows(sidebar, root) {
+                    for child in forest.descendant_rows(sidebar, root, index) {
                         col = col.push(child);
                     }
                 }
@@ -185,44 +185,77 @@ fn reorderable_row<'a>(
         }
     }
 
-    if sidebar.row_menu != Some(index) {
+    if sidebar.row_menu != Some(RowMenuAnchor::Entry(index)) {
         return row_el;
     }
 
-    let mut items = column![].spacing(SPACE_XXS);
-    match menu {
-        RowMenu::Folder(query_prefix) => {
-            items = items
-                .push(menu_item(
-                    icon::search(),
-                    "Search Here",
-                    SidebarMessage::SearchHere(query_prefix),
-                ))
-                .push(menu_item(
-                    icon::minus(),
-                    "Add Separator Below",
-                    SidebarMessage::AddSeparatorBelow(index),
-                ));
-        }
-        RowMenu::Separator(id) => {
-            items = items.push(menu_item(
-                icon::x(),
-                "Remove Separator",
-                SidebarMessage::RemoveSeparator(id),
-            ));
-        }
-    }
-    items = items.push(widgets::divider()).push(menu_item(
+    let items = match menu {
+        RowMenu::Folder(query_prefix) => folder_menu_items(query_prefix, index),
+        RowMenu::Separator(id) => column![menu_item(
+            icon::x(),
+            "Remove Separator",
+            SidebarMessage::RemoveSeparator(id),
+        )]
+        .spacing(SPACE_XXS),
+    };
+    with_row_menu(row_el, items)
+}
+
+/// "Search Here" and "Add Separator Below", the separator going after the
+/// top-level row at `separator_after`.
+pub(super) fn folder_menu_items<'a>(
+    query_prefix: String,
+    separator_after: usize,
+) -> iced::widget::Column<'a, SidebarMessage> {
+    column![
+        menu_item(
+            icon::search(),
+            "Search Here",
+            SidebarMessage::SearchHere(query_prefix),
+        ),
+        menu_item(
+            icon::minus(),
+            "Add Separator Below",
+            SidebarMessage::AddSeparatorBelow(separator_after),
+        ),
+    ]
+    .spacing(SPACE_XXS)
+}
+
+/// The right-click menu card, ending with "Reset Folder Order".
+fn menu_card<'a>(items: iced::widget::Column<'a, SidebarMessage>) -> Element<'a, SidebarMessage> {
+    let items = items.push(widgets::divider()).push(menu_item(
         icon::undo(),
         "Reset Folder Order",
         SidebarMessage::ResetOrder,
     ));
-
-    let menu = container(items)
+    container(items)
         .padding(PAD_DROPDOWN)
-        .style(theme::ContainerClass::SelectMenu.style());
+        .style(theme::ContainerClass::SelectMenu.style())
+        .into()
+}
+
+/// Menu for a right-click outside the folder rows: the separator goes
+/// after the last folder, from where it can be dragged.
+pub(super) fn background_menu(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let mut items = column![].spacing(SPACE_XXS);
+    if let Some(last) = current_order(sidebar).len().checked_sub(1) {
+        items = items.push(menu_item(
+            icon::minus(),
+            "Add Separator",
+            SidebarMessage::AddSeparatorBelow(last),
+        ));
+    }
+    menu_card(items)
+}
+
+/// Float the right-click menu below `row_el`.
+pub(super) fn with_row_menu<'a>(
+    row_el: Element<'a, SidebarMessage>,
+    items: iced::widget::Column<'a, SidebarMessage>,
+) -> Element<'a, SidebarMessage> {
     crate::ui::anchored_overlay::anchored_overlay(row_el)
-        .popup(menu)
+        .popup(menu_card(items))
         .popup_width(SIDEBAR_MIN_WIDTH)
         .position(crate::ui::anchored_overlay::AnchorPosition::Below)
         .on_dismiss(SidebarMessage::CloseRowMenu)
