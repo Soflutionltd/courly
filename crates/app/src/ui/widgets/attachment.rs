@@ -70,7 +70,8 @@ pub fn attachment_card<'a, M: 'a + Clone>(
             text(filename)
                 .size(TEXT_MD)
                 .style(text::base)
-                .wrapping(text::Wrapping::None),
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::Middle),
         )
         .width(Length::Fill)
         .align_y(Alignment::Center),
