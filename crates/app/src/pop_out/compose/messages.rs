@@ -204,4 +204,12 @@ pub enum ComposeMessage {
         signature_id: Option<String>,
         signature_html: Option<String>,
     },
+    // ── Quoted original preview ──
+    QuoteResized(f32),
+    QuoteRendered {
+        inputs: crate::ui::mail_body::RenderInputs,
+        body: Option<std::sync::Arc<crate::ui::mail_body::RenderedBody>>,
+    },
+    QuoteLinkClicked(String),
+    QuoteShowRemote,
 }

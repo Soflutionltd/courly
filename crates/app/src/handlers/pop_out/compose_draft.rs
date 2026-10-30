@@ -28,7 +28,7 @@ fn draft_params_from_compose(
         .as_ref()
         .map(|a| a.id.clone())
         .unwrap_or_default();
-    let body_text = state.body.to_html();
+    let body_text = state.draft_html();
     #[allow(clippy::cast_possible_wrap)]
     let sep_idx = state.signature_separator_index.map(|i| i as i64);
     SaveLocalDraftParams {

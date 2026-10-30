@@ -527,13 +527,39 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         .height(Length::Fill)
         .font(font::text());
 
+    let editor_height = if state.quote.is_some() {
+        Length::FillPortion(COMPOSE_EDITOR_PORTION)
+    } else {
+        Length::Fill
+    };
     let body_card = container(editor)
         .width(Length::Fill)
-        .height(Length::Fill)
+        .height(editor_height)
         .padding(PAD_CONTENT)
         .style(theme::ContainerClass::EmailBody.style());
 
-    container(body_card)
+    let content: Element<'a, Message> = match state.quote.as_ref() {
+        Some(quote) => {
+            let compose = move |msg| Message::PopOut(window_id, PopOutMessage::Compose(msg));
+            let preview = crate::ui::mail_body::view(
+                Some(&quote.preview),
+                Some(quote.text.as_str()),
+                move |width| compose(ComposeMessage::QuoteResized(width)),
+                move |url| compose(ComposeMessage::QuoteLinkClicked(url)),
+                compose(ComposeMessage::QuoteShowRemote),
+            );
+            let quote_card = container(iced::widget::scrollable(
+                container(preview).padding(PAD_CONTENT),
+            ))
+            .width(Length::Fill)
+            .height(Length::FillPortion(COMPOSE_QUOTE_PORTION))
+            .style(theme::ContainerClass::EmailBody.style());
+            column![body_card, quote_card].spacing(SPACE_XS).into()
+        }
+        None => body_card.into(),
+    };
+
+    container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(iced::Padding {

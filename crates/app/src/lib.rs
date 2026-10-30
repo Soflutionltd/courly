@@ -40,6 +40,7 @@ mod font;
 mod handlers;
 pub mod harness;
 mod helpers;
+mod i18n;
 mod icon;
 mod main_view;
 mod message;
@@ -61,6 +62,8 @@ pub use service_client::ServiceClient;
 pub use ui::label_paint::LabelPaint;
 
 use std::path::PathBuf;
+
+rust_i18n::i18n!("locales", fallback = "en");
 
 pub(crate) static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
@@ -89,6 +92,7 @@ pub fn run() -> RunResult {
 pub fn run_app_blocking() -> RunResult {
     env_logger::init();
     log::info!("Ratatoskr starting");
+    i18n::init();
     #[cfg(feature = "hotpath")]
     let _hotpath = hotpath::HotpathGuardBuilder::new("ratatoskr::main")
         .percentiles(&[50.0, 95.0, 99.0])

@@ -59,8 +59,7 @@ impl ReadyApp {
             Some(state.subject.clone())
         };
 
-        let body_html = state.body.to_html();
-        let body_text = state.body.document.flattened_text();
+        let (body_html, body_text) = state.outgoing_body();
 
         let attachments: Vec<SendAttachment> = state
             .attachments

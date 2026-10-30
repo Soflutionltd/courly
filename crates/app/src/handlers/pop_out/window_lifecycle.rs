@@ -1,7 +1,7 @@
 use iced::{Size, Task};
 
 use crate::pop_out::PopOutWindow;
-use crate::pop_out::compose::{ComposeMode, ComposeState};
+use crate::pop_out::compose::{ComposeMode, ComposeState, ReplySource};
 use crate::pop_out::message_view::{MessageViewMessage, MessageViewState};
 use crate::ui::layout::{
     COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH, COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH,
@@ -187,17 +187,21 @@ impl ReadyApp {
             _ => return Task::none(),
         };
 
-        let state = ComposeState::new_reply(
-            &self.sidebar.accounts,
-            &mode,
-            mv.from_address.as_deref(),
-            mv.from_name.as_deref(),
-            mv.cc_addresses.as_deref(),
-            mv.body_text.as_deref().or(mv.snippet.as_deref()),
-            Some(&mv.thread_id),
-            Some(&mv.message_id),
-            mv.message_id_header.as_deref(),
-        );
+        let source = ReplySource {
+            from_name: mv.from_name.as_deref(),
+            from_address: mv.from_address.as_deref(),
+            to_addresses: mv.to_addresses.as_deref(),
+            cc_addresses: mv.cc_addresses.as_deref(),
+            subject: mv.subject.as_deref(),
+            date: mv.date,
+            body_html: mv.body_html.as_deref(),
+            body_text: mv.body_text.as_deref(),
+            snippet: mv.snippet.as_deref(),
+            thread_id: Some(&mv.thread_id),
+            message_id: Some(&mv.message_id),
+            message_id_header: mv.message_id_header.as_deref(),
+        };
+        let state = ComposeState::new_reply(&self.sidebar.accounts, &mode, &source);
 
         self.open_compose_window_with_state(state, mode)
     }
@@ -230,25 +234,11 @@ impl ReadyApp {
             },
         };
 
-        let to_email = last_message.and_then(|m| m.from_address.as_deref());
-        let to_name = last_message.and_then(|m| m.from_name.as_deref());
-        let cc_emails = last_message.and_then(|m| m.cc_addresses.as_deref());
         let thread_id = selected_thread.map(|t| t.id.as_str());
-        let message_id = last_message.map(|m| m.id.as_str());
-        let message_id_header = last_message.and_then(|m| m.message_id_header.as_deref());
-        let snippet = last_message.and_then(|m| m.snippet.as_deref());
-
-        let state = ComposeState::new_reply(
-            &self.sidebar.accounts,
-            &mode,
-            to_email,
-            to_name,
-            cc_emails,
-            snippet,
-            thread_id,
-            message_id,
-            message_id_header,
-        );
+        let source = last_message
+            .map(|m| ReplySource::from_thread_message(m, thread_id))
+            .unwrap_or_default();
+        let state = ComposeState::new_reply(&self.sidebar.accounts, &mode, &source);
 
         self.open_compose_window_with_state(state, mode)
     }

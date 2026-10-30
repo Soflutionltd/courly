@@ -5,8 +5,9 @@ use crate::ui::emoji_picker::EmojiCategory;
 use crate::ui::layout::{COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH};
 use crate::ui::token_input::{self, TokenId, TokenInputValue};
 
-use super::helpers::{accounts_to_info, build_attribution, csv_to_token_input};
+use super::helpers::{accounts_to_info, csv_to_token_input};
 use super::messages::ComposeMode;
+use super::quote::{QuotedOriginal, ReplySource, split_draft_html};
 use super::types::{
     AccountInfo, AutocompleteState, BccNudgeBanner, BulkPasteBanner, ComposeAttachment,
     ComposeTokenDrag, TokenContextMenuState,
@@ -34,6 +35,10 @@ pub struct ComposeState {
 
     // Body (rich text editor)
     pub body: EditorState,
+
+    /// Original message carried under a reply or forward, outside the
+    /// editor so its HTML reaches the recipient untouched.
+    pub quote: Option<QuotedOriginal>,
 
     // Compose mode
     pub mode: ComposeMode,
@@ -128,6 +133,7 @@ impl ComposeState {
             from_dropdown_open: false,
             subject: String::new(),
             body: EditorState::new(),
+            quote: None,
             mode: ComposeMode::New,
             reply_thread_id: None,
             reply_message_id: None,
@@ -186,9 +192,12 @@ impl ComposeState {
         let show_cc = !cc.tokens.is_empty();
         let show_bcc = !bcc.tokens.is_empty();
 
-        let body = draft
+        let (editor_html, quote) = draft
             .body_html
             .as_deref()
+            .map(split_draft_html)
+            .unwrap_or_default();
+        let body = Some(editor_html)
             .filter(|h| !h.trim().is_empty())
             .map(EditorState::from_html)
             .unwrap_or_default();
@@ -212,6 +221,7 @@ impl ComposeState {
             from_dropdown_open: false,
             subject: draft.subject.clone().unwrap_or_default(),
             body,
+            quote,
             mode: ComposeMode::New,
             reply_thread_id: draft.thread_id.clone(),
             reply_message_id: draft.reply_to_message_id.clone(),
@@ -248,28 +258,16 @@ impl ComposeState {
         }
     }
 
-    // TODO(refactor): wrap reply fields in a ReplyContext struct.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_reply(
-        accounts: &[db::Account],
-        mode: &ComposeMode,
-        to_email: Option<&str>,
-        to_name: Option<&str>,
-        cc_emails: Option<&str>,
-        quoted_body: Option<&str>,
-        thread_id: Option<&str>,
-        message_id: Option<&str>,
-        message_id_header: Option<&str>,
-    ) -> Self {
+    pub fn new_reply(accounts: &[db::Account], mode: &ComposeMode, source: &ReplySource<'_>) -> Self {
         let mut state = Self::new(accounts);
         state.mode = mode.clone();
 
         state.subject = mode.prefixed_subject();
 
         if !matches!(state.mode, ComposeMode::Forward { .. })
-            && let Some(email) = to_email
+            && let Some(email) = source.from_address
         {
-            let label = to_name.filter(|n| !n.is_empty()).unwrap_or(email);
+            let label = source.from_name.filter(|n| !n.is_empty()).unwrap_or(email);
             let id = state.to.next_token_id();
             state.to.tokens.push(token_input::Token {
                 id,
@@ -282,7 +280,7 @@ impl ComposeState {
         }
 
         if let ComposeMode::ReplyAll { .. } = &state.mode
-            && let Some(cc_str) = cc_emails
+            && let Some(cc_str) = source.cc_addresses
         {
             for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 let id = state.cc.next_token_id();
@@ -300,27 +298,14 @@ impl ComposeState {
             }
         }
 
-        if let Some(body) = quoted_body {
-            let attribution = build_attribution(to_name, to_email);
-            let escaped_body = body
-                .replace('&', "&amp;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;");
-            let body_paras = escaped_body
-                .lines()
-                .map(|line| format!("<p>{line}</p>"))
-                .collect::<Vec<_>>()
-                .join("");
-            let html = format!(
-                "<p><br></p><p><em>{attribution}</em></p><blockquote>{body_paras}</blockquote>"
-            );
-            state.body = EditorState::from_html(&html);
-            state.signature_separator_index = Some(1);
-        }
+        state.quote = QuotedOriginal::from_source(source);
 
-        state.reply_thread_id = thread_id.map(String::from);
-        state.reply_source_message_id = message_id.map(String::from);
-        state.reply_message_id = message_id_header.or(message_id).map(String::from);
+        state.reply_thread_id = source.thread_id.map(String::from);
+        state.reply_source_message_id = source.message_id.map(String::from);
+        state.reply_message_id = source
+            .message_id_header
+            .or(source.message_id)
+            .map(String::from);
 
         state
     }
@@ -347,6 +332,36 @@ impl ComposeState {
         };
         self.from_accounts.insert(0, shared_info.clone());
         self.from_account = Some(shared_info);
+    }
+
+    /// HTML and plain text sent to the recipient. The rule that marks the
+    /// signature region in the editor is left out: the only rule the
+    /// recipient sees is the one above the quoted original.
+    pub fn outgoing_body(&self) -> (String, String) {
+        let mut document = self.body.document.clone();
+        if let Some(index) = self.signature_separator_index
+            && matches!(document.block(index), Some(&rte::Block::HorizontalRule))
+        {
+            document.remove_block(index);
+        }
+        let editor_html = rte::html_serialize::to_html(&document);
+        let editor_text = document.flattened_text();
+        match &self.quote {
+            Some(quote) => (
+                quote.outgoing_html(&editor_html),
+                quote.outgoing_text(&editor_text),
+            ),
+            None => (editor_html, editor_text),
+        }
+    }
+
+    /// HTML persisted for a draft, quoted original included.
+    pub fn draft_html(&self) -> String {
+        let editor_html = self.body.to_html();
+        match &self.quote {
+            Some(quote) => quote.draft_html(&editor_html),
+            None => editor_html,
+        }
     }
 
     /// Returns true if the compose body has user content beyond the

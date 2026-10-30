@@ -575,35 +575,17 @@ impl ReadyApp {
         message_index: usize,
         mode: ComposeMode,
     ) -> Task<Message> {
-        // Clone all data upfront to avoid borrow checker conflicts with &mut self.
-        let msg = self
-            .reading_pane
-            .thread_messages
-            .get(message_index)
-            .cloned();
-        let to_email = msg.as_ref().and_then(|m| m.from_address.clone());
-        let to_name = msg.as_ref().and_then(|m| m.from_name.clone());
-        let cc_emails = msg.as_ref().and_then(|m| m.cc_addresses.clone());
         let thread_id = self
             .thread_list
             .selected_thread
             .and_then(|idx| self.thread_list.threads.get(idx))
-            .map(|t| t.id.clone());
-        let message_id = msg.as_ref().map(|m| m.id.clone());
-        let message_id_header = msg.as_ref().and_then(|m| m.message_id_header.clone());
-        let snippet = msg.as_ref().and_then(|m| m.snippet.clone());
-
-        let state = pop_out::compose::ComposeState::new_reply(
-            &self.sidebar.accounts,
-            &mode,
-            to_email.as_deref(),
-            to_name.as_deref(),
-            cc_emails.as_deref(),
-            snippet.as_deref(),
-            thread_id.as_deref(),
-            message_id.as_deref(),
-            message_id_header.as_deref(),
-        );
+            .map(|t| t.id.as_str());
+        let msg = self.reading_pane.thread_messages.get(message_index);
+        let source = msg
+            .map(|m| pop_out::compose::ReplySource::from_thread_message(m, thread_id))
+            .unwrap_or_default();
+        let state =
+            pop_out::compose::ComposeState::new_reply(&self.sidebar.accounts, &mode, &source);
 
         self.open_compose_window_with_state(state, mode)
     }

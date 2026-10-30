@@ -47,15 +47,3 @@ pub(super) fn accounts_to_info(accounts: &[db::Account]) -> Vec<AccountInfo> {
         })
         .collect()
 }
-
-/// Build an attribution line for quoted content, e.g.
-/// "On Mar 19, Alice Smith <alice@corp.com> wrote:"
-pub(super) fn build_attribution(name: Option<&str>, email: Option<&str>) -> String {
-    let sender = match (name, email) {
-        (Some(n), Some(e)) if !n.is_empty() => format!("{n} <{e}>"),
-        (_, Some(e)) => e.to_string(),
-        (Some(n), None) if !n.is_empty() => n.to_string(),
-        _ => "someone".to_string(),
-    };
-    format!("{sender} wrote:")
-}

@@ -586,6 +586,9 @@ pub const COMPOSE_MIN_WIDTH: f32 = 480.0;
 pub const COMPOSE_MIN_HEIGHT: f32 = 360.0;
 /// Width of the label column (From, To, Cc, Bcc, Subject) in compose.
 pub const COMPOSE_LABEL_WIDTH: f32 = 52.0;
+/// Height split between the editor and the quoted original under it.
+pub const COMPOSE_EDITOR_PORTION: u16 = 3;
+pub const COMPOSE_QUOTE_PORTION: u16 = 2;
 
 // ── Emoji picker ────────────────────────────────────────
 

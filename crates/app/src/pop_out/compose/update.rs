@@ -550,6 +550,12 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.active_signature_id = signature_id;
             state.draft_dirty = true;
         }
+        ComposeMessage::QuoteResized(_)
+        | ComposeMessage::QuoteRendered { .. }
+        | ComposeMessage::QuoteLinkClicked(_)
+        | ComposeMessage::QuoteShowRemote => {
+            log::warn!("quote preview message reached update_compose - dispatcher routing regression");
+        }
     }
 
     // After every update, if a recipients-error is showing and any

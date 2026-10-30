@@ -368,6 +368,20 @@ impl ReadyApp {
                     Message::PopOut(window_id, PopOutMessage::Compose(outer))
                 })
             }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(
+                    ComposeMessage::QuoteResized(_)
+                    | ComposeMessage::QuoteRendered { .. }
+                    | ComposeMessage::QuoteLinkClicked(_)
+                    | ComposeMessage::QuoteShowRemote,
+                ),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                handle_quote_preview(window_id, state, msg)
+            }
             // All other compose messages
             (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
@@ -394,6 +408,43 @@ impl ReadyApp {
             _ => Task::none(),
         }
     }
+}
+
+/// Keep the read-only preview of the quoted original rendered at the width
+/// it is laid out at.
+fn handle_quote_preview(
+    window_id: iced::window::Id,
+    state: &mut crate::pop_out::compose::ComposeState,
+    msg: ComposeMessage,
+) -> Task<Message> {
+    let Some(quote) = state.quote.as_mut() else {
+        return Task::none();
+    };
+    let start = match msg {
+        ComposeMessage::QuoteResized(width) => quote.preview.set_width(width),
+        ComposeMessage::QuoteShowRemote => quote.preview.allow_remote(),
+        ComposeMessage::QuoteRendered { inputs, body } => quote.preview.finish(inputs, body),
+        ComposeMessage::QuoteLinkClicked(url) => {
+            crate::ui::reading_pane::open_url_in_browser(&url);
+            false
+        }
+        _ => false,
+    };
+    if !start {
+        return Task::none();
+    }
+    let Some(inputs) = quote.preview.start() else {
+        return Task::none();
+    };
+    Task::perform(
+        crate::ui::mail_body::render(quote.html.clone(), inputs, Default::default()),
+        move |body| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::QuoteRendered { inputs, body }),
+            )
+        },
+    )
 }
 
 /// Launch an async file picker and return the selected files as attachments.
