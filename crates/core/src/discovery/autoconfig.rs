@@ -192,13 +192,13 @@ fn build_options_from_servers(
                 incoming: ServerConfig {
                     hostname: substitute_vars(&imap.hostname, email, local_part, email_domain),
                     port: imap.port,
-                    security: parse_security(&imap.socket_type),
+                    security: parse_security(&imap.socket_type, imap.port),
                     username: parse_username_format(&imap.username_template),
                 },
                 outgoing: ServerConfig {
                     hostname: substitute_vars(&smtp.hostname, email, local_part, email_domain),
                     port: smtp.port,
-                    security: parse_security(&smtp.socket_type),
+                    security: parse_security(&smtp.socket_type, smtp.port),
                     username: parse_username_format(&smtp.username_template),
                 },
             },
@@ -219,11 +219,17 @@ fn substitute_vars(template: &str, email: &str, local_part: &str, domain: &str) 
         .replace("%EMAILDOMAIN%", domain)
 }
 
-fn parse_security(socket_type: &str) -> Security {
+/// Only an explicit `plain` yields an unencrypted server. A missing or
+/// unknown value stays encrypted (implicit TLS on the implicit-TLS ports,
+/// STARTTLS otherwise), so a malformed or hostile document cannot silently
+/// downgrade the account to cleartext credentials.
+fn parse_security(socket_type: &str, port: u16) -> Security {
     match socket_type.to_uppercase().as_str() {
         "SSL" | "TLS" => Security::Tls,
         "STARTTLS" => Security::StartTls,
-        _ => Security::None,
+        "PLAIN" => Security::None,
+        _ if matches!(port, 465 | 993 | 995) => Security::Tls,
+        _ => Security::StartTls,
     }
 }
 
@@ -256,5 +262,25 @@ fn resolve_auth(server: &ParsedServer, domain: &str) -> AuthConfig {
     AuthConfig {
         method: AuthMethod::Password,
         alternatives: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_an_explicit_plain_socket_type_is_unencrypted() {
+        assert!(matches!(parse_security("plain", 25), Security::None));
+        assert!(matches!(parse_security("SSL", 993), Security::Tls));
+        assert!(matches!(parse_security("starttls", 587), Security::StartTls));
+    }
+
+    #[test]
+    fn unknown_socket_type_stays_encrypted() {
+        assert!(matches!(parse_security("", 993), Security::Tls));
+        assert!(matches!(parse_security("bogus", 465), Security::Tls));
+        assert!(matches!(parse_security("", 587), Security::StartTls));
+        assert!(matches!(parse_security("bogus", 143), Security::StartTls));
     }
 }
