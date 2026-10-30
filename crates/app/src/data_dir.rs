@@ -1,11 +1,15 @@
 //! Location of the data directory under the platform data dir.
 
+#[cfg(any(test, not(feature = "dev-seed")))]
 use std::path::{Path, PathBuf};
 
 /// Named after the bundle identifier, so renaming the app never has to move
 /// user data again.
+#[cfg(any(test, not(feature = "dev-seed")))]
 pub(crate) const DATA_DIR_NAME: &str = "com.soflution.mail";
+#[cfg(feature = "dev-seed")]
 pub(crate) const DEV_DATA_DIR_NAME: &str = "com.soflution.mail.dev";
+#[cfg(any(test, not(feature = "dev-seed")))]
 const LEGACY_DATA_DIR_NAME: &str = "org.folknor.ratatoskr";
 
 /// The data directory under `base`, adopting the directory used before the
@@ -14,6 +18,7 @@ const LEGACY_DATA_DIR_NAME: &str = "org.folknor.ratatoskr";
 /// mix. When both exist the new one wins and the old one is left untouched.
 /// When the move fails the old directory keeps being used, so the user's
 /// accounts never look gone.
+#[cfg(any(test, not(feature = "dev-seed")))]
 pub(crate) fn resolve(base: &Path) -> PathBuf {
     let current = base.join(DATA_DIR_NAME);
     let legacy = base.join(LEGACY_DATA_DIR_NAME);
