@@ -658,6 +658,7 @@ mod tests {
                 snooze_until INTEGER,
                 is_pinned INTEGER NOT NULL DEFAULT 0,
                 is_muted INTEGER NOT NULL DEFAULT 0,
+                is_flag_complete INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (account_id, id)
              );
              CREATE TABLE messages (
