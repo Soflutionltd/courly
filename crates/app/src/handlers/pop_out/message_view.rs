@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::pop_out::message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
@@ -25,11 +26,7 @@ pub(super) fn handle_message_view_update(
         }
         MessageViewMessage::BodyLoaded(_, Err(e)) => {
             eprintln!("Pop-out body load failed: {e}");
-            state.error_banner = Some(
-                "This message is no longer available. It may have been \
-                 deleted or moved."
-                    .to_string(),
-            );
+            state.error_banner = Some(t!("compose.message_unavailable").into_owned());
             Task::none()
         }
         MessageViewMessage::AttachmentsLoaded(generation, _)
@@ -181,10 +178,11 @@ fn synthesize_pseudo_source(state: &MessageViewState) -> String {
         ));
     }
 
+    let empty_body = t!("compose.empty_body");
     let (body, content_type) = match (state.body_html.as_deref(), state.body_text.as_deref()) {
         (Some(html), _) if !html.trim().is_empty() => (html, "text/html; charset=utf-8"),
         (_, Some(text)) if !text.trim().is_empty() => (text, "text/plain; charset=utf-8"),
-        _ => ("(empty body)", "text/plain; charset=utf-8"),
+        _ => (&*empty_body, "text/plain; charset=utf-8"),
     };
     out.push_str(&format!("Content-Type: {content_type}\n"));
     out.push('\n');

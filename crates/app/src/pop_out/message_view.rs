@@ -1,5 +1,7 @@
 use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, Padding};
+use rust_i18n::t;
+use std::borrow::Cow;
 
 use crate::Message;
 use crate::db::{self, ThreadMessage};
@@ -325,7 +327,7 @@ fn message_view_header<'a>(
         .from_name
         .as_deref()
         .or(state.from_address.as_deref())
-        .unwrap_or("(unknown)");
+        .map_or_else(|| t!("compose.unknown_sender"), Cow::Borrowed);
     let sender_email = state.from_address.as_deref().unwrap_or("");
 
     // Action buttons + overflow menu (right-aligned on sender name row)
@@ -341,7 +343,7 @@ fn message_view_header<'a>(
             Some(Some(path)) if path.exists() => Some(path),
             _ => None,
         });
-    let avatar = widgets::sender_avatar(sender_name, bimi_logo.as_deref(), AVATAR_MESSAGE_CARD);
+    let avatar = widgets::sender_avatar(&sender_name, bimi_logo.as_deref(), AVATAR_MESSAGE_CARD);
 
     // From row: avatar + (name + email) + actions
     let from_row = row![
@@ -369,7 +371,7 @@ fn message_view_header<'a>(
     if !to_text.is_empty() {
         header_fields = header_fields.push(
             row![
-                text("To: ")
+                text(t!("compose.to_header"))
                     .size(TEXT_SM)
                     .style(theme::TextClass::Tertiary.style()),
                 text(to_text).size(TEXT_SM).style(text::secondary),
@@ -384,7 +386,7 @@ fn message_view_header<'a>(
     {
         header_fields = header_fields.push(
             row![
-                text("Cc: ")
+                text(t!("compose.cc_header"))
                     .size(TEXT_SM)
                     .style(theme::TextClass::Tertiary.style()),
                 text(cc.as_str()).size(TEXT_SM).style(text::secondary),
@@ -395,7 +397,10 @@ fn message_view_header<'a>(
 
     // Subject + date row
     let date_str = format_date(state.date).trim().to_string();
-    let subject = state.subject.as_deref().unwrap_or("(no subject)");
+    let subject = state
+        .subject
+        .as_deref()
+        .map_or_else(|| t!("compose.no_subject"), Cow::Borrowed);
     let subject_row = row![
         text(subject)
             .size(TEXT_HEADING)
@@ -433,25 +438,25 @@ fn action_buttons_with_overflow<'a>(
     window_id: iced::window::Id,
     state: &'a MessageViewState,
 ) -> Element<'a, Message> {
-    let reply_btn = widgets::action_icon_button(
+    let reply_btn = action_button(
         icon::reply(),
-        "Reply",
+        t!("compose.reply"),
         Message::PopOut(
             window_id,
             PopOutMessage::MessageView(MessageViewMessage::Reply),
         ),
     );
-    let reply_all_btn = widgets::action_icon_button(
+    let reply_all_btn = action_button(
         icon::reply_all(),
-        "Reply All",
+        t!("compose.reply_all"),
         Message::PopOut(
             window_id,
             PopOutMessage::MessageView(MessageViewMessage::ReplyAll),
         ),
     );
-    let forward_btn = widgets::action_icon_button(
+    let forward_btn = action_button(
         icon::forward(),
-        "Forward",
+        t!("compose.forward"),
         Message::PopOut(
             window_id,
             PopOutMessage::MessageView(MessageViewMessage::Forward),
@@ -462,6 +467,27 @@ fn action_buttons_with_overflow<'a>(
     row![reply_btn, reply_all_btn, forward_btn, overflow]
         .spacing(SPACE_XXS)
         .into()
+}
+
+/// `widgets::action_icon_button` with an owned label, so the label can be
+/// a translation that does not outlive this view.
+fn action_button<'a>(
+    ico: iced::widget::Text<'a>,
+    label: Cow<'a, str>,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(
+        row![
+            container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+            container(text(label).size(TEXT_SM).style(text::secondary)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Action.style())
+    .into()
 }
 
 // ── Overflow menu ──────────────────────────────────────
@@ -496,16 +522,19 @@ fn overflow_context_menu<'a>(
     }
 
     let modes = [
-        (RenderingMode::PlainText, "Plain Text"),
-        (RenderingMode::SimpleHtml, "Simple HTML"),
-        (RenderingMode::OriginalHtml, "Original HTML"),
-        (RenderingMode::Source, "Source"),
+        (RenderingMode::PlainText, t!("compose.mode_plain_text")),
+        (RenderingMode::SimpleHtml, t!("compose.mode_simple_html")),
+        (
+            RenderingMode::OriginalHtml,
+            t!("compose.mode_original_html"),
+        ),
+        (RenderingMode::Source, t!("compose.mode_source")),
     ];
 
     let mut menu_items = column![
         context_menu_item(
             icon::archive(),
-            "Archive",
+            t!("compose.archive"),
             Message::PopOut(
                 window_id,
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
@@ -513,7 +542,7 @@ fn overflow_context_menu<'a>(
         ),
         context_menu_item(
             icon::trash(),
-            "Delete",
+            t!("compose.delete"),
             Message::PopOut(
                 window_id,
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
@@ -521,7 +550,7 @@ fn overflow_context_menu<'a>(
         ),
         context_menu_item(
             icon::printer(),
-            "Print",
+            t!("compose.print"),
             Message::PopOut(
                 window_id,
                 PopOutMessage::MessageView(MessageViewMessage::Print),
@@ -529,7 +558,7 @@ fn overflow_context_menu<'a>(
         ),
         context_menu_item(
             icon::download(),
-            "Save As",
+            t!("compose.save_as"),
             Message::PopOut(
                 window_id,
                 PopOutMessage::MessageView(MessageViewMessage::SaveAs),
@@ -567,7 +596,7 @@ fn overflow_context_menu<'a>(
 
 fn context_menu_item<'a>(
     ico: iced::widget::Text<'a>,
-    label: &'a str,
+    label: Cow<'a, str>,
     on_press: Message,
 ) -> Element<'a, Message> {
     button(
@@ -595,7 +624,7 @@ fn context_menu_item<'a>(
 /// dropdown (e.g. the rendering-mode picker in the overflow menu).
 fn context_menu_radio_item<'a>(
     selected: bool,
-    label: &'a str,
+    label: Cow<'a, str>,
     on_press: Message,
 ) -> Element<'a, Message> {
     button(
@@ -624,19 +653,16 @@ fn plain_text_body<'a>(
     window_id: iced::window::Id,
     state: &'a MessageViewState,
 ) -> Element<'a, Message> {
-    let txt = state
-        .body_text
-        .as_deref()
-        .or(state.snippet.as_deref())
-        .unwrap_or("(no content)");
-    container(crate::ui::widgets::linked_text(txt, TEXT_LG, move |url| {
-        Message::PopOut(
-            window_id,
-            PopOutMessage::MessageView(MessageViewMessage::LinkClicked(url)),
-        )
-    }))
-    .width(Length::Fill)
-    .into()
+    let body: Element<'a, Message> = match state.body_text.as_deref().or(state.snippet.as_deref()) {
+        Some(txt) => crate::ui::widgets::linked_text(txt, TEXT_LG, move |url| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::LinkClicked(url)),
+            )
+        }),
+        None => text(t!("compose.no_content")).size(TEXT_LG).into(),
+    };
+    container(body).width(Length::Fill).into()
 }
 
 fn message_view_body<'a>(
@@ -661,7 +687,10 @@ fn message_view_body<'a>(
             }
         }
         RenderingMode::Source => {
-            let src = state.raw_source.as_deref().unwrap_or("Loading source...");
+            let src = state
+                .raw_source
+                .as_deref()
+                .map_or_else(|| t!("compose.loading_source"), Cow::Borrowed);
             text(src)
                 .size(TEXT_SM)
                 .font(font::monospace())
@@ -726,14 +755,14 @@ fn message_view_attachments<'a>(
     hovered_id: Option<&str>,
 ) -> Element<'a, Message> {
     // ── Panel header: "Attachments (N)" left + Save All right ──
-    let title = text(format!("Attachments ({})", attachments.len()))
+    let title = text(t!("compose.attachments_count", count = attachments.len()))
         .size(TEXT_MD)
         .font(font::text_semibold())
         .style(text::base);
 
-    let save_all_btn = widgets::action_icon_button(
+    let save_all_btn = action_button(
         icon::download(),
-        "Save All",
+        t!("compose.save_all"),
         Message::PopOut(
             window_id,
             PopOutMessage::MessageView(MessageViewMessage::SaveAllAttachments),
@@ -797,7 +826,10 @@ fn compact_attachment_card<'a>(
     att: &'a MessageViewAttachment,
     is_hovered: bool,
 ) -> Element<'a, Message> {
-    let filename = att.filename.as_deref().unwrap_or("(unnamed)");
+    let filename = att
+        .filename
+        .as_deref()
+        .map_or_else(|| t!("compose.unnamed_attachment"), Cow::Borrowed);
     let file_ico = file_type_icon(att.mime_type.as_deref());
     let size_str = format_file_size(att.size);
 
@@ -834,7 +866,7 @@ fn compact_attachment_card<'a>(
             container(
                 row![
                     icon::download().size(ICON_MD).style(text::base),
-                    text("Save").size(TEXT_SM).style(text::base),
+                    text(t!("compose.save")).size(TEXT_SM).style(text::base),
                 ]
                 .spacing(SPACE_XS)
                 .align_y(Alignment::Center),
@@ -853,7 +885,7 @@ fn compact_attachment_card<'a>(
             container(
                 row![
                     icon::external_link().size(ICON_MD).style(text::base),
-                    text("Open").size(TEXT_SM).style(text::base),
+                    text(t!("compose.open")).size(TEXT_SM).style(text::base),
                 ]
                 .spacing(SPACE_XS)
                 .align_y(Alignment::Center),
@@ -934,9 +966,18 @@ fn format_date(timestamp: Option<i64>) -> String {
     timestamp
         .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
         .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::system())
-                .strftime("%a, %b %d, %Y, %-I:%M %p")
-                .to_string()
+            let zoned = ts.to_zoned(jiff::tz::TimeZone::system());
+            t!(
+                "compose.message_date",
+                weekday = crate::i18n::weekday_short(
+                    zoned.weekday().to_monday_zero_offset().unsigned_abs()
+                ),
+                month = crate::i18n::month_short(zoned.month()),
+                day = format!("{:02}", zoned.day()),
+                year = zoned.year(),
+                time = crate::i18n::time_of_day(&zoned)
+            )
+            .into_owned()
         })
         .unwrap_or_default()
 }
@@ -965,10 +1006,14 @@ fn mime_to_type_label(mime: Option<&str>) -> &'static str {
 fn format_file_size(size: Option<i64>) -> String {
     match size {
         None => "\u{2014}".to_string(),
-        Some(b) if b < 1024 => format!("{b} B"),
+        Some(b) if b < 1024 => t!("compose.size_bytes", size = b).into_owned(),
         Some(b) if b < 1024 * 1024 => {
-            format!("{:.0} KB", b as f64 / 1024.0)
+            let size = format!("{:.0}", b as f64 / 1024.0);
+            t!("compose.size_kb", size = size).into_owned()
         }
-        Some(b) => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
+        Some(b) => {
+            let size = format!("{:.1}", b as f64 / (1024.0 * 1024.0));
+            t!("compose.size_mb", size = size).into_owned()
+        }
     }
 }

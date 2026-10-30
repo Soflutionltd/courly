@@ -1,5 +1,6 @@
 use iced::Point;
 use rte::{Action as RteAction, EditAction, InlineStyle};
+use rust_i18n::t;
 
 use crate::ui::token_input::{self, TokenId};
 
@@ -48,11 +49,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 || !state.cc.tokens.is_empty()
                 || !state.bcc.tokens.is_empty();
             if !has_recipients {
-                state.recipients_error = Some("Add at least one recipient.".to_string());
+                state.recipients_error = Some(t!("compose.add_recipient_error").into_owned());
                 return;
             }
             state.recipients_error = None;
-            state.status = Some("Send not yet wired".to_string());
+            state.status = Some(t!("compose.send_not_wired").into_owned());
         }
         ComposeMessage::Discard => {
             // Handled by the caller (close window)

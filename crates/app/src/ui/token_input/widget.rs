@@ -45,7 +45,7 @@ pub(super) struct TokenInputState {
 pub(super) struct TokenInputWidget<'a, M> {
     pub(super) tokens: &'a [Token],
     pub(super) text: &'a str,
-    pub(super) placeholder: &'a str,
+    pub(super) placeholder: String,
     pub(super) on_message: Box<dyn Fn(TokenInputMessage) -> M + 'a>,
     /// Which token the parent considers selected (for backspace flow).
     pub(super) selected_token: Option<TokenId>,
@@ -70,7 +70,7 @@ pub(super) struct TokenInputWidget<'a, M> {
 pub fn token_input_field<'a, M: Clone + 'a>(
     tokens: &'a [Token],
     text: &'a str,
-    placeholder: &'a str,
+    placeholder: String,
     selected_token: Option<TokenId>,
     autocomplete_open: bool,
     on_message: impl Fn(TokenInputMessage) -> M + 'a,

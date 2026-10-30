@@ -2,6 +2,8 @@
 
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
+use std::borrow::Cow;
 
 use crate::db::ThreadAttachment;
 use crate::icon;
@@ -36,7 +38,10 @@ pub fn attachment_card<'a, M: 'a + Clone>(
     expanded: bool,
     actions: AttachmentCardActions<M>,
 ) -> Element<'a, M> {
-    let filename = primary.filename.as_deref().unwrap_or("(unnamed)");
+    let filename = primary
+        .filename
+        .as_deref()
+        .map_or_else(|| t!("compose.unnamed_attachment"), Cow::Borrowed);
     let file_icon = file_type_icon(primary.mime_type.as_deref());
     let latest = versions.first().copied().unwrap_or(primary);
     let date_sender = format_attachment_date_sender(latest);
@@ -88,7 +93,7 @@ pub fn attachment_card<'a, M: 'a + Clone>(
                 chevron
                     .size(ICON_XS)
                     .style(theme::TextClass::Tertiary.style()),
-                text(format!("{} versions", versions.len()))
+                text(t!("compose.versions_count", count = versions.len()))
                     .size(TEXT_XS)
                     .line_height(iced::widget::text::LineHeight::Relative(1.0))
                     .style(theme::TextClass::Tertiary.style()),
@@ -206,14 +211,13 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
     let date = att
         .date
         .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
-        .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::system())
-                .strftime("%b %d")
-                .to_string()
-        })
+        .map(|ts| short_date(&ts.to_zoned(jiff::tz::TimeZone::system())))
         .unwrap_or_default();
-    let sender = att.from_name.as_deref().unwrap_or("unknown");
-    format!("{type_label} \u{00B7} {size} \u{00B7} {date} from {sender}")
+    let sender = attachment_sender(att);
+    format!(
+        "{type_label} \u{00B7} {size} \u{00B7} {}",
+        t!("compose.attachment_date_from", date = date, sender = sender)
+    )
 }
 
 /// "Mar 14 from Alex Morgan" - file size lives separately in the top-right
@@ -222,14 +226,10 @@ fn format_attachment_date_sender(att: &ThreadAttachment) -> String {
     let date = att
         .date
         .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
-        .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::system())
-                .strftime("%b %d")
-                .to_string()
-        })
+        .map(|ts| short_date(&ts.to_zoned(jiff::tz::TimeZone::system())))
         .unwrap_or_default();
-    let sender = att.from_name.as_deref().unwrap_or("unknown");
-    format!("{date} from {sender}")
+    let sender = attachment_sender(att);
+    t!("compose.attachment_date_from", date = date, sender = sender).into_owned()
 }
 
 /// Per-version line shown under an expanded attachment card. Drops the type
@@ -239,18 +239,35 @@ fn format_attachment_version_line(att: &ThreadAttachment, is_latest: bool) -> St
     let date = att
         .date
         .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
-        .map(|ts| {
-            ts.to_zoned(jiff::tz::TimeZone::system())
-                .strftime("%b %d")
-                .to_string()
-        })
+        .map(|ts| short_date(&ts.to_zoned(jiff::tz::TimeZone::system())))
         .unwrap_or_default();
-    let sender = att.from_name.as_deref().unwrap_or("unknown");
-    if is_latest {
-        format!("{size} \u{00B7} {date} from {sender} (latest)")
+    let sender = attachment_sender(att);
+    let date_from = if is_latest {
+        t!(
+            "compose.attachment_date_from_latest",
+            date = date,
+            sender = sender
+        )
     } else {
-        format!("{size} \u{00B7} {date} from {sender}")
-    }
+        t!("compose.attachment_date_from", date = date, sender = sender)
+    };
+    format!("{size} \u{00B7} {date_from}")
+}
+
+/// "Mar 14", "14 mars".
+fn short_date(zoned: &jiff::Zoned) -> String {
+    t!(
+        "compose.attachment_short_date",
+        month = crate::i18n::month_short(zoned.month()),
+        day = format!("{:02}", zoned.day())
+    )
+    .into_owned()
+}
+
+fn attachment_sender(att: &ThreadAttachment) -> Cow<'_, str> {
+    att.from_name
+        .as_deref()
+        .map_or_else(|| t!("compose.unknown_attachment_sender"), Cow::Borrowed)
 }
 
 fn mime_to_type_label(mime: Option<&str>) -> &'static str {
@@ -267,8 +284,14 @@ fn mime_to_type_label(mime: Option<&str>) -> &'static str {
 fn format_file_size(size: Option<i64>) -> String {
     match size {
         None => "\u{2014}".to_string(),
-        Some(b) if b < 1024 => format!("{b} B"),
-        Some(b) if b < 1024 * 1024 => format!("{:.0} KB", b as f64 / 1024.0),
-        Some(b) => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
+        Some(b) if b < 1024 => t!("compose.size_bytes", size = b).into_owned(),
+        Some(b) if b < 1024 * 1024 => {
+            let size = format!("{:.0}", b as f64 / 1024.0);
+            t!("compose.size_kb", size = size).into_owned()
+        }
+        Some(b) => {
+            let size = format!("{:.1}", b as f64 / (1024.0 * 1024.0));
+            t!("compose.size_mb", size = size).into_owned()
+        }
     }
 }

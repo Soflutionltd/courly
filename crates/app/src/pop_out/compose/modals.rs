@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::Message;
 use crate::font;
@@ -22,19 +23,23 @@ pub(super) fn bcc_nudge_banner<'a>(
 ) -> Element<'a, Message> {
     let tid = nudge.token_id;
     let label = format!(
-        "\u{2139} \"{}\" is a group. Move to Bcc to hide member addresses?",
-        nudge.group_name,
+        "\u{2139} {}",
+        t!("compose.bcc_nudge", name = nudge.group_name)
     );
 
-    let move_btn = button(text("Move").size(TEXT_SM).font(font::text_semibold()))
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::BccNudgeAccept(tid)),
-        ))
-        .padding(PAD_ICON_BTN)
-        .style(theme::ButtonClass::Primary.style());
+    let move_btn = button(
+        text(t!("compose.move"))
+            .size(TEXT_SM)
+            .font(font::text_semibold()),
+    )
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::BccNudgeAccept(tid)),
+    ))
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Primary.style());
 
-    let dismiss_btn = button(text("Dismiss").size(TEXT_SM))
+    let dismiss_btn = button(text(t!("compose.dismiss")).size(TEXT_SM))
         .on_press(Message::PopOut(
             window_id,
             PopOutMessage::Compose(ComposeMessage::BccNudgeDismiss(tid)),
@@ -62,11 +67,11 @@ pub(super) fn bulk_paste_banner_view<'a>(
     banner: &BulkPasteBanner,
 ) -> Element<'a, Message> {
     let label = format!(
-        "\u{2139} {} addresses pasted. Save as a contact group?",
-        banner.count,
+        "\u{2139} {}",
+        t!("compose.bulk_paste", count = banner.count)
     );
 
-    let save_btn = button(text("Save as group").size(TEXT_SM))
+    let save_btn = button(text(t!("compose.save_as_group")).size(TEXT_SM))
         .on_press(Message::PopOut(
             window_id,
             PopOutMessage::Compose(ComposeMessage::BulkPasteSaveAsGroup),
@@ -74,7 +79,7 @@ pub(super) fn bulk_paste_banner_view<'a>(
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Primary.style());
 
-    let dismiss_btn = button(text("Dismiss").size(TEXT_SM))
+    let dismiss_btn = button(text(t!("compose.dismiss")).size(TEXT_SM))
         .on_press(Message::PopOut(
             window_id,
             PopOutMessage::Compose(ComposeMessage::BulkPasteDismiss),
@@ -103,7 +108,7 @@ pub(super) fn save_as_group_dialog<'a>(
 ) -> Element<'a, Message> {
     let count = state.bulk_paste_banner.as_ref().map_or(0, |b| b.count);
 
-    let name_input = text_input("Group name", &state.save_group_name)
+    let name_input = text_input(t!("compose.group_name"), &state.save_group_name)
         .on_input(move |s| {
             Message::PopOut(
                 window_id,
@@ -118,13 +123,13 @@ pub(super) fn save_as_group_dialog<'a>(
         .padding(PAD_INPUT);
 
     let mut body = column![
-        text(format!(
-            "{count} addresses will be saved as a new contact group."
-        ))
-        .size(TEXT_MD)
-        .style(text::secondary),
+        text(t!("compose.group_save_summary", count = count))
+            .size(TEXT_MD)
+            .style(text::secondary),
         column![
-            text("Group name").size(TEXT_SM).style(text::secondary),
+            text(t!("compose.group_name"))
+                .size(TEXT_SM)
+                .style(text::secondary),
             name_input,
         ]
         .spacing(SPACE_XXS),
@@ -137,17 +142,17 @@ pub(super) fn save_as_group_dialog<'a>(
 
     let save_disabled = state.save_group_name.trim().is_empty() || state.save_group_in_flight;
     let save_label = if state.save_group_in_flight {
-        "Saving..."
+        t!("compose.saving")
     } else {
-        "Save"
+        t!("compose.save")
     };
 
     form_dialog(
-        "Save as contact group",
+        t!("compose.save_as_contact_group"),
         body,
         vec![
             DialogAction::default_action(
-                "Cancel",
+                t!("compose.cancel"),
                 Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::GroupSaveCancel),
@@ -170,7 +175,7 @@ pub(super) fn token_context_menu<'a>(
     window_id: iced::window::Id,
     ctx: &TokenContextMenuState,
 ) -> Element<'a, Message> {
-    let mk = |label: &'a str, msg: ComposeMessage| {
+    let mk = |label: String, msg: ComposeMessage| {
         button(
             container(text(label).size(TEXT_MD).style(text::base))
                 .width(Length::Fill)
@@ -189,27 +194,30 @@ pub(super) fn token_context_menu<'a>(
     match ctx.kind {
         ContextMenuKind::Token { token_id, is_group } => {
             items = items.push(mk(
-                "Cut",
+                t!("compose.cut").into_owned(),
                 ComposeMessage::ContextMenuCut { field, token_id },
             ));
             items = items.push(mk(
-                "Copy",
+                t!("compose.copy").into_owned(),
                 ComposeMessage::ContextMenuCopy { field, token_id },
             ));
-            items = items.push(mk("Paste", ComposeMessage::ContextMenuPaste { field }));
             items = items.push(mk(
-                "Delete",
+                t!("compose.paste").into_owned(),
+                ComposeMessage::ContextMenuPaste { field },
+            ));
+            items = items.push(mk(
+                t!("compose.delete").into_owned(),
                 ComposeMessage::ContextMenuDelete { field, token_id },
             ));
             if is_group {
                 items = items.push(mk(
-                    "Expand group",
+                    t!("compose.expand_group").into_owned(),
                     ComposeMessage::ContextMenuExpandGroup { field, token_id },
                 ));
             }
             if field != RecipientField::To {
                 items = items.push(mk(
-                    "Move to To",
+                    t!("compose.move_to_to").into_owned(),
                     ComposeMessage::ContextMenuMoveTo {
                         token_id,
                         from: field,
@@ -219,7 +227,7 @@ pub(super) fn token_context_menu<'a>(
             }
             if field != RecipientField::Cc {
                 items = items.push(mk(
-                    "Move to Cc",
+                    t!("compose.move_to_cc").into_owned(),
                     ComposeMessage::ContextMenuMoveTo {
                         token_id,
                         from: field,
@@ -229,7 +237,7 @@ pub(super) fn token_context_menu<'a>(
             }
             if field != RecipientField::Bcc {
                 items = items.push(mk(
-                    "Move to Bcc",
+                    t!("compose.move_to_bcc").into_owned(),
                     ComposeMessage::ContextMenuMoveTo {
                         token_id,
                         from: field,
@@ -239,7 +247,10 @@ pub(super) fn token_context_menu<'a>(
             }
         }
         ContextMenuKind::Field => {
-            items = items.push(mk("Paste", ComposeMessage::ContextMenuPaste { field }));
+            items = items.push(mk(
+                t!("compose.paste").into_owned(),
+                ComposeMessage::ContextMenuPaste { field },
+            ));
         }
     }
 
@@ -257,11 +268,11 @@ pub(super) fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'
     );
     let discard_msg = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Discard));
     alert_dialog(
-        "Discard this draft?",
-        "Your unsaved changes will be lost.",
+        t!("compose.discard_title"),
+        t!("compose.discard_body"),
         vec![
-            DialogAction::default_action("Keep editing", cancel_msg),
-            DialogAction::destructive("Discard", discard_msg),
+            DialogAction::default_action(t!("compose.keep_editing"), cancel_msg),
+            DialogAction::destructive(t!("compose.discard"), discard_msg),
         ],
         None,
     )
@@ -379,7 +390,7 @@ pub(super) fn link_dialog<'a>(
         .size(TEXT_MD)
         .padding(PAD_INPUT);
 
-    let text_input_field = text_input("Display text (optional)", &state.link_text)
+    let text_input_field = text_input(t!("compose.link_display_text_optional"), &state.link_text)
         .on_input(move |s| {
             Message::PopOut(
                 window_id,
@@ -392,7 +403,9 @@ pub(super) fn link_dialog<'a>(
     let body = column![
         column![text("URL").size(TEXT_SM).style(text::secondary), url_input,].spacing(SPACE_XXS),
         column![
-            text("Display text").size(TEXT_SM).style(text::secondary),
+            text(t!("compose.link_display_text"))
+                .size(TEXT_SM)
+                .style(text::secondary),
             text_input_field,
         ]
         .spacing(SPACE_XXS),
@@ -402,18 +415,18 @@ pub(super) fn link_dialog<'a>(
     let insert_disabled = state.link_url.trim().is_empty();
 
     form_dialog(
-        "Insert link",
+        t!("compose.insert_link"),
         body,
         vec![
             DialogAction::default_action(
-                "Cancel",
+                t!("compose.cancel"),
                 Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::ToggleLinkDialog),
                 ),
             ),
             DialogAction::suggested(
-                "Insert",
+                t!("compose.insert"),
                 Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::LinkInsert),

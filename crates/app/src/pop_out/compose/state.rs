@@ -1,4 +1,5 @@
 use rte::EditorState;
+use rust_i18n::t;
 
 use crate::db;
 use crate::ui::emoji_picker::EmojiCategory;
@@ -301,7 +302,7 @@ impl ComposeState {
     /// Window title based on compose mode.
     pub fn window_title(&self) -> String {
         match &self.mode {
-            ComposeMode::New => "New Message".to_string(),
+            ComposeMode::New => t!("compose.new_message").into_owned(),
             _ => self.mode.prefixed_subject(),
         }
     }
@@ -316,7 +317,7 @@ impl ComposeState {
             id: parent_account_id.to_string(),
             email: shared_email.to_string(),
             display_name: None,
-            account_name: Some(format!("{shared_email} (shared)")),
+            account_name: Some(t!("compose.shared_mailbox", email = shared_email).into_owned()),
         };
         self.from_accounts.insert(0, shared_info.clone());
         self.from_account = Some(shared_info);

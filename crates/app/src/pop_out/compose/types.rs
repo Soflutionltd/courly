@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Point;
+use rust_i18n::t;
 
 use crate::db::ContactMatch;
 use crate::ui::token_input::TokenId;
@@ -40,11 +41,13 @@ impl ComposeAttachment {
     pub fn display_size(&self) -> String {
         let bytes = self.data.len();
         if bytes < 1024 {
-            format!("{bytes} B")
+            t!("compose.size_bytes", size = bytes).into_owned()
         } else if bytes < 1024 * 1024 {
-            format!("{:.1} KB", bytes as f64 / 1024.0)
+            let size = format!("{:.1}", bytes as f64 / 1024.0);
+            t!("compose.size_kb", size = size).into_owned()
         } else {
-            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+            let size = format!("{:.1}", bytes as f64 / (1024.0 * 1024.0));
+            t!("compose.size_mb", size = size).into_owned()
         }
     }
 }
