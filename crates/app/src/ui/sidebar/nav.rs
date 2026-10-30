@@ -204,7 +204,7 @@ fn reorderable_row<'a>(
     with_row_menu(row_el, items)
 }
 
-/// t!("main.sidebar.search_here") and t!("main.sidebar.add_separator_below"), the separator going after the
+/// "Search Here" and "Add Separator Below", the separator going after the
 /// top-level row at `separator_after`.
 pub(super) fn folder_menu_items<'a>(
     query_prefix: String,

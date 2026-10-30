@@ -1179,6 +1179,7 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {
+        let first_load = self.sidebar.accounts.is_empty();
         self.sidebar.accounts = accounts;
         if self.sidebar.accounts.is_empty() {
             self.status = "No account yet".to_string();
@@ -1204,8 +1205,19 @@ impl ReadyApp {
                 ),
             })
             .collect();
-        if let Some(first) = self.sidebar.accounts.first() {
+        let scope_still_exists = match &self.sidebar.selected_scope {
+            ViewScope::Account(id)
+            | ViewScope::SharedMailbox { account_id: id, .. }
+            | ViewScope::PublicFolder { account_id: id, .. } => {
+                self.sidebar.accounts.iter().any(|a| a.id == *id)
+            }
+            ViewScope::AllAccounts => true,
+        };
+        if (first_load || !scope_still_exists)
+            && let Some(first) = self.sidebar.accounts.first()
+        {
             self.sidebar.selected_scope = ViewScope::Account(first.id.clone());
+            self.sidebar.selection = types::SidebarSelection::Inbox;
         }
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task =
