@@ -3590,6 +3590,53 @@ mod tests {
         assert_eq!(parsed, original);
     }
 
+    fn sample_label_save() -> RequestParams {
+        RequestParams::LabelSave {
+            params: LabelSaveParams {
+                account_id: "acc".into(),
+                label_id: Some("cat:À traiter".into()),
+                name: "À traiter".into(),
+                color: Some(("#e7a1ad".into(), "#000000".into())),
+            },
+        }
+    }
+
+    fn sample_label_delete() -> RequestParams {
+        RequestParams::LabelDelete {
+            params: LabelDeleteParams {
+                account_id: "acc".into(),
+                label_id: "cat:À traiter".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn label_write_methods_are_dotted_mutating_and_thirty_seconds() {
+        for (request, method) in [
+            (sample_label_save(), "label.save"),
+            (sample_label_delete(), "label.delete"),
+        ] {
+            assert_eq!(request.method_name(), method);
+            assert_eq!(request.idempotency(), Idempotency::Mutating);
+            assert_eq!(
+                request.timeout(),
+                RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            );
+        }
+    }
+
+    #[test]
+    fn label_write_methods_round_trip_from_method_params() {
+        for original in [sample_label_save(), sample_label_delete()] {
+            let parsed = RequestParams::from_method_params(
+                original.method_name(),
+                Some(original.params_value()),
+            )
+            .expect("parse");
+            assert_eq!(parsed, original);
+        }
+    }
+
     // -- Phase 6a: contact group wire envelope ----------------------------
 
     fn sample_group_save() -> ContactGroupSaveParams {
