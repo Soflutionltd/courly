@@ -587,7 +587,10 @@ impl ReadyApp {
             }
             Message::ToggleSidebar => Task::none(),
             Message::FocusSearch => self.update(Message::FocusSearchBar),
-            Message::ShowHelp => Task::none(),
+            Message::ShowHelp => {
+                self.open_settings(crate::ui::settings::Tab::Shortcuts);
+                Task::none()
+            }
             Message::SyncCurrentFolder => {
                 // Manual "sync now" bypasses staleness gates: explicit
                 // request fan-out for both email and calendar.
