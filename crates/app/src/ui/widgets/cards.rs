@@ -128,7 +128,10 @@ pub fn thread_card<'a, M: Clone + 'a>(
             text(sender)
                 .size(TEXT_MD)
                 .style(text::base)
-                .font(sender_font),
+                .font(sender_font)
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::End)
+                .width(Length::Fill),
         )
         .width(Length::Fill),
         container(
@@ -137,6 +140,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .style(theme::TextClass::Tertiary.style())
         ),
     ]
+    .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
     let subject_row = row![
@@ -145,7 +149,9 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .size(TEXT_MD)
                 .style(subject_style)
                 .font(font::text())
-                .wrapping(text::Wrapping::None),
+                .wrapping(text::Wrapping::None)
+                .ellipsis(text::Ellipsis::End)
+                .width(Length::Fill),
         )
         .width(Length::Fill),
     ];
@@ -166,7 +172,9 @@ pub fn thread_card<'a, M: Clone + 'a>(
                     text(attachment_snippet.to_string())
                         .size(TEXT_SM)
                         .style(text::secondary)
-                        .wrapping(text::Wrapping::None),
+                        .wrapping(text::Wrapping::None)
+                        .ellipsis(text::Ellipsis::End)
+                        .width(Length::Fill),
                 ]
                 .align_y(Alignment::Center),
             )
@@ -177,13 +185,17 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 text(snippet)
                     .size(TEXT_SM)
                     .style(text::secondary)
-                    .wrapping(text::Wrapping::None),
+                    .wrapping(text::Wrapping::None)
+                    .ellipsis(text::Ellipsis::End)
+                    .width(Length::Fill),
             )
             .width(Length::Fill)
             .into()
         };
 
-    let snippet_row = row![snippet_slot, indicators].align_y(Alignment::Center);
+    let snippet_row = row![snippet_slot, indicators]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
 
     let text_content = column![top_row, subject_row, snippet_row]
         .spacing(SPACE_XXXS)
