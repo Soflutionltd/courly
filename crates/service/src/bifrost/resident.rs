@@ -402,6 +402,11 @@ impl ResidentEngine {
                 Arc::clone(&slot),
                 account_id.to_string(),
             ));
+            tokio::spawn(category_refresh_loop(
+                Arc::clone(&self.inner),
+                Arc::clone(&slot),
+                account_id.to_string(),
+            ));
         }
         self.inner
             .slots
@@ -1152,6 +1157,38 @@ async fn hot_poll_loop(
             .filter(|native| !system.contains(native));
         for native in system.iter().cloned().chain(focused) {
             invalidate_folder(&inner, &account, native);
+        }
+    }
+}
+
+/// How often Outlook's category list (names and colours) is re-read. A
+/// category's colour is not a message change, so no delta ever reports it.
+const CATEGORY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
+async fn category_refresh_loop(
+    inner: Arc<ResidentEngineInner>,
+    slot: Arc<ResidentSlot>,
+    account_id: String,
+) {
+    let account = AccountId(account_id.clone());
+    loop {
+        tokio::select! {
+            () = slot.cancel.cancelled() => return,
+            () = tokio::time::sleep(CATEGORY_REFRESH_INTERVAL) => {}
+        }
+        match super::aux::graph::import_master_categories(
+            &inner.engine.engine(),
+            &account,
+            &inner.write_db,
+            &account_id,
+        )
+        .await
+        {
+            Ok(true) => slot.mutation_signal.notify_one(),
+            Ok(false) => {}
+            Err(error) => {
+                log::warn!("Graph master category sync failed for account {account_id}: {error}");
+            }
         }
     }
 }

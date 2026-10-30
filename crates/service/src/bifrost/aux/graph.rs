@@ -8,6 +8,7 @@ use db::db::queries_extra::{
     LabelWriteRow, delete_message_reaction, upsert_labels, upsert_message_reaction_update_type,
 };
 use label_colors::preset_colors;
+use rusqlite::OptionalExtension;
 use service_state::WriteDbState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +124,9 @@ pub(crate) async fn run_graph_auxiliary_sync(
 ) -> Result<(), String> {
     let account = AccountId(account_id.to_string());
     if !initial_sync_completed_before_run {
-        return import_master_categories(engine, &account, write_db, account_id).await;
+        return import_master_categories(engine, &account, write_db, account_id)
+            .await
+            .map(|_| ());
     }
 
     let cycle = sync::state::increment_graph_sync_cycle(&write_db.writer_pool(), account_id)
@@ -132,56 +135,94 @@ pub(crate) async fn run_graph_auxiliary_sync(
             log::warn!("Graph aux cadence counter failed for account {account_id}: {error}");
             1
         });
-    // Legacy logged each half independently and always attempted the other,
-    // so a transient reaction failure never suppressed the category refresh
-    // that shares cycle 20. Keep that, and surface the first error to the
-    // caller only after both halves have had their turn.
-    let mut first_error = None;
-    if cycle.is_multiple_of(5)
-        && let Err(error) =
-            refresh_reactions_for_recent_messages(engine, &account, read_db, write_db, account_id)
-                .await
-    {
-        log::warn!("Graph reaction refresh failed for account {account_id}: {error}");
-        first_error = Some(error);
+    // Master categories refresh on their own one-minute cadence (resident
+    // `category_refresh_loop`), so a colour changed in Outlook does not wait
+    // for this five-minute pass.
+    if cycle.is_multiple_of(5) {
+        refresh_reactions_for_recent_messages(engine, &account, read_db, write_db, account_id)
+            .await
+            .inspect_err(|error| {
+                log::warn!("Graph reaction refresh failed for account {account_id}: {error}");
+            })?;
     }
-    if cycle.is_multiple_of(20)
-        && let Err(error) = import_master_categories(engine, &account, write_db, account_id).await
-    {
-        log::warn!("Graph master category sync failed for account {account_id}: {error}");
-        first_error = first_error.or(Some(error));
-    }
-    match first_error {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
-async fn import_master_categories(
+/// Import Outlook's master category list (names and colours). Returns
+/// whether anything changed: the list is re-read every minute and almost
+/// never moves, so an unchanged list writes nothing and wakes no one.
+pub(crate) async fn import_master_categories(
     engine: &SyncEngine,
     account: &AccountId,
     write_db: &WriteDbState,
     account_id: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let definitions = engine
         .category_definitions_list(account)
         .await
         .map_err(|error| format!("Graph master category list: {error}"))?;
-    log::info!(
-        "[Graph] Label sync for account {account_id}: {} categories fetched",
-        definitions.len()
-    );
     let rows = category_label_rows(&definitions, account_id)?;
-    write_db
+    let aid = account_id.to_string();
+    let changed = write_db
         .with_write(move |conn| {
             let tx = conn
                 .transaction()
                 .map_err(|error| format!("label sync tx: {error}"))?;
+            if !labels_differ(&tx, &aid, &rows)? {
+                return Ok(false);
+            }
             upsert_labels(&tx, &rows)?;
             tx.commit()
-                .map_err(|error| format!("label sync commit: {error}"))
+                .map_err(|error| format!("label sync commit: {error}"))?;
+            Ok(true)
         })
-        .await
+        .await?;
+    if changed {
+        log::info!(
+            "[Graph] Label sync for account {account_id}: {} categories updated",
+            definitions.len()
+        );
+    }
+    Ok(changed)
+}
+
+/// Whether writing `rows` would change a stored name, order or server colour.
+fn labels_differ(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    rows: &[LabelWriteRow],
+) -> Result<bool, String> {
+    for row in rows {
+        let stored = tx
+            .query_row(
+                "SELECT name, sort_order, server_color_bg, server_color_fg FROM labels \
+                 WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params![account_id, row.id],
+                |stored| {
+                    Ok((
+                        stored.get::<_, String>(0)?,
+                        stored.get::<_, Option<i64>>(1)?,
+                        stored.get::<_, Option<String>>(2)?,
+                        stored.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| format!("read label {}: {error}", row.id))?;
+        let Some((name, sort_order, color_bg, color_fg)) = stored else {
+            return Ok(true);
+        };
+        if name != row.name
+            || row
+                .sort_order
+                .is_some_and(|order| sort_order != Some(order))
+            || color_bg != row.server_color_bg
+            || color_fg != row.server_color_fg
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 async fn refresh_reactions_for_recent_messages(
@@ -290,6 +331,34 @@ async fn refresh_reactions_for_recent_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unchanged_category_list_writes_nothing_and_a_new_colour_does() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let pool = db::db::open_writer_pool(tmp.path()).expect("writer pool");
+        let blue = |color: &str| {
+            vec![CategoryDefinition {
+                name: "Clients".into(),
+                color: Some(color.into()),
+            }]
+        };
+        pool.with_write_sync(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', 'graph')",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            let rows = category_label_rows(&blue("preset7"), "acc")?;
+            assert!(labels_differ(&tx, "acc", &rows)?, "nothing stored yet");
+            upsert_labels(&tx, &rows)?;
+            assert!(!labels_differ(&tx, "acc", &rows)?, "same list again");
+            let recoloured = category_label_rows(&blue("preset0"), "acc")?;
+            assert!(labels_differ(&tx, "acc", &recoloured)?, "colour changed");
+            Ok(())
+        })
+        .expect("label diff");
+    }
 
     #[test]
     fn category_label_rows_include_categories_and_importance() {
