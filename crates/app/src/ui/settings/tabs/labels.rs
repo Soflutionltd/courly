@@ -251,8 +251,8 @@ fn provider_labels_list_builder<'a>(groups: &'a [AccountLabelsGroup]) -> RowBuil
 }
 
 /// "+ Create new tag" row at the bottom of the per-account section.
-/// Opens the per-account label editor in create mode; the existing
-/// `label.create` stub fans the new tag out across every account.
+/// Opens the per-account label editor in create mode; saving creates
+/// the tag on every account (one `label.save` per account).
 fn add_provider_label_row<'a>(position: RowPosition) -> Element<'a, SettingsMessage> {
     button(
         container(
@@ -369,17 +369,30 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
         .spacing(SPACE_XXS),
     );
 
-    col = col.push(section(
-        tr(t!("settings.labels.name")),
-        vec![input_row(
-            "label-name",
-            &t!("settings.labels.name"),
-            &t!("settings.labels.tag_name_placeholder"),
-            &editor.name,
-            SettingsMessage::LabelEditorNameChanged,
-            InputField::LabelName,
-        )],
-    ));
+    let name_section = if editor.name_is_locked() {
+        section_with_subtitle(
+            tr(t!("settings.labels.name")),
+            tr(t!("settings.labels.outlook_name_locked")),
+            vec![static_row(
+                container(text(&editor.name).size(TEXT_LG).style(text::base))
+                    .padding(PAD_SETTINGS_ROW)
+                    .width(Length::Fill),
+            )],
+        )
+    } else {
+        section(
+            tr(t!("settings.labels.name")),
+            vec![input_row(
+                "label-name",
+                &t!("settings.labels.name"),
+                &t!("settings.labels.tag_name_placeholder"),
+                &editor.name,
+                SettingsMessage::LabelEditorNameChanged,
+                InputField::LabelName,
+            )],
+        )
+    };
+    col = col.push(name_section);
 
     col = col.push(section_with_subtitle(
         tr(t!("settings.labels.colour")),
@@ -398,6 +411,14 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
 
     col = col.push(label_editor_buttons(editor));
 
+    if let Some(ref error) = editor.error {
+        col = col.push(
+            text(t!("settings.labels.write_failed", error = error))
+                .size(TEXT_SM)
+                .style(text::danger),
+        );
+    }
+
     col.into()
 }
 
@@ -413,7 +434,7 @@ fn label_editor_buttons<'a>(editor: &'a LabelEditorState) -> Element<'a, Setting
                         .size(TEXT_LG)
                         .style(text::danger),
                 )
-                .on_press(SettingsMessage::LabelEditorDelete)
+                .on_press_maybe((!editor.pending).then_some(SettingsMessage::LabelEditorDelete))
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Action.style()),
             );
@@ -452,7 +473,7 @@ fn label_editor_buttons<'a>(editor: &'a LabelEditorState) -> Element<'a, Setting
         t!("settings.labels.save")
     };
     let name_filled = !editor.name.trim().is_empty();
-    let can_save = name_filled && (is_new || editor.dirty);
+    let can_save = name_filled && (is_new || editor.dirty) && !editor.pending;
     let mut save_btn = button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Primary.style())

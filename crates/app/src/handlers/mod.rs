@@ -37,15 +37,10 @@ use rtsk::db::queries_extra::navigation::{AccountLabelsGroup, SettingsLabelGroup
 pub enum LabelOp {
     /// Re-listed labels grouped by account (`query_labels_by_account`).
     Loaded(Result<Vec<AccountLabelsGroup>, String>),
-    /// `label.create` ack. Carries the normalized name created
-    /// (cross-account fan-out happens server-side).
-    CreatedAck(Result<String, String>),
-    /// `label.delete` ack for one `(account_id, label_id)`.
-    DeletedAck(Result<(), String>),
-    /// `label.recolor` ack (writes per-label `user_color_*`).
-    RecoloredAck(Result<(), String>),
-    /// `label.rename` ack for one `(account_id, label_id)`.
-    RenamedAck(Result<(), String>),
+    /// Ack of a `label.save` / `label.delete` from the label editor
+    /// sheet. A create fans out to every account; the error lists the
+    /// accounts that failed.
+    WriteAck(Result<(), String>),
     /// User-visible label groups for the Settings > Labels top section.
     /// Loaded via `query_label_groups_for_settings`. Writes (create /
     /// rename / recolor / delete / member changes) will get their own

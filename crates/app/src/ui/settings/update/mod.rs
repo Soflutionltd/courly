@@ -380,6 +380,10 @@ impl Component for Settings {
                 }
                 return (Task::none(), None);
             }
+            SettingsMessage::LabelEditorSave => return (Task::none(), self.label_save_event()),
+            SettingsMessage::LabelEditorDelete => {
+                return (Task::none(), self.label_delete_event());
+            }
             _ => self.handle_simple_message(message),
         }
         (Task::none(), None)
@@ -391,6 +395,61 @@ impl Component for Settings {
 }
 
 impl Settings {
+    fn label_save_event(&mut self) -> Option<SettingsEvent> {
+        let editor = self.editing_label.as_mut()?;
+        if editor.pending {
+            return None;
+        }
+        let (account_ids, label_id) = if editor.label_id.is_empty() {
+            let ids = self.managed_accounts.iter().map(|a| a.id.clone()).collect();
+            (ids, None)
+        } else {
+            (vec![editor.account_id.clone()], Some(editor.label_id.clone()))
+        };
+        editor.pending = true;
+        editor.error = None;
+        Some(SettingsEvent::SaveLabel {
+            account_ids,
+            label_id,
+            name: editor.name.trim().to_owned(),
+            color: editor
+                .has_override
+                .then(|| (editor.color_bg.clone(), editor.color_fg.clone())),
+        })
+    }
+
+    fn label_delete_event(&mut self) -> Option<SettingsEvent> {
+        let editor = self.editing_label.as_mut()?;
+        if editor.pending || editor.label_id.is_empty() {
+            return None;
+        }
+        editor.pending = true;
+        editor.error = None;
+        Some(SettingsEvent::DeleteLabel {
+            account_id: editor.account_id.clone(),
+            label_id: editor.label_id.clone(),
+        })
+    }
+
+    /// Close the label editor after a successful save or delete, or keep
+    /// it open with the error.
+    pub(crate) fn finish_label_write(&mut self, result: Result<(), String>) {
+        match result {
+            Ok(()) => {
+                if self.editing_label.take().is_some() {
+                    self.active_sheet = None;
+                    self.sheet_anim.go_mut(false, Instant::now());
+                }
+            }
+            Err(error) => {
+                if let Some(ref mut editor) = self.editing_label {
+                    editor.pending = false;
+                    editor.error = Some(error);
+                }
+            }
+        }
+    }
+
     /// Open the label-group editor sheet. None = create new; Some(id) =
     /// edit existing. Members are loaded async by the caller via
     /// `SettingsEvent::LoadLabelGroupMembers` because we do not have DB
@@ -869,13 +928,8 @@ impl Settings {
                     editor.dirty = true;
                 }
             }
-            SettingsMessage::LabelEditorSave
-            | SettingsMessage::LabelEditorDelete
-            | SettingsMessage::LabelEditorConfirmDelete => {
-                // Wiring to action handlers comes with Tier-2 task #3.
-                if let Some(ref mut editor) = self.editing_label
-                    && matches!(message, SettingsMessage::LabelEditorConfirmDelete)
-                {
+            SettingsMessage::LabelEditorConfirmDelete => {
+                if let Some(ref mut editor) = self.editing_label {
                     editor.show_delete_confirmation = true;
                 }
             }
@@ -959,5 +1013,89 @@ impl Settings {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod label_editor_tests {
+    use super::*;
+
+    fn account(id: &str) -> ManagedAccount {
+        ManagedAccount {
+            id: id.to_owned(),
+            email: format!("{id}@example.com"),
+            provider: "graph".to_owned(),
+            account_name: None,
+            account_color: None,
+            display_name: None,
+            last_sync_at: None,
+            health: AccountHealth::default(),
+        }
+    }
+
+    #[test]
+    fn create_fans_out_to_every_account_once() {
+        let mut editor = LabelEditorState::new_create();
+        editor.name = "  À traiter ".to_owned();
+        editor.has_override = true;
+        let mut settings = Settings {
+            managed_accounts: vec![account("a"), account("b")],
+            editing_label: Some(editor),
+            ..Default::default()
+        };
+
+        let (_, event) = settings.update(SettingsMessage::LabelEditorSave);
+        let Some(SettingsEvent::SaveLabel {
+            account_ids,
+            label_id,
+            name,
+            color,
+        }) = event
+        else {
+            panic!("expected SaveLabel");
+        };
+        assert_eq!(account_ids, vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(label_id, None);
+        assert_eq!(name, "À traiter");
+        assert!(color.is_some());
+
+        let (_, again) = settings.update(SettingsMessage::LabelEditorSave);
+        assert!(again.is_none(), "a second click while pending must not resend");
+    }
+
+    #[test]
+    fn delete_targets_the_edited_label_and_failure_keeps_the_sheet_open() {
+        let mut editor = LabelEditorState::new_create();
+        editor.account_id = "a".to_owned();
+        editor.label_id = "cat:À traiter".to_owned();
+        let mut settings = Settings {
+            editing_label: Some(editor),
+            ..Default::default()
+        };
+
+        let (_, event) = settings.update(SettingsMessage::LabelEditorDelete);
+        assert!(matches!(
+            event,
+            Some(SettingsEvent::DeleteLabel { ref account_id, ref label_id })
+                if account_id == "a" && label_id == "cat:À traiter"
+        ));
+
+        settings.finish_label_write(Err("Server rejected".to_owned()));
+        let editor = settings.editing_label.as_ref().expect("sheet stays open");
+        assert!(!editor.pending);
+        assert_eq!(editor.error.as_deref(), Some("Server rejected"));
+
+        settings.finish_label_write(Ok(()));
+        assert!(settings.editing_label.is_none());
+    }
+
+    #[test]
+    fn outlook_category_names_are_locked() {
+        let mut editor = LabelEditorState::new_create();
+        assert!(!editor.name_is_locked());
+        editor.label_id = "cat:À traiter".to_owned();
+        assert!(editor.name_is_locked());
+        editor.label_id = "Label_12".to_owned();
+        assert!(!editor.name_is_locked());
     }
 }

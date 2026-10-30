@@ -1,8 +1,7 @@
 //! Per-account raw labels (settings > Mail Rules > Labels).
 //!
-//! Read path lives here. Writes (create / delete / rename / recolor) are
-//! scaffolded as stub Tasks until the action service grows the matching
-//! `label.create`, `label.delete`, `label.recolor`, `label.rename` actions.
+//! Read path lives here. Writes go through the `label.save` and
+//! `label.delete` Service IPC (see `App::handle_save_label`).
 //! Every per-account label is keyed on `(account_id, label_id)`; cross-
 //! account labels are explicit user-created groups (`label_groups`), not
 //! auto-collapse by normalised name. See `reference/glossary/folders-labels.md`.
@@ -10,7 +9,6 @@
 use std::sync::Arc;
 
 use iced::Task;
-use types::LabelId;
 
 use crate::db::Db;
 
@@ -84,52 +82,4 @@ pub fn load_label_groups_async(db: &Arc<Db>) -> Task<LabelOp> {
             LabelOp::GroupsLoaded(result)
         },
     )
-}
-
-// Write stubs.
-//
-// These return Task::done synthesising an Err result for now so the UI
-// can surface "not yet implemented" without crashing. Replace with real
-// Service IPC once the action handlers land.
-
-#[allow(dead_code)] // wired in tier-2; kept for the call-site shape
-pub fn create_label_async(account_id: &str, name: &str) -> Task<LabelOp> {
-    log::warn!("create_label not implemented yet: account={account_id} name={name}");
-    Task::done(LabelOp::CreatedAck(Err(
-        "label creation not yet implemented".to_owned(),
-    )))
-}
-
-#[allow(dead_code)]
-pub fn delete_label_async(account_id: &str, label_id: &LabelId) -> Task<LabelOp> {
-    log::warn!("delete_label not implemented yet: account={account_id} label={label_id}");
-    Task::done(LabelOp::DeletedAck(Err(
-        "label deletion not yet implemented".to_owned(),
-    )))
-}
-
-#[allow(dead_code)]
-pub fn rename_label_async(account_id: &str, label_id: &LabelId, new_name: &str) -> Task<LabelOp> {
-    log::warn!(
-        "rename_label not implemented yet: account={account_id} label={label_id} -> {new_name}"
-    );
-    Task::done(LabelOp::RenamedAck(Err(
-        "label rename not yet implemented".to_owned()
-    )))
-}
-
-#[allow(dead_code)]
-pub fn recolor_label_async(
-    account_id: &str,
-    label_id: &LabelId,
-    color: label_colors::LabelStyleHex<'_>,
-) -> Task<LabelOp> {
-    log::warn!(
-        "recolor_label not implemented yet: account={account_id} label={label_id} -> ({}, {})",
-        color.bg(),
-        color.fg(),
-    );
-    Task::done(LabelOp::RecoloredAck(Err(
-        "label recolor not yet implemented".to_owned(),
-    )))
 }

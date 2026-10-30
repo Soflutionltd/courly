@@ -767,6 +767,16 @@ impl ReadyApp {
                 handlers::labels::load_label_group_members_async(&self.db, group_id)
             }
             SettingsEvent::ReorderLabelGroups(orders) => self.handle_reorder_label_groups(orders),
+            SettingsEvent::SaveLabel {
+                account_ids,
+                label_id,
+                name,
+                color,
+            } => self.handle_save_label(account_ids, label_id, name, color),
+            SettingsEvent::DeleteLabel {
+                account_id,
+                label_id,
+            } => self.handle_delete_label(account_id, label_id),
             SettingsEvent::ExecuteContactImport {
                 prepared,
                 account_id,
@@ -824,56 +834,116 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_label_op(&mut self, op: handlers::LabelOp) -> Task<Message> {
-        let mutated = match op {
+        match op {
             handlers::LabelOp::Loaded(Ok(groups)) => {
                 self.settings.labels_by_account = groups;
-                return Task::none();
+                Task::none()
             }
             handlers::LabelOp::Loaded(Err(e)) => {
                 log::error!("Failed to load per-account labels: {e}");
-                return Task::none();
+                Task::none()
             }
             handlers::LabelOp::GroupsLoaded(Ok(groups)) => {
                 self.settings.label_groups = groups;
-                return Task::none();
+                Task::none()
             }
             handlers::LabelOp::GroupsLoaded(Err(e)) => {
                 log::error!("Failed to load label groups: {e}");
-                return Task::none();
+                Task::none()
             }
             handlers::LabelOp::ReorderAck(Ok(())) => {
                 // Refresh both the settings list and the sidebar so the
                 // new order shows up everywhere it's rendered.
-                return Task::batch([
+                Task::batch([
                     handlers::labels::load_label_groups_async(&self.db).map(Message::LabelOp),
                     self.load_navigation_and_threads(),
-                ]);
+                ])
             }
             handlers::LabelOp::ReorderAck(Err(e)) => {
                 log::error!("Failed to persist label group order: {e}");
-                return Task::none();
+                Task::none()
             }
-            handlers::LabelOp::CreatedAck(Err(ref e))
-            | handlers::LabelOp::RenamedAck(Err(ref e))
-            | handlers::LabelOp::DeletedAck(Err(ref e))
-            | handlers::LabelOp::RecoloredAck(Err(ref e)) => {
-                log::error!("Label op failed: {e}");
-                false
+            handlers::LabelOp::WriteAck(result) => {
+                if let Err(ref e) = result {
+                    log::error!("Label write failed: {e}");
+                }
+                self.settings.finish_label_write(result);
+                // Reload even on failure: a create fanned out to several
+                // accounts may have succeeded on some of them.
+                Task::batch([
+                    handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp),
+                    handlers::labels::load_label_groups_async(&self.db).map(Message::LabelOp),
+                    self.load_navigation_and_threads(),
+                ])
             }
-            handlers::LabelOp::CreatedAck(Ok(_))
-            | handlers::LabelOp::RenamedAck(Ok(()))
-            | handlers::LabelOp::DeletedAck(Ok(()))
-            | handlers::LabelOp::RecoloredAck(Ok(())) => true,
-        };
-
-        if mutated {
-            Task::batch([
-                handlers::labels::load_visible_labels_async(&self.db).map(Message::LabelOp),
-                handlers::labels::load_label_groups_async(&self.db).map(Message::LabelOp),
-            ])
-        } else {
-            Task::none()
         }
+    }
+
+    pub(crate) fn handle_save_label(
+        &mut self,
+        account_ids: Vec<String>,
+        label_id: Option<String>,
+        name: String,
+        color: Option<(String, String)>,
+    ) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(
+                "Service not connected".to_owned(),
+            ))));
+        };
+        let account_names: Vec<String> = account_ids
+            .iter()
+            .map(|id| {
+                self.settings
+                    .managed_accounts
+                    .iter()
+                    .find(|a| &a.id == id)
+                    .map_or_else(|| id.clone(), |a| a.email.clone())
+            })
+            .collect();
+        Task::perform(
+            async move {
+                let mut failures = Vec::new();
+                for (account_id, account_name) in account_ids.into_iter().zip(account_names) {
+                    let params = service_api::LabelSaveParams {
+                        account_id,
+                        label_id: label_id.clone(),
+                        name: name.clone(),
+                        color: color.clone(),
+                    };
+                    if let Err(e) = client.save_label(params).await {
+                        failures.push(format!("{account_name}: {e}"));
+                    }
+                }
+                if failures.is_empty() {
+                    Ok(())
+                } else {
+                    Err(failures.join("\n"))
+                }
+            },
+            |result| Message::LabelOp(handlers::LabelOp::WriteAck(result)),
+        )
+    }
+
+    pub(crate) fn handle_delete_label(
+        &mut self,
+        account_id: String,
+        label_id: String,
+    ) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(
+                "Service not connected".to_owned(),
+            ))));
+        };
+        Task::perform(
+            async move {
+                client
+                    .delete_label(account_id, label_id)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            |result| Message::LabelOp(handlers::LabelOp::WriteAck(result)),
+        )
     }
 
     pub(crate) fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {

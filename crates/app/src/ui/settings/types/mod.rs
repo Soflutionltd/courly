@@ -151,7 +151,6 @@ pub struct EditableItem {
 #[derive(Debug, Clone)]
 pub struct LabelEditorState {
     /// Account whose label is being edited. Empty in create mode.
-    #[allow(dead_code)]
     pub account_id: String,
     /// Label being edited. Empty in create mode.
     pub label_id: String,
@@ -174,6 +173,10 @@ pub struct LabelEditorState {
     pub show_delete_confirmation: bool,
     /// True once the user has edited any field.
     pub dirty: bool,
+    /// A save or delete is in flight; the buttons are disabled.
+    pub pending: bool,
+    /// Error from the last save or delete, shown under the buttons.
+    pub error: Option<String>,
 }
 
 impl LabelEditorState {
@@ -194,7 +197,14 @@ impl LabelEditorState {
             is_undeletable: false,
             show_delete_confirmation: false,
             dirty: false,
+            pending: false,
+            error: None,
         }
+    }
+
+    /// Outlook categories cannot be renamed through Microsoft Graph.
+    pub fn name_is_locked(&self) -> bool {
+        self.label_id.starts_with("cat:")
     }
 
     pub fn from_row(row: &rtsk::db::queries_extra::navigation::AccountLabelRow) -> Self {
@@ -212,6 +222,8 @@ impl LabelEditorState {
             is_undeletable: row.is_undeletable,
             show_delete_confirmation: false,
             dirty: false,
+            pending: false,
+            error: None,
         }
     }
 }

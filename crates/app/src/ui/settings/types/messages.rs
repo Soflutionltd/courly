@@ -299,6 +299,19 @@ pub enum SettingsEvent {
     /// Persist a new ordering for label groups. Pairs are
     /// `(label_groups.id, sort_order)`.
     ReorderLabelGroups(Vec<(i64, i64)>),
+    /// Create (`label_id: None`, one write per account) or update one
+    /// provider label. `color` is `(bg, fg)`; `None` keeps the provider's.
+    SaveLabel {
+        account_ids: Vec<String>,
+        label_id: Option<String>,
+        name: String,
+        color: Option<(String, String)>,
+    },
+    /// Delete one provider label.
+    DeleteLabel {
+        account_id: String,
+        label_id: String,
+    },
     /// Request the App to open the re-auth wizard for an account.
     ReauthenticateAccount(String),
 }
