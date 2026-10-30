@@ -5,9 +5,11 @@ use iced::{Alignment, Element, Length};
 use jiff::civil::{Date, Time};
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, Zoned};
+use rust_i18n::t;
 
 use crate::db::{CalendarEvent, ThreadMessage};
 use crate::font;
+use crate::i18n;
 use crate::icon;
 use crate::ui::animated_toggler::animated_toggler;
 use crate::ui::calendar_time_grid::TimeGridEvent;
@@ -180,7 +182,7 @@ impl InviteCard {
         let proposing = self.rich_reply && self.proposing;
         let proposed = if proposing {
             if response == RsvpResponse::Accepted {
-                self.error = Some("A new time goes with Tentative or Decline".to_string());
+                self.error = Some(t!("calendar.invite.new_time_needs_tentative").into_owned());
                 return None;
             }
             match proposed_slot(
@@ -339,30 +341,41 @@ fn is_invite_event(ev: &TimeGridEvent, invite: &CalendarEvent) -> bool {
             && invite.summary.as_deref() == Some(ev.title.as_str()))
 }
 
-/// "Tuesday 3 November 2026, 14:00 - 15:30".
+/// "Tuesday 3 November 2026, 2:00 PM - 3:30 PM".
 pub fn when_label(event: &CalendarEvent, tz: &TimeZone) -> String {
     let (Ok(start), Ok(end)) = (local(event.start_time, tz), local(event.end_time, tz)) else {
         return String::new();
     };
-    let day = |at: &Zoned| at.strftime("%A %-d %B %Y").to_string();
+    let day = |at: &Zoned| {
+        t!(
+            "calendar.invite.when_day",
+            weekday = i18n::weekday_name(at.weekday()),
+            day = at.day(),
+            month = i18n::month_name(at.month()),
+            year = at.year()
+        )
+        .into_owned()
+    };
     if event.is_all_day {
-        return format!("{} (all day)", day(&start));
+        return t!("calendar.invite.when_all_day", day = day(&start)).into_owned();
     }
     if start.date() == end.date() {
-        format!(
-            "{}, {} - {}",
-            day(&start),
-            start.strftime("%H:%M"),
-            end.strftime("%H:%M")
+        t!(
+            "calendar.invite.when_same_day",
+            day = day(&start),
+            start = i18n::time_of_day(&start),
+            end = i18n::time_of_day(&end)
         )
+        .into_owned()
     } else {
-        format!(
-            "{} {} - {} {}",
-            day(&start),
-            start.strftime("%H:%M"),
-            day(&end),
-            end.strftime("%H:%M")
+        t!(
+            "calendar.invite.when_multi_day",
+            start_day = day(&start),
+            start = i18n::time_of_day(&start),
+            end_day = day(&end),
+            end = i18n::time_of_day(&end)
         )
+        .into_owned()
     }
 }
 
@@ -388,20 +401,20 @@ pub fn proposed_slot(
     let date: Date = date
         .trim()
         .parse()
-        .map_err(|_| "Enter the date as YYYY-MM-DD".to_string())?;
+        .map_err(|_| t!("calendar.invite.enter_date").into_owned())?;
     let at = |value: &str| -> Result<i64, String> {
         let time: Time = value
             .trim()
             .parse()
-            .map_err(|_| "Enter times as HH:MM".to_string())?;
+            .map_err(|_| t!("calendar.invite.enter_times").into_owned())?;
         date.to_datetime(time)
             .to_zoned(tz.clone())
             .map(|zoned| zoned.timestamp().as_second())
-            .map_err(|e| format!("Invalid time: {e}"))
+            .map_err(|e| t!("calendar.invite.invalid_time", error = e).into_owned())
     };
     let (start, end) = (at(start)?, at(end)?);
     if start >= end {
-        return Err("The new time must end after it starts".to_string());
+        return Err(t!("calendar.invite.end_after_start").into_owned());
     }
     Ok((start, end))
 }
@@ -416,17 +429,17 @@ pub fn view<'a, M: Clone + 'a>(
 ) -> Option<Element<'a, M>> {
     let sender = msg
         .from_name
-        .as_deref()
-        .or(msg.from_address.as_deref())
-        .unwrap_or("The organizer");
+        .clone()
+        .or_else(|| msg.from_address.clone())
+        .unwrap_or_else(|| t!("calendar.invite.the_organizer").into_owned());
     match InviteKind::of(msg)? {
         InviteKind::Reply => Some(notice(
             icon::calendar(),
-            format!("{sender} responded to this meeting"),
+            t!("calendar.invite.responded", name = sender).into_owned(),
         )),
         InviteKind::Cancel => Some(notice(
             icon::x(),
-            format!("{sender} cancelled this meeting"),
+            t!("calendar.invite.cancelled", name = sender).into_owned(),
         )),
         InviteKind::Request => card.map(|card| request_card(msg, card, sender, on)),
     }
@@ -450,15 +463,15 @@ fn notice<'a, M: 'a>(ico: iced::widget::Text<'a>, label: String) -> Element<'a, 
 fn request_card<'a, M: Clone + 'a>(
     msg: &'a ThreadMessage,
     card: &'a InviteCard,
-    sender: &'a str,
+    sender: String,
     on: impl Fn(InviteMessage) -> M + Clone + 'a,
 ) -> Element<'a, M> {
     let tz = TimeZone::system();
     let details = card.details();
     let title = details
-        .and_then(|d| d.event.summary.as_deref())
-        .or(msg.subject.as_deref())
-        .unwrap_or("Meeting");
+        .and_then(|d| d.event.summary.clone())
+        .or_else(|| msg.subject.clone())
+        .unwrap_or_else(|| t!("calendar.invite.meeting").into_owned());
 
     let mut info = column![
         row![
@@ -474,21 +487,24 @@ fn request_card<'a, M: Clone + 'a>(
     .spacing(SPACE_XXS);
 
     if let Some(details) = details {
-        info = info.push(field("When", when_label(&details.event, &tz)));
+        info = info.push(field(
+            t!("calendar.invite.when"),
+            when_label(&details.event, &tz),
+        ));
         if let Some(location) = details.event.location.as_deref()
             && !location.trim().is_empty()
         {
-            info = info.push(field("Where", location.to_string()));
+            info = info.push(field(t!("calendar.invite.where"), location.to_string()));
         }
     }
     if let Some(url) = card.join_url.as_deref() {
         info = info.push(
             row![
-                label_cell("Join"),
+                label_cell(t!("calendar.invite.join")),
                 button(
                     row![
                         icon::link().size(ICON_MD),
-                        text("Join meeting").size(TEXT_MD)
+                        text(t!("calendar.invite.join_meeting")).size(TEXT_MD)
                     ]
                     .spacing(SPACE_XXS)
                     .align_y(Alignment::Center),
@@ -504,30 +520,29 @@ fn request_card<'a, M: Clone + 'a>(
         .and_then(|d| {
             d.event
                 .organizer_name
-                .as_deref()
-                .or(d.event.organizer_email.as_deref())
+                .clone()
+                .or_else(|| d.event.organizer_email.clone())
         })
         .unwrap_or(sender);
-    info = info.push(field("Organizer", organizer.to_string()));
+    info = info.push(field(t!("calendar.invite.organizer"), organizer));
     let required = display_names(msg.to_addresses.as_deref());
     if !required.is_empty() {
-        info = info.push(field("Required", required.join(", ")));
+        info = info.push(field(t!("calendar.invite.required"), required.join(", ")));
     }
     let optional = display_names(msg.cc_addresses.as_deref());
     if !optional.is_empty() {
-        info = info.push(field("Optional", optional.join(", ")));
+        info = info.push(field(t!("calendar.invite.optional"), optional.join(", ")));
     }
 
     match &card.lookup {
-        InviteLookup::Loading => info = info.push(muted("Loading meeting details...")),
+        InviteLookup::Loading => info = info.push(muted(t!("calendar.invite.loading"))),
         InviteLookup::Unsynced => {
-            info = info.push(muted(
-                "This meeting is not in your synced calendar yet. \
-                 Responding unlocks once the calendar syncs.",
-            ));
+            info = info.push(muted(t!("calendar.invite.unsynced")));
         }
         InviteLookup::Failed(error) => {
-            info = info.push(muted(format!("Could not load meeting details: {error}")));
+            info = info.push(muted(
+                t!("calendar.invite.load_failed", error = error).into_owned(),
+            ));
         }
         InviteLookup::Found(_) => {}
     }
@@ -564,7 +579,9 @@ fn response_controls<'a, M: Clone + 'a>(
     on: impl Fn(InviteMessage) -> M + Clone + 'a,
 ) -> Element<'a, M> {
     let ready = card.details().is_some() && card.pending.is_none();
-    let respond = |ico: iced::widget::Text<'a>, label: &'a str, response: RsvpResponse| {
+    let respond = |ico: iced::widget::Text<'a>,
+                   label: std::borrow::Cow<'static, str>,
+                   response: RsvpResponse| {
         let chosen = current == Some(rsvp_value(response)) || card.pending == Some(response);
         let allowed = ready && !(card.proposing && response == RsvpResponse::Accepted);
         button(
@@ -583,9 +600,13 @@ fn response_controls<'a, M: Clone + 'a>(
     };
     let mut controls = column![
         row![
-            respond(icon::check(), "Accept", RsvpResponse::Accepted),
-            respond(icon::help_circle(), "Tentative", RsvpResponse::Tentative),
-            respond(icon::x(), "Decline", RsvpResponse::Declined),
+            respond(icon::check(), t!("calendar.accept"), RsvpResponse::Accepted),
+            respond(
+                icon::help_circle(),
+                t!("calendar.tentative"),
+                RsvpResponse::Tentative
+            ),
+            respond(icon::x(), t!("calendar.decline"), RsvpResponse::Declined),
         ]
         .spacing(SPACE_XS)
     ]
@@ -598,7 +619,7 @@ fn response_controls<'a, M: Clone + 'a>(
     if card.rich_reply && ready {
         let on_comment = on.clone();
         controls = controls.push(
-            text_input("Add a message to the organizer (optional)", &card.comment)
+            text_input(t!("calendar.invite.comment_placeholder"), &card.comment)
                 .on_input(move |value| on_comment(InviteMessage::CommentChanged(value)))
                 .size(TEXT_MD)
                 .padding(PAD_INPUT)
@@ -611,11 +632,11 @@ fn response_controls<'a, M: Clone + 'a>(
                     .size(TEXT_HEADING)
                     .on_toggle(move |send| on_send(InviteMessage::SendResponseToggled(send)))
                     .style(theme::TogglerClass::Settings.style()),
-                text("Send response to organizer")
+                text(t!("calendar.invite.send_response"))
                     .size(TEXT_MD)
                     .style(text::base),
                 Space::new().width(Length::Fill),
-                button(text("Propose new time").size(TEXT_MD))
+                button(text(t!("calendar.invite.propose_new_time")).size(TEXT_MD))
                     .on_press_maybe(
                         card.send_response
                             .then(|| on(InviteMessage::ProposeToggled))
@@ -649,37 +670,39 @@ fn propose_row<'a, M: Clone + 'a>(
     card: &'a InviteCard,
     on: impl Fn(InviteMessage) -> M + Clone + 'a,
 ) -> Element<'a, M> {
-    let input =
-        |placeholder: &'a str, value: &'a str, width: f32, make: fn(String) -> InviteMessage| {
-            let on = on.clone();
-            text_input(placeholder, value)
-                .on_input(move |value| on(make(value)))
-                .size(TEXT_MD)
-                .padding(PAD_INPUT)
-                .width(width)
-                .style(theme::TextInputClass::Settings.style())
-        };
+    let input = |placeholder: std::borrow::Cow<'static, str>,
+                 value: &'a str,
+                 width: f32,
+                 make: fn(String) -> InviteMessage| {
+        let on = on.clone();
+        text_input(placeholder, value)
+            .on_input(move |value| on(make(value)))
+            .size(TEXT_MD)
+            .padding(PAD_INPUT)
+            .width(width)
+            .style(theme::TextInputClass::Settings.style())
+    };
     row![
         input(
-            "YYYY-MM-DD",
+            t!("calendar.invite.date_placeholder"),
             &card.propose_date,
             INVITE_DATE_INPUT_WIDTH,
             InviteMessage::ProposeDateChanged,
         ),
         input(
-            "HH:MM",
+            "HH:MM".into(),
             &card.propose_start,
             INVITE_TIME_INPUT_WIDTH,
             InviteMessage::ProposeStartChanged,
         ),
         text("-").size(TEXT_MD).style(text::secondary),
         input(
-            "HH:MM",
+            "HH:MM".into(),
             &card.propose_end,
             INVITE_TIME_INPUT_WIDTH,
             InviteMessage::ProposeEndChanged,
         ),
-        muted("Sent with Tentative or Decline"),
+        muted(t!("calendar.invite.proposal_hint")),
     ]
     .spacing(SPACE_XS)
     .align_y(Alignment::Center)
@@ -690,12 +713,20 @@ fn day_agenda<'a, M: 'a>(details: &'a InviteDetails, tz: &TimeZone) -> Element<'
     let flags = conflicts(details);
     let count = flags.iter().filter(|&&conflict| conflict).count();
     let day = local(details.event.start_time, tz)
-        .map(|at| at.strftime("%A %-d %B").to_string())
+        .map(|at| {
+            t!(
+                "calendar.invite.agenda_day",
+                weekday = i18n::weekday_name(at.weekday()),
+                day = at.day(),
+                month = i18n::month_name(at.month())
+            )
+            .into_owned()
+        })
         .unwrap_or_default();
     let summary = match count {
-        0 => "No conflicts".to_string(),
-        1 => "1 conflict".to_string(),
-        n => format!("{n} conflicts"),
+        0 => t!("calendar.invite.no_conflicts"),
+        1 => t!("calendar.invite.conflicts_one"),
+        n => t!("calendar.invite.conflicts_other", count = n),
     };
     let mut agenda = column![
         text(day)
@@ -711,12 +742,14 @@ fn day_agenda<'a, M: 'a>(details: &'a InviteDetails, tz: &TimeZone) -> Element<'
     .spacing(SPACE_XXS);
     for (ev, conflict) in details.day_events.iter().zip(flags) {
         let time = if ev.all_day {
-            "All day".to_string()
+            t!("calendar.all_day").into_owned()
         } else {
             match (local(ev.start_time, tz), local(ev.end_time, tz)) {
-                (Ok(start), Ok(end)) => {
-                    format!("{} - {}", start.strftime("%H:%M"), end.strftime("%H:%M"))
-                }
+                (Ok(start), Ok(end)) => format!(
+                    "{} - {}",
+                    i18n::time_of_day(&start),
+                    i18n::time_of_day(&end)
+                ),
                 _ => String::new(),
             }
         };
@@ -748,16 +781,16 @@ fn day_agenda<'a, M: 'a>(details: &'a InviteDetails, tz: &TimeZone) -> Element<'
         .into()
 }
 
-fn status_label(status: &str) -> Option<&'static str> {
+fn status_label(status: &str) -> Option<std::borrow::Cow<'static, str>> {
     match status {
-        "accepted" => Some("You accepted this meeting"),
-        "tentative" => Some("You tentatively accepted this meeting"),
-        "declined" => Some("You declined this meeting"),
+        "accepted" => Some(t!("calendar.invite.status_accepted")),
+        "tentative" => Some(t!("calendar.invite.status_tentative")),
+        "declined" => Some(t!("calendar.invite.status_declined")),
         _ => None,
     }
 }
 
-fn label_cell<'a, M: 'a>(label: &'a str) -> Element<'a, M> {
+fn label_cell<'a, M: 'a>(label: std::borrow::Cow<'static, str>) -> Element<'a, M> {
     container(
         text(label)
             .size(TEXT_SM)
@@ -767,7 +800,7 @@ fn label_cell<'a, M: 'a>(label: &'a str) -> Element<'a, M> {
     .into()
 }
 
-fn field<'a, M: 'a>(label: &'a str, value: String) -> Element<'a, M> {
+fn field<'a, M: 'a>(label: std::borrow::Cow<'static, str>, value: String) -> Element<'a, M> {
     row![
         label_cell(label),
         text(value)
@@ -887,7 +920,7 @@ mod tests {
     #[test]
     fn when_label_formats_same_day_slot() {
         let label = when_label(&event(1_793_624_400, 1_793_629_800), &paris());
-        assert_eq!(label, "Monday 2 November 2026, 14:00 - 15:30");
+        assert_eq!(label, "Monday 2 November 2026, 2:00 PM - 3:30 PM");
     }
 
     #[test]

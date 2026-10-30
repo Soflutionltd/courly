@@ -3,6 +3,7 @@ use iced::{Element, Length, Padding};
 use jiff::civil::Date as NaiveDate;
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, Zoned};
+use rust_i18n::t;
 
 use crate::Message;
 use crate::db::Thread;
@@ -62,7 +63,7 @@ fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
         Message::Calendar(Box::new(CalendarMessage::NextMonth)),
     );
 
-    container(column![widgets::section_header("CALENDAR"), mini].spacing(SPACE_XXS))
+    container(column![section_header(t!("calendar.right.calendar")), mini].spacing(SPACE_XXS))
         .padding(PAD_RIGHT_SIDEBAR)
         .into()
 }
@@ -74,7 +75,7 @@ fn agenda_section(cal: &CalendarState) -> Element<'_, Message> {
 
     let body: Element<'_, Message> = if today_events.is_empty() {
         container(
-            text("No events today")
+            text(t!("calendar.right.no_events_today"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -88,7 +89,7 @@ fn agenda_section(cal: &CalendarState) -> Element<'_, Message> {
         container(items).padding(PAD_ICON_BTN).into()
     };
 
-    container(column![widgets::section_header("TODAY'S AGENDA"), body].spacing(SPACE_XXS))
+    container(column![section_header(t!("calendar.right.agenda")), body].spacing(SPACE_XXS))
         .padding(PAD_RIGHT_SIDEBAR)
         .into()
 }
@@ -96,7 +97,7 @@ fn agenda_section(cal: &CalendarState) -> Element<'_, Message> {
 /// A single agenda row: time range + title. Clicking opens the event detail.
 fn agenda_item(event: &crate::ui::calendar_time_grid::TimeGridEvent) -> Element<'_, Message> {
     let time_label = if event.all_day {
-        "All day".to_string()
+        t!("calendar.all_day").into_owned()
     } else {
         format_time_range(event.start_time, event.end_time)
     };
@@ -130,7 +131,7 @@ fn pinned_section(threads: &[Thread]) -> Element<'_, Message> {
 
     let body: Element<'_, Message> = if starred.is_empty() {
         container(
-            text("No pinned items")
+            text(t!("calendar.right.no_pinned"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -144,7 +145,7 @@ fn pinned_section(threads: &[Thread]) -> Element<'_, Message> {
         container(items).padding(PAD_ICON_BTN).into()
     };
 
-    container(column![widgets::section_header("PINNED ITEMS"), body].spacing(SPACE_XXS))
+    container(column![section_header(t!("calendar.right.pinned")), body].spacing(SPACE_XXS))
         .padding(PAD_RIGHT_SIDEBAR)
         .into()
 }
@@ -153,11 +154,14 @@ fn pinned_section(threads: &[Thread]) -> Element<'_, Message> {
 fn starred_item(thread: &Thread) -> Element<'_, Message> {
     let sender = thread
         .from_name
-        .as_deref()
-        .or(thread.from_address.as_deref())
-        .unwrap_or("Unknown");
+        .clone()
+        .or_else(|| thread.from_address.clone())
+        .unwrap_or_else(|| t!("calendar.right.unknown_sender").into_owned());
 
-    let subject = thread.subject.as_deref().unwrap_or("(no subject)");
+    let subject = thread
+        .subject
+        .clone()
+        .unwrap_or_else(|| t!("calendar.right.no_subject").into_owned());
 
     let sender_text = text(sender)
         .size(TEXT_XS)
@@ -175,6 +179,18 @@ fn starred_item(thread: &Thread) -> Element<'_, Message> {
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+/// `widgets::section_header` with an owned, translated label.
+fn section_header<'a, M: 'a>(label: std::borrow::Cow<'static, str>) -> Element<'a, M> {
+    container(
+        text(label)
+            .size(TEXT_XS)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .padding(PAD_SECTION_HEADER)
+    .width(Length::Fill)
+    .into()
+}
 
 /// Filter calendar events to those occurring on a specific date.
 fn events_for_date(
@@ -201,7 +217,7 @@ fn events_for_date(
         .collect()
 }
 
-/// Format a Unix timestamp range as "HH:MM -- HH:MM".
+/// Format a Unix timestamp range as "HH:MM -- HH:MM", in the language's 12 h or 24 h form.
 fn format_time_range(start: i64, end: i64) -> String {
     let local = |seconds: i64| {
         Timestamp::from_second(seconds)
@@ -209,8 +225,12 @@ fn format_time_range(start: i64, end: i64) -> String {
             .map(|ts| ts.to_zoned(TimeZone::system()))
     };
     match (local(start), local(end)) {
-        (Some(s), Some(e)) => format!("{} \u{2013} {}", s.strftime("%H:%M"), e.strftime("%H:%M")),
-        (Some(s), None) => s.strftime("%H:%M").to_string(),
+        (Some(s), Some(e)) => format!(
+            "{} \u{2013} {}",
+            crate::i18n::time_of_day(&s),
+            crate::i18n::time_of_day(&e)
+        ),
+        (Some(s), None) => crate::i18n::time_of_day(&s),
         _ => String::new(),
     }
 }

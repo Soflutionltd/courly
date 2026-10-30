@@ -6,6 +6,7 @@
 use jiff::civil::{Date as NaiveDate, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Span, Timestamp};
+use rust_i18n::t;
 
 /// Days from Monday, in the `i64` this module's week arithmetic wants. jiff
 /// spells chrono's `num_days_from_monday` as `to_monday_zero_offset`.
@@ -231,7 +232,7 @@ const WEEK_NUM_COL_WIDTH: f32 = 28.0;
 fn day_of_week_header_with_week_num<'a, M: 'a>(week_start: Weekday) -> Element<'a, M> {
     // Empty cell for the week number column.
     let wk_header = container(
-        text("Wk")
+        text(t!("calendar.week_column"))
             .size(TEXT_XS)
             .style(theme::TextClass::Tertiary.style()),
     )
@@ -243,7 +244,7 @@ fn day_of_week_header_with_week_num<'a, M: 'a>(week_start: Weekday) -> Element<'
     let mut header_row = row![wk_header].spacing(SPACE_0);
     for i in 0..7 {
         let day = weekday_offset(week_start, i);
-        let label = weekday_short(day);
+        let label = crate::i18n::weekday_short(day.to_monday_zero_offset().unsigned_abs());
         let cell = container(
             text(label)
                 .size(TEXT_XS)
@@ -312,7 +313,7 @@ fn day_cell<'a, M: 'a + Clone>(
     if overflow > 0 {
         content = content.push(
             button(
-                text(format!("+{overflow} more"))
+                text(more_label(overflow))
                     .size(TEXT_XS)
                     .style(theme::TextClass::Muted.style()),
             )
@@ -387,7 +388,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
     on_next_month: M,
 ) -> Element<'a, M> {
     // Month/year header with arrows.
-    let month_name = month_label(month);
+    let month_name = i8::try_from(month).map_or_else(|_| String::new(), crate::i18n::month_name);
     let header = row![
         button(
             container(text("\u{25C0}").size(TEXT_SM).style(text::secondary))
@@ -398,7 +399,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::BareIcon.style()),
         container(
-            text(format!("{month_name} {year}"))
+            text(t!("calendar.month_year", month = month_name, year = year))
                 .size(TEXT_SM)
                 .style(text::base)
                 .font(crate::font::text_semibold()),
@@ -569,48 +570,26 @@ fn weekday_offset(start: Weekday, offset: usize) -> Weekday {
     }
 }
 
-/// Three-letter weekday abbreviation.
-fn weekday_short(day: Weekday) -> &'static str {
-    match day {
-        Weekday::Monday => "Mon",
-        Weekday::Tuesday => "Tue",
-        Weekday::Wednesday => "Wed",
-        Weekday::Thursday => "Thu",
-        Weekday::Friday => "Fri",
-        Weekday::Saturday => "Sat",
-        Weekday::Sunday => "Sun",
+/// "+3 more" under a day's visible events.
+pub fn more_label(overflow: usize) -> String {
+    if overflow == 1 {
+        t!("calendar.more_one")
+    } else {
+        t!("calendar.more_other", count = overflow)
     }
+    .into_owned()
 }
 
 /// Two-letter weekday abbreviation for the mini-month.
-fn weekday_two_letter(day: Weekday) -> &'static str {
+fn weekday_two_letter(day: Weekday) -> std::borrow::Cow<'static, str> {
     match day {
-        Weekday::Monday => "Mo",
-        Weekday::Tuesday => "Tu",
-        Weekday::Wednesday => "We",
-        Weekday::Thursday => "Th",
-        Weekday::Friday => "Fr",
-        Weekday::Saturday => "Sa",
-        Weekday::Sunday => "Su",
-    }
-}
-
-/// Full month name.
-fn month_label(month: u32) -> &'static str {
-    match month {
-        1 => "January",
-        2 => "February",
-        3 => "March",
-        4 => "April",
-        5 => "May",
-        6 => "June",
-        7 => "July",
-        8 => "August",
-        9 => "September",
-        10 => "October",
-        11 => "November",
-        12 => "December",
-        _ => "???",
+        Weekday::Monday => t!("calendar.weekday_min.monday"),
+        Weekday::Tuesday => t!("calendar.weekday_min.tuesday"),
+        Weekday::Wednesday => t!("calendar.weekday_min.wednesday"),
+        Weekday::Thursday => t!("calendar.weekday_min.thursday"),
+        Weekday::Friday => t!("calendar.weekday_min.friday"),
+        Weekday::Saturday => t!("calendar.weekday_min.saturday"),
+        Weekday::Sunday => t!("calendar.weekday_min.sunday"),
     }
 }
 

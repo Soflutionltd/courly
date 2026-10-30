@@ -2,12 +2,13 @@ use iced::widget::{
     Space, button, column, container, pick_list, row, scrollable, text, text_input,
 };
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::undoable_text_input::undoable_text_input;
 
-use super::format::{format_recurrence_rule, month_short, weekday_short};
+use super::format::{format_event_date, format_recurrence_rule};
 use super::messages::{CalendarMessage, EventField, EventTextField};
 use super::types::{CalendarEventData, CalendarListEntry};
 
@@ -18,9 +19,9 @@ pub(super) fn event_editor_card<'a>(
     calendars: &'a [CalendarListEntry],
 ) -> Element<'a, CalendarMessage> {
     let heading = if is_creating {
-        "New Event"
+        t!("calendar.editor.new_event")
     } else {
-        "Edit Event"
+        t!("calendar.editor.edit_event")
     };
 
     let mut content = column![].spacing(SPACE_SM);
@@ -55,24 +56,27 @@ pub(super) fn event_editor_card<'a>(
                 account_id: Some(entry.account_id),
             })
         })
-        .placeholder("Select calendar...")
+        .placeholder(t!("calendar.editor.select_calendar"))
         .text_size(TEXT_MD)
         .padding(PAD_INPUT)
         .width(Length::Fill)
         .style(theme::PickListClass::Ghost.style());
-        content = content.push(form_field("Calendar", picker.into()));
+        content = content.push(form_field(t!("calendar.editor.calendar"), picker.into()));
     } else {
         let label = event
             .calendar_name
-            .as_deref()
-            .or(event.calendar_id.as_deref())
-            .unwrap_or("Unknown calendar");
-        content = content.push(form_field("Calendar", text(label).size(TEXT_MD).into()));
+            .clone()
+            .or_else(|| event.calendar_id.clone())
+            .unwrap_or_else(|| t!("calendar.editor.unknown_calendar").into_owned());
+        content = content.push(form_field(
+            t!("calendar.editor.calendar"),
+            text(label).size(TEXT_MD).into(),
+        ));
     }
 
     content = content.push(form_field(
-        "Title",
-        undoable_text_input("Event title", &event.title)
+        t!("calendar.editor.title"),
+        undoable_text_input(t!("calendar.editor.title_placeholder"), &event.title)
             .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Title(s)))
             .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Title))
             .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Title))
@@ -81,24 +85,21 @@ pub(super) fn event_editor_card<'a>(
             .into(),
     ));
 
-    let date_str = format!(
-        "{}, {} {}, {}",
-        weekday_short(event.start_date.weekday()),
-        month_short(event.start_date.month()),
-        event.start_date.day(),
-        event.start_date.year(),
-    );
-    content = content.push(form_field("Date", text(date_str).size(TEXT_MD).into()));
+    let date_str = format_event_date(event.start_date);
+    content = content.push(form_field(
+        t!("calendar.editor.date"),
+        text(date_str).size(TEXT_MD).into(),
+    ));
 
     if !event.all_day {
         let time_row = time_input_row(event);
-        content = content.push(form_field("Time", time_row));
+        content = content.push(form_field(t!("calendar.editor.time"), time_row));
     }
 
     let all_day_label = if event.all_day {
-        "All day: Yes"
+        t!("calendar.editor.all_day_yes")
     } else {
-        "All day: No"
+        t!("calendar.editor.all_day_no")
     };
     let all_day_btn = button(text(all_day_label).size(TEXT_SM))
         .on_press(CalendarMessage::EventFieldChanged(EventField::AllDay(
@@ -109,8 +110,8 @@ pub(super) fn event_editor_card<'a>(
     content = content.push(all_day_btn);
 
     content = content.push(form_field(
-        "Location",
-        undoable_text_input("Location (optional)", &event.location)
+        t!("calendar.editor.location"),
+        undoable_text_input(t!("calendar.editor.location_placeholder"), &event.location)
             .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Location(s)))
             .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Location))
             .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Location))
@@ -120,25 +121,31 @@ pub(super) fn event_editor_card<'a>(
     ));
 
     content = content.push(form_field(
-        "Description",
-        undoable_text_input("Description (optional)", &event.description)
-            .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Description(s)))
-            .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Description))
-            .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Description))
-            .padding(PAD_INPUT)
-            .size(TEXT_MD)
-            .into(),
+        t!("calendar.editor.description"),
+        undoable_text_input(
+            t!("calendar.editor.description_placeholder"),
+            &event.description,
+        )
+        .on_input(|s| CalendarMessage::EventFieldChanged(EventField::Description(s)))
+        .on_undo(CalendarMessage::EventFieldUndo(EventTextField::Description))
+        .on_redo(CalendarMessage::EventFieldRedo(EventTextField::Description))
+        .padding(PAD_INPUT)
+        .size(TEXT_MD)
+        .into(),
     ));
 
-    let tz_display = event.timezone.as_deref().unwrap_or("Local");
-    let tz_input = text_input("Timezone (e.g. Europe/Oslo)", tz_display)
+    let tz_display = event
+        .timezone
+        .clone()
+        .unwrap_or_else(|| t!("calendar.editor.timezone_local").into_owned());
+    let tz_input = text_input(t!("calendar.editor.timezone_placeholder"), tz_display)
         .on_input(|s| {
             let tz = if s.is_empty() { None } else { Some(s) };
             CalendarMessage::EventFieldChanged(EventField::Timezone(tz))
         })
         .padding(PAD_INPUT)
         .size(TEXT_SM);
-    content = content.push(form_field("Timezone", tz_input.into()));
+    content = content.push(form_field(t!("calendar.editor.timezone"), tz_input.into()));
 
     let avail = event.availability.as_deref().unwrap_or("busy");
     let avail_options = ["busy", "free", "tentative", "oof"];
@@ -146,11 +153,11 @@ pub(super) fn event_editor_card<'a>(
     for opt in &avail_options {
         let is_active = avail == *opt;
         let label = match *opt {
-            "busy" => "Busy",
-            "free" => "Free",
-            "tentative" => "Tentative",
-            "oof" => "OOO",
-            _ => opt,
+            "busy" => t!("calendar.editor.busy"),
+            "free" => t!("calendar.editor.free"),
+            "tentative" => t!("calendar.editor.tentative"),
+            "oof" => t!("calendar.editor.out_of_office"),
+            _ => (*opt).into(),
         };
         avail_row = avail_row.push(
             button(text(label).size(TEXT_XS).style(if is_active {
@@ -169,7 +176,10 @@ pub(super) fn event_editor_card<'a>(
             }),
         );
     }
-    content = content.push(form_field("Availability", avail_row.into()));
+    content = content.push(form_field(
+        t!("calendar.editor.availability"),
+        avail_row.into(),
+    ));
 
     let vis = event.visibility.as_deref().unwrap_or("default");
     let vis_options = ["default", "public", "private"];
@@ -177,10 +187,10 @@ pub(super) fn event_editor_card<'a>(
     for opt in &vis_options {
         let is_active = vis == *opt;
         let label = match *opt {
-            "default" => "Default",
-            "public" => "Public",
-            "private" => "Private",
-            _ => opt,
+            "default" => t!("calendar.editor.visibility_default"),
+            "public" => t!("calendar.editor.visibility_public"),
+            "private" => t!("calendar.editor.visibility_private"),
+            _ => (*opt).into(),
         };
         vis_row = vis_row.push(
             button(text(label).size(TEXT_XS).style(if is_active {
@@ -199,16 +209,17 @@ pub(super) fn event_editor_card<'a>(
             }),
         );
     }
-    content = content.push(form_field("Visibility", vis_row.into()));
+    content = content.push(form_field(t!("calendar.editor.visibility"), vis_row.into()));
 
     let has_recurrence = event.recurrence_rule.is_some();
     let recurrence_label = if has_recurrence {
-        format!(
-            "Recurring: {}",
-            format_recurrence_rule(event.recurrence_rule.as_deref().unwrap_or(""),)
+        t!(
+            "calendar.editor.recurring",
+            rule = format_recurrence_rule(event.recurrence_rule.as_deref().unwrap_or(""))
         )
+        .into_owned()
     } else {
-        "Not recurring".to_string()
+        t!("calendar.editor.not_recurring").into_owned()
     };
     let recurrence_toggle = button(text(recurrence_label).size(TEXT_SM))
         .on_press(CalendarMessage::EventFieldChanged(
@@ -220,10 +231,13 @@ pub(super) fn event_editor_card<'a>(
         ))
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
-    content = content.push(form_field("Recurrence", recurrence_toggle.into()));
+    content = content.push(form_field(
+        t!("calendar.editor.recurrence"),
+        recurrence_toggle.into(),
+    ));
 
     let can_save = event.calendar_id.is_some();
-    let save_btn = button(text("Save").size(TEXT_SM))
+    let save_btn = button(text(t!("calendar.editor.save")).size(TEXT_SM))
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Nav { active: true }.style());
     let save_btn = if can_save {
@@ -232,7 +246,7 @@ pub(super) fn event_editor_card<'a>(
         save_btn
     };
 
-    let cancel_btn = button(text("Cancel").size(TEXT_SM))
+    let cancel_btn = button(text(t!("calendar.editor.cancel")).size(TEXT_SM))
         .on_press(CalendarMessage::CloseModal)
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Ghost.style());
@@ -242,14 +256,18 @@ pub(super) fn event_editor_card<'a>(
     if !is_creating && let Some(ref id) = event.id {
         action_row = action_row.push(Space::new().width(Length::Fill));
         action_row = action_row.push(
-            button(text("Delete").size(TEXT_SM).style(text::danger))
-                .on_press(CalendarMessage::ConfirmDeleteEvent {
-                    event_id: id.clone(),
-                    title: event.title.clone(),
-                    account_id: event.account_id.clone(),
-                })
-                .padding(PAD_BUTTON)
-                .style(theme::ButtonClass::Ghost.style()),
+            button(
+                text(t!("calendar.delete"))
+                    .size(TEXT_SM)
+                    .style(text::danger),
+            )
+            .on_press(CalendarMessage::ConfirmDeleteEvent {
+                event_id: id.clone(),
+                title: event.title.clone(),
+                account_id: event.account_id.clone(),
+            })
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Ghost.style()),
         );
     }
 
@@ -268,7 +286,7 @@ pub(super) fn event_editor_card<'a>(
 
 /// A labeled form field row: label on left, widget on right.
 fn form_field<'a>(
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     widget: Element<'a, CalendarMessage>,
 ) -> Element<'a, CalendarMessage> {
     row![

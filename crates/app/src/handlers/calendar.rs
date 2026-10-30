@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::ui::calendar::{
     CalendarEventData, CalendarMessage, CalendarWorkflow, EditorSession, EventField,
@@ -63,7 +64,9 @@ impl ReadyApp {
                     async move {
                         let ev = db.get_calendar_event(eid).await?;
                         let Some(ev) = ev else {
-                            return Err(format!("Event not found: {event_id}"));
+                            return Err(
+                                t!("calendar.status.event_not_found", id = event_id).into_owned()
+                            );
                         };
                         let attendees = db
                             .get_event_attendees(ev.account_id.clone(), ev.id.clone())
@@ -96,7 +99,8 @@ impl ReadyApp {
                     }
                     Err(e) => {
                         log::error!("Failed to load calendar event: {e}");
-                        self.status = format!("Failed to load event: {e}");
+                        self.status =
+                            t!("calendar.status.load_event_failed", error = e).into_owned();
                     }
                 }
                 Task::none()
@@ -265,7 +269,7 @@ impl ReadyApp {
                     }
                     Err(e) => {
                         log::error!("Failed to save calendar event: {e}");
-                        self.status = format!("Save failed: {e}");
+                        self.status = t!("calendar.status.save_failed", error = e).into_owned();
                     }
                 }
                 Task::none()
@@ -307,7 +311,7 @@ impl ReadyApp {
                 let Some(client) = self.service_client.as_ref().cloned() else {
                     log::error!("DeleteEvent: service client unavailable");
                     self.status_bar
-                        .show_confirmation("Cannot delete: service not connected".to_string());
+                        .show_confirmation(t!("calendar.status.delete_not_connected").into_owned());
                     return Task::none();
                 };
 
@@ -345,13 +349,14 @@ impl ReadyApp {
                     Ok(()) => {
                         log::info!("Calendar event deleted");
                         self.status_bar
-                            .show_confirmation("Event deleted".to_string());
+                            .show_confirmation(t!("calendar.status.event_deleted").into_owned());
                         return self.reload_calendar_events();
                     }
                     Err(e) => {
                         log::error!("Failed to delete calendar event: {e}");
-                        self.status_bar
-                            .show_confirmation(format!("Delete failed: {e}"));
+                        self.status_bar.show_confirmation(
+                            t!("calendar.status.delete_failed", error = e).into_owned(),
+                        );
                     }
                 }
                 Task::none()
@@ -364,12 +369,13 @@ impl ReadyApp {
             CalendarMessage::RsvpCompleted(result) => match result {
                 Ok(()) => {
                     self.status_bar
-                        .show_confirmation("RSVP updated".to_string());
+                        .show_confirmation(t!("calendar.status.rsvp_updated").into_owned());
                     self.reload_calendar_events()
                 }
                 Err(error) => {
-                    self.status_bar
-                        .show_confirmation(format!("RSVP failed: {error}"));
+                    self.status_bar.show_confirmation(
+                        t!("calendar.status.rsvp_failed", error = error).into_owned(),
+                    );
                     Task::none()
                 }
             },
@@ -419,7 +425,8 @@ impl ReadyApp {
                     }
                     Err(e) => {
                         log::error!("Failed to load calendar events: {e}");
-                        self.status = format!("Load events error: {e}");
+                        self.status =
+                            t!("calendar.status.load_events_failed", error = e).into_owned();
                     }
                 }
                 Task::none()
@@ -433,7 +440,7 @@ impl ReadyApp {
                 let Some(client) = self.service_client.as_ref().cloned() else {
                     log::warn!("calendar.set_visibility: no ServiceClient yet; ignoring toggle");
                     self.status_bar
-                        .show_confirmation("Service not ready - try again in a moment".to_string());
+                        .show_confirmation(t!("calendar.status.service_not_ready").into_owned());
                     return Task::none();
                 };
                 // Eager UI flip for responsiveness, with the prior value
@@ -483,8 +490,9 @@ impl ReadyApp {
                         cal.is_visible = !requested_value;
                     }
                     log::warn!("calendar.set_visibility failed for {calendar_id}: {e}");
-                    self.status_bar
-                        .show_confirmation(format!("Could not update calendar: {e}"));
+                    self.status_bar.show_confirmation(
+                        t!("calendar.status.visibility_failed", error = e).into_owned(),
+                    );
                     Task::none()
                 }
             },
@@ -622,7 +630,7 @@ impl ReadyApp {
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             self.status_bar
-                .show_confirmation("Cannot respond: service not connected".to_string());
+                .show_confirmation(t!("calendar.status.respond_not_connected").into_owned());
             return Task::none();
         };
         let plan = service_api::CalendarActionPlan {
@@ -659,7 +667,7 @@ impl ReadyApp {
 
     fn handle_save_event(&mut self) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
-            self.status = "Cannot save: service not connected".to_string();
+            self.status = t!("calendar.status.save_not_connected").into_owned();
             return Task::none();
         };
 
@@ -685,11 +693,11 @@ impl ReadyApp {
                 session,
             } => {
                 let Some(aid) = aid else {
-                    self.status = "Select a calendar before saving".to_string();
+                    self.status = t!("calendar.status.select_calendar").into_owned();
                     return Task::none();
                 };
                 let Some(calendar_id) = session.draft.calendar_id.as_ref() else {
-                    self.status = "Select a calendar before saving".to_string();
+                    self.status = t!("calendar.status.select_calendar").into_owned();
                     return Task::none();
                 };
                 account_id = aid.clone();

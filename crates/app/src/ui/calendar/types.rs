@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use jiff::civil::{Date, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Span, Timestamp, Zoned};
+use rust_i18n::t;
 
 use crate::ui::calendar_month;
 use crate::ui::calendar_time_grid;
@@ -18,12 +19,12 @@ pub enum CalendarView {
 }
 
 impl CalendarView {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Day => "D",
-            Self::WorkWeek => "5",
-            Self::Week => "7",
-            Self::Month => "M",
+            Self::Day => t!("calendar.view.day"),
+            Self::WorkWeek => "5".into(),
+            Self::Week => "7".into(),
+            Self::Month => t!("calendar.view.month"),
         }
     }
 }
@@ -518,7 +519,7 @@ impl CalendarState {
             CalendarWorkflow::ConfirmingDiscard { .. } => {
                 self.active_popover = None;
                 self.active_modal = Some(CalendarModal::ConfirmDiscard {
-                    title: "Discard unsaved changes?".to_string(),
+                    title: t!("calendar.dialog.discard_title").into_owned(),
                 });
             }
             CalendarWorkflow::ConfirmingDelete {

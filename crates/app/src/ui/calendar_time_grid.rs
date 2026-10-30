@@ -7,6 +7,7 @@
 use jiff::civil::{Date as NaiveDate, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{Span, Timestamp, Zoned};
+use rust_i18n::t;
 
 /// Days from Monday, in the `i64` this module's week arithmetic wants.
 fn days_from_monday(day: Weekday) -> i64 {
@@ -265,7 +266,7 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
     // Label column.
     bar_row = bar_row.push(
         container(
-            text("All day")
+            text(t!("calendar.all_day"))
                 .size(TEXT_XS)
                 .style(theme::TextClass::Muted.style()),
         )
@@ -289,7 +290,7 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
             let overflow = all_day_events.len().saturating_sub(max_visible_all_day);
             if overflow > 0 {
                 col = col.push(
-                    text(format!("+{overflow} more"))
+                    text(super::calendar_month::more_label(overflow))
                         .size(TEXT_XS)
                         .style(theme::TextClass::Muted.style()),
                 );
@@ -814,22 +815,23 @@ fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
     add_days(date, -diff)
 }
 
-/// Format an hour number as a time label.
+/// Format an hour number as a time label, in the language's 12 h or 24 h form.
 fn format_hour(hour: u32) -> String {
-    format!("{hour}:00")
+    i8::try_from(hour)
+        .ok()
+        .and_then(|hour| {
+            NaiveDate::default()
+                .at(hour, 0, 0, 0)
+                .to_zoned(TimeZone::UTC)
+                .ok()
+        })
+        .map(|zoned| crate::i18n::time_of_day(&zoned))
+        .unwrap_or_default()
 }
 
 /// Format a day header label (e.g. "Wed 19").
 fn format_day_header(date: NaiveDate) -> String {
-    let weekday = match date.weekday() {
-        Weekday::Monday => "Mon",
-        Weekday::Tuesday => "Tue",
-        Weekday::Wednesday => "Wed",
-        Weekday::Thursday => "Thu",
-        Weekday::Friday => "Fri",
-        Weekday::Saturday => "Sat",
-        Weekday::Sunday => "Sun",
-    };
+    let weekday = crate::i18n::weekday_short(date.weekday().to_monday_zero_offset().unsigned_abs());
     format!("{} {}", weekday, date.day())
 }
 
@@ -840,10 +842,7 @@ fn format_day_header(date: NaiveDate) -> String {
 /// the position it was drawn at.
 fn format_event_time(event: &TimeGridEvent) -> String {
     Timestamp::from_second(event.start_time)
-        .map(|ts| {
-            let dt = ts.to_zoned(TimeZone::system());
-            format!("{}:{:02}", dt.hour(), dt.minute())
-        })
+        .map(|ts| crate::i18n::time_of_day(&ts.to_zoned(TimeZone::system())))
         .unwrap_or_default()
 }
 

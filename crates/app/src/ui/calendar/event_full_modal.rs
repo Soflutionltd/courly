@@ -1,13 +1,14 @@
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::calendar_time_grid;
 use crate::ui::layout::*;
 use crate::ui::theme;
 
 use super::format::{
-    format_event_time_range, format_recurrence_rule, format_reminder, month_short, parse_hex_color,
-    weekday_short,
+    format_event_date, format_event_day, format_event_time_range, format_recurrence_rule,
+    format_reminder, parse_hex_color,
 };
 use super::messages::CalendarMessage;
 use super::types::{CalendarEventData, CalendarState};
@@ -41,9 +42,9 @@ pub(super) fn event_full_modal<'a>(
     }
 
     let title_text = if event.title.is_empty() {
-        "(Untitled event)"
+        t!("calendar.untitled_event").into_owned()
     } else {
-        &event.title
+        event.title.clone()
     };
     detail = detail.push(
         text(title_text)
@@ -51,16 +52,10 @@ pub(super) fn event_full_modal<'a>(
             .font(crate::font::text_semibold()),
     );
 
-    let date_str = format!(
-        "{}, {} {}, {}",
-        weekday_short(event.start_date.weekday()),
-        month_short(event.start_date.month()),
-        event.start_date.day(),
-        event.start_date.year(),
-    );
+    let date_str = format_event_date(event.start_date);
     let time_str = format_event_time_range(event);
     let datetime_label = if event.all_day {
-        format!("{date_str} \u{2014} All day")
+        format!("{date_str} \u{2014} {}", t!("calendar.all_day"))
     } else {
         format!("{date_str}  {time_str}")
     };
@@ -105,7 +100,7 @@ pub(super) fn event_full_modal<'a>(
     if let Some(ref name) = event.organizer_name {
         if !name.is_empty() {
             detail = detail.push(
-                text(format!("Organizer: {name}"))
+                text(t!("calendar.organizer_line", name = name).into_owned())
                     .size(TEXT_SM)
                     .style(text::secondary),
             );
@@ -114,7 +109,7 @@ pub(super) fn event_full_modal<'a>(
         && !email.is_empty()
     {
         detail = detail.push(
-            text(format!("Organizer: {email}"))
+            text(t!("calendar.organizer_line", name = email).into_owned())
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
@@ -122,7 +117,7 @@ pub(super) fn event_full_modal<'a>(
 
     if !event.attendees.is_empty() {
         detail = detail.push(
-            text("Attendees:")
+            text(t!("calendar.attendees"))
                 .size(TEXT_SM)
                 .font(crate::font::text_semibold()),
         );
@@ -134,9 +129,13 @@ pub(super) fn event_full_modal<'a>(
                 _ => "?",
             };
             let display = att.name.as_deref().unwrap_or(&att.email);
-            let suffix = if att.is_organizer { " (organizer)" } else { "" };
+            let display = if att.is_organizer {
+                t!("calendar.attendee_organizer", name = display).into_owned()
+            } else {
+                display.to_string()
+            };
             detail = detail.push(
-                text(format!("  {icon} {display}{suffix}"))
+                text(format!("  {icon} {display}"))
                     .size(TEXT_SM)
                     .style(text::secondary),
             );
@@ -160,7 +159,7 @@ pub(super) fn event_full_modal<'a>(
             .collect::<Vec<_>>()
             .join(", ");
         detail = detail.push(
-            text(format!("Reminders: {reminder_text}"))
+            text(t!("calendar.reminders", list = reminder_text).into_owned())
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
@@ -168,14 +167,14 @@ pub(super) fn event_full_modal<'a>(
 
     if let Some(ref status) = event.rsvp_status {
         let display = match status.as_str() {
-            "accepted" => "Accepted",
-            "declined" => "Declined",
-            "tentative" => "Tentative",
-            "needs-action" => "No response",
-            _ => status.as_str(),
+            "accepted" => t!("calendar.rsvp.accepted"),
+            "declined" => t!("calendar.rsvp.declined"),
+            "tentative" => t!("calendar.rsvp.tentative"),
+            "needs-action" => t!("calendar.rsvp.no_response"),
+            _ => status.as_str().into(),
         };
         detail = detail.push(
-            text(format!("Your RSVP: {display}"))
+            text(t!("calendar.your_rsvp", status = display).into_owned())
                 .size(TEXT_SM)
                 .font(crate::font::text_semibold())
                 .style(text::secondary),
@@ -183,7 +182,7 @@ pub(super) fn event_full_modal<'a>(
     }
 
     detail = detail.push(Space::new().height(SPACE_XS));
-    let edit_btn = button(text("Edit").size(TEXT_SM))
+    let edit_btn = button(text(t!("calendar.edit")).size(TEXT_SM))
         .on_press(CalendarMessage::OpenEventEditor(Some(event.clone())))
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Ghost.style());
@@ -191,7 +190,7 @@ pub(super) fn event_full_modal<'a>(
     let mut action_row = row![edit_btn].spacing(SPACE_XS);
     if let Some(ref id) = event.id {
         action_row = action_row.push(
-            button(text("Delete").size(TEXT_SM))
+            button(text(t!("calendar.delete")).size(TEXT_SM))
                 .on_press(CalendarMessage::ConfirmDeleteEvent {
                     event_id: id.clone(),
                     title: event.title.clone(),
@@ -207,12 +206,7 @@ pub(super) fn event_full_modal<'a>(
 
     let day_events = calendar_time_grid::events_for_date(&state.events, event.start_date);
 
-    let day_label = format!(
-        "{}, {} {}",
-        weekday_short(event.start_date.weekday()),
-        month_short(event.start_date.month()),
-        event.start_date.day(),
-    );
+    let day_label = format_event_day(event.start_date);
 
     let mut day_col = column![
         text(day_label)
@@ -224,14 +218,14 @@ pub(super) fn event_full_modal<'a>(
 
     if day_events.is_empty() {
         day_col = day_col.push(
-            text("No other events")
+            text(t!("calendar.no_other_events"))
                 .size(TEXT_XS)
                 .style(theme::TextClass::Muted.style()),
         );
     } else {
         for ev in day_events {
             let time_str = if ev.all_day {
-                "All day".to_string()
+                t!("calendar.all_day").into_owned()
             } else {
                 let local = |seconds: i64| {
                     jiff::Timestamp::from_second(seconds)
@@ -240,7 +234,11 @@ pub(super) fn event_full_modal<'a>(
                 };
                 match (local(ev.start_time), local(ev.end_time)) {
                     (Some(s), Some(e)) => {
-                        format!("{} \u{2013} {}", s.strftime("%H:%M"), e.strftime("%H:%M"))
+                        format!(
+                            "{} \u{2013} {}",
+                            crate::i18n::time_of_day(&s),
+                            crate::i18n::time_of_day(&e)
+                        )
                     }
                     _ => String::new(),
                 }
