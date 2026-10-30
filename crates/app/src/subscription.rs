@@ -51,6 +51,24 @@ impl ReadyApp {
             sync_progress_subscription(&self.sync_receiver).map(Message::SyncProgress),
         ];
 
+        // Follow the pointer anywhere in the window while the toolbar is
+        // being customized, including over the panel, which captures the
+        // events under it: a drag starts from the last position seen.
+        if self.toolbar.customizing {
+            subs.push(iced::event::listen_with(|event, _status, _id| {
+                use crate::ui::toolbar::ToolbarMessage;
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::Toolbar(ToolbarMessage::CursorMoved(position)))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::Toolbar(ToolbarMessage::DragEnd)),
+                    _ => None,
+                }
+            }));
+        }
+
         if self.service_client.is_some() {
             subs.push(
                 service_notification_subscription(&self.service_notifications)

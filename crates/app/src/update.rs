@@ -563,6 +563,7 @@ impl ReadyApp {
             }
             Message::EmailAction(action) => self.handle_email_action(action),
             Message::ConfirmPermanentDelete => self.confirm_permanent_delete(),
+            Message::Toolbar(msg) => self.handle_toolbar(msg),
             Message::CancelPermanentDelete => {
                 self.pending_permanent_delete = None;
                 Task::none()

@@ -287,6 +287,7 @@ pub enum Message {
 
     // Palette placeholder (Slice 6b)
     Palette(PaletteMessage),
+    Toolbar(crate::ui::toolbar::ToolbarMessage),
 
     // Search
     SearchQueryChanged(String),

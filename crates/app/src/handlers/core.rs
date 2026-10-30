@@ -1218,6 +1218,8 @@ impl ReadyApp {
         self.settings.apply_bootstrap(&ui_snap, &settings_snap);
         self.sidebar.layouts =
             crate::ui::sidebar::order::SidebarLayouts::parse(ui_snap.sidebar_layout.as_deref());
+        self.toolbar.layout =
+            crate::ui::toolbar::ToolbarLayout::parse(ui_snap.toolbar_layout.as_deref());
         self.settings.persisted_preferences = Some(self.settings.committed_preferences.clone());
     }
 

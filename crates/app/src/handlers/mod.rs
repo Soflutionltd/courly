@@ -20,6 +20,7 @@ mod palette;
 pub(crate) mod pop_out;
 pub(crate) mod provider;
 pub(crate) mod row_menu;
+mod toolbar;
 pub(crate) mod search;
 pub mod signatures;
 mod updater;

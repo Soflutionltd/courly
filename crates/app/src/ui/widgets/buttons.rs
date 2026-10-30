@@ -190,15 +190,6 @@ pub fn rail_button<'a, M: Clone + 'a>(
     .into()
 }
 
-/// Thin vertical rule separating groups of ribbon buttons.
-pub fn ribbon_separator<'a, M: 'a>() -> Element<'a, M> {
-    container(iced::widget::Space::new())
-        .width(1)
-        .height(ICON_RAIL)
-        .style(theme::ContainerClass::Divider.style())
-        .into()
-}
-
 /// Icon-only "+" with the same vertical padding as the compose button,
 /// so the two line up in a row.
 pub fn add_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {

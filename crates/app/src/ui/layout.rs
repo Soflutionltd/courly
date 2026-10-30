@@ -158,6 +158,19 @@ pub const ROW_MENU_ITEM_PADDING: Padding = Padding {
     left: SPACE_XS,
 };
 pub const ROW_MENU_WIDTH: f32 = 280.0;
+/// Toolbar "…" menu and button right-click menu.
+pub const TOOLBAR_MENU_WIDTH: f32 = 260.0;
+/// Customize-toolbar panel under the ribbon.
+pub const TOOLBAR_CUSTOMIZE_WIDTH: f32 = 860.0;
+pub const TOOLBAR_CUSTOMIZE_COLUMNS: usize = 4;
+/// Drop slot after the last button while customizing.
+pub const TOOLBAR_END_SLOT_WIDTH: f32 = 120.0;
+/// Height of a toolbar button: `PAD_ICON_BTN` around one line of `TEXT_SM`.
+pub const TOOLBAR_SLOT_HEIGHT: f32 = 22.0;
+/// Scrollbar under the customizing bar when its buttons don't all fit.
+pub const TOOLBAR_SCROLLBAR_WIDTH: f32 = 3.0;
+/// Rounding headroom when deciding which buttons fit before "…".
+pub const TOOLBAR_MEASURE_SLACK: f32 = 2.0;
 pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
 
 // ── Panel widths ────────────────────────────────────────

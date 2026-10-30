@@ -228,7 +228,7 @@ impl ReadyApp {
     /// the chat timeline when a chat is open).
     fn view_mail_body(&self) -> Element<'_, Message> {
         let ctx = command_dispatch::build_context(self);
-        let ribbon = ui::chrome::ribbon(&self.registry, &self.binding_table, &ctx);
+        let ribbon = ui::toolbar::toolbar(&self.toolbar, &self.registry, &ctx);
         let sidebar = container(pane(self.sidebar.view().map(Message::Sidebar)))
             .width(self.sidebar_width)
             .height(Length::Fill);

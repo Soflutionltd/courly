@@ -101,6 +101,12 @@ impl ReadyApp {
             self.thread_list.row_menu = None;
             return Task::none();
         }
+        if *key == Key::Named(Named::Escape)
+            && window_id == self.main_window_id
+            && self.toolbar.escape()
+        {
+            return Task::none();
+        }
 
         // 1. If palette is open, route to palette-specific handler
         if self.palette.is_open() {

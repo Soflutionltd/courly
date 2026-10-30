@@ -104,6 +104,7 @@ pub struct ReadyApp {
     /// Row menu action that needs the conversation's messages, held until
     /// the reading pane has loaded that thread (account id, thread id).
     pub(crate) pending_row_action: Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
+    pub(crate) toolbar: crate::ui::toolbar::Toolbar,
     pub(crate) palette: Palette,
     pub(crate) undo_stack: UndoStack<crate::action_resolve::MailUndoPayload>,
 
@@ -432,6 +433,7 @@ impl ReadyApp {
             pending_chord: None,
             pending_permanent_delete: None,
             pending_row_action: None,
+            toolbar: crate::ui::toolbar::Toolbar::default(),
             palette: Palette::new(CommandRegistry::new(), resolver),
             undo_stack: UndoStack::default(),
             search_state,
