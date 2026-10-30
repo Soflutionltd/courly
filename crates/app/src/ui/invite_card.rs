@@ -19,13 +19,32 @@ use crate::ui::theme;
 use service_api::{RsvpResponse, WireRsvpReply};
 
 /// Online meeting links recognised in an invite's location or body.
-const MEETING_LINK_MARKERS: [&str; 5] = [
-    "teams.microsoft.com/l/meetup-join",
-    "teams.live.com/meet",
-    "zoom.us/j/",
-    "meet.google.com/",
-    "webex.com/",
+/// (host, path prefix) of the online meeting services. The host matches
+/// exactly or as a parent domain (`us02web.zoom.us`).
+const MEETING_LINK_MARKERS: [(&str, &str); 5] = [
+    ("teams.microsoft.com", "/l/meetup-join"),
+    ("teams.live.com", "/meet"),
+    ("zoom.us", "/j/"),
+    ("meet.google.com", "/"),
+    ("webex.com", "/"),
 ];
+
+fn is_meeting_link(token: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(token) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    url.scheme() == "https"
+        && MEETING_LINK_MARKERS.iter().any(|(domain, path)| {
+            let host_matches = host == *domain
+                || host
+                    .strip_suffix(domain)
+                    .is_some_and(|prefix| prefix.ends_with('.'));
+            host_matches && url.path().starts_with(path)
+        })
+}
 
 /// Calendar data an invite resolved to.
 #[derive(Debug, Clone)]
@@ -248,14 +267,8 @@ pub fn join_url(sources: &[Option<&str>]) -> Option<String> {
             .split(|c: char| {
                 c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']')
             })
-            .map(|token| token.trim_end_matches(['.', ',', ';']))
-            .find(|token| {
-                token.starts_with("https://")
-                    && MEETING_LINK_MARKERS
-                        .iter()
-                        .any(|marker| token.contains(marker))
-            })
-            .map(|token| token.replace("&amp;", "&"))
+            .map(|token| token.trim_end_matches(['.', ',', ';']).replace("&amp;", "&"))
+            .find(|token| is_meeting_link(token))
     })
 }
 
@@ -883,6 +896,25 @@ mod tests {
             Some("https://us02web.zoom.us/j/123456789")
         );
         assert_eq!(join_url(&[Some("https://example.com/agenda")]), None);
+    }
+
+    #[test]
+    fn join_url_rejects_lookalike_hosts() {
+        for hostile in [
+            "https://evil.tld/?zoom.us/j/1",
+            "https://evilzoom.us/j/1",
+            "https://zoom.us.evil.tld/j/1",
+            "https://zoom.us@evil.tld/j/1",
+            "http://zoom.us/j/1",
+            "https://teams.microsoft.com.evil.tld/l/meetup-join/x",
+            "https://teams.microsoft.com/phish?l/meetup-join",
+        ] {
+            assert_eq!(join_url(&[Some(hostile)]), None, "{hostile}");
+        }
+        assert_eq!(
+            join_url(&[Some("https://meet.google.com/abc-defg-hij")]).as_deref(),
+            Some("https://meet.google.com/abc-defg-hij")
+        );
     }
 
     #[test]
