@@ -106,9 +106,13 @@ fn link_cargo_home_child(original: &std::path::Path, isolated: &std::path::Path,
     if dest.exists() {
         return;
     }
+    // Parallel trybuild tests race to create the same link.
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, &dest)
-        .unwrap_or_else(|e| panic!("symlink {} -> {}: {e}", dest.display(), source.display()));
+    if let Err(e) = std::os::unix::fs::symlink(&source, &dest)
+        && e.kind() != std::io::ErrorKind::AlreadyExists
+    {
+        panic!("symlink {} -> {}: {e}", dest.display(), source.display());
+    }
     #[cfg(not(unix))]
     {
         let _ = (source, dest);
