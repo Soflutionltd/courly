@@ -290,6 +290,23 @@ mod tests {
     }
 
     #[test]
+    fn rsvp_journaled_before_reply_existed_still_deserializes() {
+        let op = WireCalendarOperation::RsvpEvent {
+            event_id: "evt-1".to_string(),
+            response: RsvpResponse::Tentative,
+            reply: WireRsvpReply::default(),
+        };
+        let mut json = serde_json::to_value(&op).expect("serialize");
+        let removed = json
+            .as_object_mut()
+            .and_then(|tagged| tagged.values_mut().find_map(|v| v.as_object_mut()))
+            .and_then(|fields| fields.remove("reply"));
+        assert!(removed.is_some(), "reply field not found in {json}");
+        let recovered: WireCalendarOperation = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(op, recovered);
+    }
+
+    #[test]
     fn calendar_action_plan_round_trips_through_serde() {
         let plan = CalendarActionPlan {
             plan_id: PlanId::new_v7(),
