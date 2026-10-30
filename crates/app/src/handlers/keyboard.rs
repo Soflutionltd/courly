@@ -30,6 +30,19 @@ fn is_plain_delete_key(key: &iced::keyboard::Key, modifiers: iced::keyboard::Mod
         && !modifiers.alt()
 }
 
+/// Select all, copy, paste, cut, undo and redo belong to the text field
+/// that captured them, never to the thread list behind it.
+fn is_text_editing_chord(key: &iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> bool {
+    let iced::keyboard::Key::Character(character) = key else {
+        return false;
+    };
+    modifiers.command()
+        && !modifiers.alt()
+        && ["a", "c", "v", "x", "z"]
+            .iter()
+            .any(|editing| character.eq_ignore_ascii_case(editing))
+}
+
 impl ReadyApp {
     pub(crate) fn handle_key_event(&mut self, msg: KeyEventMessage) -> Task<Message> {
         match msg {
@@ -186,7 +199,8 @@ impl ReadyApp {
         // 2b. If a text input or other widget captured the event, skip
         //     (unless it's a modifier-chord like Ctrl+K)
         if status == iced::event::Status::Captured
-            && !command_dispatch::has_command_modifier(&modifiers)
+            && (!command_dispatch::has_command_modifier(&modifiers)
+                || is_text_editing_chord(key, modifiers))
         {
             return Task::none();
         }
@@ -287,7 +301,7 @@ impl ReadyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::delete_key_intent;
+    use super::{delete_key_intent, is_text_editing_chord};
     use crate::action_resolve::MailActionIntent;
 
     #[test]
@@ -300,5 +314,19 @@ mod tests {
             delete_key_intent(true),
             MailActionIntent::PermanentDelete
         ));
+    }
+
+    #[test]
+    fn text_fields_keep_their_editing_chords() {
+        use iced::keyboard::{Key, Modifiers};
+        let character = |c: &str| Key::Character(c.into());
+
+        assert!(is_text_editing_chord(&character("a"), Modifiers::COMMAND));
+        assert!(is_text_editing_chord(
+            &character("Z"),
+            Modifiers::COMMAND | Modifiers::SHIFT
+        ));
+        assert!(!is_text_editing_chord(&character("a"), Modifiers::empty()));
+        assert!(!is_text_editing_chord(&character("k"), Modifiers::COMMAND));
     }
 }
