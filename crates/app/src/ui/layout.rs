@@ -199,6 +199,8 @@ pub const PAD_THREAD_GROUP_HEADER: Padding = Padding {
     bottom: 4.0,
     left: 12.0,
 };
+/// Fold chevron slot of a date group header.
+pub const THREAD_GROUP_CHEVRON_SLOT: f32 = 10.0;
 /// Inset of the hairline between two thread cards.
 pub const PAD_THREAD_SEPARATOR: Padding = Padding {
     top: 0.0,

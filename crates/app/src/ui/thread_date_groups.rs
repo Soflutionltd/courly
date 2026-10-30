@@ -5,7 +5,7 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use rust_i18n::t;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DateGroup {
     Pinned,
     Today,
@@ -78,10 +78,9 @@ fn group_for(date: Option<Date>, today: Date) -> DateGroup {
     }
 }
 
-/// The header to show above each row: `Some` where a new group starts.
-/// Lists not sorted by date (relevance-ranked search) get no headers, since
-/// the groups would repeat.
-pub fn headers(rows: &[GroupKey], today: Date, tz: &TimeZone) -> Vec<Option<DateGroup>> {
+/// The group of each row, or `None` for lists not sorted by date
+/// (relevance-ranked search), where the groups would repeat.
+pub fn groups(rows: &[GroupKey], today: Date, tz: &TimeZone) -> Option<Vec<DateGroup>> {
     let unpinned: Vec<i64> = rows
         .iter()
         .filter(|row| !row.pinned)
@@ -93,17 +92,30 @@ pub fn headers(rows: &[GroupKey], today: Date, tz: &TimeZone) -> Vec<Option<Date
         .all(|row| !row.pinned);
     let date_ordered = unpinned.windows(2).all(|pair| pair[0] >= pair[1]);
     if !pinned_first || !date_ordered {
-        return vec![None; rows.len()];
+        return None;
     }
+    Some(
+        rows.iter()
+            .map(|row| {
+                if row.pinned {
+                    DateGroup::Pinned
+                } else {
+                    group_for(row.last_message_at.and_then(|ms| local_date(ms, tz)), today)
+                }
+            })
+            .collect(),
+    )
+}
 
+/// The header to show above each row: `Some` where a new group starts.
+pub fn headers(groups: Option<&[DateGroup]>, len: usize) -> Vec<Option<DateGroup>> {
+    let Some(groups) = groups else {
+        return vec![None; len];
+    };
     let mut previous = None;
-    rows.iter()
-        .map(|row| {
-            let group = if row.pinned {
-                DateGroup::Pinned
-            } else {
-                group_for(row.last_message_at.and_then(|ms| local_date(ms, tz)), today)
-            };
+    groups
+        .iter()
+        .map(|&group| {
             let header = (previous != Some(group)).then_some(group);
             previous = Some(group);
             header
@@ -138,6 +150,10 @@ mod tests {
     // Friday 30 October 2026.
     const TODAY: Date = date(2026, 10, 30);
 
+    fn headers_for(rows: &[GroupKey]) -> Vec<Option<DateGroup>> {
+        headers(groups(rows, TODAY, &paris()).as_deref(), rows.len())
+    }
+
     #[test]
     fn groups_follow_outlook_buckets() {
         let rows = [
@@ -151,7 +167,7 @@ mod tests {
             key(at(date(2026, 9, 30), 8, 0)),
             key(at(date(2026, 8, 31), 8, 0)),
         ];
-        let groups: Vec<_> = headers(&rows, TODAY, &paris());
+        let groups: Vec<_> = headers_for(&rows);
         assert_eq!(
             groups,
             vec![
@@ -173,7 +189,7 @@ mod tests {
         // 00:30 in Paris is still the previous day in UTC.
         let rows = [key(at(TODAY, 0, 30))];
         assert_eq!(
-            headers(&rows, TODAY, &paris()),
+            headers_for(&rows),
             vec![Some(DateGroup::Today)]
         );
     }
@@ -188,7 +204,7 @@ mod tests {
             key(at(TODAY, 9, 0)),
         ];
         assert_eq!(
-            headers(&rows, TODAY, &paris()),
+            headers_for(&rows),
             vec![Some(DateGroup::Pinned), Some(DateGroup::Today)]
         );
     }
@@ -196,7 +212,7 @@ mod tests {
     #[test]
     fn relevance_ordered_lists_get_no_headers() {
         let rows = [key(at(date(2026, 9, 1), 8, 0)), key(at(TODAY, 9, 0))];
-        assert_eq!(headers(&rows, TODAY, &paris()), vec![None, None]);
+        assert_eq!(headers_for(&rows), vec![None, None]);
     }
 
     #[test]
@@ -209,7 +225,7 @@ mod tests {
             },
         ];
         assert_eq!(
-            headers(&rows, TODAY, &paris()),
+            headers_for(&rows),
             vec![Some(DateGroup::Today), Some(DateGroup::Older)]
         );
     }

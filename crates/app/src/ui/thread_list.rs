@@ -9,6 +9,7 @@ use crate::component::Component;
 use crate::db::Thread;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::thread_date_groups::{DateGroup, GroupKey};
 use crate::ui::thread_menu::{RowMenu, RowMenuItem, RowMenuPage, RowMenuPages};
 use crate::ui::widgets;
 
@@ -120,6 +121,8 @@ pub enum ThreadListMessage {
     RowMenuShowPage(RowMenuPage),
     RowMenuPick(RowMenuItem),
     CloseRowMenu,
+    /// Fold or unfold the rows under a date header.
+    ToggleDateGroup(DateGroup),
     /// Dismiss the typeahead dropdown.
     TypeaheadDismiss,
 }
@@ -210,6 +213,8 @@ pub struct ThreadList {
     pub bimi_cache: Arc<rtsk::bimi::BimiLruCache>,
     /// Show Today / Yesterday / ... headers. Mirrors the user preference.
     pub date_groups: bool,
+    /// Date headers folded by the user, for every folder of the session.
+    pub collapsed_groups: HashSet<DateGroup>,
     /// Open right-click menu, if any.
     pub row_menu: Option<RowMenu>,
 }
@@ -230,8 +235,60 @@ impl ThreadList {
             typeahead: TypeaheadState::default(),
             bimi_cache,
             date_groups: true,
+            collapsed_groups: HashSet::new(),
             row_menu: None,
         }
+    }
+
+    /// The date group of each row, `None` when the list shows no headers.
+    fn row_groups(&self) -> Option<Vec<DateGroup>> {
+        if !self.date_groups {
+            return None;
+        }
+        let keys: Vec<GroupKey> = self
+            .threads
+            .iter()
+            .map(|thread| GroupKey {
+                pinned: thread.is_pinned,
+                last_message_at: thread.last_message_at,
+            })
+            .collect();
+        let now = jiff::Zoned::now();
+        super::thread_date_groups::groups(&keys, now.date(), now.time_zone())
+    }
+
+    /// Whether each row is shown, i.e. not under a folded header.
+    fn visible_rows(&self) -> Vec<bool> {
+        match self.row_groups() {
+            Some(groups) => groups
+                .iter()
+                .map(|group| !self.collapsed_groups.contains(group))
+                .collect(),
+            None => vec![true; self.threads.len()],
+        }
+    }
+
+    fn toggle_date_group(&mut self, group: DateGroup) -> Option<ThreadListEvent> {
+        if self.collapsed_groups.remove(&group) {
+            return None;
+        }
+        self.collapsed_groups.insert(group);
+        let visible = self.visible_rows();
+        let is_hidden = |idx: &usize| !visible.get(*idx).copied().unwrap_or(false);
+        if self.row_menu.as_ref().is_some_and(|menu| is_hidden(&menu.index)) {
+            self.row_menu = None;
+        }
+        // Actions must not reach rows the user no longer sees. As in
+        // Outlook, folding the open conversation away closes it.
+        if self.selected_thread.as_ref().is_some_and(is_hidden) {
+            self.selected_thread = None;
+            self.clear_multi_select();
+            return Some(ThreadListEvent::ThreadDeselected);
+        }
+        let before = self.selected_threads.len();
+        self.selected_threads.retain(|idx| !is_hidden(idx));
+        (self.selected_threads.len() != before)
+            .then_some(ThreadListEvent::MultiSelectionChanged(self.selected_threads.len()))
     }
 
     pub fn set_row_menu_pages(&mut self, pages: RowMenuPages) {
@@ -329,34 +386,27 @@ impl ThreadList {
 
     /// Move selection to the next thread (down).
     fn select_next(&mut self) -> Option<ThreadListEvent> {
-        if self.threads.is_empty() {
-            return None;
-        }
-        self.clear_multi_select();
-        let next = match self.selected_thread {
-            Some(i) if i + 1 < self.threads.len() => i + 1,
-            Some(_) => return None, // already at end
-            None => 0,
-        };
-        self.selected_thread = Some(next);
-        self.last_selected_anchor = Some(next);
-        Some(ThreadListEvent::ThreadSelected(next))
+        let visible = self.visible_rows();
+        let start = self.selected_thread.map_or(0, |i| i + 1);
+        let next = (start..visible.len()).find(|&i| visible[i])?;
+        self.select_only(next)
     }
 
     /// Move selection to the previous thread (up).
     fn select_previous(&mut self) -> Option<ThreadListEvent> {
-        if self.threads.is_empty() {
-            return None;
-        }
-        self.clear_multi_select();
+        let visible = self.visible_rows();
         let prev = match self.selected_thread {
-            Some(0) => return None, // already at start
-            Some(i) => i - 1,
-            None => 0,
+            Some(i) => (0..i).rev().find(|&j| visible[j])?,
+            None => visible.iter().position(|&shown| shown)?,
         };
-        self.selected_thread = Some(prev);
-        self.last_selected_anchor = Some(prev);
-        Some(ThreadListEvent::ThreadSelected(prev))
+        self.select_only(prev)
+    }
+
+    fn select_only(&mut self, idx: usize) -> Option<ThreadListEvent> {
+        self.clear_multi_select();
+        self.selected_thread = Some(idx);
+        self.last_selected_anchor = Some(idx);
+        Some(ThreadListEvent::ThreadSelected(idx))
     }
 
     /// Auto-advance: select the next (or previous) thread after the current
@@ -369,21 +419,17 @@ impl ThreadList {
         }
 
         let prev_idx = self.selected_thread.unwrap_or(0);
+        let visible = self.visible_rows();
+        let at_or_after = |from: usize| (from..visible.len()).find(|&i| visible[i]);
+        let before = |to: usize| (0..to.min(visible.len())).rev().find(|&i| visible[i]);
         let new_idx = match self.auto_advance_direction {
-            AutoAdvanceDirection::Next => {
-                if prev_idx < self.threads.len() {
-                    prev_idx
-                } else {
-                    self.threads.len().saturating_sub(1)
-                }
-            }
-            AutoAdvanceDirection::Previous => {
-                if prev_idx > 0 {
-                    prev_idx.saturating_sub(1)
-                } else {
-                    0
-                }
-            }
+            AutoAdvanceDirection::Next => at_or_after(prev_idx).or_else(|| before(prev_idx)),
+            AutoAdvanceDirection::Previous => before(prev_idx).or_else(|| at_or_after(prev_idx)),
+        };
+        let Some(new_idx) = new_idx else {
+            self.selected_thread = None;
+            self.clear_multi_select();
+            return Some(ThreadListEvent::AutoAdvance { new_index: None });
         };
 
         self.selected_thread = Some(new_idx);
@@ -459,7 +505,8 @@ impl Component for ThreadList {
                 {
                     self.selected_threads.insert(prev);
                 }
-                for i in start..=end {
+                let visible = self.visible_rows();
+                for i in (start..=end).filter(|&i| visible.get(i).copied().unwrap_or(false)) {
                     self.selected_threads.insert(i);
                 }
                 self.selected_thread = Some(idx);
@@ -473,7 +520,8 @@ impl Component for ThreadList {
                 if self.threads.is_empty() {
                     return (Task::none(), None);
                 }
-                self.selected_threads = (0..self.threads.len()).collect();
+                let visible = self.visible_rows();
+                self.selected_threads = (0..visible.len()).filter(|&i| visible[i]).collect();
                 let count = self.selected_threads.len();
                 (
                     Task::none(),
@@ -488,7 +536,8 @@ impl Component for ThreadList {
                     .selected_thread
                     .or(self.last_selected_anchor)
                     .unwrap_or(0);
-                for idx in start..self.threads.len() {
+                let visible = self.visible_rows();
+                for idx in (start..visible.len()).filter(|&i| visible[i]) {
                     self.selected_threads.insert(idx);
                 }
                 let count = self.selected_threads.len();
@@ -522,23 +571,12 @@ impl Component for ThreadList {
                 (Task::none(), event)
             }
             ThreadListMessage::SelectFirst => {
-                if self.threads.is_empty() {
-                    return (Task::none(), None);
-                }
-                self.clear_multi_select();
-                self.selected_thread = Some(0);
-                self.last_selected_anchor = Some(0);
-                (Task::none(), Some(ThreadListEvent::ThreadSelected(0)))
+                let first = self.visible_rows().iter().position(|&shown| shown);
+                (Task::none(), first.and_then(|idx| self.select_only(idx)))
             }
             ThreadListMessage::SelectLast => {
-                if self.threads.is_empty() {
-                    return (Task::none(), None);
-                }
-                self.clear_multi_select();
-                let last = self.threads.len() - 1;
-                self.selected_thread = Some(last);
-                self.last_selected_anchor = Some(last);
-                (Task::none(), Some(ThreadListEvent::ThreadSelected(last)))
+                let last = self.visible_rows().iter().rposition(|&shown| shown);
+                (Task::none(), last.and_then(|idx| self.select_only(idx)))
             }
             ThreadListMessage::ActivateSelected => {
                 if let Some(idx) = self.selected_thread {
@@ -638,6 +676,10 @@ impl Component for ThreadList {
             ThreadListMessage::CloseRowMenu => {
                 self.row_menu = None;
                 (Task::none(), None)
+            }
+            ThreadListMessage::ToggleDateGroup(group) => {
+                let event = self.toggle_date_group(group);
+                (Task::none(), event)
             }
         }
     }
@@ -807,38 +849,23 @@ fn thread_list_header<'a>(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
-    use super::thread_date_groups::{GroupKey, headers};
-
-    let group_headers = if state.date_groups {
-        let keys: Vec<GroupKey> = state
-            .threads
-            .iter()
-            .map(|thread| GroupKey {
-                pinned: thread.is_pinned,
-                last_message_at: thread.last_message_at,
-            })
-            .collect();
-        let now = jiff::Zoned::now();
-        headers(&keys, now.date(), now.time_zone())
-    } else {
-        vec![None; state.threads.len()]
+    let row_groups = state.row_groups();
+    let group_headers =
+        super::thread_date_groups::headers(row_groups.as_deref(), state.threads.len());
+    let is_folded = |i: usize| {
+        row_groups
+            .as_ref()
+            .and_then(|groups| groups.get(i))
+            .is_some_and(|group| state.collapsed_groups.contains(group))
     };
 
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {
         match group_headers.get(i).copied().flatten() {
             Some(group) => {
-                list = list.push(
-                    container(
-                        text(group.label())
-                            .size(TEXT_XS)
-                            .font(crate::font::text_semibold())
-                            .style(theme::TextClass::Tertiary.style()),
-                    )
-                    .padding(PAD_THREAD_GROUP_HEADER)
-                    .width(Length::Fill),
-                );
+                list = list.push(date_group_header(group, is_folded(i)));
             }
+            None if is_folded(i) => {}
             None if i > 0 => {
                 list = list.push(
                     container(
@@ -848,6 +875,9 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
                 );
             }
             None => {}
+        }
+        if is_folded(i) {
+            continue;
         }
         // Look up BIMI logo for the sender's domain.
         let bimi_logo = thread
@@ -886,6 +916,37 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
         .spacing(SCROLLBAR_SPACING)
         .height(Length::Fill)
         .into()
+}
+
+/// "Today", "Yesterday", ... with a chevron; a click folds the group.
+fn date_group_header<'a>(group: DateGroup, folded: bool) -> Element<'a, ThreadListMessage> {
+    let chevron = if folded {
+        crate::icon::chevron_right()
+    } else {
+        crate::icon::chevron_down()
+    };
+    button(
+        row![
+            container(
+                chevron
+                    .size(ICON_XS)
+                    .style(theme::TextClass::Tertiary.style())
+            )
+            .width(THREAD_GROUP_CHEVRON_SLOT)
+            .align_x(iced::Alignment::Center),
+            text(group.label())
+                .size(TEXT_XS)
+                .font(crate::font::text_semibold())
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(ThreadListMessage::ToggleDateGroup(group))
+    .padding(PAD_THREAD_GROUP_HEADER)
+    .style(theme::ButtonClass::Ghost.style())
+    .width(Length::Fill)
+    .into()
 }
 
 #[cfg(test)]
@@ -1091,5 +1152,91 @@ mod tests {
 
         threads.set_threads(list(&["b"]));
         assert!(threads.row_menu.is_none());
+    }
+
+    /// One pinned thread, then two undated ones in the "Older" group.
+    fn pinned_then_older() -> ThreadList {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        let mut pinned = thread("acc", "pinned");
+        pinned.is_pinned = true;
+        threads.set_threads(vec![pinned, thread("acc", "b"), thread("acc", "c")]);
+        threads
+    }
+
+    fn fold(threads: &mut ThreadList, group: DateGroup) -> Option<ThreadListEvent> {
+        threads.update(ThreadListMessage::ToggleDateGroup(group)).1
+    }
+
+    #[test]
+    fn the_keyboard_skips_a_folded_group() {
+        let mut threads = pinned_then_older();
+        fold(&mut threads, DateGroup::Older);
+
+        let (_, first) = threads.update(ThreadListMessage::SelectNext);
+        assert_eq!(first, Some(ThreadListEvent::ThreadSelected(0)));
+        let (_, past_end) = threads.update(ThreadListMessage::SelectNext);
+        assert_eq!(past_end, None);
+        let (_, last) = threads.update(ThreadListMessage::SelectLast);
+        assert_eq!(last, Some(ThreadListEvent::ThreadSelected(0)));
+
+        fold(&mut threads, DateGroup::Older);
+        let (_, unfolded) = threads.update(ThreadListMessage::SelectNext);
+        assert_eq!(unfolded, Some(ThreadListEvent::ThreadSelected(1)));
+    }
+
+    #[test]
+    fn folding_drops_hidden_rows_from_the_multi_selection() {
+        let mut threads = pinned_then_older();
+        threads.selected_thread = Some(0);
+        threads.selected_threads = HashSet::from([0, 1, 2]);
+
+        let event = fold(&mut threads, DateGroup::Older);
+
+        assert_eq!(threads.selected_threads, HashSet::from([0]));
+        assert_eq!(event, Some(ThreadListEvent::MultiSelectionChanged(1)));
+    }
+
+    #[test]
+    fn folding_the_open_conversation_away_closes_it() {
+        let mut threads = pinned_then_older();
+        threads.selected_thread = Some(1);
+
+        let event = fold(&mut threads, DateGroup::Older);
+
+        assert_eq!(threads.selected_thread, None);
+        assert_eq!(threads.selected_indices(), Vec::<usize>::new());
+        assert_eq!(event, Some(ThreadListEvent::ThreadDeselected));
+    }
+
+    #[test]
+    fn select_all_leaves_folded_rows_out() {
+        let mut threads = pinned_then_older();
+        fold(&mut threads, DateGroup::Pinned);
+
+        let (_, _) = threads.update(ThreadListMessage::SelectAll);
+
+        assert_eq!(threads.selected_threads, HashSet::from([1, 2]));
+    }
+
+    #[test]
+    fn auto_advance_lands_on_a_shown_row() {
+        let mut threads = pinned_then_older();
+        fold(&mut threads, DateGroup::Older);
+        threads.selected_thread = Some(1);
+
+        let (_, event) = threads.update(ThreadListMessage::AutoAdvance);
+
+        assert_eq!(event, Some(ThreadListEvent::AutoAdvance { new_index: Some(0) }));
+    }
+
+    #[test]
+    fn without_date_headers_nothing_is_folded() {
+        let mut threads = pinned_then_older();
+        fold(&mut threads, DateGroup::Older);
+        threads.date_groups = false;
+
+        let (_, _) = threads.update(ThreadListMessage::SelectAll);
+
+        assert_eq!(threads.selected_threads, HashSet::from([0, 1, 2]));
     }
 }
