@@ -175,7 +175,14 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         window: Size,
     ) -> Vec<overlay::Element<'b, Message, Theme, Renderer>> {
         let Some(popup) = self.popup.as_mut() else {
-            return Vec::new();
+            return self.base.as_widget_mut().overlay(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                viewport,
+                translation,
+                window,
+            );
         };
 
         let (first, second) = tree.children.split_at_mut(1);
