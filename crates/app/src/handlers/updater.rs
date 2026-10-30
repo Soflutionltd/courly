@@ -13,6 +13,7 @@ impl ReadyApp {
                 let task = self.start_update_check(true);
                 if self.updater.checking {
                     self.updater.report_outcome = true;
+                    self.settings.update_check_note = Some(t!("updater.checking").into_owned());
                 }
                 task
             }
@@ -72,13 +73,18 @@ impl ReadyApp {
         self.updater.checking = false;
         let report = std::mem::take(&mut self.updater.report_outcome);
         let info = match result {
-            Ok(Some(info)) => info,
+            Ok(Some(info)) => {
+                self.settings.update_check_note = report.then(|| {
+                    t!("updater.available", version = info.version).into_owned()
+                });
+                info
+            }
             Ok(None) => {
                 if matches!(self.updater.phase, Phase::Available(_)) {
                     self.updater.phase = Phase::Idle;
                 }
                 if report {
-                    self.status_bar.show_confirmation(
+                    self.settings.update_check_note = Some(
                         t!("updater.up_to_date", version = updater::current_version())
                             .into_owned(),
                     );
@@ -88,8 +94,7 @@ impl ReadyApp {
             Err(error) => {
                 log::info!("update check failed: {error}");
                 if report {
-                    self.status_bar
-                        .show_confirmation(t!("updater.check_failed").into_owned());
+                    self.settings.update_check_note = Some(t!("updater.check_failed").into_owned());
                 }
                 return Task::none();
             }

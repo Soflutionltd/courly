@@ -71,7 +71,7 @@ pub(super) fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
     col.into()
 }
 
-pub(super) fn about_tab<'a>() -> Element<'a, SettingsMessage> {
+pub(super) fn about_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
@@ -96,7 +96,12 @@ pub(super) fn about_tab<'a>() -> Element<'a, SettingsMessage> {
         tr(t!("settings.reference.updates")),
         vec![action_row(
             tr(t!("settings.reference.software_updates")),
-            Some(tr(t!("settings.reference.check_for_updates"))),
+            Some(
+                state
+                    .update_check_note
+                    .as_deref()
+                    .unwrap_or(tr(t!("settings.reference.check_for_updates"))),
+            ),
             None,
             ActionKind::InApp,
             SettingsMessage::CheckForUpdates,

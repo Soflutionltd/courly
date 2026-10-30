@@ -307,6 +307,8 @@ pub struct Settings {
     pub selected_theme: Option<usize>,
     pub sync_status_bar: bool,
     pub auto_update: bool,
+    /// Outcome of the last "Check for updates" press, shown in its row.
+    pub update_check_note: Option<String>,
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
@@ -571,6 +573,7 @@ impl Default for Settings {
             selected_theme: None,
             sync_status_bar: true,
             auto_update: false,
+            update_check_note: None,
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),

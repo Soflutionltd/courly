@@ -80,6 +80,7 @@ account_setup.error.no_registration_endpoint: "Aucun ID client indiqué et le fo
 account_setup.error.account_lookup_failed: "Impossible de trouver le compte : %{error}"
 account_setup.error.open_browser_failed: "Impossible d'ouvrir le navigateur : %{error}"
 updater.available: "Courly %{version} est disponible"
+updater.checking: "Recherche de mises à jour…"
 updater.up_to_date: "Courly %{version} est à jour"
 updater.check_failed: "Impossible de vérifier les mises à jour. Réessayez plus tard."
 updater.later: "Plus tard"

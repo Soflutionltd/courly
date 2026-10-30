@@ -39,7 +39,7 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         Tab::People => people::people_tab(state),
         Tab::Shortcuts => reference::shortcuts_tab(),
         Tab::Ai => ai::ai_tab(state),
-        Tab::About => reference::about_tab(),
+        Tab::About => reference::about_tab(state),
     };
 
     let now = Instant::now();
