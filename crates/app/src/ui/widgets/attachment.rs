@@ -180,7 +180,7 @@ pub fn attachment_card<'a, M: 'a + Clone>(
 
     let info_card = container(card_col)
         .padding(PAD_NAV_ITEM)
-        .style(theme::ContainerClass::EmailBody.style())
+        .style(theme::ContainerClass::AttachmentCard.style())
         .width(Length::Fill);
 
     let open_btn = button(

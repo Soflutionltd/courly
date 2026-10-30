@@ -28,6 +28,9 @@ pub enum ContainerClass {
     MessageCard,
     /// Email body inset - always white for rendering fidelity.
     EmailBody,
+    /// Attachment card beside an email body. Its text follows the theme,
+    /// so it only takes the white body sheet in a light theme.
+    AttachmentCard,
     /// Action bar (no radius).
     ActionBar,
     /// Floating tooltip/popover on primary background.
@@ -111,6 +114,7 @@ impl ContainerClass {
             Self::Badge => style_badge_container,
             Self::MessageCard => style_message_card_container,
             Self::EmailBody => style_email_body_container,
+            Self::AttachmentCard => style_attachment_card_container,
             Self::ActionBar => style_action_bar_container,
             Self::Floating => style_floating_container,
             Self::SettingsSection => style_settings_section_container,
@@ -339,6 +343,22 @@ fn style_email_body_container(theme: &Theme) -> container::Style {
         background: Some(bg.into()),
         border: iced::Border {
             color: border_color,
+            width: 1.0,
+            radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_attachment_card_container(theme: &Theme) -> container::Style {
+    if theme_is_light(theme) {
+        return style_email_body_container(theme);
+    }
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.base.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.15),
             width: 1.0,
             radius: RADIUS_MD.into(),
         },

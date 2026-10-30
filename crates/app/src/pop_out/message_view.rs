@@ -856,7 +856,7 @@ fn compact_attachment_card<'a>(
         })
         .height(Length::Fixed(POPOUT_ATTACHMENT_CARD_HEIGHT))
         .align_y(Alignment::Center)
-        .style(theme::ContainerClass::EmailBody.style())
+        .style(theme::ContainerClass::AttachmentCard.style())
         .into();
 
     let id_for_enter = att.id.clone();
