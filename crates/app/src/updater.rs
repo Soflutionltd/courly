@@ -19,6 +19,15 @@ const MANIFEST_URL: &str =
 /// public key file, as written by `tauri signer generate`).
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4REQxQUQ2MzUxNTk1RjAKUldUd2xSVTExaHJkQ0t1Z1pUQUJmNlpiWVk5WmdsK0NoNTlmN2o4ck4vQkZ3UXIvMDRNbTB0ZGMK";
 const PLATFORM: &str = "darwin-aarch64";
+/// The archive must come from this repository's own releases. The
+/// signature already guards integrity; this keeps a tampered manifest from
+/// sending every client to a third-party host.
+const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/Soflutionltd/ratatoskr/releases/download/";
+
+fn is_release_archive_url(url: &str) -> bool {
+    url.strip_prefix(RELEASE_DOWNLOAD_PREFIX)
+        .is_some_and(|rest| !rest.is_empty() && !rest.contains(".."))
+}
 const MAX_ARCHIVE_BYTES: u64 = 500 * 1024 * 1024;
 
 pub const BOOT_CHECK_DELAY: Duration = Duration::from_secs(4);
@@ -178,6 +187,9 @@ pub async fn check() -> Result<Option<UpdateInfo>, String> {
     let Some(entry) = manifest.platforms.get(PLATFORM) else {
         return Ok(None);
     };
+    if !is_release_archive_url(&entry.url) {
+        return Err(format!("manifest: archive URL outside {RELEASE_DOWNLOAD_PREFIX}"));
+    }
     Ok(Some(UpdateInfo {
         version: manifest.version,
         notes: manifest.notes,
@@ -256,7 +268,7 @@ fn verify_signature(archive: &[u8], signature: &str, version: &str) -> Result<()
         .and_then(|text| minisign_verify::Signature::decode(&text).map_err(|e| e.to_string()))
         .map_err(|error| t!("updater.error.signature_decode", error = error).into_owned())?;
     public_key
-        .verify(archive, &signature, true)
+        .verify(archive, &signature, false)
         .map_err(|_| t!("updater.error.signature_invalid").into_owned())?;
     let expected = format!("version:{version}");
     if signature
@@ -413,6 +425,22 @@ mod tests {
         let bogus = STANDARD.encode("untrusted comment: x\nnot-a-signature\n");
         assert!(verify_signature(b"payload", &bogus, "0.1.0").is_err());
         assert!(verify_signature(b"payload", "%%%", "0.1.0").is_err());
+    }
+
+    #[test]
+    fn archive_url_must_be_one_of_our_releases() {
+        assert!(is_release_archive_url(
+            "https://github.com/Soflutionltd/ratatoskr/releases/download/v0.2.6/Ratatoskr.app.tar.gz"
+        ));
+        for foreign in [
+            "https://evil.tld/Ratatoskr.app.tar.gz",
+            "http://github.com/Soflutionltd/ratatoskr/releases/download/v1/x.tar.gz",
+            "https://github.com/Soflutionltd/ratatoskr-fork/releases/download/v1/x.tar.gz",
+            "https://github.com/Soflutionltd/ratatoskr/releases/download/../../other/x",
+            "https://github.com/Soflutionltd/ratatoskr/releases/download/",
+        ] {
+            assert!(!is_release_archive_url(foreign), "{foreign}");
+        }
     }
 
     #[test]
