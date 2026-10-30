@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 app = { path = "../app", default-features = false }
+mail-html = { path = "../mail-html" }
 service = { path = "../service", default-features = false }
 
 [target.'cfg(unix)'.dependencies]

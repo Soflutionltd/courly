@@ -6692,6 +6692,7 @@ version = "0.2.4"
 dependencies = [
  "app",
  "libc",
+ "mail-html",
  "service",
 ]
 

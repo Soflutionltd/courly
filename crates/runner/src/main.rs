@@ -1,4 +1,6 @@
 fn main() -> app::RunResult {
+    install_abort_on_panic_hook();
+
     // The parent-death test helper is a hidden mode of this same binary
     // rather than a separate sibling executable. Folding it in means the
     // single `ratatoskr` binary the harness build produces always carries
@@ -34,6 +36,21 @@ fn main() -> app::RunResult {
     }
 
     app::run_app_blocking()
+}
+
+/// In release builds any panic aborts the process, exactly like the former
+/// `panic = "abort"` profile (the UI classifies a dead Service from that
+/// signal), except inside the HTML email renderer: Blitz is beta and panics
+/// on odd markup, and that one email falls back to its plain-text body
+/// instead of closing the app. Debug builds keep unwinding as before.
+fn install_abort_on_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        if !cfg!(debug_assertions) && !mail_html::is_rendering() {
+            std::process::abort();
+        }
+    }));
 }
 
 fn test_harness_script_arg() -> Option<std::path::PathBuf> {

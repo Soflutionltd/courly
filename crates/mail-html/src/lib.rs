@@ -5,6 +5,7 @@
 //! unless the caller opts in per message. Output is a set of RGBA tiles plus
 //! the hit areas of every link, so the UI layer only has to draw images.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -39,6 +40,36 @@ const LAYOUT_VIEWPORT_HEIGHT: u32 = 800;
 /// How long to wait for opted-in remote images before painting anyway.
 const REMOTE_DEADLINE: Duration = Duration::from_secs(10);
 const REMOTE_POLL: Duration = Duration::from_millis(15);
+/// Base URL for relative references. Without one Blitz panics on the first
+/// relative `src`; `.invalid` never resolves, so those resources are skipped
+/// while protocol-relative URLs (`//cdn...`) still resolve to https.
+const BASE_HOST: &str = "mail.invalid";
+
+thread_local! {
+    static RENDERING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// True while the current thread is inside [`render`]. A panic hook uses it
+/// to let a Blitz failure on one email unwind into a plain-text fallback
+/// instead of aborting the process.
+pub fn is_rendering() -> bool {
+    RENDERING.with(Cell::get)
+}
+
+struct RenderingGuard;
+
+impl RenderingGuard {
+    fn enter() -> Self {
+        RENDERING.with(|flag| flag.set(true));
+        Self
+    }
+}
+
+impl Drop for RenderingGuard {
+    fn drop(&mut self) {
+        RENDERING.with(|flag| flag.set(false));
+    }
+}
 
 /// Rules layered over Blitz's default user-agent sheet.
 ///
@@ -129,6 +160,7 @@ impl NetProvider for MailNetProvider {
                     handler.bytes(url.to_string(), Bytes::from(body));
                 }
             }
+            "http" | "https" if url.host_str() == Some(BASE_HOST) => {}
             "http" | "https" => match &self.remote {
                 Some(fetch) => {
                     let fetch = Arc::clone(fetch);
@@ -159,6 +191,7 @@ fn device_pixels(value: f32) -> u32 {
 /// Lay out and rasterise one HTML email. CPU only; call from a blocking
 /// worker, never from the UI thread.
 pub fn render(request: RenderRequest) -> RenderedMail {
+    let _rendering = RenderingGuard::enter();
     let width = request.width.clamp(1.0, MAX_WIDTH).floor();
     let pending = Arc::new(AtomicUsize::new(0));
     let net = Arc::new(MailNetProvider {
@@ -177,6 +210,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
                 HIDPI_SCALE,
                 ColorScheme::Light,
             )),
+            base_url: Some(format!("https://{BASE_HOST}/")),
             net_provider: Some(Arc::clone(&net) as Arc<dyn NetProvider>),
             ua_stylesheets: vec![UserAgentStylesheet::default_sheet(), EMAIL_UA_SHEET.clone()],
             ..Default::default()
@@ -338,6 +372,19 @@ mod tests {
     fn fixed_width_layouts_widen_the_render() {
         let mail = render_html(r#"<table width="900"><tr><td>wide</td></tr></table>"#);
         assert!(mail.width >= 900.0, "width was {}", mail.width);
+    }
+
+    #[test]
+    fn relative_image_sources_do_not_panic() {
+        let mail = render_html(r#"<img src="logo.png"><img src="/a/b.gif"><p>Receipt</p>"#);
+        assert_eq!(mail.blocked_remote, 0);
+        assert!(!is_rendering());
+    }
+
+    #[test]
+    fn protocol_relative_images_stay_remote() {
+        let mail = render_html(r#"<img src="//cdn.example/p.gif">"#);
+        assert_eq!(mail.blocked_remote, 1);
     }
 
     #[test]
