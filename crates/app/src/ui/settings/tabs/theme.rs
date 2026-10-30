@@ -1,5 +1,6 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -23,7 +24,7 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         let card = column![
             widgets::theme_preview(&entry.palette, selected, crate::Message::Noop)
                 .map(move |_| SettingsMessage::ThemeSelected(i)),
-            container(text(entry.name).size(TEXT_SM).style(if selected {
+            container(text(entry.display_name()).size(TEXT_SM).style(if selected {
                 text::base
             } else {
                 text::secondary
@@ -54,7 +55,7 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     }
 
     col = col.push(section(
-        "Themes",
+        tr(t!("settings.theme.themes")),
         vec![static_row(
             container(grid)
                 .padding(PAD_SETTINGS_ROW)
@@ -83,11 +84,14 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
                 .style(theme::ButtonClass::Experiment { variant: *idx }.style())
                 .padding(PAD_BUTTON)
                 .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS);
 
@@ -110,7 +114,7 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     }
 
     col = col.push(section(
-        "Button Experiments (section bg)",
+        tr(t!("settings.theme.button_experiments")),
         vec![static_row(
             container(grid)
                 .padding(PAD_SETTINGS_ROW)
@@ -129,11 +133,14 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
                 .style(theme::ButtonClass::Experiment { variant: *idx }.style())
                 .padding(PAD_BUTTON)
                 .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS);
         current_row2 = current_row2.push(container(pair).width(Length::FillPortion(1)));
@@ -155,7 +162,7 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     let content_bg_box = container(
         column![
-            text("Content / main area background")
+            text(t!("settings.theme.content_background"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
             grid2,
@@ -179,11 +186,14 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
                 .style(theme::ButtonClass::Experiment { variant: *idx }.style())
                 .padding(PAD_BUTTON)
                 .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS);
         current_row3 = current_row3.push(container(pair).width(Length::FillPortion(1)));
@@ -205,7 +215,7 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     let sidebar_bg_box = container(
         column![
-            text("Sidebar background")
+            text(t!("settings.theme.sidebar_background"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
             grid3,
@@ -221,62 +231,86 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let btn_width = Length::Fixed(120.0);
     let semantic_grid = column![
         row![
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS),
         row![
-            button(container(text("Success").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::ExperimentSemantic { variant: 0 }.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_success")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::ExperimentSemantic { variant: 0 }.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS),
         row![
-            button(container(text("Warning").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::ExperimentSemantic { variant: 1 }.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_warning")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::ExperimentSemantic { variant: 1 }.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS),
         row![
-            button(container(text("Danger").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::ExperimentSemantic { variant: 2 }.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
-            button(container(text("Primary").size(TEXT_MD)).center_x(Length::Fill))
-                .on_press(SettingsMessage::Noop)
-                .style(theme::ButtonClass::Primary.style())
-                .padding(PAD_BUTTON)
-                .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_danger")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::ExperimentSemantic { variant: 2 }.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
+            button(
+                container(text(t!("settings.theme.sample_primary")).size(TEXT_MD))
+                    .center_x(Length::Fill)
+            )
+            .on_press(SettingsMessage::Noop)
+            .style(theme::ButtonClass::Primary.style())
+            .padding(PAD_BUTTON)
+            .width(btn_width),
         ]
         .spacing(SPACE_XXS),
     ]
     .spacing(SPACE_XS);
 
     col = col.push(section(
-        "Semantic Color Pairs",
+        tr(t!("settings.theme.semantic_pairs")),
         vec![static_row(
             container(semantic_grid)
                 .padding(PAD_SETTINGS_ROW)

@@ -1,5 +1,6 @@
 use iced::Length;
 use iced::widget::{Space, column, text};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -7,19 +8,49 @@ use crate::ui::settings::types::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 
+/// Display name of a canonical select value on the General tab.
+fn option_label(value: &str) -> Option<&'static str> {
+    Some(tr(match value {
+        "System" => t!("settings.general.option.system"),
+        "Light" => t!("settings.general.option.light"),
+        "Dark" => t!("settings.general.option.dark"),
+        "Theme" => t!("settings.general.option.theme"),
+        "Compact" => t!("settings.general.option.compact"),
+        "Default" => t!("settings.general.option.default"),
+        "Spacious" => t!("settings.general.option.spacious"),
+        "Small" => t!("settings.general.option.small"),
+        "Large" => t!("settings.general.option.large"),
+        "XLarge" => t!("settings.general.option.xlarge"),
+        "Always White" => t!("settings.general.option.always_white"),
+        "Match Theme" => t!("settings.general.option.match_theme"),
+        "Auto" => t!("settings.general.option.auto"),
+        "Relative Offset" => t!("settings.general.option.relative_offset"),
+        "Absolute" => t!("settings.general.option.absolute"),
+        "None" => t!("settings.general.option.none"),
+        "5 seconds" => t!("settings.general.option.seconds_5"),
+        "10 seconds" => t!("settings.general.option.seconds_10"),
+        "30 seconds" => t!("settings.general.option.seconds_30"),
+        "Instantly" => t!("settings.general.option.instantly"),
+        "After 2 Seconds" => t!("settings.general.option.after_2_seconds"),
+        "Manually" => t!("settings.general.option.manually"),
+        _ => return None,
+    }))
+}
+
 pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section(
-        "Appearance",
+        tr(t!("settings.general.appearance")),
         vec![
             setting_row(
-                "Theme",
-                widgets::select(
+                tr(t!("settings.general.theme")),
+                translated_select(
                     &["System", "Light", "Dark", "Theme"],
                     &state.theme,
+                    option_label,
                     state.open_select == Some(SelectField::Theme),
                     SettingsMessage::ToggleSelect(SelectField::Theme),
                     SettingsMessage::ThemeChanged,
@@ -27,10 +58,11 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::Theme),
             ),
             setting_row(
-                "Email Density",
-                widgets::select(
+                tr(t!("settings.general.email_density")),
+                translated_select(
                     &["Compact", "Default", "Spacious"],
                     &state.density,
+                    option_label,
                     state.open_select == Some(SelectField::Density),
                     SettingsMessage::ToggleSelect(SelectField::Density),
                     SettingsMessage::DensityChanged,
@@ -38,10 +70,11 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::Density),
             ),
             setting_row(
-                "Font Size",
-                widgets::select(
+                tr(t!("settings.general.font_size")),
+                translated_select(
                     &["Small", "Default", "Large", "XLarge"],
                     &state.font_size,
+                    option_label,
                     state.open_select == Some(SelectField::FontSize),
                     SettingsMessage::ToggleSelect(SelectField::FontSize),
                     SettingsMessage::FontSizeChanged,
@@ -49,10 +82,11 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::FontSize),
             ),
             setting_row(
-                "Email Body Background",
-                widgets::select(
+                tr(t!("settings.general.email_body_background")),
+                translated_select(
                     &["Always White", "Match Theme", "Auto"],
                     state.email_body_background.label(),
+                    option_label,
                     state.open_select == Some(SelectField::EmailBodyBg),
                     SettingsMessage::ToggleSelect(SelectField::EmailBodyBg),
                     SettingsMessage::EmailBodyBgChanged,
@@ -60,8 +94,8 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::EmailBodyBg),
             ),
             setting_row_with_description(
-                "Email Zoom",
-                Some("Size of email content in the reading pane. Cmd + and Cmd - change it too."),
+                tr(t!("settings.general.email_zoom")),
+                Some(tr(t!("settings.general.email_zoom_description"))),
                 widgets::select(
                     EMAIL_ZOOM_LEVELS,
                     &state.email_zoom,
@@ -72,7 +106,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::EmailZoom),
             ),
             slider_row(
-                "Scale",
+                tr(t!("settings.general.scale")),
                 None,
                 None,
                 1.0..=4.0,
@@ -83,14 +117,15 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 Some(SettingsMessage::ScaleReleased),
             ),
             setting_row_with_description(
-                "Message Dates",
-                Some("Relative offset shows \"2h ago\"; Absolute shows the calendar date."),
-                widgets::select(
+                tr(t!("settings.general.message_dates")),
+                Some(tr(t!("settings.general.message_dates_description"))),
+                translated_select(
                     &["Relative Offset", "Absolute"],
                     match state.date_display {
                         crate::db::DateDisplay::RelativeOffset => "Relative Offset",
                         crate::db::DateDisplay::Absolute => "Absolute",
                     },
+                    option_label,
                     state.open_select == Some(SelectField::DateDisplay),
                     SettingsMessage::ToggleSelect(SelectField::DateDisplay),
                     SettingsMessage::DateDisplayChanged,
@@ -98,14 +133,14 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::DateDisplay),
             ),
             toggle_row(
-                "Group messages by date",
-                "Show Today, Yesterday, This Week and older headers in the message list.",
+                tr(t!("settings.general.group_by_date")),
+                t!("settings.general.group_by_date_description"),
                 state.thread_date_groups,
                 SettingsMessage::ToggleThreadDateGroups,
             ),
             toggle_row(
-                "Show status bar",
-                "Show sync progress, action confirmations, warnings, and the Out-of-Office indicator at the bottom of the window.",
+                tr(t!("settings.general.show_status_bar")),
+                t!("settings.general.show_status_bar_description"),
                 state.sync_status_bar,
                 SettingsMessage::ToggleSyncStatusBar,
             ),
@@ -113,13 +148,14 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
     ));
 
     col = col.push(section(
-        "Behavior",
+        tr(t!("settings.general.behavior")),
         vec![
             setting_row(
-                "Undo Send Delay",
-                widgets::select(
+                tr(t!("settings.general.undo_send_delay")),
+                translated_select(
                     &["None", "5 seconds", "10 seconds", "30 seconds"],
                     &state.undo_delay,
+                    option_label,
                     state.open_select == Some(SelectField::UndoDelay),
                     SettingsMessage::ToggleSelect(SelectField::UndoDelay),
                     SettingsMessage::UndoDelayChanged,
@@ -127,10 +163,11 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::UndoDelay),
             ),
             setting_row(
-                "Mark as Read",
-                widgets::select(
+                tr(t!("settings.general.mark_as_read")),
+                translated_select(
                     &["Instantly", "After 2 Seconds", "Manually"],
                     &state.mark_as_read,
+                    option_label,
                     state.open_select == Some(SelectField::MarkAsRead),
                     SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
                     SettingsMessage::MarkAsReadChanged,
@@ -141,12 +178,12 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
     ));
 
     col = col.push(section(
-        "Reading Pane",
+        tr(t!("settings.general.reading_pane")),
         radio_group(
             &[
-                ("Right", None, "Right"),
-                ("Bottom", None, "Bottom"),
-                ("Hidden", None, "Hidden"),
+                (tr(t!("settings.general.pane_right")), None, "Right"),
+                (tr(t!("settings.general.pane_bottom")), None, "Bottom"),
+                (tr(t!("settings.general.pane_hidden")), None, "Hidden"),
             ],
             Some(state.reading_pane_position.as_str()),
             |v| SettingsMessage::ReadingPaneChanged(v.to_string()),
@@ -154,13 +191,12 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
     ));
 
     col = col.push(section(
-        "Updates",
+        tr(t!("settings.general.updates")),
         vec![toggle_row(
-            "Install updates automatically",
-            concat!(
-                "You have version ",
-                env!("CARGO_PKG_VERSION"),
-                ". When off, Ratatoskr asks before installing a new version."
+            tr(t!("settings.general.auto_update")),
+            t!(
+                "settings.general.auto_update_description",
+                version = env!("CARGO_PKG_VERSION")
             ),
             state.auto_update,
             SettingsMessage::ToggleAutoUpdate,
@@ -169,23 +205,37 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
 
     let privacy_help_id = "privacy-security";
     let privacy_help_visible = state.hovered_help.as_deref() == Some(privacy_help_id);
-    col = col.push(section_with_help("Privacy & Security", SectionHelp {
-        id: privacy_help_id,
-        content: column![
-            text("Remote images can be used to track when you open an email. Blocking them prevents this but some emails may not display correctly.")
-                .size(TEXT_SM)
-                .style(theme::TextClass::OnPrimary.style()),
-            Space::new().height(SPACE_XS),
-            text("Phishing detection analyzes incoming emails for suspicious links, sender spoofing, and social engineering patterns.")
-                .size(TEXT_SM)
-                .style(theme::TextClass::OnPrimary.style()),
-        ]
-        .into(),
-        visible: privacy_help_visible,
-    }, vec![
-        toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images, SettingsMessage::ToggleBlockRemoteImages),
-        toggle_row("Phishing Detection", "Warn about suspicious emails", state.phishing_detection, SettingsMessage::TogglePhishingDetection),
-    ]));
+    col = col.push(section_with_help(
+        tr(t!("settings.general.privacy_security")),
+        SectionHelp {
+            id: privacy_help_id,
+            content: column![
+                text(t!("settings.general.remote_images_help"))
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::OnPrimary.style()),
+                Space::new().height(SPACE_XS),
+                text(t!("settings.general.phishing_help"))
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::OnPrimary.style()),
+            ]
+            .into(),
+            visible: privacy_help_visible,
+        },
+        vec![
+            toggle_row(
+                tr(t!("settings.general.block_remote_images")),
+                t!("settings.general.block_remote_images_description"),
+                state.block_remote_images,
+                SettingsMessage::ToggleBlockRemoteImages,
+            ),
+            toggle_row(
+                tr(t!("settings.general.phishing_detection")),
+                t!("settings.general.phishing_detection_description"),
+                state.phishing_detection,
+                SettingsMessage::TogglePhishingDetection,
+            ),
+        ],
+    ));
 
     col.into()
 }

@@ -1,5 +1,6 @@
 use iced::Task;
 use iced::time::Instant;
+use rust_i18n::t;
 
 use crate::component::Component;
 use crate::db::DateDisplay;
@@ -616,7 +617,7 @@ impl Settings {
             SettingsMessage::ListAdd(list_id) => {
                 let items = self.list_items_mut(&list_id);
                 items.push(EditableItem {
-                    label: format!("New item {}", items.len() + 1),
+                    label: t!("settings.filters.new_item", number = items.len() + 1).into_owned(),
                     enabled: None,
                 });
             }

@@ -1,5 +1,6 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -23,17 +24,17 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section(
-        "Notifications",
+        tr(t!("settings.behavior.notifications")),
         vec![
             toggle_row(
-                "Enable Notifications",
-                "Receive desktop notifications for new email",
+                tr(t!("settings.behavior.enable_notifications")),
+                t!("settings.behavior.enable_notifications_description"),
                 state.notifications_enabled,
                 SettingsMessage::ToggleNotifications,
             ),
             toggle_row(
-                "Smart Notifications",
-                "Only notify about important emails",
+                tr(t!("settings.behavior.smart_notifications")),
+                t!("settings.behavior.smart_notifications_description"),
                 state.smart_notifications,
                 SettingsMessage::ToggleSmartNotifications,
             ),
@@ -46,7 +47,7 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
                 .iter()
                 .map(|cat| {
                     let active = state.notify_categories.contains(&(*cat).to_string());
-                    button(text(*cat).size(TEXT_SM))
+                    button(text(category_label(cat)).size(TEXT_SM))
                         .on_press(SettingsMessage::ToggleNotifyCategory((*cat).to_string()))
                         .padding(PAD_ICON_BTN)
                         .style(theme::ButtonClass::Chip { active }.style())
@@ -57,7 +58,7 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
             .spacing(SPACE_XS)
             .align_y(Alignment::Center);
         col = col.push(section(
-            "Notify for Categories",
+            tr(t!("settings.behavior.notify_for_categories")),
             vec![settings_row_container(SETTINGS_ROW_HEIGHT, chips_row)],
         ));
 
@@ -65,7 +66,7 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
 
         vip_col = vip_col.push(
             container(
-                text("Always notify when email arrives from a VIP sender.")
+                text(t!("settings.behavior.vip_description"))
                     .size(TEXT_SM)
                     .style(theme::TextClass::Tertiary.style()),
             )
@@ -80,10 +81,14 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
                         container(text(email.clone()).size(TEXT_LG).style(text::base))
                             .align_y(Alignment::Center)
                             .width(Length::Fill),
-                        button(text("Remove").size(TEXT_SM).style(text::danger))
-                            .on_press(SettingsMessage::RemoveVipSender(email.clone()))
-                            .padding(PAD_ICON_BTN)
-                            .style(theme::ButtonClass::Action.style()),
+                        button(
+                            text(t!("settings.behavior.remove"))
+                                .size(TEXT_SM)
+                                .style(text::danger)
+                        )
+                        .on_press(SettingsMessage::RemoveVipSender(email.clone()))
+                        .padding(PAD_ICON_BTN)
+                        .style(theme::ButtonClass::Action.style()),
                     ]
                     .align_y(Alignment::Center),
                 )
@@ -105,7 +110,7 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
                         .style(theme::TextInputClass::Settings.style())
                         .width(Length::Fill),
                     Space::new().width(SPACE_XS),
-                    button(text("Add").size(TEXT_LG))
+                    button(text(t!("settings.behavior.add")).size(TEXT_LG))
                         .on_press(SettingsMessage::AddVipSender)
                         .padding(PAD_ICON_BTN)
                         .style(theme::ButtonClass::Secondary.style()),
@@ -116,7 +121,10 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
             .width(Length::Fill),
         );
 
-        col = col.push(section("VIP Senders", vec![static_row(vip_col)]));
+        col = col.push(section(
+            tr(t!("settings.behavior.vip_senders")),
+            vec![static_row(vip_col)],
+        ));
     }
 
     col.into()

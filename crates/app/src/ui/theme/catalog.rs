@@ -37,6 +37,18 @@ pub struct ThemeEntry {
     pub palette: Seed,
 }
 
+impl ThemeEntry {
+    /// Name shown in the theme picker. Only the generic built-in names are
+    /// translated; named palettes (Nord, Dracula...) stay as they are.
+    pub fn display_name(&self) -> std::borrow::Cow<'static, str> {
+        match self.name {
+            "Light" => rust_i18n::t!("settings.theme.light"),
+            "Dark" => rust_i18n::t!("settings.theme.dark"),
+            name => std::borrow::Cow::Borrowed(name),
+        }
+    }
+}
+
 pub const THEMES: &[ThemeEntry] = &[
     ThemeEntry {
         name: "Light",

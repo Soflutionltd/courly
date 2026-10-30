@@ -14,6 +14,7 @@ pub use signatures::*;
 
 use iced::animation::{self, Easing};
 use iced::time::Duration;
+use rust_i18n::t;
 
 use crate::db::DateDisplay;
 use crate::pop_out::RenderingMode;
@@ -50,19 +51,19 @@ impl Tab {
     ];
 
     pub(super) fn label(self) -> &'static str {
-        match self {
-            Tab::Accounts => "Accounts",
-            Tab::General => "General",
-            Tab::Theme => "Theme",
-            Tab::Notifications => "Notifications",
-            Tab::Composing => "Composing",
-            Tab::Labels => "Labels",
-            Tab::Filters => "Filters",
-            Tab::People => "People",
-            Tab::Shortcuts => "Shortcuts",
-            Tab::Ai => "AI",
-            Tab::About => "About",
-        }
+        super::row_widgets::tr(match self {
+            Tab::Accounts => t!("settings.tabs.accounts"),
+            Tab::General => t!("settings.tabs.general"),
+            Tab::Theme => t!("settings.tabs.theme"),
+            Tab::Notifications => t!("settings.tabs.notifications"),
+            Tab::Composing => t!("settings.tabs.composing"),
+            Tab::Labels => t!("settings.tabs.labels"),
+            Tab::Filters => t!("settings.tabs.filters"),
+            Tab::People => t!("settings.tabs.people"),
+            Tab::Shortcuts => t!("settings.tabs.shortcuts"),
+            Tab::Ai => t!("settings.tabs.ai"),
+            Tab::About => t!("settings.tabs.about"),
+        })
     }
 
     pub(super) fn icon(self) -> iced::widget::Text<'static> {
@@ -611,11 +612,11 @@ impl Default for Settings {
             editing_label_group: None,
             demo_filters: vec![
                 EditableItem {
-                    label: "Auto-archive promotions".into(),
+                    label: t!("settings.filters.demo_auto_archive_promotions").into_owned(),
                     enabled: Some(true),
                 },
                 EditableItem {
-                    label: "Star from VIPs".into(),
+                    label: t!("settings.filters.demo_star_vips").into_owned(),
                     enabled: Some(true),
                 },
             ],

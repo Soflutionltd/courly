@@ -1,5 +1,6 @@
 use iced::widget::column;
 use iced::{Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -12,11 +13,11 @@ pub(super) fn filters_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     if !state.demo_filters.is_empty() {
         col = col.push(section(
-            "Filters",
+            tr(t!("settings.filters.filters")),
             vec![editable_list(
                 "filters",
                 &state.demo_filters,
-                "Add Filter",
+                tr(t!("settings.filters.add_filter")),
                 &state.drag_state,
             )],
         ));

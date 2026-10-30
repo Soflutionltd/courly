@@ -2,6 +2,8 @@ use iced::widget::{
     Space, button, column, container, mouse_area, radio, row, slider, text, text_input,
 };
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
+use std::borrow::Cow;
 
 use crate::icon;
 use crate::ui::animated_toggler::animated_toggler;
@@ -53,6 +55,62 @@ pub(super) fn settings_row_style(
     position: RowPosition,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
     move |theme, status| theme::style_settings_row_button(theme, status, position)
+}
+
+// ── Translated text ─────────────────────────────────────
+
+/// A translation without placeholders as `&'static str`, for widgets that
+/// borrow their labels for the element's lifetime. rust-i18n returns these
+/// borrowed from its compiled-in tables; an owned value would only come from
+/// a backend change and is leaked rather than dropped mid-frame.
+pub(super) fn tr(translated: Cow<'static, str>) -> &'static str {
+    match translated {
+        Cow::Borrowed(s) => s,
+        Cow::Owned(s) => s.leak(),
+    }
+}
+
+/// `widgets::select` over canonical option values, which are what the
+/// state holds and persists. Each value is shown through `label`; values
+/// without a translation (product and model names, percentages) show as is.
+pub(super) fn translated_select<'a>(
+    options: &[&'static str],
+    selected: &'a str,
+    label: fn(&str) -> Option<&'static str>,
+    open: bool,
+    on_toggle: SettingsMessage,
+    on_select: impl Fn(String) -> SettingsMessage + 'a,
+) -> Element<'a, SettingsMessage> {
+    let pairs: Vec<(&'static str, &'static str)> = options
+        .iter()
+        .map(|value| (label(value).unwrap_or(value), *value))
+        .collect();
+    let labels: Vec<&'static str> = pairs.iter().map(|(shown, _)| *shown).collect();
+    crate::ui::widgets::select(
+        &labels,
+        label(selected).unwrap_or(selected),
+        open,
+        on_toggle,
+        move |shown| {
+            let value = pairs
+                .iter()
+                .find(|(l, _)| *l == shown)
+                .map_or(shown, |(_, value)| (*value).to_string());
+            on_select(value)
+        },
+    )
+}
+
+/// Display name of a canonical mail category ("Primary", "Updates", ...).
+pub(super) fn category_label(category: &str) -> Cow<'static, str> {
+    match category {
+        "Primary" => t!("settings.common.category_primary"),
+        "Updates" => t!("settings.common.category_updates"),
+        "Promotions" => t!("settings.common.category_promotions"),
+        "Social" => t!("settings.common.category_social"),
+        "Newsletters" => t!("settings.common.category_newsletters"),
+        other => Cow::Owned(other.to_string()),
+    }
 }
 
 // ── Shared setting widgets ──────────────────────────────
@@ -333,10 +391,11 @@ pub(super) fn setting_row_with_description<'a>(
 
 pub(super) fn toggle_row<'a>(
     label: &'a str,
-    description: &'a str,
+    description: impl Into<Cow<'a, str>>,
     value: bool,
     on_toggle: impl Fn(bool) -> SettingsMessage + 'a,
 ) -> RowBuilder<'a> {
+    let description = description.into();
     Box::new(move |position| {
         // Compute the button's press message before on_toggle is moved into the toggler.
         // The toggler captures its own click events, so the button only fires when the
@@ -519,7 +578,7 @@ fn input_row_inner<'a>(
 pub(super) fn coming_soon_row<'a>(feature: &'a str) -> RowBuilder<'a> {
     Box::new(move |_pos| {
         container(
-            text(format!("{feature} coming soon."))
+            text(t!("settings.common.coming_soon", feature = feature))
                 .size(TEXT_LG)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -630,7 +689,7 @@ pub(super) fn slider_row<'a>(
 /// Tuples are `(label, description, value)`. Pass `None` for `description`
 /// when an option doesn't need a secondary line.
 pub(super) fn radio_group<'a, V>(
-    options: &'a [(&'a str, Option<&'a str>, V)],
+    options: &[(&'a str, Option<&'a str>, V)],
     selected: Option<V>,
     on_select: impl Fn(V) -> SettingsMessage + 'a + Copy,
 ) -> Vec<RowBuilder<'a>>
@@ -1033,6 +1092,19 @@ pub(super) fn action_row<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `tr` only stays leak-free while rust-i18n hands out borrowed values.
+    #[test]
+    fn translations_without_placeholders_are_borrowed() {
+        assert!(matches!(
+            t!("settings.tabs.general", locale = "fr"),
+            Cow::Borrowed("Général")
+        ));
+        assert!(matches!(
+            t!("settings.tabs.general", locale = "en"),
+            Cow::Borrowed("General")
+        ));
+    }
 
     #[test]
     fn position_for_classifies_endpoints() {
