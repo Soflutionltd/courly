@@ -77,6 +77,8 @@ pub enum RuleClass {
     SidebarDivider,
     /// Subtle divider within sections (25% alpha).
     Subtle,
+    /// User-added sidebar separator: thick, rounded, clearly visible.
+    SidebarSeparator,
 }
 
 impl RuleClass {
@@ -85,7 +87,17 @@ impl RuleClass {
             Self::Divider => style_divider_rule,
             Self::SidebarDivider => style_sidebar_divider_rule,
             Self::Subtle => style_subtle_divider_rule,
+            Self::SidebarSeparator => style_sidebar_separator_rule,
         }
+    }
+}
+
+fn style_sidebar_separator_rule(theme: &Theme) -> rule::Style {
+    rule::Style {
+        color: theme.palette().background.strongest.color.scale_alpha(0.55),
+        radius: 2.0.into(),
+        fill_mode: rule::FillMode::Full,
+        snap: true,
     }
 }
 

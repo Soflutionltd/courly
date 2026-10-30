@@ -68,7 +68,8 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         match entry {
             SidebarEntry::Separator(id) => {
                 let line = container(
-                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Divider.style()),
+                    iced::widget::rule::horizontal(SIDEBAR_SEPARATOR_THICKNESS)
+                        .style(theme::RuleClass::SidebarSeparator.style()),
                 )
                 .padding(PAD_SIDEBAR_SEPARATOR)
                 .width(Length::Fill);

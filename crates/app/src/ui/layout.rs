@@ -161,6 +161,8 @@ pub const LABEL_DOT_SIZE: f32 = 6.0;
 
 /// Thread card fixed height (three lines + padding)
 pub const THREAD_CARD_HEIGHT: f32 = 68.0;
+/// Thickness of a user-added sidebar separator.
+pub const SIDEBAR_SEPARATOR_THICKNESS: f32 = 3.0;
 /// User-added separator line between sidebar folders.
 pub const PAD_SIDEBAR_SEPARATOR: Padding = Padding {
     top: 6.0,
