@@ -1,5 +1,6 @@
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -13,9 +14,9 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
     let mut content = column![].spacing(SPACE_SM);
 
     let title_text = if event.title.is_empty() {
-        "(Untitled event)"
+        t!("calendar.untitled_event").into_owned()
     } else {
-        &event.title
+        event.title.clone()
     };
     let expand_btn = button(text("\u{2197}").size(TEXT_MD))
         .on_press(CalendarMessage::ExpandPopoverToModal)
@@ -63,7 +64,7 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
     if let Some(ref organizer) = event.organizer_name {
         if !organizer.is_empty() {
             content = content.push(
-                text(format!("Invited by {organizer}"))
+                text(t!("calendar.invited_by", name = organizer).into_owned())
                     .size(TEXT_SM)
                     .style(text::secondary),
             );
@@ -72,7 +73,7 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
         && !email.is_empty()
     {
         content = content.push(
-            text(format!("Invited by {email}"))
+            text(t!("calendar.invited_by", name = email).into_owned())
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
@@ -88,9 +89,13 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
                 _ => "?",
             };
             let display = att.name.as_deref().unwrap_or(&att.email);
-            let suffix = if att.is_organizer { " (organizer)" } else { "" };
+            let display = if att.is_organizer {
+                t!("calendar.attendee_organizer", name = display).into_owned()
+            } else {
+                display.to_string()
+            };
             attendee_col = attendee_col.push(
-                text(format!("{status_icon} {display}{suffix}"))
+                text(format!("{status_icon} {display}"))
                     .size(TEXT_SM)
                     .style(text::secondary),
             );
@@ -114,7 +119,7 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
             .collect::<Vec<_>>()
             .join(", ");
         content = content.push(
-            text(format!("Reminders: {reminder_text}"))
+            text(t!("calendar.reminders", list = reminder_text).into_owned())
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
@@ -122,14 +127,14 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
 
     if let Some(ref status) = event.rsvp_status {
         let status_display = match status.as_str() {
-            "accepted" => "Accepted",
-            "declined" => "Declined",
-            "tentative" => "Tentative",
-            "needs-action" => "No response",
-            _ => status.as_str(),
+            "accepted" => t!("calendar.rsvp.accepted"),
+            "declined" => t!("calendar.rsvp.declined"),
+            "tentative" => t!("calendar.rsvp.tentative"),
+            "needs-action" => t!("calendar.rsvp.no_response"),
+            _ => status.as_str().into(),
         };
         content = content.push(
-            text(format!("Your RSVP: {status_display}"))
+            text(t!("calendar.your_rsvp", status = status_display).into_owned())
                 .size(TEXT_SM)
                 .font(crate::font::text_semibold())
                 .style(text::secondary),
@@ -137,7 +142,7 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
     }
 
     if let (Some(event_id), Some(account_id)) = (&event.id, &event.account_id) {
-        let rsvp_button = |label, response| {
+        let rsvp_button = |label: std::borrow::Cow<'static, str>, response| {
             button(text(label).size(TEXT_SM))
                 .on_press(CalendarMessage::RsvpEvent {
                     event_id: event_id.clone(),
@@ -149,21 +154,24 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
         };
         content = content.push(
             row![
-                rsvp_button("Accept", service_api::RsvpResponse::Accepted),
-                rsvp_button("Decline", service_api::RsvpResponse::Declined),
-                rsvp_button("Tentative", service_api::RsvpResponse::Tentative),
+                rsvp_button(t!("calendar.accept"), service_api::RsvpResponse::Accepted),
+                rsvp_button(t!("calendar.decline"), service_api::RsvpResponse::Declined),
+                rsvp_button(
+                    t!("calendar.tentative"),
+                    service_api::RsvpResponse::Tentative
+                ),
             ]
             .spacing(SPACE_XS),
         );
     }
 
-    let edit_btn = button(text("Edit").size(TEXT_SM))
+    let edit_btn = button(text(t!("calendar.edit")).size(TEXT_SM))
         .on_press(CalendarMessage::OpenEventEditor(Some(event.clone())))
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Ghost.style());
 
     let delete_btn = if let Some(ref id) = event.id {
-        button(text("Delete").size(TEXT_SM))
+        button(text(t!("calendar.delete")).size(TEXT_SM))
             .on_press(CalendarMessage::ConfirmDeleteEvent {
                 event_id: id.clone(),
                 title: event.title.clone(),
@@ -172,7 +180,7 @@ pub(super) fn event_detail_popover(event: &CalendarEventData) -> Element<'_, Cal
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Ghost.style())
     } else {
-        button(text("Delete").size(TEXT_SM))
+        button(text(t!("calendar.delete")).size(TEXT_SM))
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Ghost.style())
     };

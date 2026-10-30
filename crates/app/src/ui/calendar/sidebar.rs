@@ -1,6 +1,7 @@
 use iced::widget::{Space, button, checkbox, column, container, row, text};
 use iced::{Alignment, Element, Length, Theme};
 use jiff::Zoned;
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::calendar_month;
@@ -27,18 +28,22 @@ pub(super) fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMes
         CalendarMessage::NextMonth,
     );
 
-    let today_btn = button(text("Today").size(TEXT_SM).style(text::secondary))
+    let today_btn = button(text(t!("date.today")).size(TEXT_SM).style(text::secondary))
         .on_press(CalendarMessage::Today)
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
-    let new_event_btn = button(text("+ New Event").size(TEXT_SM).style(text::primary))
-        .on_press(CalendarMessage::CreateEvent)
-        .padding(PAD_ICON_BTN)
-        .style(theme::ButtonClass::Ghost.style());
+    let new_event_btn = button(
+        text(t!("calendar.sidebar.new_event"))
+            .size(TEXT_SM)
+            .style(text::primary),
+    )
+    .on_press(CalendarMessage::CreateEvent)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
 
     let mut calendar_list_col = column![
-        text("Calendars")
+        text(t!("calendar.sidebar.calendars"))
             .size(TEXT_XS)
             .font(crate::font::text_semibold())
             .style(theme::TextClass::Muted.style()),
@@ -47,7 +52,7 @@ pub(super) fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMes
 
     if state.calendars.is_empty() {
         calendar_list_col = calendar_list_col.push(
-            text("No calendars synced")
+            text(t!("calendar.sidebar.no_calendars"))
                 .size(TEXT_XS)
                 .style(theme::TextClass::Muted.style()),
         );
@@ -147,8 +152,12 @@ pub(super) fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMes
                 row![
                     container(icon::external_link().size(ICON_LG).style(text::primary))
                         .align_y(Alignment::Center),
-                    container(text("Pop Out").size(TEXT_LG).style(text::primary))
-                        .align_y(Alignment::Center),
+                    container(
+                        text(t!("calendar.sidebar.pop_out"))
+                            .size(TEXT_LG)
+                            .style(text::primary)
+                    )
+                    .align_y(Alignment::Center),
                 ]
                 .spacing(SPACE_XXS)
                 .align_y(Alignment::Center),
@@ -159,7 +168,7 @@ pub(super) fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMes
         .style(theme::ButtonClass::Experiment { variant: 10 }.style())
         .padding(PAD_BUTTON)
         .width(Length::Fill),
-        text("Open calendar in a separate window")
+        text(t!("calendar.sidebar.pop_out_tooltip"))
             .size(TEXT_XS)
             .style(theme::TextClass::OnPrimary.style()),
         iced::widget::tooltip::Position::Top,
