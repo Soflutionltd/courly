@@ -1,6 +1,6 @@
 [package]
 name = "seen"
-description = "Address observation tracking and autocomplete for Ratatoskr"
+description = "Address observation tracking and autocomplete for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

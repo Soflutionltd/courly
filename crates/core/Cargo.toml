@@ -1,6 +1,6 @@
 [package]
 name = "rtsk"
-description = "Framework-agnostic core logic for Ratatoskr"
+description = "Framework-agnostic core logic for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "label-colors"
-description = "Deterministic label color resolution for Ratatoskr"
+description = "Deterministic label color resolution for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -30,7 +30,7 @@ pub fn build_mdn_message(
     let recipient_email = &strip_line_breaks(recipient_email);
     let recipient_name = &strip_line_breaks(recipient_name);
     let boundary = format!("mdn-boundary-{}", uuid::Uuid::new_v4());
-    let message_id = format!("<{}.mdn@ratatoskr>", uuid::Uuid::new_v4());
+    let message_id = format!("<{}.mdn@courly>", uuid::Uuid::new_v4());
     // RFC 5322 Date header, fixed to +0000. `strftime` is locale-independent
     // here (jiff's `%a`/`%b` are always English abbreviations), which the
     // header format requires.

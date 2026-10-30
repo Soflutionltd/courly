@@ -1,6 +1,6 @@
 [package]
 name = "types"
-description = "Shared lightweight types for Ratatoskr workspace"
+description = "Shared lightweight types for Courly workspace"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

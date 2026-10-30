@@ -1,6 +1,6 @@
 [package]
 name = "llm"
-description = "AI completion and orchestration for Ratatoskr"
+description = "AI completion and orchestration for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

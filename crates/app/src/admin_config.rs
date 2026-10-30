@@ -81,7 +81,7 @@ mod tests {
         let toml_str = r#"
 [oidc]
 issuer_url = "https://auth.corp.example"
-client_id = "ratatoskr-corp"
+client_id = "courly-corp"
 client_secret = "shh"
 extra_scopes = "imap-access offline_access"
 
@@ -104,7 +104,7 @@ url = "https://jmap.corp.example/.well-known/jmap"
             oidc.issuer_url.as_deref(),
             Some("https://auth.corp.example")
         );
-        assert_eq!(oidc.client_id.as_deref(), Some("ratatoskr-corp"));
+        assert_eq!(oidc.client_id.as_deref(), Some("courly-corp"));
         assert_eq!(oidc.client_secret.as_deref(), Some("shh"));
         assert_eq!(
             oidc.extra_scopes.as_deref(),

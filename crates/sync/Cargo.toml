@@ -1,6 +1,6 @@
 [package]
 name = "sync"
-description = "Sync pipeline, persistence, notifications, and state for Ratatoskr"
+description = "Sync pipeline, persistence, notifications, and state for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

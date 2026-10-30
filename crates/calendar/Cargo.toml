@@ -1,6 +1,6 @@
 [package]
 name = "cal"
-description = "Calendar sync (Google Calendar + CalDAV) for Ratatoskr"
+description = "Calendar sync (Google Calendar + CalDAV) for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "cmdk"
-description = "Command palette engine for Ratatoskr"
+description = "Command palette engine for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

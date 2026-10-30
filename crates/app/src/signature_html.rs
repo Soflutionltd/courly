@@ -82,7 +82,7 @@ pub fn extract_data_images(html: &str) -> (String, Vec<InlineImage>) {
             .decode(payload.trim())
             .ok()?;
         let number = images.len() + 1;
-        let content_id = format!("image{number:03}@ratatoskr");
+        let content_id = format!("image{number:03}@courly");
         let extension = mime_guess::get_mime_extensions_str(mime)
             .and_then(|extensions| extensions.first())
             .unwrap_or(&"bin");
@@ -195,7 +195,7 @@ mod tests {
         let (rewritten, images) = extract_data_images(html);
         assert_eq!(
             rewritten,
-            "<p>A</p><img alt=x src=\"cid:image001@ratatoskr\"><IMG SRC='cid:image002@ratatoskr'>"
+            "<p>A</p><img alt=x src=\"cid:image001@courly\"><IMG SRC='cid:image002@courly'>"
         );
         assert_eq!(images.len(), 2);
         assert_eq!(images[0].mime_type, "image/png");

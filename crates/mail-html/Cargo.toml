@@ -1,6 +1,6 @@
 [package]
 name = "mail-html"
-description = "Native HTML email rendering for Ratatoskr, built on the Blitz engine"
+description = "Native HTML email rendering for Courly, built on the Blitz engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

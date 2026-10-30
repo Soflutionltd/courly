@@ -1,6 +1,6 @@
 [package]
 name = "db"
-description = "Shared database types, state, and migrations for Ratatoskr"
+description = "Shared database types, state, and migrations for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

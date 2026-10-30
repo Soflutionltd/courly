@@ -50,7 +50,7 @@ fn custom_oidc_fields(cfg: &CustomOidcConfig) -> Element<'_, AddAccountMessage> 
         ),
         field(
             t!("account_setup.client_id_optional"),
-            "ratatoskr-corp",
+            "courly-corp",
             &cfg.client_id,
             AddAccountMessage::CustomOidcClientIdChanged,
         ),

@@ -8,7 +8,9 @@ use crate::ui::mail_body::HtmlBodyState;
 /// Separates the editable part from the quoted original in a saved draft.
 /// Outlook uses the same element, so a draft opened there keeps the split.
 const QUOTE_MARKER: &str = r#"<div id="appendonsend"></div>"#;
-const SIGNATURE_MARKER: &str = "<!--ratatoskr-signature-->";
+const SIGNATURE_MARKER: &str = "<!--courly-signature-->";
+/// The marker drafts saved before the rename to Courly carry.
+const LEGACY_SIGNATURE_MARKER: &str = "<!--ratatoskr-signature-->";
 
 const TEXT_RULE: &str = "________________________________";
 
@@ -182,7 +184,10 @@ pub fn split_draft_html(html: &str) -> DraftParts<'_> {
         }
         None => (html, None),
     };
-    let (editor_html, signature) = match rest.split_once(SIGNATURE_MARKER) {
+    let (editor_html, signature) = match rest
+        .split_once(SIGNATURE_MARKER)
+        .or_else(|| rest.split_once(LEGACY_SIGNATURE_MARKER))
+    {
         Some((editor, signature)) => (editor, HtmlBlock::signature(signature)),
         None => (rest, None),
     };
@@ -355,6 +360,14 @@ mod tests {
         assert_eq!(parts.editor_html, "<p>Reply</p>");
         assert_eq!(parts.signature.expect("signature").html, "<p>Antoine</p>");
         assert_eq!(parts.quote.expect("quote").html, quote.expect("quote").html);
+    }
+
+    #[test]
+    fn draft_saved_before_the_rename_still_splits() {
+        let saved = format!("<p>Reply</p>{LEGACY_SIGNATURE_MARKER}<p>Antoine</p>");
+        let parts = split_draft_html(&saved);
+        assert_eq!(parts.editor_html, "<p>Reply</p>");
+        assert_eq!(parts.signature.expect("signature").html, "<p>Antoine</p>");
     }
 
     #[test]

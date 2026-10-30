@@ -695,7 +695,7 @@ fn collapse_blank_lines(s: &str) -> String {
 ///
 /// Finds the first `<hr>` in the HTML and wraps everything from there to the
 /// end (or to the next attribution/quote section) in
-/// `<div id="ratatoskr-signature">`. If no `<hr>` is found, returns the
+/// `<div id="courly-signature">`. If no `<hr>` is found, returns the
 /// HTML unchanged.
 pub fn finalize_compose_html(html: &str) -> String {
     // Simple approach: find the first `<hr` and wrap from there.
@@ -724,7 +724,7 @@ pub fn finalize_compose_html(html: &str) -> String {
 
     let mut result = String::with_capacity(html.len() + 64);
     result.push_str(&html[..hr_pos]);
-    result.push_str("<div id=\"ratatoskr-signature\">");
+    result.push_str("<div id=\"courly-signature\">");
     result.push_str(&html[hr_pos..sig_end]);
     result.push_str("</div>");
     result.push_str(&html[sig_end..]);

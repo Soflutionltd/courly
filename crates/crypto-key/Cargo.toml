@@ -1,6 +1,6 @@
 [package]
 name = "crypto-key"
-description = "Encryption key file loader for Ratatoskr - shared between common and service"
+description = "Encryption key file loader for Courly - shared between common and service"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

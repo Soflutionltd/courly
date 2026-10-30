@@ -1,6 +1,6 @@
 [package]
 name = "smart-folder"
-description = "Smart folder query engine for Ratatoskr"
+description = "Smart folder query engine for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

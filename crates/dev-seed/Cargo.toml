@@ -1,6 +1,6 @@
 [package]
 name = "dev-seed"
-description = "Ephemeral dev database seeder for Ratatoskr"
+description = "Ephemeral dev database seeder for Courly"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
