@@ -219,11 +219,32 @@ impl ThreadList {
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    /// Replace the list, carrying every selection index over to the same
+    /// thread in the new list. Background sync reloads the list while the
+    /// user reads, so an index kept as-is would jump to a neighbour as soon
+    /// as a thread above it is added or removed.
     pub fn set_threads(&mut self, threads: Vec<Thread>) {
+        let key_at = |idx: usize| {
+            self.threads
+                .get(idx)
+                .map(|t| (t.account_id.clone(), t.id.clone()))
+        };
+        let selected = self.selected_thread.and_then(key_at);
+        let anchor = self.last_selected_anchor.and_then(key_at);
+        let multi: Vec<_> = self
+            .selected_threads
+            .iter()
+            .filter_map(|&idx| key_at(idx))
+            .collect();
         self.threads = threads;
-        // Clear multi-selection when thread list changes - stale indices.
-        self.selected_threads.clear();
-        self.last_selected_anchor = None;
+        let index_of = |key: &(String, String)| {
+            self.threads
+                .iter()
+                .position(|t| t.account_id == key.0 && t.id == key.1)
+        };
+        self.selected_thread = selected.as_ref().and_then(index_of);
+        self.last_selected_anchor = anchor.as_ref().and_then(index_of);
+        self.selected_threads = multi.iter().filter_map(index_of).collect();
     }
 
     pub fn set_context(&mut self, folder_name: String, scope_name: String) {
@@ -763,4 +784,76 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
         .spacing(SCROLLBAR_SPACING)
         .height(Length::Fill)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn thread(account_id: &str, id: &str) -> Thread {
+        Thread {
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            subject: None,
+            snippet: None,
+            last_message_at: None,
+            message_count: 1,
+            is_read: true,
+            is_starred: false,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: false,
+            is_muted: false,
+            has_attachments: false,
+            label_paints: Vec::new(),
+            from_name: None,
+            from_address: None,
+            is_local_draft: false,
+            match_kind: None,
+            also_matched: Vec::new(),
+        }
+    }
+
+    fn list(ids: &[&str]) -> Vec<Thread> {
+        ids.iter().map(|id| thread("acc", id)).collect()
+    }
+
+    #[test]
+    fn a_reload_keeps_the_selection_on_the_same_thread() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c", "d"]));
+        threads.selected_thread = Some(2);
+        threads.last_selected_anchor = Some(2);
+        threads.selected_threads = HashSet::from([2, 3]);
+
+        threads.set_threads(list(&["b", "c", "d"]));
+
+        assert_eq!(threads.selected_thread, Some(1));
+        assert_eq!(threads.last_selected_anchor, Some(1));
+        assert_eq!(threads.selected_threads, HashSet::from([1, 2]));
+    }
+
+    #[test]
+    fn a_thread_deleted_elsewhere_drops_out_of_the_selection() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c"]));
+        threads.selected_thread = Some(1);
+        threads.selected_threads = HashSet::from([1, 2]);
+
+        threads.set_threads(list(&["a", "c"]));
+
+        assert_eq!(threads.selected_thread, None);
+        assert_eq!(threads.selected_threads, HashSet::from([1]));
+    }
+
+    #[test]
+    fn the_same_thread_id_in_another_account_is_a_different_thread() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(vec![thread("one", "t"), thread("two", "t")]);
+        threads.selected_thread = Some(1);
+
+        threads.set_threads(vec![thread("two", "t"), thread("one", "t")]);
+
+        assert_eq!(threads.selected_thread, Some(0));
+    }
 }
