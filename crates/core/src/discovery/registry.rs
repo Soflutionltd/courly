@@ -149,6 +149,7 @@ static REGISTRY: &[RegistryEntry] = &[
                             "Mail.Send.Shared",
                             "Mail.Read.Shared",
                             "MailboxSettings.ReadWrite",
+                            "Calendars.ReadWrite",
                             "offline_access",
                             "openid",
                             "profile",

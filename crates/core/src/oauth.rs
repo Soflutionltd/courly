@@ -41,13 +41,14 @@ const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const MICROSOFT_GRAPH_ME_URL: &str =
     "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName";
-const MICROSOFT_GRAPH_SCOPES: [&str; 11] = [
+const MICROSOFT_GRAPH_SCOPES: [&str; 12] = [
     "Mail.ReadWrite",
     "Mail.ReadWrite.Shared",
     "Mail.Send",
     "Mail.Send.Shared",
     "Mail.Read.Shared",
     "MailboxSettings.ReadWrite",
+    "Calendars.ReadWrite",
     "offline_access",
     "openid",
     "profile",
@@ -862,6 +863,20 @@ mod tests {
     #[test]
     fn microsoft_graph_scopes_allow_directory_search() {
         const SCOPE: &str = "User.ReadBasic.All";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(scopes.iter().any(|scope| scope == SCOPE));
+    }
+
+    /// Calendar sync and invite responses read and write `/me/events`,
+    /// which Graph refuses without `Calendars.ReadWrite`.
+    #[test]
+    fn microsoft_graph_scopes_allow_calendar_sync() {
+        const SCOPE: &str = "Calendars.ReadWrite";
         assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
         let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
             .expect("microsoft_graph registry entry");
