@@ -16,6 +16,7 @@ use super::modals::{
     attachment_list, autocomplete_dropdown, bcc_nudge_banner, bulk_paste_banner_view,
     discard_confirmation, link_dialog, save_as_group_dialog, token_context_menu,
 };
+use super::quote::{ComposePreview, HtmlBlock};
 use super::state::ComposeState;
 use super::types::RecipientField;
 
@@ -527,7 +528,8 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         .height(Length::Fill)
         .font(font::text());
 
-    let editor_height = if state.quote.is_some() {
+    let has_extras = state.signature.is_some() || state.quote.is_some();
+    let editor_height = if has_extras {
         Length::FillPortion(COMPOSE_EDITOR_PORTION)
     } else {
         Length::Fill
@@ -538,26 +540,41 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         .padding(PAD_CONTENT)
         .style(theme::ContainerClass::EmailBody.style());
 
-    let content: Element<'a, Message> = match state.quote.as_ref() {
-        Some(quote) => {
-            let compose = move |msg| Message::PopOut(window_id, PopOutMessage::Compose(msg));
-            let preview = crate::ui::mail_body::view(
-                Some(&quote.preview),
-                Some(quote.text.as_str()),
-                move |width| compose(ComposeMessage::QuoteResized(width)),
-                move |url| compose(ComposeMessage::QuoteLinkClicked(url)),
-                compose(ComposeMessage::QuoteShowRemote),
-            );
-            let quote_card = container(iced::widget::scrollable(
-                container(preview).padding(PAD_CONTENT),
-            ))
+    if !has_extras {
+        return container(body_card)
             .width(Length::Fill)
-            .height(Length::FillPortion(COMPOSE_QUOTE_PORTION))
-            .style(theme::ContainerClass::EmailBody.style());
-            column![body_card, quote_card].spacing(SPACE_XS).into()
-        }
-        None => body_card.into(),
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: SPACE_SM,
+                bottom: 0.0,
+                left: SPACE_SM,
+            })
+            .into();
+    }
+
+    let compose = move |msg| Message::PopOut(window_id, PopOutMessage::Compose(msg));
+    let preview = move |block: &'a HtmlBlock, which: ComposePreview| {
+        crate::ui::mail_body::view(
+            Some(&block.preview),
+            Some(block.text.as_str()),
+            move |width| compose(ComposeMessage::PreviewResized(which, width)),
+            move |url| compose(ComposeMessage::PreviewLinkClicked(url)),
+            compose(ComposeMessage::PreviewShowRemote(which)),
+        )
     };
+    let mut extras = column![].spacing(SPACE_SM).padding(PAD_CONTENT);
+    if let Some(signature) = state.signature.as_ref() {
+        extras = extras.push(preview(signature, ComposePreview::Signature));
+    }
+    if let Some(quote) = state.quote.as_ref() {
+        extras = extras.push(preview(quote, ComposePreview::Quote));
+    }
+    let extras_card = container(iced::widget::scrollable(extras))
+        .width(Length::Fill)
+        .height(Length::FillPortion(COMPOSE_QUOTE_PORTION))
+        .style(theme::ContainerClass::EmailBody.style());
+    let content = column![body_card, extras_card].spacing(SPACE_XS);
 
     container(content)
         .width(Length::Fill)

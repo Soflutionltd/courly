@@ -217,22 +217,9 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     col = col.push(section(
         "Signature",
         vec![static_row(
-            container(column![
-                signature_formatting_toolbar(editor),
-                Space::new().height(SPACE_XXS),
-                container(
-                    rich_text_editor(&editor.body_editor)
-                        .on_action(SettingsMessage::SignatureEditorAction)
-                        .font(crate::font::text())
-                        .height(Length::Fixed(200.0))
-                        .width(Length::Fill),
-                )
-                .padding(PAD_CONTENT)
-                .style(theme::ContainerClass::EmailBody.style())
+            container(signature_body(editor))
+                .padding(PAD_SETTINGS_ROW)
                 .width(Length::Fill),
-            ])
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill),
         )],
     ));
 
@@ -285,6 +272,68 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     col = col.push(btn_row);
 
     col.into()
+}
+
+/// The rich text editor, or the rendered preview of a signature kept as
+/// HTML, with the import actions under it.
+fn signature_body(editor: &SignatureEditorState) -> Element<'_, SettingsMessage> {
+    let import_label = if editor.raw_html.is_some() {
+        "Replace with an HTML file..."
+    } else {
+        "Import an HTML file..."
+    };
+    let mut actions = row![
+        button(text(import_label).size(TEXT_SM))
+            .on_press(SettingsMessage::SignatureEditorImportHtml)
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::Secondary.style())
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+    if editor.raw_html.is_some() {
+        actions = actions.push(
+            button(text("Edit as plain text").size(TEXT_SM))
+                .on_press(SettingsMessage::SignatureEditorUseRichText)
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::Secondary.style()),
+        );
+    }
+
+    let body: Element<'_, SettingsMessage> = if editor.raw_html.is_some() {
+        container(crate::ui::mail_body::view(
+            Some(&editor.preview),
+            None,
+            SettingsMessage::SignatureEditorPreviewResized,
+            SettingsMessage::SignatureEditorPreviewLink,
+            SettingsMessage::SignatureEditorPreviewShowRemote,
+        ))
+        .padding(PAD_CONTENT)
+        .style(theme::ContainerClass::EmailBody.style())
+        .width(Length::Fill)
+        .into()
+    } else {
+        column![
+            signature_formatting_toolbar(editor),
+            Space::new().height(SPACE_XXS),
+            container(
+                rich_text_editor(&editor.body_editor)
+                    .on_action(SettingsMessage::SignatureEditorAction)
+                    .font(crate::font::text())
+                    .height(Length::Fixed(200.0))
+                    .width(Length::Fill),
+            )
+            .padding(PAD_CONTENT)
+            .style(theme::ContainerClass::EmailBody.style())
+            .width(Length::Fill),
+        ]
+        .into()
+    };
+
+    let mut content = column![body, actions].spacing(SPACE_XS);
+    if let Some(error) = editor.import_error.as_deref() {
+        content = content.push(text(error).size(TEXT_SM).style(text::danger));
+    }
+    content.into()
 }
 
 fn signature_account_row<'a>(

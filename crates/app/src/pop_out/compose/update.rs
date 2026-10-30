@@ -540,22 +540,35 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             signature_id,
             signature_html,
         } => {
-            use rte::compose::replace_signature;
-
-            state.signature_separator_index = replace_signature(
-                &mut state.body.document,
-                state.signature_separator_index,
-                signature_html.as_deref(),
-            );
+            // A draft saved before signatures moved out of the editor still
+            // carries one inline: drop it so the account's signature is not
+            // shown twice.
+            if let Some(separator) = state.signature_separator_index.take()
+                && matches!(
+                    state.body.document.block(separator),
+                    Some(&rte::Block::HorizontalRule)
+                )
+            {
+                let end = rte::compose::find_signature_end(&state.body.document, separator);
+                rte::compose::remove_signature(&mut state.body.document, separator, Some(end));
+            }
+            let mut signature = signature_html
+                .as_deref()
+                .and_then(super::quote::HtmlBlock::signature);
+            if let (Some(new), Some(old)) = (signature.as_mut(), state.signature.take()) {
+                new.preview = old.preview;
+                new.preview.restart();
+            }
+            state.signature = signature;
             state.active_signature_id = signature_id;
             state.draft_dirty = true;
         }
-        ComposeMessage::QuoteResized(_)
-        | ComposeMessage::QuoteRendered { .. }
-        | ComposeMessage::QuoteLinkClicked(_)
-        | ComposeMessage::QuoteShowRemote => {
+        ComposeMessage::PreviewResized(..)
+        | ComposeMessage::PreviewRendered { .. }
+        | ComposeMessage::PreviewLinkClicked(_)
+        | ComposeMessage::PreviewShowRemote(_) => {
             log::warn!(
-                "quote preview message reached update_compose - dispatcher routing regression"
+                "compose preview message reached update_compose - dispatcher routing regression"
             );
         }
     }

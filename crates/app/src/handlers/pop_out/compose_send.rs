@@ -60,6 +60,7 @@ impl ReadyApp {
         };
 
         let (body_html, body_text) = state.outgoing_body();
+        let (body_html, inline_images) = crate::signature_html::extract_data_images(&body_html);
 
         let attachments: Vec<SendAttachment> = state
             .attachments
@@ -70,6 +71,12 @@ impl ReadyApp {
                 data: a.data.as_ref().clone().into(),
                 content_id: None,
             })
+            .chain(inline_images.into_iter().map(|image| SendAttachment {
+                filename: image.filename,
+                mime_type: image.mime_type,
+                data: image.data.into(),
+                content_id: Some(image.content_id),
+            }))
             .collect();
 
         // Reuse draft_id on retry so the action updates the existing

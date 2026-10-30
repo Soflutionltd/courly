@@ -48,6 +48,7 @@ pub mod notification_queue;
 mod pop_out;
 pub mod service_client;
 mod service_subscription;
+mod signature_html;
 mod subscription;
 mod ui;
 mod update;

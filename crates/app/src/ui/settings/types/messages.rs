@@ -120,6 +120,18 @@ pub enum SettingsMessage {
     SignatureEditorToggleDefault(bool),
     SignatureEditorToggleReplyDefault(bool),
     SignatureEditorSave,
+    /// Pick a `.htm` / `.html` signature file to use as is.
+    SignatureEditorImportHtml,
+    SignatureEditorHtmlImported(Result<Option<String>, String>),
+    /// Leave the imported HTML and edit the signature as rich text.
+    SignatureEditorUseRichText,
+    SignatureEditorPreviewResized(f32),
+    SignatureEditorPreviewRendered {
+        inputs: crate::ui::mail_body::RenderInputs,
+        body: Option<std::sync::Arc<crate::ui::mail_body::RenderedBody>>,
+    },
+    SignatureEditorPreviewShowRemote,
+    SignatureEditorPreviewLink(String),
     // Filter inputs (People tab + group editor)
     FilterFocused(FilterId),
     FilterCleared(FilterId),

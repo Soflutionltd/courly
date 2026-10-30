@@ -5,6 +5,7 @@ use crate::db::ContactMatch;
 use crate::ui::emoji_picker::EmojiCategory;
 use crate::ui::token_input::{TokenId, TokenInputMessage};
 
+use super::quote::ComposePreview;
 use super::types::{AccountInfo, ComposeAttachment, GroupSaveSuccess, RecipientField};
 
 /// How the compose window was opened.
@@ -204,12 +205,13 @@ pub enum ComposeMessage {
         signature_id: Option<String>,
         signature_html: Option<String>,
     },
-    // ── Quoted original preview ──
-    QuoteResized(f32),
-    QuoteRendered {
+    // ── Signature and quoted original previews ──
+    PreviewResized(ComposePreview, f32),
+    PreviewRendered {
+        which: ComposePreview,
         inputs: crate::ui::mail_body::RenderInputs,
         body: Option<std::sync::Arc<crate::ui::mail_body::RenderedBody>>,
     },
-    QuoteLinkClicked(String),
-    QuoteShowRemote,
+    PreviewLinkClicked(String),
+    PreviewShowRemote(ComposePreview),
 }

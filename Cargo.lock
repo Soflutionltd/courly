@@ -330,6 +330,7 @@ dependencies = [
  "dev-seed",
  "dirs",
  "display-info",
+ "encoding_rs",
  "env_logger",
  "hotpath 0.27.0",
  "iced",

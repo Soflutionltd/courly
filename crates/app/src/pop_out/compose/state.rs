@@ -7,7 +7,7 @@ use crate::ui::token_input::{self, TokenId, TokenInputValue};
 
 use super::helpers::{accounts_to_info, csv_to_token_input};
 use super::messages::ComposeMode;
-use super::quote::{QuotedOriginal, ReplySource, split_draft_html};
+use super::quote::{HtmlBlock, ReplySource, draft_html, outgoing_body, split_draft_html};
 use super::types::{
     AccountInfo, AutocompleteState, BccNudgeBanner, BulkPasteBanner, ComposeAttachment,
     ComposeTokenDrag, TokenContextMenuState,
@@ -36,9 +36,10 @@ pub struct ComposeState {
     // Body (rich text editor)
     pub body: EditorState,
 
-    /// Original message carried under a reply or forward, outside the
-    /// editor so its HTML reaches the recipient untouched.
-    pub quote: Option<QuotedOriginal>,
+    /// Signature and original message of a reply or forward, kept outside
+    /// the editor so their HTML reaches the recipient untouched.
+    pub signature: Option<HtmlBlock>,
+    pub quote: Option<HtmlBlock>,
 
     // Compose mode
     pub mode: ComposeMode,
@@ -133,6 +134,7 @@ impl ComposeState {
             from_dropdown_open: false,
             subject: String::new(),
             body: EditorState::new(),
+            signature: None,
             quote: None,
             mode: ComposeMode::New,
             reply_thread_id: None,
@@ -192,15 +194,14 @@ impl ComposeState {
         let show_cc = !cc.tokens.is_empty();
         let show_bcc = !bcc.tokens.is_empty();
 
-        let (editor_html, quote) = draft
-            .body_html
-            .as_deref()
-            .map(split_draft_html)
-            .unwrap_or_default();
-        let body = Some(editor_html)
+        let parts = draft.body_html.as_deref().map(split_draft_html);
+        let body = parts
+            .as_ref()
+            .map(|p| p.editor_html)
             .filter(|h| !h.trim().is_empty())
             .map(EditorState::from_html)
             .unwrap_or_default();
+        let (signature, quote) = parts.map(|p| (p.signature, p.quote)).unwrap_or_default();
 
         let signature_separator_index = draft
             .signature_separator_index
@@ -221,6 +222,7 @@ impl ComposeState {
             from_dropdown_open: false,
             subject: draft.subject.clone().unwrap_or_default(),
             body,
+            signature,
             quote,
             mode: ComposeMode::New,
             reply_thread_id: draft.thread_id.clone(),
@@ -302,7 +304,7 @@ impl ComposeState {
             }
         }
 
-        state.quote = QuotedOriginal::from_source(source);
+        state.quote = HtmlBlock::quote(source);
 
         state.reply_thread_id = source.thread_id.map(String::from);
         state.reply_source_message_id = source.message_id.map(String::from);
@@ -338,9 +340,9 @@ impl ComposeState {
         self.from_account = Some(shared_info);
     }
 
-    /// HTML and plain text sent to the recipient. The rule that marks the
-    /// signature region in the editor is left out: the only rule the
-    /// recipient sees is the one above the quoted original.
+    /// HTML and plain text sent to the recipient. A signature region left
+    /// in the editor by an older draft loses its marker rule: the only rule
+    /// the recipient sees is the one above the quoted original.
     pub fn outgoing_body(&self) -> (String, String) {
         let mut document = self.body.document.clone();
         if let Some(index) = self.signature_separator_index
@@ -348,24 +350,21 @@ impl ComposeState {
         {
             document.remove_block(index);
         }
-        let editor_html = rte::html_serialize::to_html(&document);
-        let editor_text = document.flattened_text();
-        match &self.quote {
-            Some(quote) => (
-                quote.outgoing_html(&editor_html),
-                quote.outgoing_text(&editor_text),
-            ),
-            None => (editor_html, editor_text),
-        }
+        outgoing_body(
+            &rte::html_serialize::to_html(&document),
+            &document.flattened_text(),
+            self.signature.as_ref(),
+            self.quote.as_ref(),
+        )
     }
 
-    /// HTML persisted for a draft, quoted original included.
+    /// HTML persisted for a draft, signature and quoted original included.
     pub fn draft_html(&self) -> String {
-        let editor_html = self.body.to_html();
-        match &self.quote {
-            Some(quote) => quote.draft_html(&editor_html),
-            None => editor_html,
-        }
+        draft_html(
+            &self.body.to_html(),
+            self.signature.as_ref(),
+            self.quote.as_ref(),
+        )
     }
 
     /// Returns true if the compose body has user content beyond the

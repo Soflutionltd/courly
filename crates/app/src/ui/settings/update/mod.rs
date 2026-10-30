@@ -3,8 +3,6 @@ use iced::time::Instant;
 
 use crate::component::Component;
 use crate::db::DateDisplay;
-use crate::ui::undoable::UndoableText;
-use rte::EditorState as RteEditorState;
 
 use crate::ui::settings::tabs::settings_view;
 use crate::ui::settings::types::*;
@@ -111,21 +109,22 @@ impl Component for Settings {
             SettingsMessage::SignatureEditorSave => {
                 return self.handle_signature_save();
             }
+            SettingsMessage::SignatureEditorImportHtml
+            | SettingsMessage::SignatureEditorHtmlImported(_)
+            | SettingsMessage::SignatureEditorUseRichText
+            | SettingsMessage::SignatureEditorPreviewResized(_)
+            | SettingsMessage::SignatureEditorPreviewRendered { .. }
+            | SettingsMessage::SignatureEditorPreviewShowRemote
+            | SettingsMessage::SignatureEditorPreviewLink(_) => {
+                return (self.handle_signature_html(message), None);
+            }
             SettingsMessage::SignatureDelete(ref id) => {
                 let need_open = self
                     .signature_editor
                     .as_ref()
                     .is_none_or(|e| e.signature_id.as_deref() != Some(id.as_str()));
                 if need_open && let Some(sig) = self.signatures.iter().find(|s| s.id == *id) {
-                    self.signature_editor = Some(SignatureEditorState {
-                        signature_id: Some(sig.id.clone()),
-                        account_id: sig.account_id.clone(),
-                        name: UndoableText::with_initial(&sig.name),
-                        body_editor: RteEditorState::from_html(&sig.body_html),
-                        is_default: sig.is_default,
-                        is_reply_default: sig.is_reply_default,
-                        dirty: false,
-                    });
+                    self.signature_editor = Some(SignatureEditorState::for_signature(sig));
                     self.active_sheet = Some(SettingsSheetPage::EditSignature {
                         signature_id: Some(sig.id.clone()),
                         account_id: Some(sig.account_id.clone()),
@@ -665,15 +664,7 @@ impl Settings {
             }
             SettingsMessage::SignatureEdit(sig_id) => {
                 if let Some(sig) = self.signatures.iter().find(|s| s.id == sig_id) {
-                    self.signature_editor = Some(SignatureEditorState {
-                        signature_id: Some(sig.id.clone()),
-                        account_id: sig.account_id.clone(),
-                        name: UndoableText::with_initial(&sig.name),
-                        body_editor: RteEditorState::from_html(&sig.body_html),
-                        is_default: sig.is_default,
-                        is_reply_default: sig.is_reply_default,
-                        dirty: false,
-                    });
+                    self.signature_editor = Some(SignatureEditorState::for_signature(sig));
                     self.active_sheet = Some(SettingsSheetPage::EditSignature {
                         signature_id: Some(sig.id.clone()),
                         account_id: Some(sig.account_id.clone()),
@@ -682,15 +673,7 @@ impl Settings {
                 }
             }
             SettingsMessage::SignatureCreate => {
-                self.signature_editor = Some(SignatureEditorState {
-                    signature_id: None,
-                    account_id: String::new(),
-                    name: UndoableText::new(),
-                    body_editor: RteEditorState::new(),
-                    is_default: false,
-                    is_reply_default: false,
-                    dirty: false,
-                });
+                self.signature_editor = Some(SignatureEditorState::blank());
                 self.active_sheet = Some(SettingsSheetPage::EditSignature {
                     signature_id: None,
                     account_id: None,

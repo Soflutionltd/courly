@@ -10,7 +10,7 @@ mod view;
 
 pub use helpers::mime_from_extension;
 pub use messages::{ComposeMessage, ComposeMode};
-pub use quote::ReplySource;
+pub use quote::{ComposePreview, ReplySource, embeddable_body};
 pub use state::ComposeState;
 pub use types::{ComposeAttachment, GroupSaveSuccess, RecipientField};
 pub use update::update_compose;

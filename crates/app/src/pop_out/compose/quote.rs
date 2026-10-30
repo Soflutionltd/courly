@@ -1,13 +1,14 @@
-//! The original message carried under a reply or forward, laid out like
-//! Outlook: a rule, a From / Sent / To / Cc / Subject block, then the
-//! original body untouched. It stays out of the editor so the original
-//! HTML reaches the recipient intact.
+//! HTML carried below the editor, laid out like Outlook: the signature,
+//! then for a reply or forward a rule, a From / Sent / To / Cc / Subject
+//! block and the original body. Both stay out of the editor, which has no
+//! images or tables, so they reach the recipient untouched.
 
 use crate::ui::mail_body::HtmlBodyState;
 
 /// Separates the editable part from the quoted original in a saved draft.
 /// Outlook uses the same element, so a draft opened there keeps the split.
-const DRAFT_MARKER: &str = r#"<div id="appendonsend"></div>"#;
+const QUOTE_MARKER: &str = r#"<div id="appendonsend"></div>"#;
+const SIGNATURE_MARKER: &str = "<!--ratatoskr-signature-->";
 
 const TEXT_RULE: &str = "________________________________";
 
@@ -51,20 +52,41 @@ impl<'a> ReplySource<'a> {
     }
 }
 
-/// Quoted original attached to a compose window.
+/// Which read-only block of a compose window a preview message is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposePreview {
+    Signature,
+    Quote,
+}
+
+/// Read-only HTML shown under the editor and appended when sending.
 #[derive(Debug, Clone)]
-pub struct QuotedOriginal {
-    /// Rule, header block and original body, ready to append to the
-    /// editor HTML.
+pub struct HtmlBlock {
     pub html: String,
     /// Plain-text equivalent for the `text/plain` part.
     pub text: String,
-    /// Read-only preview shown under the editor.
     pub preview: HtmlBodyState,
 }
 
-impl QuotedOriginal {
-    pub fn from_source(source: &ReplySource<'_>) -> Option<Self> {
+impl HtmlBlock {
+    fn new(html: String, text: String) -> Self {
+        Self {
+            html,
+            text,
+            preview: HtmlBodyState::default(),
+        }
+    }
+
+    /// A signature, or `None` when its HTML shows nothing.
+    pub fn signature(html: &str) -> Option<Self> {
+        let text = html_to_text(html);
+        let has_image = html.to_ascii_lowercase().contains("<img");
+        (has_image || !text.trim().is_empty()).then(|| Self::new(html.to_string(), text))
+    }
+
+    /// The quoted original of a reply or forward, or `None` when the source
+    /// has no body at all.
+    pub fn quote(source: &ReplySource<'_>) -> Option<Self> {
         let body_html = match (source.body_html, source.body_text, source.snippet) {
             (Some(html), _, _) if !html.trim().is_empty() => embeddable_body(html),
             (_, Some(text), _) if !text.trim().is_empty() => text_to_html(text),
@@ -100,39 +122,74 @@ impl QuotedOriginal {
 
         Some(Self::new(html, text))
     }
-
-    fn new(html: String, text: String) -> Self {
-        Self {
-            html,
-            text,
-            preview: HtmlBodyState::default(),
-        }
-    }
-
-    /// HTML sent to the recipient: the editor content, then the quote.
-    pub fn outgoing_html(&self, editor_html: &str) -> String {
-        format!("{editor_html}{}", self.html)
-    }
-
-    pub fn outgoing_text(&self, editor_text: &str) -> String {
-        format!("{}\n\n{}", editor_text.trim_end(), self.text)
-    }
-
-    /// HTML stored in a draft, with a marker so it can be split again.
-    pub fn draft_html(&self, editor_html: &str) -> String {
-        format!("{editor_html}{DRAFT_MARKER}{}", self.html)
-    }
 }
 
-/// Split a saved draft into its editable HTML and the quoted original.
-pub fn split_draft_html(html: &str) -> (&str, Option<QuotedOriginal>) {
-    match html.split_once(DRAFT_MARKER) {
-        Some((editor, quoted)) if !quoted.trim().is_empty() => {
-            let text = html_to_text(quoted);
-            (editor, Some(QuotedOriginal::new(quoted.to_string(), text)))
+/// HTML and plain text sent to the recipient: the editor content, the
+/// signature, then the quoted original.
+pub fn outgoing_body(
+    editor_html: &str,
+    editor_text: &str,
+    signature: Option<&HtmlBlock>,
+    quote: Option<&HtmlBlock>,
+) -> (String, String) {
+    let mut html = editor_html.to_string();
+    let mut text = editor_text.trim_end().to_string();
+    if let Some(signature) = signature {
+        html.push_str(&format!("<div id=\"Signature\">{}</div>", signature.html));
+        text.push_str("\n\n");
+        text.push_str(signature.text.trim_end());
+    }
+    if let Some(quote) = quote {
+        html.push_str("<br>");
+        html.push_str(&quote.html);
+        text.push_str("\n\n");
+        text.push_str(&quote.text);
+    }
+    (html, text)
+}
+
+/// HTML stored in a draft, with markers so it can be split again.
+pub fn draft_html(
+    editor_html: &str,
+    signature: Option<&HtmlBlock>,
+    quote: Option<&HtmlBlock>,
+) -> String {
+    let mut html = editor_html.to_string();
+    if let Some(signature) = signature {
+        html.push_str(SIGNATURE_MARKER);
+        html.push_str(&signature.html);
+    }
+    if let Some(quote) = quote {
+        html.push_str(QUOTE_MARKER);
+        html.push_str(&quote.html);
+    }
+    html
+}
+
+/// A saved draft split back into its parts.
+pub struct DraftParts<'a> {
+    pub editor_html: &'a str,
+    pub signature: Option<HtmlBlock>,
+    pub quote: Option<HtmlBlock>,
+}
+
+pub fn split_draft_html(html: &str) -> DraftParts<'_> {
+    let (rest, quote) = match html.split_once(QUOTE_MARKER) {
+        Some((rest, quoted)) => {
+            let quote = (!quoted.trim().is_empty())
+                .then(|| HtmlBlock::new(quoted.to_string(), html_to_text(quoted)));
+            (rest, quote)
         }
-        Some((editor, _)) => (editor, None),
         None => (html, None),
+    };
+    let (editor_html, signature) = match rest.split_once(SIGNATURE_MARKER) {
+        Some((editor, signature)) => (editor, HtmlBlock::signature(signature)),
+        None => (rest, None),
+    };
+    DraftParts {
+        editor_html,
+        signature,
+        quote,
     }
 }
 
@@ -164,7 +221,7 @@ fn header_fields(source: &ReplySource<'_>) -> Vec<(String, String)> {
 
 /// The part of a full HTML document that can be nested in another one:
 /// the `<body>` content, preceded by the `<style>` blocks of the head.
-fn embeddable_body(html: &str) -> String {
+pub fn embeddable_body(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
     let Some(body_open) = lower.find("<body") else {
         return html.to_string();
@@ -233,7 +290,7 @@ mod tests {
 
     #[test]
     fn html_original_is_kept_with_rule_and_header() {
-        let quote = QuotedOriginal::from_source(&source(
+        let quote = HtmlBlock::quote(&source(
             Some("<html><head><style>p{color:red}</style></head><body class=\"x\"><p>Hello</p></body></html>"),
             Some("Votre client de messagerie ne prend pas en charge le format HTML"),
         ))
@@ -256,8 +313,7 @@ mod tests {
 
     #[test]
     fn text_only_original_is_escaped() {
-        let quote =
-            QuotedOriginal::from_source(&source(None, Some("a < b\n\nfin"))).expect("quote");
+        let quote = HtmlBlock::quote(&source(None, Some("a < b\n\nfin"))).expect("quote");
         assert!(
             quote
                 .html
@@ -267,23 +323,44 @@ mod tests {
 
     #[test]
     fn nothing_to_quote_gives_none() {
-        assert!(QuotedOriginal::from_source(&source(None, None)).is_none());
+        assert!(HtmlBlock::quote(&source(None, None)).is_none());
     }
 
     #[test]
-    fn draft_round_trip_splits_editor_and_quote() {
-        let quote = QuotedOriginal::from_source(&source(Some("<p>Hi</p>"), None)).expect("quote");
-        let saved = quote.draft_html("<p>Reply</p>");
-        let (editor, restored) = split_draft_html(&saved);
-        assert_eq!(editor, "<p>Reply</p>");
-        assert_eq!(restored.expect("restored").html, quote.html);
-        assert!(!quote.outgoing_html("<p>Reply</p>").contains("appendonsend"));
+    fn signature_sits_between_text_and_quote() {
+        let signature = HtmlBlock::signature("<p>Antoine</p><img src=\"https://x/logo.png\">");
+        let quote = HtmlBlock::quote(&source(Some("<p>Hi</p>"), None));
+        let (html, text) =
+            outgoing_body("<p>Reply</p>", "Reply", signature.as_ref(), quote.as_ref());
+        let reply = html.find("Reply").expect("reply");
+        let sig = html.find("Antoine").expect("signature");
+        let rule = html.find("<hr").expect("rule");
+        assert!(reply < sig && sig < rule);
+        assert!(!html.contains("appendonsend") && !html.contains(SIGNATURE_MARKER));
+        assert!(text.starts_with("Reply\n\nAntoine"));
     }
 
     #[test]
-    fn draft_without_quote_is_unchanged() {
-        let (editor, restored) = split_draft_html("<p>Only</p>");
-        assert_eq!(editor, "<p>Only</p>");
-        assert!(restored.is_none());
+    fn image_only_signature_is_kept_and_blank_one_dropped() {
+        assert!(HtmlBlock::signature("<img src=\"cid:logo\">").is_some());
+        assert!(HtmlBlock::signature("<p> </p>").is_none());
+    }
+
+    #[test]
+    fn draft_round_trip_restores_every_part() {
+        let signature = HtmlBlock::signature("<p>Antoine</p>");
+        let quote = HtmlBlock::quote(&source(Some("<p>Hi</p>"), None));
+        let saved = draft_html("<p>Reply</p>", signature.as_ref(), quote.as_ref());
+        let parts = split_draft_html(&saved);
+        assert_eq!(parts.editor_html, "<p>Reply</p>");
+        assert_eq!(parts.signature.expect("signature").html, "<p>Antoine</p>");
+        assert_eq!(parts.quote.expect("quote").html, quote.expect("quote").html);
+    }
+
+    #[test]
+    fn draft_without_markers_is_all_editor() {
+        let parts = split_draft_html("<p>Only</p>");
+        assert_eq!(parts.editor_html, "<p>Only</p>");
+        assert!(parts.signature.is_none() && parts.quote.is_none());
     }
 }

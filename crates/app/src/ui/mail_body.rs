@@ -134,6 +134,16 @@ impl HtmlBodyState {
         self.in_flight.is_none()
     }
 
+    /// Drop the current render after the content changed. Returns true when
+    /// the width is known, so a new render can start right away; results
+    /// still in flight for the old content are ignored.
+    pub fn restart(&mut self) -> bool {
+        self.in_flight = None;
+        self.failed = false;
+        self.rendered = None;
+        self.desired_width.is_some()
+    }
+
     /// Store a finished render. Returns true when the width or zoom changed
     /// while it was running and another pass is needed. Results for any
     /// other ticket are ignored.

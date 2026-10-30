@@ -371,16 +371,30 @@ impl ReadyApp {
             (
                 PopOutWindow::Compose(state),
                 PopOutMessage::Compose(
-                    ComposeMessage::QuoteResized(_)
-                    | ComposeMessage::QuoteRendered { .. }
-                    | ComposeMessage::QuoteLinkClicked(_)
-                    | ComposeMessage::QuoteShowRemote,
+                    ComposeMessage::PreviewResized(..)
+                    | ComposeMessage::PreviewRendered { .. }
+                    | ComposeMessage::PreviewLinkClicked(_)
+                    | ComposeMessage::PreviewShowRemote(_),
                 ),
             ) => {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
                     return Task::none();
                 };
-                handle_quote_preview(window_id, state, msg)
+                handle_compose_preview(window_id, state, msg)
+            }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::SignatureResolved { .. }),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                crate::pop_out::compose::update_compose(state, msg);
+                start_compose_preview(
+                    window_id,
+                    state,
+                    crate::pop_out::compose::ComposePreview::Signature,
+                )
             }
             // All other compose messages
             (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
@@ -410,38 +424,72 @@ impl ReadyApp {
     }
 }
 
-/// Keep the read-only preview of the quoted original rendered at the width
-/// it is laid out at.
-fn handle_quote_preview(
+/// Keep the read-only signature and quote previews rendered at the width
+/// they are laid out at.
+fn handle_compose_preview(
     window_id: iced::window::Id,
     state: &mut crate::pop_out::compose::ComposeState,
     msg: ComposeMessage,
 ) -> Task<Message> {
-    let Some(quote) = state.quote.as_mut() else {
+    use crate::pop_out::compose::ComposePreview;
+
+    let which = match msg {
+        ComposeMessage::PreviewResized(which, _)
+        | ComposeMessage::PreviewShowRemote(which)
+        | ComposeMessage::PreviewRendered { which, .. } => which,
+        ComposeMessage::PreviewLinkClicked(url) => {
+            crate::ui::reading_pane::open_url_in_browser(&url);
+            return Task::none();
+        }
+        _ => return Task::none(),
+    };
+    let block = match which {
+        ComposePreview::Signature => state.signature.as_mut(),
+        ComposePreview::Quote => state.quote.as_mut(),
+    };
+    let Some(block) = block else {
         return Task::none();
     };
     let start = match msg {
-        ComposeMessage::QuoteResized(width) => quote.preview.set_width(width),
-        ComposeMessage::QuoteShowRemote => quote.preview.allow_remote(),
-        ComposeMessage::QuoteRendered { inputs, body } => quote.preview.finish(inputs, body),
-        ComposeMessage::QuoteLinkClicked(url) => {
-            crate::ui::reading_pane::open_url_in_browser(&url);
-            false
-        }
+        ComposeMessage::PreviewResized(_, width) => block.preview.set_width(width),
+        ComposeMessage::PreviewShowRemote(_) => block.preview.allow_remote(),
+        ComposeMessage::PreviewRendered { inputs, body, .. } => block.preview.finish(inputs, body),
         _ => false,
     };
     if !start {
         return Task::none();
     }
-    let Some(inputs) = quote.preview.start() else {
+    start_compose_preview(window_id, state, which)
+}
+
+/// Render a signature or quote preview if its width is known.
+fn start_compose_preview(
+    window_id: iced::window::Id,
+    state: &mut crate::pop_out::compose::ComposeState,
+    which: crate::pop_out::compose::ComposePreview,
+) -> Task<Message> {
+    use crate::pop_out::compose::ComposePreview;
+
+    let block = match which {
+        ComposePreview::Signature => state.signature.as_mut(),
+        ComposePreview::Quote => state.quote.as_mut(),
+    };
+    let Some(block) = block else {
+        return Task::none();
+    };
+    let Some(inputs) = block.preview.start() else {
         return Task::none();
     };
     Task::perform(
-        crate::ui::mail_body::render(quote.html.clone(), inputs, Default::default()),
+        crate::ui::mail_body::render(block.html.clone(), inputs, Default::default()),
         move |body| {
             Message::PopOut(
                 window_id,
-                PopOutMessage::Compose(ComposeMessage::QuoteRendered { inputs, body }),
+                PopOutMessage::Compose(ComposeMessage::PreviewRendered {
+                    which,
+                    inputs,
+                    body,
+                }),
             )
         },
     )
