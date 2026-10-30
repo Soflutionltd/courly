@@ -57,15 +57,9 @@ const SCHEMA_V100: &str = concat!(
     include_str!("schema/12_actions.sql"),
 );
 
-// PRE-RELEASE POLICY: until we ship a release, schema changes go directly into
-// the relevant `schema/*.sql` file (extending v100 in place). Do NOT add a v101
-// migration entry here. Dev DBs are wiped and re-seeded on each launch
-// (`--features dev-seed`), so there are no databases in the wild whose state
-// would be skipped. After the first release, the next change becomes v101 with
-// its own ALTER/CREATE statements appended to MIGRATIONS.
-//
-// Releases have shipped since, so v100 is now frozen: every change below is
-// an incremental migration that existing databases can apply in place.
+// v100 is frozen: released databases are already on it, so editing
+// `schema/*.sql` would never reach them. Every schema change is a new
+// incremental migration below that existing databases apply in place.
 static MIGRATIONS: &[Migration] = &[
     Migration {
         version: 100,

@@ -117,7 +117,7 @@ exercise ratatoskr's real provider sync against those endpoints.
 
 ## Dev-Seed
 
-`crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root. When the app is built with `--features dev-seed` (it always is during development), it wipes the entire dev data directory and re-seeds on every launch - there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (a single v100 migration).
+`crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root. When the app is built with `--features dev-seed` (it always is during development), it wipes the entire dev data directory and re-seeds on every launch - there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (the frozen v100 schema plus incremental migrations from v101 on).
 
 ## Crate Architecture
 
