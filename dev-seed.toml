@@ -2,4 +2,4 @@ threads = 500
 accounts = 4          # 1-4 (gmail, imap, graph, jmap)
 locale = "latin"      # "mixed", "latin", "intl"
 seed = 46             # RNG seed for reproducibility
-chats = 10            # total designated chat contacts (0 disables)
+chats = 0             # total designated chat contacts (0 disables)
