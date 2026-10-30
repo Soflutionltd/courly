@@ -14,7 +14,9 @@ pub struct AnchoredOverlay<'a, Message> {
     popup_width: Option<f32>,
     position: AnchorPosition,
     anchor_point: Option<Point>,
+    anchor_offset: Option<Vector>,
     on_right_press: Option<Box<dyn Fn(Point) -> Message + 'a>>,
+    on_right_press_offset: Option<Box<dyn Fn(Vector) -> Message + 'a>>,
 }
 
 /// Where the popup appears relative to the base widget.
@@ -37,7 +39,9 @@ pub fn anchored_overlay<'a, Message: 'a>(
         popup_width: None,
         position: AnchorPosition::default(),
         anchor_point: None,
+        anchor_offset: None,
         on_right_press: None,
+        on_right_press_offset: None,
     }
 }
 
@@ -73,6 +77,21 @@ impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
     /// cursor's window position (for a context menu at that point).
     pub fn on_right_press(mut self, on_right_press: impl Fn(Point) -> Message + 'a) -> Self {
         self.on_right_press = Some(Box::new(on_right_press));
+        self
+    }
+
+    /// Float the popup at `offset` from the base's top-left corner. Unlike
+    /// [`Self::anchor_point`], the popup follows the base when it scrolls.
+    pub fn anchor_offset(mut self, offset: Vector) -> Self {
+        self.anchor_offset = Some(offset);
+        self
+    }
+
+    /// Like [`Self::on_right_press`], with the click measured from the
+    /// base's top-left corner, for [`Self::anchor_offset`]. Works inside a
+    /// scrollable, where window coordinates go stale as the content moves.
+    pub fn on_right_press_offset(mut self, on_right_press: impl Fn(Vector) -> Message + 'a) -> Self {
+        self.on_right_press_offset = Some(Box::new(on_right_press));
         self
     }
 }
@@ -167,6 +186,18 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
             shell.publish(on_right_press(position));
             shell.capture_event();
         }
+
+        if let Some(on_right_press) = self.on_right_press_offset.as_ref()
+            && !shell.is_event_captured()
+            && let Event::Mouse(mouse::Event::ButtonPressed {
+                button: mouse::Button::Right,
+                ..
+            }) = event
+            && let Some(position) = cursor.position_over(layout.bounds())
+        {
+            shell.publish(on_right_press(position - layout.position()));
+            shell.capture_event();
+        }
     }
 
     fn mouse_interaction(
@@ -218,19 +249,24 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
         );
 
         let popup_tree = &mut second[0];
+        let base_position = layout.position() + translation;
+        let anchor_point = self
+            .anchor_offset
+            .map(|offset| base_position + offset)
+            .or(self.anchor_point);
         let popup_layout = layout_popup(
             popup,
             popup_tree,
             renderer,
             window,
-            self.anchor_point.unwrap_or(layout.position() + translation),
-            if self.anchor_point.is_some() {
+            anchor_point.unwrap_or(base_position),
+            if anchor_point.is_some() {
                 Size::ZERO
             } else {
                 layout.bounds().size()
             },
             self.popup_width,
-            self.anchor_point.is_some(),
+            anchor_point.is_some(),
             self.position,
         );
 
@@ -271,11 +307,17 @@ fn layout_popup<Message>(
     let space_below = (window.height - below_y).max(0.0);
     let space_above = anchor_position.y.max(0.0);
 
+    // A context menu may use the whole window height, like a native one.
+    let max_height = if point_anchored {
+        window.height
+    } else {
+        space_below.max(space_above)
+    };
     let limits = layout::Limits::new(
         Size::ZERO,
         Size {
             width: popup_width,
-            height: space_below.max(space_above),
+            height: max_height,
         },
     )
     .width(Length::Fill);
@@ -283,8 +325,14 @@ fn layout_popup<Message>(
     popup.as_widget_mut().layout(tree, renderer, &limits);
     let size = tree.size;
 
-    // Open upward when the popup does not fit below and the room above is larger.
-    let y = if size.height > space_below && space_above > space_below {
+    let y = if size.height <= space_below {
+        below_y
+    } else if point_anchored && size.height > space_above {
+        // Fits on neither side of the click: slide it up just enough to
+        // end at the bottom of the window.
+        (window.height - size.height).max(0.0)
+    } else if space_above > space_below {
+        // Open upward when the popup does not fit below and the room above is larger.
         (anchor_position.y - size.height).max(0.0)
     } else {
         below_y
