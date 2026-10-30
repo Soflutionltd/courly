@@ -156,8 +156,15 @@ pub fn walk_tree(indent: usize, node: &Node) {
 /// Parse an SVG image.
 #[cfg(feature = "svg")]
 pub(crate) fn parse_svg_image(source: &[u8]) -> Result<crate::node::SvgImageData, usvg::Error> {
+    // SVG comes from untrusted mail. usvg's default string resolver loads
+    // `<image href>` paths from the local filesystem, so only data: URLs
+    // (the data resolver) may embed images.
     let options = usvg::Options {
         fontdb: Arc::clone(&*FONT_DB),
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: usvg::ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| None),
+        },
         ..Default::default()
     };
     crate::node::SvgImageData::from_data(source, &options)
@@ -231,6 +238,49 @@ mod svg_tests {
         let svg = parse_svg_image(src).unwrap();
         assert!(svg.intrinsic_width().is_some());
         assert!(svg.intrinsic_height().is_some());
+    }
+
+    #[test]
+    fn image_href_never_reads_local_files() {
+        let local_png = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/icons/StoreLogo.png");
+        assert!(std::path::Path::new(local_png).exists());
+        let src = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="{local_png}" width="10" height="10"/></svg>"#
+        );
+        let svg = parse_svg_image(src.as_bytes()).unwrap();
+        assert!(svg.tree.root().children().is_empty());
+    }
+
+    #[test]
+    fn image_href_data_urls_still_render() {
+        let src = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><image href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" width="10" height="10"/></svg>"#;
+        let svg = parse_svg_image(src).unwrap();
+        assert!(!svg.tree.root().children().is_empty());
+    }
+
+    #[test]
+    fn svgz_bomb_is_rejected() {
+        use std::io::Write;
+
+        let mut svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">"#.to_vec();
+        svg.resize(svg.len() + 17 * 1024 * 1024, b' ');
+        svg.extend_from_slice(b"</svg>");
+        let mut encoder =
+            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&svg).unwrap();
+        let bomb = encoder.finish().unwrap();
+        assert!(matches!(
+            parse_svg_image(&bomb),
+            Err(usvg::Error::MalformedGZip)
+        ));
+
+        let mut encoder =
+            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"></svg>"#)
+            .unwrap();
+        let small = encoder.finish().unwrap();
+        assert!(parse_svg_image(&small).is_ok());
     }
 
     #[test]

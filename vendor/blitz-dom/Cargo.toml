@@ -57,6 +57,7 @@ scrollbars = []
 svg = [
     "dep:usvg",
     "dep:svgtypes",
+    "dep:flate2",
 ]
 system-fonts = ["parley/system"]
 text-transform-icu = [
@@ -106,6 +107,12 @@ version = "0.1.2"
 
 [dependencies.euclid]
 version = "0.22"
+
+[dependencies.flate2]
+version = "1"
+features = ["zlib-rs"]
+default-features = false
+optional = true
 
 [dependencies.html-escape]
 version = "0.2.13"

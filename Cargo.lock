@@ -936,6 +936,7 @@ dependencies = [
  "cursor-icon",
  "debug_timer",
  "euclid 0.22.14",
+ "flate2",
  "html-escape",
  "icu_locale_core",
  "icu_properties",

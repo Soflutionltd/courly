@@ -4,6 +4,24 @@ use std::sync::Arc;
 
 use usvg::roxmltree;
 
+/// Ceiling on a decompressed SVGZ document. `usvg::decompress_svgz` reads
+/// to the end, so a few KB of gzip could otherwise expand to gigabytes.
+const MAX_SVGZ_DECOMPRESSED_BYTES: u64 = 16 * 1024 * 1024;
+
+fn decompress_svgz_bounded(data: &[u8]) -> Result<Vec<u8>, usvg::Error> {
+    use std::io::Read;
+
+    let mut decompressed = Vec::new();
+    flate2::read::GzDecoder::new(data)
+        .take(MAX_SVGZ_DECOMPRESSED_BYTES + 1)
+        .read_to_end(&mut decompressed)
+        .map_err(|_| usvg::Error::MalformedGZip)?;
+    if decompressed.len() as u64 > MAX_SVGZ_DECOMPRESSED_BYTES {
+        return Err(usvg::Error::MalformedGZip);
+    }
+    Ok(decompressed)
+}
+
 /// Dimensions declared on the root `<svg>` element, before any resolution.
 ///
 /// Unlike [`usvg::Tree::size`], which always produces a concrete size, this
@@ -93,7 +111,7 @@ impl SvgImageData {
         // Gzip magic bytes, matching the SVGZ detection in `usvg::Tree::from_data`.
         let decompressed;
         let data = if data.starts_with(&[0x1f, 0x8b]) {
-            decompressed = usvg::decompress_svgz(data)?;
+            decompressed = decompress_svgz_bounded(data)?;
             decompressed.as_slice()
         } else {
             data
