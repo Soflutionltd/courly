@@ -950,6 +950,7 @@ impl App {
             },
             App::Ready(ready) => {
                 let task = ready.update(message);
+                ready.thread_list.date_groups = ready.settings.thread_date_groups;
                 Task::batch([task, ready.persist_preferences_if_changed()])
             }
         }

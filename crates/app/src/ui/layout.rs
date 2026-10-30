@@ -161,6 +161,20 @@ pub const LABEL_DOT_SIZE: f32 = 6.0;
 
 /// Thread card fixed height (three lines + padding)
 pub const THREAD_CARD_HEIGHT: f32 = 68.0;
+/// Date group header above thread cards ("Today", "Yesterday", ...).
+pub const PAD_THREAD_GROUP_HEADER: Padding = Padding {
+    top: 10.0,
+    right: 12.0,
+    bottom: 4.0,
+    left: 12.0,
+};
+/// Inset of the hairline between two thread cards.
+pub const PAD_THREAD_SEPARATOR: Padding = Padding {
+    top: 0.0,
+    right: 12.0,
+    bottom: 0.0,
+    left: 12.0,
+};
 
 /// Right sidebar section header padding
 pub const PAD_RIGHT_SIDEBAR: Padding = Padding {

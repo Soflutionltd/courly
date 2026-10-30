@@ -180,6 +180,8 @@ pub struct ThreadList {
     pub typeahead: TypeaheadState,
     /// BIMI logo LRU cache - shared with App for cross-component access.
     pub bimi_cache: Arc<rtsk::bimi::BimiLruCache>,
+    /// Show Today / Yesterday / ... headers. Mirrors the user preference.
+    pub date_groups: bool,
 }
 
 impl ThreadList {
@@ -197,6 +199,7 @@ impl ThreadList {
             auto_advance_direction: AutoAdvanceDirection::Next,
             typeahead: TypeaheadState::default(),
             bimi_cache,
+            date_groups: true,
         }
     }
 
@@ -681,8 +684,48 @@ fn thread_list_header<'a>(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
+    use super::thread_date_groups::{GroupKey, headers};
+
+    let group_headers = if state.date_groups {
+        let keys: Vec<GroupKey> = state
+            .threads
+            .iter()
+            .map(|thread| GroupKey {
+                pinned: thread.is_pinned,
+                last_message_at: thread.last_message_at,
+            })
+            .collect();
+        let now = jiff::Zoned::now();
+        headers(&keys, now.date(), now.time_zone())
+    } else {
+        vec![None; state.threads.len()]
+    };
+
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {
+        match group_headers.get(i).copied().flatten() {
+            Some(group) => {
+                list = list.push(
+                    container(
+                        text(group.label())
+                            .size(TEXT_XS)
+                            .font(crate::font::text_semibold())
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .padding(PAD_THREAD_GROUP_HEADER)
+                    .width(Length::Fill),
+                );
+            }
+            None if i > 0 => {
+                list = list.push(
+                    container(
+                        iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
+                    )
+                    .padding(PAD_THREAD_SEPARATOR),
+                );
+            }
+            None => {}
+        }
         // Look up BIMI logo for the sender's domain.
         let bimi_logo = thread
             .from_address
