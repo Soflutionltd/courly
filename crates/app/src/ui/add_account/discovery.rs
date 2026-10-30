@@ -11,6 +11,22 @@ use rtsk::discovery::types::{DiscoveredConfig, DiscoverySource, Protocol, Protoc
 use super::state::{AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard};
 use super::views::{ghost_button, primary_button};
 
+/// The option to sign in with right away, skipping the provider choice.
+/// A provider API (Gmail, Microsoft Graph) only comes from a known-provider
+/// match, even through the MX record: like Outlook, go straight to its
+/// sign-in without offering IMAP beside it.
+fn auto_option(config: &DiscoveredConfig) -> Option<usize> {
+    let provider_api = config.options.iter().position(|option| {
+        matches!(
+            option.protocol,
+            Protocol::GmailApi | Protocol::MicrosoftGraph
+        )
+    });
+    provider_api.or_else(|| {
+        (config.options.len() == 1 && config.options[0].source.is_high_confidence()).then_some(0)
+    })
+}
+
 impl AddAccountWizard {
     pub(super) fn handle_discovery_result(
         &mut self,
@@ -24,19 +40,9 @@ impl AddAccountWizard {
 
         self.discovery = Some(config.clone());
 
-        // Auto-proceed when exactly one high-confidence option. A provider
-        // API (Gmail, Microsoft Graph) only comes from a known-provider match,
-        // so it qualifies even when found through the MX record.
-        let auto_proceed = config.options.len() == 1
-            && (config.options[0].source.is_high_confidence()
-                || matches!(
-                    config.options[0].protocol,
-                    Protocol::GmailApi | Protocol::MicrosoftGraph
-                ));
-
-        if auto_proceed {
-            self.selected_option = Some(0);
-            return self.proceed_to_auth(&config.options[0]);
+        if let Some(index) = auto_option(config) {
+            self.selected_option = Some(index);
+            return self.proceed_to_auth(&config.options[index]);
         }
 
         // Multiple options or lower confidence: show selection
@@ -216,5 +222,68 @@ impl HighConfidence for DiscoverySource {
                 | DiscoverySource::JmapWellKnown
                 | DiscoverySource::OidcWellKnown
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rtsk::discovery::types::{AuthConfig, AuthMethod, Security, ServerConfig, UsernameFormat};
+
+    fn option(protocol: Protocol, source: DiscoverySource) -> ProtocolOption {
+        ProtocolOption {
+            protocol,
+            auth: AuthConfig {
+                method: AuthMethod::Password,
+                alternatives: Vec::new(),
+            },
+            provider_name: None,
+            help_url: None,
+            source,
+        }
+    }
+
+    fn imap() -> Protocol {
+        let server = |hostname: &str, port| ServerConfig {
+            hostname: hostname.to_string(),
+            port,
+            security: Security::Tls,
+            username: UsernameFormat::EmailAddress,
+        };
+        Protocol::Imap {
+            incoming: server("lavillart.com", 993),
+            outgoing: server("lavillart.com", 465),
+        }
+    }
+
+    fn config(options: Vec<ProtocolOption>) -> DiscoveredConfig {
+        DiscoveredConfig {
+            email: "contact@lavillart.com".to_string(),
+            domain: "lavillart.com".to_string(),
+            options,
+            resolved_domain: None,
+            oidc_endpoints: None,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn microsoft_365_domain_goes_straight_to_microsoft_sign_in() {
+        let mx = DiscoverySource::MxLookup {
+            mx_domain: "lavillart-com.mail.protection.outlook.com".to_string(),
+        };
+        let autoconfig = DiscoverySource::AutoconfigXml {
+            url: "https://autoconfig.lavillart.com".to_string(),
+        };
+        let found = config(vec![
+            option(imap(), autoconfig.clone()),
+            option(Protocol::MicrosoftGraph, mx),
+        ]);
+        assert_eq!(auto_option(&found), Some(1));
+        let imap_only = config(vec![
+            option(imap(), autoconfig.clone()),
+            option(imap(), autoconfig),
+        ]);
+        assert_eq!(auto_option(&imap_only), None);
     }
 }
