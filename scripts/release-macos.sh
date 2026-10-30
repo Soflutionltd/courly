@@ -131,7 +131,7 @@ spctl --assess --type execute --verbose=2 "$APP" 2>&1 | grep -q "Notarized Devel
 
 echo "==> Packaging the update"
 COPYFILE_DISABLE=1 tar -czf "$ARCHIVE" -C "$OUT" "${APP_NAME}.app"
-npx --yes @tauri-apps/cli@2 signer sign \
+npx --yes @tauri-apps/cli@2.12.4 signer sign \
   --private-key-path "$UPDATER_KEY" --password "" \
   --app-version "$VERSION" "$ARCHIVE" >/dev/null
 [[ -s "${ARCHIVE}.sig" ]] || die "updater signature was not written"
