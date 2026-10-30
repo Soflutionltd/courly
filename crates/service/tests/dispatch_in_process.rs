@@ -270,8 +270,9 @@ async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -
     shutdown(harness).await
 }
 
-/// Boot sequence with a missing `ratatoskr.key` returns the
-/// `BootExitCode::KeyLoadFailure` exit code. Verifies the boot-failure
+/// Boot sequence with a missing `ratatoskr.key` next to an existing
+/// database returns the `BootExitCode::KeyLoadFailure` exit code (a first
+/// install, with no database, generates the key instead). Verifies the boot-failure
 /// signal propagates from the spawn_blocking key-load step through the
 /// dispatch loop's `boot_failure_rx` and out as the run_service_with_io
 /// return value, without calling `std::process::exit` (which would kill
@@ -279,6 +280,7 @@ async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -
 #[tokio::test(flavor = "multi_thread")]
 async fn boot_sequence_returns_key_load_failure_when_key_file_is_missing() -> TestResult {
     let data_dir = TestDataDir::without_key("missing_key").expect("create test data dir");
+    std::fs::write(data_dir.path().join("ratatoskr.db"), b"").expect("create existing db");
     let (_client_stdin, service_stdin) = tokio::io::duplex(1024 * 1024);
     let (service_stdout, _client_stdout) = tokio::io::duplex(1024 * 1024);
     let service = tokio::spawn(service::run_service_with_io(

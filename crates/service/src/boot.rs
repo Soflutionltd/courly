@@ -1062,7 +1062,7 @@ async fn run_boot_sequence_inner(
 
     let key = match tokio::task::spawn_blocking({
         let dir = app_data_dir.clone();
-        move || crypto_key::load_encryption_key(&dir)
+        move || crypto_key::load_or_create_encryption_key(&dir)
     })
     .await
     {

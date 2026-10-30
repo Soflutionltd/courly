@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 base64.workspace = true
+getrandom = { version = "0.4.2", features = ["std"] }
 log = "0.4"
 zeroize = "1"
 

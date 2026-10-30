@@ -204,6 +204,65 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
     Ok(SecretKey { bytes: buf })
 }
 
+/// Like [`load_encryption_key`], but on a first install (no key file and
+/// no database yet) generates a random key first. When a database already
+/// exists the key is never regenerated: a fresh key could not decrypt the
+/// stored credentials, so the missing-key error surfaces instead.
+pub fn load_or_create_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> {
+    match load_encryption_key(app_data_dir) {
+        Err(LoadError::NotFound) if is_first_install(app_data_dir) => {
+            create_key_file(app_data_dir)?;
+            load_encryption_key(app_data_dir)
+        }
+        other => other,
+    }
+}
+
+fn is_first_install(app_data_dir: &Path) -> bool {
+    !app_data_dir.join("ratatoskr.db").exists() && !app_data_dir.join("velo.db").exists()
+}
+
+/// Write a random key to `ratatoskr.key` without ever exposing a partial
+/// file: the key goes to a private temp file first, then a hard link
+/// publishes it atomically and fails if another process already did.
+fn create_key_file(app_data_dir: &Path) -> Result<(), LoadError> {
+    use std::io::Write;
+
+    let path = app_data_dir.join("ratatoskr.key");
+    let temp_path = app_data_dir.join(format!("ratatoskr.key.{}.tmp", std::process::id()));
+    let io_error = |error: std::io::Error| LoadError::Io {
+        path: path.clone(),
+        error,
+    };
+
+    let mut bytes = Zeroizing::new([0u8; 32]);
+    getrandom::fill(bytes.as_mut_slice())
+        .map_err(|error| io_error(std::io::Error::other(error.to_string())))?;
+    let encoded = Zeroizing::new(STANDARD.encode(bytes.as_slice()));
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let written = options.open(&temp_path).and_then(|mut file| {
+        file.write_all(encoded.as_bytes())?;
+        file.sync_all()
+    });
+    let published = written.and_then(|()| std::fs::hard_link(&temp_path, &path));
+    let _ = std::fs::remove_file(&temp_path);
+    match published {
+        Ok(()) => {
+            log::info!("generated a new encryption key at {}", path.display());
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(io_error(error)),
+    }
+}
+
 /// Open the key file with `O_NOFOLLOW` (Unix) so a symlink at the path
 /// can't redirect us, then read its contents via the open fd. While the
 /// fd is open, fstat for owner-UID validation and fchmod to repair the
@@ -345,6 +404,43 @@ mod tests {
             Err(LoadError::NotFound) => {}
             other => panic!("expected NotFound, got {other:?}"),
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_install_generates_a_private_random_key() {
+        let dir = temp_dir("first_install").expect("temp dir");
+        let created = load_or_create_encryption_key(&dir).expect("create");
+        let reloaded = load_encryption_key(&dir).expect("reload");
+        assert_eq!(created.expose(), reloaded.expose());
+        assert!(created.expose().iter().any(|&b| b != 0));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join("ratatoskr.key"))
+                .expect("stat")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let leftovers = std::fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_key_with_existing_database_is_not_regenerated() {
+        let dir = temp_dir("lost_key").expect("temp dir");
+        std::fs::write(dir.join("ratatoskr.db"), b"").expect("write db");
+        match load_or_create_encryption_key(&dir) {
+            Err(LoadError::NotFound) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        assert!(!dir.join("ratatoskr.key").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
