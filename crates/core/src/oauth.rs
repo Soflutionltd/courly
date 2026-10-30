@@ -627,7 +627,10 @@ async fn fetch_provider_userinfo(
     tokens: &TokenExchangeResult,
 ) -> Result<OAuthUserInfo, String> {
     if provider.is_microsoft {
-        return fetch_microsoft_userinfo(&tokens.access_token).await;
+        if provider.provider_id == "microsoft_graph" {
+            return fetch_microsoft_userinfo(&tokens.access_token).await;
+        }
+        return microsoft_userinfo_from_id_token(tokens.id_token.as_deref());
     }
 
     let user_info_url = provider.user_info_url.as_deref().ok_or_else(|| {
@@ -725,6 +728,39 @@ fn microsoft_userinfo_from_me(data: MicrosoftGraphMe) -> Result<OAuthUserInfo, S
     })
 }
 
+/// The IMAP access token is issued for outlook.office.com, so Graph `/me`
+/// rejects it. The ID token from the same token response names the
+/// account; it came straight from the token endpoint over TLS, which
+/// OpenID Connect accepts without checking its signature.
+fn microsoft_userinfo_from_id_token(id_token: Option<&str>) -> Result<OAuthUserInfo, String> {
+    let payload = id_token
+        .and_then(|token| token.split('.').nth(1))
+        .ok_or("Microsoft did not return an ID token")?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| format!("Invalid Microsoft ID token: {e}"))?;
+    let claims: MicrosoftIdTokenClaims =
+        serde_json::from_slice(&bytes).map_err(|e| format!("Invalid Microsoft ID token: {e}"))?;
+    let email = claims
+        .email
+        .filter(|s| !s.is_empty())
+        .or(claims.preferred_username.filter(|s| !s.is_empty()))
+        .ok_or("Microsoft ID token did not contain an email address")?;
+
+    Ok(OAuthUserInfo {
+        email,
+        name: claims.name.unwrap_or_default(),
+        picture: None,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct MicrosoftIdTokenClaims {
+    email: Option<String>,
+    preferred_username: Option<String>,
+    name: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct GoogleUserInfo {
     email: String,
@@ -753,7 +789,30 @@ pub fn sha256_base64url(input: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, microsoft_userinfo_from_me};
+    use super::{
+        MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, microsoft_userinfo_from_id_token,
+        microsoft_userinfo_from_me,
+    };
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    fn id_token(claims: &str) -> String {
+        format!("e30.{}.c2ln", URL_SAFE_NO_PAD.encode(claims))
+    }
+
+    #[test]
+    fn microsoft_imap_userinfo_reads_the_id_token() {
+        let token = id_token(r#"{"email":"bob@outlook.com","name":"Bob"}"#);
+        let user = microsoft_userinfo_from_id_token(Some(&token)).expect("claims should parse");
+        assert_eq!(user.email, "bob@outlook.com");
+        assert_eq!(user.name, "Bob");
+
+        let token = id_token(r#"{"email":"","preferred_username":"bob@hotmail.com"}"#);
+        let user = microsoft_userinfo_from_id_token(Some(&token)).expect("claims should parse");
+        assert_eq!(user.email, "bob@hotmail.com");
+
+        assert!(microsoft_userinfo_from_id_token(None).is_err());
+        assert!(microsoft_userinfo_from_id_token(Some(&id_token(r#"{"name":"Bob"}"#))).is_err());
+    }
 
     /// `GroupMember.Read.All` needs a tenant admin's consent, so requesting
     /// it at sign-in blocks every ordinary user of a tenant that has not
@@ -777,6 +836,24 @@ mod tests {
         assert!(
             !scopes.iter().any(|scope| scope == SCOPE),
             "Outlook discovery registry entry must not request {SCOPE}"
+        );
+    }
+
+    /// The account's address comes from Graph `/me`, which answers 403
+    /// unless the token carries `User.Read`.
+    #[test]
+    fn microsoft_graph_scopes_allow_reading_the_profile() {
+        const SCOPE: &str = "User.Read";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(
+            scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry must request {SCOPE}"
         );
     }
 
