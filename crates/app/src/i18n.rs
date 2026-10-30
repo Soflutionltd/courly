@@ -132,6 +132,46 @@ pub fn month_name(month: i8) -> String {
     .into_owned()
 }
 
+/// "Mon", "lun.", by days since Monday (0 = Monday).
+pub fn weekday_short(days_from_monday: u8) -> String {
+    match days_from_monday {
+        0 => t!("date.short.monday"),
+        1 => t!("date.short.tuesday"),
+        2 => t!("date.short.wednesday"),
+        3 => t!("date.short.thursday"),
+        4 => t!("date.short.friday"),
+        5 => t!("date.short.saturday"),
+        _ => t!("date.short.sunday"),
+    }
+    .into_owned()
+}
+
+/// "Mar", "mars", by month number (1 = January).
+pub fn month_short(month: i8) -> String {
+    match month {
+        1 => t!("date.short.january"),
+        2 => t!("date.short.february"),
+        3 => t!("date.short.march"),
+        4 => t!("date.short.april"),
+        5 => t!("date.short.may"),
+        6 => t!("date.short.june"),
+        7 => t!("date.short.july"),
+        8 => t!("date.short.august"),
+        9 => t!("date.short.september"),
+        10 => t!("date.short.october"),
+        11 => t!("date.short.november"),
+        _ => t!("date.short.december"),
+    }
+    .into_owned()
+}
+
+/// Command labels are English `&'static str` in the cmdk crate; their
+/// translations are keyed `cmd.<English label>`.
+pub fn command(label: &'static str) -> std::borrow::Cow<'static, str> {
+    crate::_rust_i18n_try_translate(&rust_i18n::locale(), format!("cmd.{label}"))
+        .unwrap_or(std::borrow::Cow::Borrowed(label))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
