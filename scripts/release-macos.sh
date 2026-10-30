@@ -17,7 +17,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-REPO="Soflutionltd/ratatoskr"
+REPO="Soflutionltd/courly"
 APP_NAME="Courly"
 BUNDLE_ID="com.soflution.mail"
 TOOLCHAIN="+1.99.0"

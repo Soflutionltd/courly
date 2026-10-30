@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rust_i18n::t;
 
 const MANIFEST_URL: &str =
-    "https://github.com/Soflutionltd/ratatoskr/releases/latest/download/latest.json";
+    "https://github.com/Soflutionltd/courly/releases/latest/download/latest.json";
 /// Public half of `~/.tauri/ratatoskr_updater.key` (base64 of the minisign
 /// public key file, as written by `tauri signer generate`).
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4REQxQUQ2MzUxNTk1RjAKUldUd2xSVTExaHJkQ0t1Z1pUQUJmNlpiWVk5WmdsK0NoNTlmN2o4ck4vQkZ3UXIvMDRNbTB0ZGMK";
@@ -22,7 +22,7 @@ const PLATFORM: &str = "darwin-aarch64";
 /// The archive must come from this repository's own releases. The
 /// signature already guards integrity; this keeps a tampered manifest from
 /// sending every client to a third-party host.
-const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/Soflutionltd/ratatoskr/releases/download/";
+const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/Soflutionltd/courly/releases/download/";
 
 fn is_release_archive_url(url: &str) -> bool {
     url.strip_prefix(RELEASE_DOWNLOAD_PREFIX)
@@ -430,14 +430,14 @@ mod tests {
     #[test]
     fn archive_url_must_be_one_of_our_releases() {
         assert!(is_release_archive_url(
-            "https://github.com/Soflutionltd/ratatoskr/releases/download/v0.2.6/Ratatoskr.app.tar.gz"
+            "https://github.com/Soflutionltd/courly/releases/download/v0.2.7/Courly.app.tar.gz"
         ));
         for foreign in [
-            "https://evil.tld/Ratatoskr.app.tar.gz",
-            "http://github.com/Soflutionltd/ratatoskr/releases/download/v1/x.tar.gz",
-            "https://github.com/Soflutionltd/ratatoskr-fork/releases/download/v1/x.tar.gz",
-            "https://github.com/Soflutionltd/ratatoskr/releases/download/../../other/x",
-            "https://github.com/Soflutionltd/ratatoskr/releases/download/",
+            "https://evil.tld/Courly.app.tar.gz",
+            "http://github.com/Soflutionltd/courly/releases/download/v1/x.tar.gz",
+            "https://github.com/Soflutionltd/courly-fork/releases/download/v1/x.tar.gz",
+            "https://github.com/Soflutionltd/courly/releases/download/../../other/x",
+            "https://github.com/Soflutionltd/courly/releases/download/",
         ] {
             assert!(!is_release_archive_url(foreign), "{foreign}");
         }
