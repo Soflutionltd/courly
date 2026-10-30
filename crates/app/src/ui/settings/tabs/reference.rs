@@ -79,7 +79,10 @@ pub(super) fn about_tab<'a>() -> Element<'a, SettingsMessage> {
     col = col.push(section(
         tr(t!("settings.reference.application")),
         vec![
-            info_row(&t!("settings.reference.version"), "0.1.0-dev"),
+            info_row(
+                &t!("settings.reference.version"),
+                crate::updater::current_version(),
+            ),
             info_row(&t!("settings.reference.iced_version"), "0.15.0-dev"),
             info_row(&t!("settings.reference.platform"), std::env::consts::OS),
             info_row(
@@ -126,7 +129,7 @@ pub(super) fn about_tab<'a>() -> Element<'a, SettingsMessage> {
         tr(t!("settings.reference.links")),
         vec![action_row(
             tr(t!("settings.reference.github_repository")),
-            Some("folknor/ratatoskr"),
+            Some(crate::updater::REPOSITORY),
             Some(icon::globe()),
             ActionKind::Url,
             SettingsMessage::OpenGithub,

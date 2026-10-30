@@ -71,6 +71,12 @@ impl Component for Settings {
             SettingsMessage::AddAccountFromSettings => {
                 return (Task::none(), Some(SettingsEvent::OpenAddAccountWizard));
             }
+            SettingsMessage::CheckForUpdates => {
+                return (Task::none(), Some(SettingsEvent::CheckForUpdates));
+            }
+            SettingsMessage::OpenGithub => {
+                return (Task::none(), Some(SettingsEvent::OpenGithub));
+            }
             SettingsMessage::AccountCardClicked(id) => {
                 self.open_account_editor(&id);
                 return (Task::none(), None);
@@ -406,10 +412,7 @@ impl Settings {
 
     fn handle_simple_message(&mut self, message: SettingsMessage) {
         match message {
-            SettingsMessage::Noop
-            | SettingsMessage::CheckForUpdates
-            | SettingsMessage::OpenGithub
-            | SettingsMessage::SheetAnimTick(_) => {}
+            SettingsMessage::Noop | SettingsMessage::SheetAnimTick(_) => {}
             SettingsMessage::UndoInput(field) => {
                 self.undo_field(field);
             }

@@ -13,6 +13,7 @@ use std::time::Duration;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rust_i18n::t;
 
+pub const REPOSITORY: &str = "Soflutionltd/courly";
 const MANIFEST_URL: &str =
     "https://github.com/Soflutionltd/courly/releases/latest/download/latest.json";
 /// Public half of `~/.tauri/ratatoskr_updater.key` (base64 of the minisign
@@ -102,6 +103,9 @@ pub enum UpdaterMessage {
     Check {
         forced: bool,
     },
+    /// "Check for updates" in Settings: a forced check whose outcome is
+    /// reported even when there is nothing new.
+    CheckRequestedByUser,
     Checked(Result<Option<UpdateInfo>, String>),
     Install,
     Later,
@@ -117,6 +121,8 @@ pub struct UpdaterState {
     pub dismissed_version: Option<String>,
     pub attempts: u32,
     pub checking: bool,
+    /// The running check was asked for by the user; its outcome is shown.
+    pub report_outcome: bool,
     pub last_check: Option<std::time::Instant>,
 }
 

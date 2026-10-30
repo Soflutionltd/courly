@@ -727,6 +727,16 @@ impl ReadyApp {
                 .set_reading_zoom(zoom)
                 .map(Message::ReadingPane),
             SettingsEvent::OpenAddAccountWizard => self.handle_open_add_account_wizard(),
+            SettingsEvent::CheckForUpdates => {
+                self.handle_updater(crate::updater::UpdaterMessage::CheckRequestedByUser)
+            }
+            SettingsEvent::OpenGithub => {
+                crate::ui::reading_pane::open_url_in_browser(&format!(
+                    "https://github.com/{}",
+                    crate::updater::REPOSITORY
+                ));
+                Task::none()
+            }
             SettingsEvent::DeleteAccount(account_id) => self.handle_delete_account(account_id),
             SettingsEvent::SaveAccountChanges { account_id, params } => {
                 self.handle_save_account_changes(account_id, params)

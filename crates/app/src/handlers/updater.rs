@@ -1,4 +1,5 @@
 use iced::Task;
+use rust_i18n::t;
 
 use crate::app::ReadyApp;
 use crate::message::Message;
@@ -8,6 +9,13 @@ impl ReadyApp {
     pub(crate) fn handle_updater(&mut self, msg: UpdaterMessage) -> Task<Message> {
         match msg {
             UpdaterMessage::Check { forced } => self.start_update_check(forced),
+            UpdaterMessage::CheckRequestedByUser => {
+                let task = self.start_update_check(true);
+                if self.updater.checking {
+                    self.updater.report_outcome = true;
+                }
+                task
+            }
             UpdaterMessage::Checked(result) => self.handle_update_checked(result),
             UpdaterMessage::Install => self.start_update_install(),
             UpdaterMessage::Later => {
@@ -62,23 +70,35 @@ impl ReadyApp {
         result: Result<Option<updater::UpdateInfo>, String>,
     ) -> Task<Message> {
         self.updater.checking = false;
+        let report = std::mem::take(&mut self.updater.report_outcome);
         let info = match result {
             Ok(Some(info)) => info,
             Ok(None) => {
                 if matches!(self.updater.phase, Phase::Available(_)) {
                     self.updater.phase = Phase::Idle;
                 }
+                if report {
+                    self.status_bar.show_confirmation(
+                        t!("updater.up_to_date", version = updater::current_version())
+                            .into_owned(),
+                    );
+                }
                 return Task::none();
             }
             Err(error) => {
                 log::info!("update check failed: {error}");
+                if report {
+                    self.status_bar
+                        .show_confirmation(t!("updater.check_failed").into_owned());
+                }
                 return Task::none();
             }
         };
         if !matches!(self.updater.phase, Phase::Idle | Phase::Available(_)) {
             return Task::none();
         }
-        if self.updater.dismissed_version.as_deref() == Some(info.version.as_str()) {
+        let dismissed = self.updater.dismissed_version.as_deref() == Some(info.version.as_str());
+        if dismissed && !report {
             return Task::none();
         }
         log::info!(

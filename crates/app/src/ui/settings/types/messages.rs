@@ -256,6 +256,9 @@ pub enum SettingsEvent {
     /// The reading zoom changed; re-render open HTML bodies.
     EmailZoomChanged(f32),
     OpenAddAccountWizard,
+    /// The user asked for an update check from Settings > About.
+    CheckForUpdates,
+    OpenGithub,
     /// Request the App to save a signature (insert or update) via core CRUD.
     SaveSignature(SignatureSaveRequest),
     /// Request the App to delete a signature by ID.

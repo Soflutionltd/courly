@@ -80,6 +80,8 @@ account_setup.error.no_registration_endpoint: "No Client ID supplied and the pro
 account_setup.error.account_lookup_failed: "Failed to look up account: %{error}"
 account_setup.error.open_browser_failed: "Failed to open browser: %{error}"
 updater.available: "Courly %{version} is available"
+updater.up_to_date: "Courly %{version} is up to date"
+updater.check_failed: "Could not check for updates. Try again later."
 updater.later: "Later"
 updater.update: "Update"
 updater.downloading: "Downloading Courly %{version}"
