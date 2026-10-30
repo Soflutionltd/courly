@@ -16,11 +16,12 @@ use types::MailProviderKind;
 struct CachedToken {
     access_token: String,
     expires_at: Option<i64>,
+    /// Replaced when the provider rotates it in a refresh response.
+    refresh_token: String,
 }
 
 pub struct DbWriteBackTokenSource {
     account_id: String,
-    refresh_token: String,
     client_id: String,
     client_secret: Option<String>,
     provider: MailProviderKind,
@@ -48,7 +49,6 @@ impl DbWriteBackTokenSource {
     ) -> Self {
         Self {
             account_id,
-            refresh_token,
             client_id,
             client_secret,
             provider,
@@ -59,6 +59,7 @@ impl DbWriteBackTokenSource {
             cached: Arc::new(RwLock::new(CachedToken {
                 access_token,
                 expires_at,
+                refresh_token,
             })),
         }
     }
@@ -95,7 +96,6 @@ impl TokenSource for DbWriteBackTokenSource {
 
     fn refresh(&self) -> AccountFuture<Result<AccessToken, Error>> {
         let account_id = self.account_id.clone();
-        let refresh_token = self.refresh_token.clone();
         let client_id = self.client_id.clone();
         let client_secret = self.client_secret.clone();
         let token_endpoint = self.token_endpoint.clone();
@@ -104,6 +104,7 @@ impl TokenSource for DbWriteBackTokenSource {
         let http = self.http.clone();
         let cached = Arc::clone(&self.cached);
         Box::pin(async move {
+            let refresh_token = cached.read().await.refresh_token.clone();
             let refreshed = refresh_oauth_token_typed(
                 &http,
                 &token_endpoint,
@@ -120,15 +121,11 @@ impl TokenSource for DbWriteBackTokenSource {
                 let mut cached = cached.write().await;
                 cached.access_token = refreshed.access_token.clone();
                 cached.expires_at = Some(refreshed.expires_at);
+                if let Some(rotated) = &refreshed.refresh_token {
+                    cached.refresh_token = rotated.clone();
+                }
             }
-            persist_refreshed_token_best_effort(
-                writer,
-                account_id,
-                refreshed.access_token,
-                refreshed.expires_at,
-                key,
-            )
-            .await;
+            persist_refreshed_token_best_effort(writer, account_id, refreshed, key).await;
             Ok(token)
         })
     }
@@ -138,11 +135,16 @@ impl TokenSource for DbWriteBackTokenSource {
 struct TokenResponse {
     access_token: String,
     expires_in: i64,
+    /// Present when the provider rotates refresh tokens; the old one may
+    /// already be revoked, so it must replace the stored token.
+    #[serde(default)]
+    refresh_token: Option<String>,
 }
 
 struct TokenRefreshResult {
     access_token: String,
     expires_at: i64,
+    refresh_token: Option<String>,
 }
 
 // `Error` is bifrost_net's error type, fixed by the `TokenSource` trait, so the
@@ -214,6 +216,7 @@ async fn refresh_oauth_token_typed(
     Ok(TokenRefreshResult {
         access_token: resp.access_token,
         expires_at: now + resp.expires_in,
+        refresh_token: resp.refresh_token.filter(|token| !token.is_empty()),
     })
 }
 
@@ -226,11 +229,10 @@ fn body_contains_invalid_grant(body: &Bytes) -> bool {
 async fn persist_refreshed_token_best_effort(
     writer: WriterPool,
     account_id: String,
-    access_token: String,
-    expires_at: i64,
+    refreshed: TokenRefreshResult,
     key: [u8; 32],
 ) {
-    let encrypted = match crypto::encrypt_value(&key, &access_token) {
+    let encrypted = match crypto::encrypt_value(&key, &refreshed.access_token) {
         Ok(encrypted) => encrypted,
         Err(error) => {
             log::warn!(
@@ -239,9 +241,30 @@ async fn persist_refreshed_token_best_effort(
             return;
         }
     };
+    let encrypted_refresh = match refreshed
+        .refresh_token
+        .as_deref()
+        .map(|token| crypto::encrypt_value(&key, token))
+        .transpose()
+    {
+        Ok(encrypted_refresh) => encrypted_refresh,
+        Err(error) => {
+            log::warn!(
+                "failed to encrypt rotated bifrost refresh token for {account_id}: {error}"
+            );
+            return;
+        }
+    };
+    let expires_at = refreshed.expires_at;
     if let Err(error) = writer
         .with_write(move |conn| {
-            db::db::queries::persist_refreshed_token(conn, &account_id, &encrypted, expires_at)
+            db::db::queries::persist_refreshed_token(
+                conn,
+                &account_id,
+                &encrypted,
+                expires_at,
+                encrypted_refresh.as_deref(),
+            )
         })
         .await
     {
@@ -306,6 +329,72 @@ mod tests {
         assert_eq!(decrypted, "new-token");
         assert!(expires_at > jiff::Timestamp::now().as_second());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn bifrost_token_source_stores_and_reuses_a_rotated_refresh_token() {
+        let (writer, dir) = test_writer("rotate");
+        seed_account(&writer, "acct-rotate", "old-token", 100).await;
+        let (endpoint, requests) = recording_token_endpoint(vec![
+            r#"{"access_token":"a1","expires_in":3600,"refresh_token":"rotated-1"}"#,
+            r#"{"access_token":"a2","expires_in":3600}"#,
+        ])
+        .await;
+        let source = source(writer.clone(), "acct-rotate", "old-token", Some(100), endpoint);
+
+        source.refresh().await.expect("first refresh");
+        source.refresh().await.expect("second refresh");
+
+        let bodies = requests.await.expect("token endpoint");
+        assert!(bodies[0].contains("refresh_token=refresh-secret"));
+        assert!(bodies[1].contains("refresh_token=rotated-1"));
+        let stored = writer
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT refresh_token FROM accounts WHERE id = 'acct-rotate'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| error.to_string())
+            })
+            .await
+            .expect("read refresh token");
+        assert_ne!(stored, "rotated-1");
+        let decrypted = crypto::StoredSecret::parse(stored)
+            .expect("stored secret parses")
+            .decrypt(&KEY)
+            .expect("stored secret decrypts");
+        assert_eq!(decrypted, "rotated-1");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Serves one JSON body per connection and returns every request seen.
+    async fn recording_token_endpoint(
+        bodies: Vec<&'static str>,
+    ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind token endpoint");
+        let addr = listener.local_addr().expect("token endpoint addr");
+        let handle = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            for body in bodies {
+                let (mut stream, _) = listener.accept().await.expect("accept token request");
+                let mut request = [0u8; 2048];
+                let read = stream.read(&mut request).await.expect("read request");
+                seen.push(String::from_utf8_lossy(&request[..read]).into_owned());
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("write token response");
+            }
+            seen
+        });
+        (format!("http://{addr}/token"), handle)
     }
 
     #[tokio::test]

@@ -41,11 +41,18 @@ pub fn persist_refreshed_token(
     account_id: &str,
     encrypted_access_token: &str,
     expires_at: i64,
+    encrypted_rotated_refresh_token: Option<&str>,
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE accounts SET access_token = ?1, token_expires_at = ?2, \
+         refresh_token = COALESCE(?4, refresh_token), \
          updated_at = unixepoch() WHERE id = ?3",
-        params![encrypted_access_token, expires_at, account_id],
+        params![
+            encrypted_access_token,
+            expires_at,
+            account_id,
+            encrypted_rotated_refresh_token
+        ],
     )
     .map_err(|e| format!("Failed to persist refreshed token: {e}"))?;
     Ok(())
