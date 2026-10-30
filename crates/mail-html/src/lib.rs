@@ -146,11 +146,17 @@ pub struct RenderedMail {
     pub blocked_remote: usize,
 }
 
+/// Remote resources fetched per message once the user allows them. Each
+/// fetch runs on its own thread, so a message listing thousands of images
+/// must not get thousands of threads.
+const MAX_REMOTE_RESOURCES: usize = 200;
+
 struct MailNetProvider {
     inline_images: HashMap<String, Bytes>,
     remote: Option<RemoteFetcher>,
     blocked: AtomicUsize,
     pending: Arc<AtomicUsize>,
+    remote_requested: AtomicUsize,
 }
 
 /// Every request is answered, with empty bytes when the resource is skipped,
@@ -171,6 +177,12 @@ impl NetProvider for MailNetProvider {
                 .map(|(body, _)| Bytes::from(body)),
             "http" | "https" if url.host_str() == Some(BASE_HOST) => None,
             "http" | "https" => match &self.remote {
+                Some(_)
+                    if self.remote_requested.fetch_add(1, Ordering::Relaxed)
+                        >= MAX_REMOTE_RESOURCES =>
+                {
+                    None
+                }
                 Some(fetch) => {
                     let fetch = Arc::clone(fetch);
                     let pending = Arc::clone(&self.pending);
@@ -247,6 +259,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         remote: request.remote,
         blocked: AtomicUsize::new(0),
         pending: Arc::clone(&pending),
+        remote_requested: AtomicUsize::new(0),
     });
 
     let mut document = HtmlDocument::from_html(

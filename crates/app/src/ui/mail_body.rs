@@ -27,14 +27,100 @@ const REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
 /// one its state is waiting for, so renders for replaced content are dropped.
 static NEXT_TICKET: AtomicU64 = AtomicU64::new(1);
 
+/// Remote resources fetched at the same time, across all messages.
+const REMOTE_CONCURRENCY: usize = 6;
+const REMOTE_MAX_REDIRECTS: usize = 5;
+
+/// A sender chooses these URLs, so they must not reach the user's own
+/// machine or network (router admin pages, LAN services, cloud metadata).
+/// Names are checked after DNS resolution, which also covers rebinding.
 static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(REMOTE_TIMEOUT)
         .user_agent("Mozilla/5.0")
+        .dns_resolver(PublicOnlyResolver)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= REMOTE_MAX_REDIRECTS {
+                attempt.error("too many redirects")
+            } else if is_public_url(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .build()
         .map_err(|e| log::warn!("remote image client unavailable: {e}"))
         .ok()
 });
+
+static REMOTE_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(REMOTE_CONCURRENCY)));
+
+struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let public: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| is_public_ip(addr.ip()))
+                .collect();
+            if public.is_empty() {
+                return Err(format!("{host} resolves to no public address").into());
+            }
+            let addrs: reqwest::dns::Addrs = Box::new(public.into_iter());
+            Ok(addrs)
+        })
+    }
+}
+
+/// IP literals never reach the resolver, so the URL host is checked too.
+fn is_public_url(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    match host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+    {
+        Ok(ip) => is_public_ip(ip),
+        Err(_) => {
+            let name = host.trim_end_matches('.');
+            !(name.eq_ignore_ascii_case("localhost")
+                || name.to_ascii_lowercase().ends_with(".localhost"))
+        }
+    }
+}
+
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+                || ip.is_documentation()
+                || a == 0
+                || (a == 100 && (64..128).contains(&b))
+                || a >= 240)
+        }
+        std::net::IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
+            Some(mapped) => is_public_ip(std::net::IpAddr::V4(mapped)),
+            None => {
+                !(ip.is_unspecified()
+                    || ip.is_loopback()
+                    || ip.is_multicast()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local())
+            }
+        },
+    }
+}
 
 /// A rendered email body, ready to draw.
 pub struct RenderedBody {
@@ -236,16 +322,26 @@ fn remote_fetcher(runtime: tokio::runtime::Handle) -> RemoteFetcher {
     Arc::new(move |url: &Url| {
         let client = HTTP.as_ref()?;
         let url = url.clone();
+        if !is_public_url(&url) {
+            return None;
+        }
         runtime.block_on(async move {
-            let response = client.get(url).send().await.ok()?.error_for_status().ok()?;
+            let _permit = Arc::clone(&REMOTE_PERMITS).acquire_owned().await.ok()?;
+            let mut response = client.get(url).send().await.ok()?.error_for_status().ok()?;
             if response
                 .content_length()
                 .is_some_and(|len| len > REMOTE_MAX_BYTES)
             {
                 return None;
             }
-            let body = response.bytes().await.ok()?;
-            (body.len() as u64 <= REMOTE_MAX_BYTES).then_some(body)
+            let mut body = Vec::new();
+            while let Some(chunk) = response.chunk().await.ok()? {
+                if (body.len() + chunk.len()) as u64 > REMOTE_MAX_BYTES {
+                    return None;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Some(Bytes::from(body))
         })
     })
 }
@@ -362,6 +458,44 @@ fn remote_banner<'a, M: Clone + 'a>(on_show_remote: M) -> Element<'a, M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_content_never_targets_local_or_private_hosts() {
+        for blocked in [
+            "http://127.0.0.1/x.png",
+            "http://localhost/x.png",
+            "http://router.localhost./x.png",
+            "http://192.168.1.1/cgi-bin/reboot",
+            "http://10.0.0.5/",
+            "http://172.20.0.1/",
+            "http://169.254.169.254/latest/meta-data",
+            "http://100.64.0.1/",
+            "http://0.0.0.0/",
+            "http://[::1]/",
+            "http://[fd00::1]/",
+            "http://[fe80::1]/",
+            "http://[::ffff:192.168.1.1]/",
+        ] {
+            let url = Url::parse(blocked).expect("url");
+            assert!(!is_public_url(&url), "{blocked}");
+        }
+        for allowed in [
+            "https://images.example.com/logo.png",
+            "http://93.184.216.34/pixel.gif",
+            "https://[2606:4700::1111]/x.png",
+        ] {
+            let url = Url::parse(allowed).expect("url");
+            assert!(is_public_url(&url), "{allowed}");
+        }
+    }
+
+    #[tokio::test]
+    async fn names_resolving_to_loopback_are_refused() {
+        use reqwest::dns::Resolve;
+
+        let name: reqwest::dns::Name = "localhost".parse().expect("name");
+        assert!(PublicOnlyResolver.resolve(name).await.is_err());
+    }
 
     fn body(width: f32) -> Option<Arc<RenderedBody>> {
         Some(Arc::new(RenderedBody {

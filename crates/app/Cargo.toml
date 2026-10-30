@@ -12,7 +12,7 @@ workspace = true
 # Workspace deps
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["fs", "io-util", "process", "rt-multi-thread", "macros", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "rt-multi-thread", "macros", "sync", "time"] }
 jiff.workspace = true
 thiserror.workspace = true
 
