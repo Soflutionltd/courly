@@ -381,7 +381,7 @@ impl ReadyApp {
         // `contacts.contact_save_with_writeback` / `contacts.contact_delete`,
         // and the `action_ctx` field that carried the key is gone.
         // The Service holds the validated key bytes for the lifetime
-        // of the process; the UI never touches `ratatoskr.key`.
+        // of the process; the UI never touches `courly.key`.
 
         // Phase 8-1: search read state init is also dispatched async
         // (see body_store / inline_image_store comment above).

@@ -123,7 +123,7 @@ pub struct ReadDbState {
 
 impl ReadDbState {
     pub fn open_existing(app_data_dir: &Path) -> Result<Self, String> {
-        let db_path = app_data_dir.join("ratatoskr.db");
+        let db_path = app_data_dir.join(crate::db::DB_FILE_NAME);
         let conn = Connection::open_with_flags(
             &db_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,

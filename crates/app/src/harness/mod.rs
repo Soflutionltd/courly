@@ -351,7 +351,7 @@ fn lua_data_dir(state: &mut State) -> dellingr::Result<u8> {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).map_err(lua_io)?;
         if with_key {
-            std::fs::write(root.join("ratatoskr.key"), TEST_KEY).map_err(lua_io)?;
+            std::fs::write(root.join("courly.key"), TEST_KEY).map_err(lua_io)?;
         }
         guard.data_dirs.push(root.clone());
         guard.record_step("data_dir", "fixture", "created");

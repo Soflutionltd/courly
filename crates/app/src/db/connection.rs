@@ -16,7 +16,7 @@ impl Db {
     /// (idempotent) but contradicting "the Service is the only writer" and
     /// adding a redundant migration check on every boot.
     pub fn open(app_data_dir: &Path) -> Result<Self, String> {
-        let db_path = app_data_dir.join("ratatoskr.db");
+        let db_path = app_data_dir.join(rtsk::db::DB_FILE_NAME);
         if !db_path.exists() {
             return Err(format!("database not found: {}", db_path.display()));
         }

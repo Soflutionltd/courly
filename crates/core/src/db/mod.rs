@@ -1,4 +1,5 @@
 // Re-export foundation types from db
+pub use db_read::db::DB_FILE_NAME;
 pub use db_read::db::OptionalExtension;
 pub use db_read::db::ReadConn;
 pub use db_read::db::ReadDbState;

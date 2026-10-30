@@ -2443,7 +2443,7 @@ impl ServiceClient {
         // (a) bounds CPU under transient crashes - the doubling delay
         //     keeps a tight crashloop from re-running the entire boot
         //     sequence (lockfile open, db open, migration apply,
-        //     reconcile_velo_rename, recovery scan) once per second
+        //     reconcile_legacy_db_rename, recovery scan) once per second
         //     forever.
         // (b) gives the dying child's fs2 file lock time to be released
         //     by the kernel before the replacement spawn tries to

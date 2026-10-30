@@ -168,7 +168,7 @@ pub fn run_all_with_progress(
         return Err(format!(
             "Database was created with a previous schema version \
              (found migration versions {stale_versions:?} which are not in \
-             the current schema). Delete ratatoskr.db and re-seed."
+             the current schema). Delete courly.db and re-seed."
         ));
     }
 

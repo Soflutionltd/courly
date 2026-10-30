@@ -76,7 +76,7 @@ pub(crate) fn vault_dir(app_data_dir: &Path, send_id: &PlanId) -> PathBuf {
 /// The handler trusts the UI for *intent* (it can put any bytes in
 /// staging that the user asked it to) but never for *layout*. A
 /// staging path that escapes its `<send_id>/` subdirectory could read
-/// arbitrary app-data files (e.g. `ratatoskr.key`, the SQLite DB) and
+/// arbitrary app-data files (e.g. `courly.key`, the SQLite DB) and
 /// move them into the vault. The rules:
 ///
 /// - non-empty

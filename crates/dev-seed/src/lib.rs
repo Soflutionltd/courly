@@ -67,7 +67,7 @@ pub fn next_message_id(rng: &mut impl RngExt) -> String {
 
 /// Seed a fresh database at the given data directory.
 ///
-/// Creates `ratatoskr.db` (with schema via migrations) and `bodies.db`
+/// Creates `courly.db` (with schema via migrations) and `bodies.db`
 /// (via the body store API), then populates both with synthetic data.
 pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create data dir: {e}"))?;
@@ -82,7 +82,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
     let mut rng = SmallRng::seed_from_u64(config.seed);
 
     // ── Create main database with schema ────────────────────
-    let db_path = app_data_dir.join("ratatoskr.db");
+    let db_path = app_data_dir.join(db::db::DB_FILE_NAME);
     log::info!("Dev-seed: creating {}", db_path.display());
 
     let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("open db: {e}"))?;
@@ -239,7 +239,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
     Ok(())
 }
 
-/// Write a deterministic 32-byte encryption key to `ratatoskr.key`.
+/// Write a deterministic 32-byte encryption key to `courly.key`.
 ///
 /// `load_encryption_key` expects base64-encoded 32 bytes. The byte
 /// pattern `0xA5` is the same one Service tests use for in-process key
@@ -247,7 +247,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 /// keeps the dev-seed fixture and the test fixtures aligned, and avoids
 /// the all-zero pattern that crypto-key rejects unconditionally.
 fn write_dev_encryption_key(app_data_dir: &Path) -> Result<(), String> {
-    let key_path = app_data_dir.join("ratatoskr.key");
+    let key_path = app_data_dir.join("courly.key");
     // base64(b'\xA5' * 32) = ten "paWl" groups + trailing "paU=" pad.
     const DEV_KEY_B64: &str = "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaU=";
     std::fs::write(&key_path, DEV_KEY_B64).map_err(|e| format!("write key file: {e}"))?;

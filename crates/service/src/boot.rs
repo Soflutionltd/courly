@@ -24,7 +24,7 @@ use db::db::queries_extra::{
     backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
     get_all_accounts_sync, get_all_send_identity_emails_read,
 };
-use db::db::{apply_writer_pragmas, migrations, reconcile_velo_rename};
+use db::db::{DB_FILE_NAME, apply_writer_pragmas, migrations, reconcile_legacy_db_rename};
 use db::progress::ProgressReporter;
 use rusqlite::{Connection, OpenFlags};
 use service_api::{BootExitCode, BootPhase, BootReadyResponse};
@@ -41,7 +41,7 @@ use tokio_util::sync::CancellationToken;
 /// are read through the accessors, not through direct struct access in
 /// every consumer); they are not a TODO.
 pub(crate) struct BootContext {
-    /// AES-256-GCM key loaded from `<app_data>/ratatoskr.key`. Held in a
+    /// AES-256-GCM key loaded from `<app_data>/courly.key`. Held in a
     /// `SecretKey` wrapper so the bytes zeroize on drop - the Service's
     /// long-lived process otherwise risks the key lingering in freed
     /// heap pages or core dumps for the lifetime of the runtime.
@@ -1603,8 +1603,8 @@ fn open_db_and_migrate(
     app_data_dir: &std::path::Path,
     out_tx: &mpsc::Sender<Vec<u8>>,
 ) -> Result<MigrateOutcome, String> {
-    reconcile_velo_rename(app_data_dir)?;
-    let db_path = app_data_dir.join("ratatoskr.db");
+    reconcile_legacy_db_rename(app_data_dir)?;
+    let db_path = app_data_dir.join(DB_FILE_NAME);
     let conn = Connection::open_with_flags(
         &db_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE

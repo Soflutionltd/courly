@@ -25,26 +25,29 @@ pub use rusqlite::types::ToSql;
 /// batches) when the caller doesn't specify an explicit limit.
 pub const DEFAULT_QUERY_LIMIT: i64 = 500;
 
+pub use db_read::db::DB_FILE_NAME;
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-/// Reconcile the `velo.db` -> `ratatoskr.db` rename, including the partial-
+/// Reconcile the `ratatoskr.db` -> `courly.db` rename (the name the files
+/// had before the app became Courly), including the partial-
 /// rename case (`.db` renamed but `.db-wal` / `.db-shm` not yet).
 ///
 /// The original rename was three independent `std::fs::rename` calls (`.db`,
 /// `.db-wal`, `.db-shm`). A crash between the first and second call leaves
-/// `ratatoskr.db` alongside `velo.db-wal` / `velo.db-shm`. SQLite's WAL
+/// `courly.db` alongside `ratatoskr.db-wal` / `ratatoskr.db-shm`. SQLite's WAL
 /// recovery on open relies on the `.db-wal` file being present alongside
-/// `.db`; opening `ratatoskr.db` without the matching `ratatoskr.db-wal`
+/// `.db`; opening `courly.db` without the matching `courly.db-wal`
 /// would silently lose any WAL-only transactions.
 ///
 /// Recovery rules:
-/// - Full pre-rename state (only `velo.db` / `velo.db-wal` / `velo.db-shm`):
+/// - Full pre-rename state (only `ratatoskr.db` / `ratatoskr.db-wal` / `ratatoskr.db-shm`):
 ///   rename all three.
-/// - Already migrated (`ratatoskr.db` exists, no `velo.*` left): no-op.
-/// - Partial-rename state (`ratatoskr.db` exists AND `velo.db-wal` or
-///   `velo.db-shm` still exist): complete the WAL/SHM rename, but only if
-///   the corresponding `ratatoskr.db-wal` / `ratatoskr.db-shm` is absent
+/// - Already migrated (`courly.db` exists, no `ratatoskr.*` left): no-op.
+/// - Partial-rename state (`courly.db` exists AND `ratatoskr.db-wal` or
+///   `ratatoskr.db-shm` still exist): complete the WAL/SHM rename, but only if
+///   the corresponding `courly.db-wal` / `courly.db-shm` is absent
 ///   (otherwise we'd clobber a fresh WAL written by a post-rename open).
 ///
 /// Failure semantics: WAL/SHM rename failures are FATAL (return Err). The
@@ -54,45 +57,45 @@ use std::sync::{Arc, Mutex};
 /// prevent. Orphan-removal failures (when both old and new sidecars exist)
 /// are non-fatal because the new sidecar is authoritative; the orphan only
 /// wastes disk.
-pub fn reconcile_velo_rename(app_data_dir: &Path) -> Result<(), String> {
-    let new_db = app_data_dir.join("ratatoskr.db");
-    let new_wal = app_data_dir.join("ratatoskr.db-wal");
-    let new_shm = app_data_dir.join("ratatoskr.db-shm");
-    let old_db = app_data_dir.join("velo.db");
-    let old_wal = app_data_dir.join("velo.db-wal");
-    let old_shm = app_data_dir.join("velo.db-shm");
+pub fn reconcile_legacy_db_rename(app_data_dir: &Path) -> Result<(), String> {
+    let new_db = app_data_dir.join("courly.db");
+    let new_wal = app_data_dir.join("courly.db-wal");
+    let new_shm = app_data_dir.join("courly.db-shm");
+    let old_db = app_data_dir.join("ratatoskr.db");
+    let old_wal = app_data_dir.join("ratatoskr.db-wal");
+    let old_shm = app_data_dir.join("ratatoskr.db-shm");
 
     if !new_db.exists() && old_db.exists() {
-        log::info!("Migrating database: velo.db -> ratatoskr.db");
+        log::info!("Migrating database: ratatoskr.db -> courly.db");
         std::fs::rename(&old_db, &new_db)
-            .map_err(|e| format!("rename velo.db -> ratatoskr.db: {e}"))?;
+            .map_err(|e| format!("rename ratatoskr.db -> courly.db: {e}"))?;
     }
 
     if old_wal.exists() && !new_wal.exists() {
         std::fs::rename(&old_wal, &new_wal)
-            .map_err(|e| format!("rename velo.db-wal -> ratatoskr.db-wal: {e}"))?;
-        log::info!("Migrated WAL: velo.db-wal -> ratatoskr.db-wal");
+            .map_err(|e| format!("rename ratatoskr.db-wal -> courly.db-wal: {e}"))?;
+        log::info!("Migrated WAL: ratatoskr.db-wal -> courly.db-wal");
     } else if old_wal.exists() && new_wal.exists() {
         log::warn!(
-            "both velo.db-wal and ratatoskr.db-wal exist; \
+            "both ratatoskr.db-wal and courly.db-wal exist; \
              leaving the new WAL in place and removing the orphan"
         );
         if let Err(error) = std::fs::remove_file(&old_wal) {
-            log::warn!("failed to remove orphan velo.db-wal: {error}");
+            log::warn!("failed to remove orphan ratatoskr.db-wal: {error}");
         }
     }
 
     if old_shm.exists() && !new_shm.exists() {
         std::fs::rename(&old_shm, &new_shm)
-            .map_err(|e| format!("rename velo.db-shm -> ratatoskr.db-shm: {e}"))?;
-        log::info!("Migrated SHM: velo.db-shm -> ratatoskr.db-shm");
+            .map_err(|e| format!("rename ratatoskr.db-shm -> courly.db-shm: {e}"))?;
+        log::info!("Migrated SHM: ratatoskr.db-shm -> courly.db-shm");
     } else if old_shm.exists() && new_shm.exists() {
         log::warn!(
-            "both velo.db-shm and ratatoskr.db-shm exist; \
+            "both ratatoskr.db-shm and courly.db-shm exist; \
              leaving the new SHM in place and removing the orphan"
         );
         if let Err(error) = std::fs::remove_file(&old_shm) {
-            log::warn!("failed to remove orphan velo.db-shm: {error}");
+            log::warn!("failed to remove orphan ratatoskr.db-shm: {error}");
         }
     }
 
@@ -478,8 +481,8 @@ pub fn open_reader_pool(app_data_dir: &Path) -> Result<ReadDbState, String> {
 
 pub fn open_writer_pool(app_data_dir: &Path) -> Result<WriterPool, String> {
     std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
-    reconcile_velo_rename(app_data_dir)?;
-    let db_path = app_data_dir.join("ratatoskr.db");
+    reconcile_legacy_db_rename(app_data_dir)?;
+    let db_path = app_data_dir.join(DB_FILE_NAME);
     let conn = Connection::open_with_flags(
         &db_path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -495,8 +498,8 @@ pub fn open_writer_pool(app_data_dir: &Path) -> Result<WriterPool, String> {
 }
 
 #[cfg(test)]
-mod reconcile_velo_rename_tests {
-    use super::reconcile_velo_rename;
+mod reconcile_legacy_db_rename_tests {
+    use super::reconcile_legacy_db_rename;
     use std::fs;
     use tempfile::TempDir;
 
@@ -524,92 +527,92 @@ mod reconcile_velo_rename_tests {
     #[test]
     fn empty_dir_is_noop() {
         let tmp = TempDir::new().expect("temp dir");
-        reconcile_velo_rename(tmp.path()).expect("empty dir should reconcile cleanly");
+        reconcile_legacy_db_rename(tmp.path()).expect("empty dir should reconcile cleanly");
+        assert_absent(tmp.path(), "courly.db");
         assert_absent(tmp.path(), "ratatoskr.db");
-        assert_absent(tmp.path(), "velo.db");
     }
 
-    /// Already-migrated state (only ratatoskr.* exists). No-op success.
+    /// Already-migrated state (only courly.* exists). No-op success.
     #[test]
     fn already_migrated_is_noop() {
+        let tmp = TempDir::new().expect("temp dir");
+        touch(tmp.path(), "courly.db", b"db");
+        touch(tmp.path(), "courly.db-wal", b"wal");
+        touch(tmp.path(), "courly.db-shm", b"shm");
+        reconcile_legacy_db_rename(tmp.path()).expect("already-migrated should reconcile cleanly");
+        assert_present(tmp.path(), "courly.db");
+        assert_present(tmp.path(), "courly.db-wal");
+        assert_present(tmp.path(), "courly.db-shm");
+    }
+
+    /// Full pre-rename state (only ratatoskr.* exists). All three rename to
+    /// courly.*; the ratatoskr.* files are gone.
+    #[test]
+    fn full_pre_rename_renames_all_three() {
         let tmp = TempDir::new().expect("temp dir");
         touch(tmp.path(), "ratatoskr.db", b"db");
         touch(tmp.path(), "ratatoskr.db-wal", b"wal");
         touch(tmp.path(), "ratatoskr.db-shm", b"shm");
-        reconcile_velo_rename(tmp.path()).expect("already-migrated should reconcile cleanly");
-        assert_present(tmp.path(), "ratatoskr.db");
-        assert_present(tmp.path(), "ratatoskr.db-wal");
-        assert_present(tmp.path(), "ratatoskr.db-shm");
-    }
-
-    /// Full pre-rename state (only velo.* exists). All three rename to
-    /// ratatoskr.*; the velo.* files are gone.
-    #[test]
-    fn full_pre_rename_renames_all_three() {
-        let tmp = TempDir::new().expect("temp dir");
-        touch(tmp.path(), "velo.db", b"db");
-        touch(tmp.path(), "velo.db-wal", b"wal");
-        touch(tmp.path(), "velo.db-shm", b"shm");
-        reconcile_velo_rename(tmp.path()).expect("full pre-rename should succeed");
-        assert_present(tmp.path(), "ratatoskr.db");
-        assert_present(tmp.path(), "ratatoskr.db-wal");
-        assert_present(tmp.path(), "ratatoskr.db-shm");
-        assert_absent(tmp.path(), "velo.db");
-        assert_absent(tmp.path(), "velo.db-wal");
-        assert_absent(tmp.path(), "velo.db-shm");
+        reconcile_legacy_db_rename(tmp.path()).expect("full pre-rename should succeed");
+        assert_present(tmp.path(), "courly.db");
+        assert_present(tmp.path(), "courly.db-wal");
+        assert_present(tmp.path(), "courly.db-shm");
+        assert_absent(tmp.path(), "ratatoskr.db");
+        assert_absent(tmp.path(), "ratatoskr.db-wal");
+        assert_absent(tmp.path(), "ratatoskr.db-shm");
     }
 
     /// Partial-rename state (.db renamed but .db-wal / .db-shm not yet).
     /// Reconcile completes the WAL + SHM rename. This is the critical case
-    /// the partial-rename comment in `reconcile_velo_rename` documents - a
+    /// the partial-rename comment in `reconcile_legacy_db_rename` documents - a
     /// regression that opens the DB without the WAL would silently lose
     /// uncheckpointed transactions.
     #[test]
     fn partial_rename_completes_wal_and_shm() {
         let tmp = TempDir::new().expect("temp dir");
-        touch(tmp.path(), "ratatoskr.db", b"db-renamed");
-        touch(tmp.path(), "velo.db-wal", b"wal-from-prior-run");
-        touch(tmp.path(), "velo.db-shm", b"shm-from-prior-run");
-        reconcile_velo_rename(tmp.path()).expect("partial rename should complete");
-        assert_present(tmp.path(), "ratatoskr.db");
-        assert_present(tmp.path(), "ratatoskr.db-wal");
-        assert_present(tmp.path(), "ratatoskr.db-shm");
-        assert_absent(tmp.path(), "velo.db-wal");
-        assert_absent(tmp.path(), "velo.db-shm");
+        touch(tmp.path(), "courly.db", b"db-renamed");
+        touch(tmp.path(), "ratatoskr.db-wal", b"wal-from-prior-run");
+        touch(tmp.path(), "ratatoskr.db-shm", b"shm-from-prior-run");
+        reconcile_legacy_db_rename(tmp.path()).expect("partial rename should complete");
+        assert_present(tmp.path(), "courly.db");
+        assert_present(tmp.path(), "courly.db-wal");
+        assert_present(tmp.path(), "courly.db-shm");
+        assert_absent(tmp.path(), "ratatoskr.db-wal");
+        assert_absent(tmp.path(), "ratatoskr.db-shm");
         assert_eq!(
-            fs::read(tmp.path().join("ratatoskr.db-wal")).expect("read wal"),
+            fs::read(tmp.path().join("courly.db-wal")).expect("read wal"),
             b"wal-from-prior-run",
             "the renamed WAL must carry the original bytes",
         );
     }
 
-    /// Partial-rename with only WAL still in velo namespace (SHM already
+    /// Partial-rename with only WAL still in ratatoskr namespace (SHM already
     /// renamed). Completes the WAL rename only.
     #[test]
     fn partial_rename_wal_only_completes_wal() {
         let tmp = TempDir::new().expect("temp dir");
-        touch(tmp.path(), "ratatoskr.db", b"db");
-        touch(tmp.path(), "ratatoskr.db-shm", b"shm-already-migrated");
-        touch(tmp.path(), "velo.db-wal", b"wal-from-prior-run");
-        reconcile_velo_rename(tmp.path()).expect("partial-rename WAL-only should complete");
-        assert_present(tmp.path(), "ratatoskr.db-wal");
-        assert_absent(tmp.path(), "velo.db-wal");
+        touch(tmp.path(), "courly.db", b"db");
+        touch(tmp.path(), "courly.db-shm", b"shm-already-migrated");
+        touch(tmp.path(), "ratatoskr.db-wal", b"wal-from-prior-run");
+        reconcile_legacy_db_rename(tmp.path()).expect("partial-rename WAL-only should complete");
+        assert_present(tmp.path(), "courly.db-wal");
+        assert_absent(tmp.path(), "ratatoskr.db-wal");
     }
 
     /// Both old and new WAL exist. Per the function's documented contract
-    /// the new WAL is authoritative; the orphan velo.db-wal is removed and
+    /// the new WAL is authoritative; the orphan ratatoskr.db-wal is removed and
     /// the new one is left untouched.
     #[test]
     fn dual_existence_preserves_new_wal_and_removes_orphan() {
         let tmp = TempDir::new().expect("temp dir");
-        touch(tmp.path(), "ratatoskr.db", b"db");
-        touch(tmp.path(), "ratatoskr.db-wal", b"new-wal-keep");
-        touch(tmp.path(), "velo.db-wal", b"orphan-wal-discard");
-        reconcile_velo_rename(tmp.path()).expect("dual-existence should reconcile cleanly");
-        assert_present(tmp.path(), "ratatoskr.db-wal");
-        assert_absent(tmp.path(), "velo.db-wal");
+        touch(tmp.path(), "courly.db", b"db");
+        touch(tmp.path(), "courly.db-wal", b"new-wal-keep");
+        touch(tmp.path(), "ratatoskr.db-wal", b"orphan-wal-discard");
+        reconcile_legacy_db_rename(tmp.path()).expect("dual-existence should reconcile cleanly");
+        assert_present(tmp.path(), "courly.db-wal");
+        assert_absent(tmp.path(), "ratatoskr.db-wal");
         assert_eq!(
-            fs::read(tmp.path().join("ratatoskr.db-wal")).expect("read wal"),
+            fs::read(tmp.path().join("courly.db-wal")).expect("read wal"),
             b"new-wal-keep",
             "the new WAL must be untouched",
         );
@@ -619,14 +622,14 @@ mod reconcile_velo_rename_tests {
     #[test]
     fn dual_existence_preserves_new_shm_and_removes_orphan() {
         let tmp = TempDir::new().expect("temp dir");
-        touch(tmp.path(), "ratatoskr.db", b"db");
-        touch(tmp.path(), "ratatoskr.db-shm", b"new-shm-keep");
-        touch(tmp.path(), "velo.db-shm", b"orphan-shm-discard");
-        reconcile_velo_rename(tmp.path()).expect("dual-existence should reconcile cleanly");
-        assert_present(tmp.path(), "ratatoskr.db-shm");
-        assert_absent(tmp.path(), "velo.db-shm");
+        touch(tmp.path(), "courly.db", b"db");
+        touch(tmp.path(), "courly.db-shm", b"new-shm-keep");
+        touch(tmp.path(), "ratatoskr.db-shm", b"orphan-shm-discard");
+        reconcile_legacy_db_rename(tmp.path()).expect("dual-existence should reconcile cleanly");
+        assert_present(tmp.path(), "courly.db-shm");
+        assert_absent(tmp.path(), "ratatoskr.db-shm");
         assert_eq!(
-            fs::read(tmp.path().join("ratatoskr.db-shm")).expect("read shm"),
+            fs::read(tmp.path().join("courly.db-shm")).expect("read shm"),
             b"new-shm-keep",
             "the new SHM must be untouched",
         );

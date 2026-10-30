@@ -1,4 +1,4 @@
-//! AES-256-GCM key file loader for Ratatoskr.
+//! AES-256-GCM key file loader for Courly.
 //!
 //! Single canonical implementation shared by `common` (UI-side load before
 //! Phase 2's IPC plumbing relocates this entirely Service-side) and
@@ -34,6 +34,15 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::{Path, PathBuf};
 use zeroize::{Zeroize, Zeroizing};
+
+/// The key file, in the app data directory.
+pub const KEY_FILE_NAME: &str = "courly.key";
+/// The name the key file had before the app became Courly. A key found
+/// under it is renamed on load.
+const LEGACY_KEY_FILE_NAME: &str = "ratatoskr.key";
+/// Database names, current and before the rename, whose presence means
+/// the install already holds credentials encrypted with a key.
+const DB_FILE_NAMES: [&str; 2] = ["courly.db", "ratatoskr.db"];
 
 /// 32-byte AES-256-GCM key. Implements `Zeroize` on drop so the key bytes
 /// don't linger in freed memory after callers finish using them. Callers
@@ -82,8 +91,7 @@ impl std::fmt::Debug for SecretKey {
 /// Outcome of [`load_encryption_key`].
 #[derive(Debug)]
 pub enum LoadError {
-    /// No key file found at either `ratatoskr.key` or the legacy
-    /// `velo.key`. Production callers should treat this as fatal -
+    /// No key file found. Production callers should treat this as fatal -
     /// silently falling back to a zero key would land credentials
     /// under known-public bytes.
     NotFound,
@@ -118,7 +126,7 @@ impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotFound => {
-                f.write_str("no encryption key file found (ratatoskr.key or legacy velo.key)")
+                write!(f, "no encryption key file found ({KEY_FILE_NAME})")
             }
             Self::WrongOwner {
                 path,
@@ -150,21 +158,15 @@ impl std::fmt::Display for LoadError {
 
 impl std::error::Error for LoadError {}
 
-/// Load the AES-256-GCM key from `<app_data_dir>/ratatoskr.key`, falling
-/// back to legacy `<app_data_dir>/velo.key`. See module docs for the
+/// Load the AES-256-GCM key from `<app_data_dir>/courly.key`, renaming a
+/// key left under the previous name first. See module docs for the
 /// security properties this enforces.
 pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> {
-    let primary = app_data_dir.join("ratatoskr.key");
-    let legacy = app_data_dir.join("velo.key");
-
-    let path = if primary.exists() {
-        primary
-    } else if legacy.exists() {
-        log::debug!("using legacy key file velo.key");
-        legacy
-    } else {
+    let path = app_data_dir.join(KEY_FILE_NAME);
+    adopt_legacy_key(app_data_dir, &path)?;
+    if !path.exists() {
         return Err(LoadError::NotFound);
-    };
+    }
 
     log::debug!("loading encryption key from {}", path.display());
     // `contents` and `decoded` carry the raw key material; both go through
@@ -204,6 +206,29 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
     Ok(SecretKey { bytes: buf })
 }
 
+/// Rename the key file from its name before the rename to Courly. The
+/// rename is atomic on the volume, so a crash leaves one name or the other,
+/// and a symlink stays a symlink, which the `O_NOFOLLOW` open then refuses.
+/// When both names exist the current one wins and the old one is left as is.
+fn adopt_legacy_key(app_data_dir: &Path, path: &Path) -> Result<(), LoadError> {
+    let legacy = app_data_dir.join(LEGACY_KEY_FILE_NAME);
+    if path.exists() || !legacy.exists() {
+        return Ok(());
+    }
+    match std::fs::rename(&legacy, path) {
+        Ok(()) => {
+            log::info!("renamed the key file {LEGACY_KEY_FILE_NAME} to {KEY_FILE_NAME}");
+            Ok(())
+        }
+        // The UI and the Service both load the key; the other one renamed it.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && path.exists() => Ok(()),
+        Err(error) => Err(LoadError::Io {
+            path: legacy,
+            error,
+        }),
+    }
+}
+
 /// Like [`load_encryption_key`], but on a first install (no key file and
 /// no database yet) generates a random key first. When a database already
 /// exists the key is never regenerated: a fresh key could not decrypt the
@@ -219,17 +244,19 @@ pub fn load_or_create_encryption_key(app_data_dir: &Path) -> Result<SecretKey, L
 }
 
 fn is_first_install(app_data_dir: &Path) -> bool {
-    !app_data_dir.join("ratatoskr.db").exists() && !app_data_dir.join("velo.db").exists()
+    !DB_FILE_NAMES
+        .iter()
+        .any(|name| app_data_dir.join(name).exists())
 }
 
-/// Write a random key to `ratatoskr.key` without ever exposing a partial
+/// Write a random key to `courly.key` without ever exposing a partial
 /// file: the key goes to a private temp file first, then a hard link
 /// publishes it atomically and fails if another process already did.
 fn create_key_file(app_data_dir: &Path) -> Result<(), LoadError> {
     use std::io::Write;
 
-    let path = app_data_dir.join("ratatoskr.key");
-    let temp_path = app_data_dir.join(format!("ratatoskr.key.{}.tmp", std::process::id()));
+    let path = app_data_dir.join(KEY_FILE_NAME);
+    let temp_path = app_data_dir.join(format!("{KEY_FILE_NAME}.{}.tmp", std::process::id()));
     let io_error = |error: std::io::Error| LoadError::Io {
         path: path.clone(),
         error,
@@ -366,34 +393,48 @@ mod tests {
     }
 
     #[test]
-    fn loads_well_formed_ratatoskr_key() {
+    fn loads_well_formed_key() {
         let dir = temp_dir("ok").expect("temp dir");
         let original = [7u8; 32];
-        write_b64_key(&dir.join("ratatoskr.key"), &original).expect("write key");
+        write_b64_key(&dir.join(KEY_FILE_NAME), &original).expect("write key");
         let key = load_encryption_key(&dir).expect("load");
         assert_eq!(key.expose(), &original);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn falls_back_to_legacy_velo_key() {
+    fn a_key_under_the_previous_name_is_renamed_and_loaded() {
         let dir = temp_dir("legacy").expect("temp dir");
         let original = [42u8; 32];
-        write_b64_key(&dir.join("velo.key"), &original).expect("write velo");
+        write_b64_key(&dir.join(LEGACY_KEY_FILE_NAME), &original).expect("write legacy");
         let key = load_encryption_key(&dir).expect("load");
         assert_eq!(key.expose(), &original);
+        assert!(dir.join(KEY_FILE_NAME).exists());
+        assert!(!dir.join(LEGACY_KEY_FILE_NAME).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn prefers_ratatoskr_over_velo() {
+    fn the_current_key_wins_over_the_previous_name() {
         let dir = temp_dir("prefer").expect("temp dir");
         let primary = [1u8; 32];
         let legacy = [2u8; 32];
-        write_b64_key(&dir.join("ratatoskr.key"), &primary).expect("primary");
-        write_b64_key(&dir.join("velo.key"), &legacy).expect("legacy");
+        write_b64_key(&dir.join(KEY_FILE_NAME), &primary).expect("primary");
+        write_b64_key(&dir.join(LEGACY_KEY_FILE_NAME), &legacy).expect("legacy");
         let key = load_encryption_key(&dir).expect("load");
         assert_eq!(key.expose(), &primary);
+        assert!(dir.join(LEGACY_KEY_FILE_NAME).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_under_the_previous_name_blocks_key_generation() {
+        let dir = temp_dir("legacy_db").expect("temp dir");
+        std::fs::write(dir.join(DB_FILE_NAMES[1]), b"").expect("write db");
+        match load_or_create_encryption_key(&dir) {
+            Err(LoadError::NotFound) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -417,7 +458,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(dir.join("ratatoskr.key"))
+            let mode = std::fs::metadata(dir.join(KEY_FILE_NAME))
                 .expect("stat")
                 .permissions()
                 .mode();
@@ -435,12 +476,12 @@ mod tests {
     #[test]
     fn missing_key_with_existing_database_is_not_regenerated() {
         let dir = temp_dir("lost_key").expect("temp dir");
-        std::fs::write(dir.join("ratatoskr.db"), b"").expect("write db");
+        std::fs::write(dir.join("courly.db"), b"").expect("write db");
         match load_or_create_encryption_key(&dir) {
             Err(LoadError::NotFound) => {}
             other => panic!("expected NotFound, got {other:?}"),
         }
-        assert!(!dir.join("ratatoskr.key").exists());
+        assert!(!dir.join(KEY_FILE_NAME).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -448,7 +489,7 @@ mod tests {
     fn wrong_length_key_is_rejected() {
         let dir = temp_dir("wrong_len").expect("temp dir");
         let bytes = [0u8; 16];
-        std::fs::write(dir.join("ratatoskr.key"), STANDARD.encode(bytes)).expect("write");
+        std::fs::write(dir.join(KEY_FILE_NAME), STANDARD.encode(bytes)).expect("write");
         match load_encryption_key(&dir) {
             Err(LoadError::WrongLength {
                 expected: 32,
@@ -462,7 +503,7 @@ mod tests {
     #[test]
     fn non_base64_key_is_rejected() {
         let dir = temp_dir("garbage").expect("temp dir");
-        std::fs::write(dir.join("ratatoskr.key"), "this is not base64!!!@@@").expect("write");
+        std::fs::write(dir.join(KEY_FILE_NAME), "this is not base64!!!@@@").expect("write");
         match load_encryption_key(&dir) {
             Err(LoadError::InvalidBase64(_)) => {}
             other => panic!("expected InvalidBase64, got {other:?}"),
@@ -475,7 +516,7 @@ mod tests {
     fn fchmod_repairs_overly_open_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp_dir("chmod").expect("temp dir");
-        let path = dir.join("ratatoskr.key");
+        let path = dir.join(KEY_FILE_NAME);
         write_b64_key(&path, &[3u8; 32]).expect("write");
         // Set a deliberately too-open mode so the loader has something
         // to repair. The fchmod-via-fd repair runs while the file is
@@ -494,7 +535,7 @@ mod tests {
     #[test]
     fn all_zero_key_is_rejected() {
         let dir = temp_dir("zero").expect("temp dir");
-        write_b64_key(&dir.join("ratatoskr.key"), &[0u8; 32]).expect("write");
+        write_b64_key(&dir.join(KEY_FILE_NAME), &[0u8; 32]).expect("write");
         match load_encryption_key(&dir) {
             Err(LoadError::AllZero { .. }) => {}
             other => panic!("expected AllZero, got {other:?}"),

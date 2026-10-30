@@ -1,9 +1,9 @@
 //! Single-instance file lock for the Service.
 //!
-//! Holds an OS-level exclusive lock on `<app_data>/ratatoskr.lock` for the
+//! Holds an OS-level exclusive lock on `<app_data>/courly.lock` for the
 //! lifetime of the Service. A second Service spawned against the same data
 //! dir gets `AcquireError::Contended` and exits with
-//! `BootExitCode::AnotherInstanceRunning`, letting the UI surface "Ratatoskr
+//! `BootExitCode::AnotherInstanceRunning`, letting the UI surface "Courly
 //! is already running" rather than "Service crashed."
 //!
 //! Lock release is kernel-managed: on Linux fs2 uses `flock`, which the kernel
@@ -23,7 +23,13 @@ use std::path::Path;
 #[derive(Debug)]
 pub(crate) struct LockGuard {
     _file: File,
+    _legacy: Option<File>,
 }
+
+const LOCK_FILE_NAME: &str = "courly.lock";
+/// The lock file of a Service built before the rename to Courly, which may
+/// still be running against the same data dir during an update.
+const LEGACY_LOCK_FILE_NAME: &str = "ratatoskr.lock";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum AcquireError {
@@ -39,19 +45,40 @@ pub(crate) enum AcquireError {
     Io(#[from] io::Error),
 }
 
-/// Try to take the exclusive lock at `<app_data>/ratatoskr.lock`. Creates the
+/// Try to take the exclusive lock at `<app_data>/courly.lock`. Creates the
 /// parent directory if missing (the same pattern `logging::init` uses for
 /// `<app_data>/logs/`).
+///
+/// A lock file left under the name used before the rename is locked too, so
+/// a Service of the previous version still running keeps this one out; once
+/// held, that file is removed.
 pub(crate) fn acquire(app_data_dir: &Path) -> Result<LockGuard, AcquireError> {
     std::fs::create_dir_all(app_data_dir)?;
-    let lock_path = app_data_dir.join("ratatoskr.lock");
     let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(&lock_path)?;
+        .open(app_data_dir.join(LOCK_FILE_NAME))?;
+    lock(&file)?;
+    let legacy_path = app_data_dir.join(LEGACY_LOCK_FILE_NAME);
+    let legacy = match OpenOptions::new().write(true).open(&legacy_path) {
+        Ok(legacy) => {
+            lock(&legacy)?;
+            std::fs::remove_file(&legacy_path)?;
+            Some(legacy)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(AcquireError::Io(error)),
+    };
+    Ok(LockGuard {
+        _file: file,
+        _legacy: legacy,
+    })
+}
+
+fn lock(file: &File) -> Result<(), AcquireError> {
     match file.try_lock_exclusive() {
-        Ok(()) => Ok(LockGuard { _file: file }),
+        Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::WouldBlock => Err(AcquireError::Contended),
         Err(error) => Err(AcquireError::Io(error)),
     }
@@ -81,7 +108,7 @@ mod tests {
     fn first_acquire_succeeds_and_creates_lockfile() {
         let dir = temp_data_dir("first").expect("temp dir");
         let guard = acquire(&dir).expect("first acquire");
-        assert!(dir.join("ratatoskr.lock").exists());
+        assert!(dir.join(LOCK_FILE_NAME).exists());
         drop(guard);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -155,6 +182,29 @@ mod tests {
         // closed the file handle and the kernel released the lock. A new
         // acquire on the same directory must succeed.
         let _retry = acquire(&dir).expect("acquire after panic-released lock");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_held_lock_of_the_previous_version_keeps_the_service_out() {
+        let dir = temp_data_dir("legacy_held").expect("temp dir");
+        let old = File::create(dir.join(LEGACY_LOCK_FILE_NAME)).expect("legacy lock");
+        old.try_lock_exclusive().expect("old service holds it");
+        match acquire(&dir) {
+            Err(AcquireError::Contended) => {}
+            other => panic!("expected Contended, got {other:?}"),
+        }
+        drop(old);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_free_lock_of_the_previous_version_is_taken_and_removed() {
+        let dir = temp_data_dir("legacy_free").expect("temp dir");
+        File::create(dir.join(LEGACY_LOCK_FILE_NAME)).expect("legacy lock");
+        let guard = acquire(&dir).expect("acquire");
+        assert!(!dir.join(LEGACY_LOCK_FILE_NAME).exists());
+        drop(guard);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,4 +1,4 @@
-//! Read-only surface for the main Ratatoskr database.
+//! Read-only surface for the main Courly database.
 
 pub mod blob_hash;
 pub mod progress;
@@ -18,6 +18,9 @@ pub mod db {
     pub use rusqlite::{Error as SqlError, OptionalExtension, Row, params};
 
     pub const DEFAULT_QUERY_LIMIT: i64 = 500;
+
+    /// The main database, in the app data directory.
+    pub const DB_FILE_NAME: &str = "courly.db";
 
     pub mod folder_roles;
     pub mod from_row;

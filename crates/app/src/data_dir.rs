@@ -65,13 +65,13 @@ mod tests {
         let base = tempfile::tempdir().expect("tempdir");
         let legacy = base.path().join(LEGACY_DATA_DIR_NAME);
         std::fs::create_dir(&legacy).expect("legacy dir");
-        std::fs::write(legacy.join("ratatoskr.db"), b"accounts").expect("db");
+        std::fs::write(legacy.join("courly.db"), b"accounts").expect("db");
 
         let resolved = resolve(base.path());
 
         assert_eq!(resolved, base.path().join(DATA_DIR_NAME));
         assert_eq!(
-            std::fs::read(resolved.join("ratatoskr.db")).expect("moved db"),
+            std::fs::read(resolved.join("courly.db")).expect("moved db"),
             b"accounts"
         );
         assert!(!legacy.exists());
@@ -94,11 +94,11 @@ mod tests {
         let legacy = base.path().join(LEGACY_DATA_DIR_NAME);
         std::fs::create_dir(&current).expect("current dir");
         std::fs::create_dir(&legacy).expect("legacy dir");
-        std::fs::write(legacy.join("ratatoskr.db"), b"old").expect("db");
+        std::fs::write(legacy.join("courly.db"), b"old").expect("db");
 
         assert_eq!(resolve(base.path()), current);
         assert_eq!(
-            std::fs::read(legacy.join("ratatoskr.db")).expect("legacy db"),
+            std::fs::read(legacy.join("courly.db")).expect("legacy db"),
             b"old"
         );
     }

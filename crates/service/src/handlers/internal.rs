@@ -2,7 +2,7 @@
 //!
 //! The encryption-key handle is the boundary that closes Phase 2
 //! carry-forward 19d. After Phase 6a-part-2 the UI no longer reads
-//! `ratatoskr.key` from disk for the bootstrap-snapshot path and no
+//! `courly.key` from disk for the bootstrap-snapshot path and no
 //! longer calls the snapshot-decrypt helpers locally. Cold-boot
 //! bootstrap data flows through `read_bootstrap_snapshots` (one IPC,
 //! both `UiBootstrapSnapshot` and `SettingsBootstrapSnapshot`

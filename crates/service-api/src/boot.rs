@@ -18,14 +18,14 @@ pub enum BootExitCode {
     /// Schema migration (or the velo-&gt;ratatoskr rename that precedes it)
     /// failed. Includes partial-rename recovery failures.
     MigrationFailure = 72,
-    /// `ratatoskr.key` could not be loaded. Phase 1 silently fell back to a
+    /// `courly.key` could not be loaded. Phase 1 silently fell back to a
     /// zero key; Phase 1.5 makes this fatal so auto-respawn never widens the
     /// window where data lands under the zero key.
     KeyLoadFailure = 73,
     /// Non-contention IO failure on the instance lock file (disk full,
     /// permission flip on the data dir, etc.). Distinct from the generic
     /// runtime exit-code-1 (`UnexpectedExit { Some(1) }`) so the UI can
-    /// surface a path-specific message naming `<app_data>/ratatoskr.lock`
+    /// surface a path-specific message naming `<app_data>/courly.lock`
     /// rather than the catch-all "Service exited unexpectedly".
     LockIoFailure = 74,
 }

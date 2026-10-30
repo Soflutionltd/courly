@@ -14,7 +14,7 @@ struct Harness {
     _data_dir: TestDataDir,
 }
 
-/// Per-test data dir with a dummy `ratatoskr.key` so the boot sequence's
+/// Per-test data dir with a dummy `courly.key` so the boot sequence's
 /// key-load step succeeds. Removed on drop to keep `target/` tidy.
 struct TestDataDir {
     path: PathBuf,
@@ -71,7 +71,7 @@ fn write_dummy_key(dir: &std::path::Path) -> std::io::Result<()> {
     // reason.
     let key_bytes = [0xA5u8; 32];
     let encoded = STANDARD.encode(key_bytes);
-    std::fs::write(dir.join("ratatoskr.key"), encoded)
+    std::fs::write(dir.join("courly.key"), encoded)
 }
 
 fn spawn_harness_with_suffix(suffix: &str) -> Harness {
@@ -270,7 +270,7 @@ async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -
     shutdown(harness).await
 }
 
-/// Boot sequence with a missing `ratatoskr.key` next to an existing
+/// Boot sequence with a missing `courly.key` next to an existing
 /// database returns the `BootExitCode::KeyLoadFailure` exit code (a first
 /// install, with no database, generates the key instead). Verifies the boot-failure
 /// signal propagates from the spawn_blocking key-load step through the
@@ -280,7 +280,7 @@ async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -
 #[tokio::test(flavor = "multi_thread")]
 async fn boot_sequence_returns_key_load_failure_when_key_file_is_missing() -> TestResult {
     let data_dir = TestDataDir::without_key("missing_key").expect("create test data dir");
-    std::fs::write(data_dir.path().join("ratatoskr.db"), b"").expect("create existing db");
+    std::fs::write(data_dir.path().join("courly.db"), b"").expect("create existing db");
     let (_client_stdin, service_stdin) = tokio::io::duplex(1024 * 1024);
     let (service_stdout, _client_stdout) = tokio::io::duplex(1024 * 1024);
     let service = tokio::spawn(service::run_service_with_io(
@@ -299,7 +299,7 @@ async fn boot_sequence_returns_key_load_failure_when_key_file_is_missing() -> Te
     Ok(())
 }
 
-/// Boot sequence with a corrupt `ratatoskr.db` (garbage bytes where the
+/// Boot sequence with a corrupt `courly.db` (garbage bytes where the
 /// SQLite header should be) returns `BootExitCode::MigrationFailure` (72).
 /// Locks in the as-exit-code mapping for the migration-failure branch -
 /// without this test, a refactor inverting the match arm in
@@ -307,11 +307,11 @@ async fn boot_sequence_returns_key_load_failure_when_key_file_is_missing() -> Te
 #[tokio::test(flavor = "multi_thread")]
 async fn boot_sequence_returns_migration_failure_when_db_is_corrupt() -> TestResult {
     let data_dir = TestDataDir::new("corrupt_db").expect("create test data dir");
-    // Write garbage bytes to ratatoskr.db. The migration-runner's first
+    // Write garbage bytes to courly.db. The migration-runner's first
     // SQL operation (CREATE TABLE IF NOT EXISTS _migrations) will fail
     // with a "file is not a database" error; that's what we want to test.
     std::fs::write(
-        data_dir.path().join("ratatoskr.db"),
+        data_dir.path().join("courly.db"),
         b"this is not a valid SQLite database file at all - garbage bytes only",
     )?;
     let (_client_stdin, service_stdin) = tokio::io::duplex(1024 * 1024);
