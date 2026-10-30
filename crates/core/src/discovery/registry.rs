@@ -154,6 +154,7 @@ static REGISTRY: &[RegistryEntry] = &[
                             "profile",
                             "email",
                             "User.Read",
+                            "User.ReadBasic.All",
                         ],
                         use_pkce: true,
                     },
