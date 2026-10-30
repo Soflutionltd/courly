@@ -103,14 +103,16 @@ pub(super) fn handle_key_press<M: Clone>(
             }
         }
 
-        // Delete key: remove selected token
+        // Delete key: remove selected token. A focused field keeps the key
+        // even with nothing to remove, so it never reaches the window-level
+        // shortcut that deletes the conversation.
         keyboard::Key::Named(keyboard::key::Named::Delete) => {
             if let Some(selected) = widget.selected_token {
                 shell.publish((widget.on_message)(TokenInputMessage::RemoveToken(
                     selected,
                 )));
-                shell.capture_event();
             }
+            shell.capture_event();
         }
 
         // Backspace
@@ -209,8 +211,8 @@ fn handle_backspace<M: Clone>(widget: &TokenInputWidget<'_, M>, shell: &mut Shel
         }
         if !widget.tokens.is_empty() {
             shell.publish((widget.on_message)(TokenInputMessage::BackspaceAtStart));
-            shell.capture_event();
         }
+        shell.capture_event();
     } else {
         let mut new_text = widget.text.to_string();
         new_text.pop();
