@@ -16,7 +16,7 @@ use crate::ui::layout::{
     PAD_HTML_BODY, PAD_ICON_BTN, PAD_THREAD_CARD, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS,
     TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS, THREAD_CARD_HEIGHT,
 };
-use crate::ui::theme;
+use crate::ui::theme::{self, RowActionTone};
 
 use super::avatars::{avatar_circle, label_dot, sender_avatar};
 
@@ -186,24 +186,25 @@ pub fn thread_card<'a, M: Clone + 'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    let pin_style = if thread.is_pinned {
-        theme::TextClass::Accent.style()
-    } else {
-        theme::TextClass::Tertiary.style()
-    };
-    let flag_style = if thread.is_starred {
-        theme::TextClass::Warning.style()
-    } else {
-        theme::TextClass::Tertiary.style()
-    };
     let actions = row![
-        row_action(icon::pin(), pin_style, on_action(index, ThreadRowAction::Pin)),
+        row_action(
+            icon::pin(),
+            RowActionTone::Accent,
+            thread.is_pinned,
+            on_action(index, ThreadRowAction::Pin),
+        ),
         row_action(
             icon::trash(),
-            theme::TextClass::Tertiary.style(),
+            RowActionTone::Danger,
+            false,
             on_action(index, ThreadRowAction::Trash),
         ),
-        row_action(icon::flag(), flag_style, on_action(index, ThreadRowAction::Flag)),
+        row_action(
+            icon::flag(),
+            RowActionTone::Warning,
+            thread.is_starred,
+            on_action(index, ThreadRowAction::Flag),
+        ),
     ]
     .spacing(SPACE_XXXS)
     .align_y(Alignment::Center);
@@ -299,13 +300,14 @@ pub fn thread_card<'a, M: Clone + 'a>(
 /// One of the pin, delete and flag buttons kept visible on every row.
 fn row_action<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    style: fn(&Theme) -> text::Style,
+    tone: RowActionTone,
+    active: bool,
     on_press: M,
 ) -> Element<'a, M> {
-    button(container(ico.size(ICON_SM).style(style)))
+    button(container(ico.size(ICON_SM)))
         .on_press(on_press)
         .padding(SPACE_XXXS)
-        .style(theme::ButtonClass::BareTransparent.style())
+        .style(theme::ButtonClass::RowAction { tone, active }.style())
         .into()
 }
 

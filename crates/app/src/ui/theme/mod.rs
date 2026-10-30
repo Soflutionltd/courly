@@ -29,7 +29,7 @@ pub const ON_AVATAR: Color = Color::WHITE;
 
 pub use avatar::{avatar_color, initials};
 pub use button::{
-    ButtonClass, RowPosition, style_filter_container, style_pill_card_button,
+    ButtonClass, RowActionTone, RowPosition, style_filter_container, style_pill_card_button,
     style_recessed_list_panel, style_settings_row_button,
 };
 pub use catalog::{THEMES, dark_theme, light_theme, theme_by_index};

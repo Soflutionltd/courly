@@ -23,6 +23,8 @@ pub enum ButtonClass {
     BareIcon,
     /// Fully transparent button (no bg, no border).
     BareTransparent,
+    /// Thread row icon: faded at rest, its tone on hover or while active.
+    RowAction { tone: RowActionTone, active: bool },
     /// Hoverable row (settings rows, collapsible headers).
     Action,
     /// Collapsed message row.
@@ -52,6 +54,17 @@ pub enum ButtonClass {
     Suggested,
 }
 
+/// Colour a thread row icon takes when hovered or active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowActionTone {
+    /// Pin: the blue of a pinned thread.
+    Accent,
+    /// Trash: red, as for every destructive action.
+    Danger,
+    /// Flag: the orange of a flagged thread.
+    Warning,
+}
+
 impl ButtonClass {
     /// Returns a style closure suitable for `.style()`.
     pub fn style(self) -> impl Fn(&Theme, button::Status) -> button::Style {
@@ -70,6 +83,9 @@ impl ButtonClass {
             Self::Ghost => style_ghost_button(theme, status),
             Self::BareIcon => style_bare_icon_button(theme, status),
             Self::BareTransparent => style_bare_transparent_button(),
+            Self::RowAction { tone, active } => {
+                style_row_action_button(theme, status, tone, active)
+            }
             Self::Action => style_action_button(theme, status),
             Self::CollapsedMessage => style_collapsed_message_button(theme, status),
             Self::StarActive => style_star_active_button(theme, status),
@@ -240,6 +256,30 @@ fn style_bare_icon_button(theme: &Theme, status: button::Status) -> button::Styl
 fn style_bare_transparent_button() -> button::Style {
     button::Style {
         background: None,
+        ..Default::default()
+    }
+}
+
+fn style_row_action_button(
+    theme: &Theme,
+    status: button::Status,
+    tone: RowActionTone,
+    active: bool,
+) -> button::Style {
+    let p = theme.palette();
+    let lit = active || matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let text_color = if lit {
+        match tone {
+            RowActionTone::Accent => p.primary.base.color,
+            RowActionTone::Danger => p.danger.base.color,
+            RowActionTone::Warning => p.warning.base.color,
+        }
+    } else {
+        p.background.strongest.text.scale_alpha(0.5)
+    };
+    button::Style {
+        background: None,
+        text_color,
         ..Default::default()
     }
 }
