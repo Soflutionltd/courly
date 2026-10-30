@@ -620,23 +620,31 @@ fn context_menu_radio_item<'a>(
 
 // ── Body ───────────────────────────────────────────────
 
+fn plain_text_body<'a>(
+    window_id: iced::window::Id,
+    state: &'a MessageViewState,
+) -> Element<'a, Message> {
+    let txt = state
+        .body_text
+        .as_deref()
+        .or(state.snippet.as_deref())
+        .unwrap_or("(no content)");
+    container(crate::ui::widgets::linked_text(txt, TEXT_LG, move |url| {
+        Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::LinkClicked(url)),
+        )
+    }))
+    .width(Length::Fill)
+    .into()
+}
+
 fn message_view_body<'a>(
     window_id: iced::window::Id,
     state: &'a MessageViewState,
 ) -> Element<'a, Message> {
     let body_content: Element<'_, Message> = match state.rendering_mode {
-        RenderingMode::PlainText => {
-            let txt = state
-                .body_text
-                .as_deref()
-                .or(state.snippet.as_deref())
-                .unwrap_or("(no content)");
-            text(txt)
-                .size(TEXT_LG)
-                .style(text::secondary)
-                .width(Length::Fill)
-                .into()
-        }
+        RenderingMode::PlainText => plain_text_body(window_id, state),
         RenderingMode::SimpleHtml | RenderingMode::OriginalHtml => {
             if state.body_html.is_some() {
                 let view_msg =
@@ -649,16 +657,7 @@ fn message_view_body<'a>(
                     view_msg(MessageViewMessage::LoadRemoteContent),
                 )
             } else {
-                let txt = state
-                    .body_text
-                    .as_deref()
-                    .or(state.snippet.as_deref())
-                    .unwrap_or("(no content)");
-                text(txt)
-                    .size(TEXT_LG)
-                    .style(text::secondary)
-                    .width(Length::Fill)
-                    .into()
+                plain_text_body(window_id, state)
             }
         }
         RenderingMode::Source => {

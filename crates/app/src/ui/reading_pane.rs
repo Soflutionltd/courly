@@ -930,6 +930,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 first_message_date,
                 &pane.search_highlight_terms,
                 html_body,
+                ReadingPaneMessage::LinkClicked,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Reply,

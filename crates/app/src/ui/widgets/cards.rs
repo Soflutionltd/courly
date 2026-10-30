@@ -270,6 +270,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
     html_body: Option<Element<'a, M>>,
+    on_link: impl Fn(String) -> M + 'a,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
     on_reply: impl Fn(usize) -> M,
@@ -387,7 +388,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
             .or(msg.snippet.as_deref())
             .unwrap_or("(no preview available)");
         if search_highlight_terms.is_empty() {
-            container(text(display).size(TEXT_LG))
+            container(super::linked_text(display, TEXT_LG, on_link))
                 .padding(PAD_BODY)
                 .into()
         } else {
