@@ -563,6 +563,8 @@ impl ReadyApp {
             }
             Message::EmailAction(action) => self.handle_email_action(action),
             Message::ConfirmPermanentDelete => self.confirm_permanent_delete(),
+            Message::FolderDialog(msg) => self.handle_folder_dialog(msg),
+            Message::FolderMarkedRead(result) => self.finish_folder_mark_read(result),
             Message::Toolbar(msg) => self.handle_toolbar(msg),
             Message::SearchScope(msg) => self.handle_search_scope(msg),
             Message::CancelPermanentDelete => {

@@ -233,6 +233,10 @@ pub enum Message {
     EmailAction(MailActionIntent),
     ConfirmPermanentDelete,
     CancelPermanentDelete,
+    FolderDialog(crate::ui::folder_dialog::FolderDialogMessage),
+    /// "Mark All as Read" on a folder finished: messages marked, or the
+    /// accounts that failed.
+    FolderMarkedRead(Result<usize, String>),
     /// Action service completed - carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         plan: crate::action_resolve::ActionExecutionPlan,

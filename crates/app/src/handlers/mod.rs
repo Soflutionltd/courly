@@ -13,6 +13,7 @@ mod chat;
 pub(crate) mod commands;
 mod contacts;
 mod core;
+mod folders;
 mod keyboard;
 pub mod labels;
 mod navigation;

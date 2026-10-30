@@ -101,6 +101,13 @@ impl ReadyApp {
                 ui::modal_overlay::ModalSurface::Modal,
                 Message::Noop,
             )
+        } else if let Some(dialog) = self.folder_dialog.as_ref() {
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                dialog.view().map(Message::FolderDialog),
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
         } else if self.palette.is_open() {
             let palette_widget = self.palette.view().map(Message::Palette);
 

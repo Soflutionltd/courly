@@ -86,6 +86,7 @@ impl ReadyApp {
             }
             SidebarEvent::ChatSelected(email) => self.enter_chat_view(&email),
             SidebarEvent::LayoutChanged(json) => self.persist_sidebar_layout(json),
+            SidebarEvent::Folder(command) => self.handle_folder_command(command),
         }
     }
 

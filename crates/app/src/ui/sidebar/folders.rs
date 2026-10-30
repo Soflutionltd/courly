@@ -11,8 +11,9 @@ use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
 use rtsk::scope::ViewScope;
 use types::{FolderId, SidebarSelection};
 
+use super::nav::{FolderMenu, MenuFolder};
 use super::search_here::build_search_here_user_folder_prefix;
-use super::{RowMenuAnchor, Sidebar, SidebarMessage};
+use super::{MoveTarget, RowMenuAnchor, Sidebar, SidebarMessage};
 
 /// A node in the depth-first tree traversal.
 struct TreeNode<'a> {
@@ -260,8 +261,8 @@ pub(super) fn folder_row_content<'a>(
         .into()
 }
 
-/// A subfolder row: selectable, right-click opens search-here and
-/// add-separator (below its top-level ancestor at `root_index`).
+/// A subfolder row: selectable, right-click opens the folder menu, whose
+/// separator goes below its top-level ancestor at `root_index`.
 fn folder_row<'a>(
     sidebar: &'a Sidebar,
     (scope, root_index): (&ViewScope, usize),
@@ -297,9 +298,54 @@ fn folder_row<'a>(
     if !menu_open {
         return row_el;
     }
+    let menu = FolderMenu {
+        query_prefix,
+        root_index,
+        shift: None,
+        folder: MenuFolder::own(scope, folder),
+    };
     super::nav::with_row_menu(
         scope,
         row_el,
-        super::nav::folder_menu_items(scope, query_prefix, root_index),
+        super::nav::folder_menu_items(scope, menu, root_index),
     )
+}
+
+impl Sidebar {
+    /// Where `folder_id` can move: the top level, then every folder of the
+    /// account outside its own subtree, in tree order.
+    pub fn move_targets(&self, account_id: &str, folder_id: &str) -> Vec<MoveTarget> {
+        let scope = ViewScope::Account(account_id.to_string());
+        let folders: Vec<&NavigationFolder> = self
+            .section_nav(&scope)
+            .map(|ns| &ns.folders[..])
+            .unwrap_or(&[])
+            .iter()
+            .filter(|f| matches!(f.folder_kind, FolderKind::AccountFolder))
+            .collect();
+        let mut targets = vec![MoveTarget {
+            parent_id: None,
+            name: String::new(),
+            depth: 0,
+        }];
+        let mut moved_subtree: Option<u16> = None;
+        for node in tree_sort(&folders) {
+            if let Some(depth) = moved_subtree {
+                if node.depth > depth {
+                    continue;
+                }
+                moved_subtree = None;
+            }
+            if node.folder.id == folder_id {
+                moved_subtree = Some(node.depth);
+                continue;
+            }
+            targets.push(MoveTarget {
+                parent_id: Some(node.folder.id.clone()),
+                name: node.folder.name.clone(),
+                depth: node.depth,
+            });
+        }
+        targets
+    }
 }

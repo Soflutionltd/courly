@@ -97,6 +97,20 @@ impl ReadyApp {
                 _ => Task::none(),
             };
         }
+        if let Some(dialog) = self.folder_dialog.as_ref()
+            && window_id == self.main_window_id
+        {
+            use crate::ui::folder_dialog::FolderDialogMessage;
+            return match key {
+                Key::Named(Named::Escape) => {
+                    self.update(Message::FolderDialog(FolderDialogMessage::Cancel))
+                }
+                Key::Named(Named::Enter) if !dialog.takes_text() => {
+                    self.update(Message::FolderDialog(FolderDialogMessage::Submit))
+                }
+                _ => Task::none(),
+            };
+        }
         if self.thread_list.row_menu.is_some() && *key == Key::Named(Named::Escape) {
             self.thread_list.row_menu = None;
             return Task::none();

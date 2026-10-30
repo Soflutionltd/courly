@@ -7,6 +7,7 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
+use rtsk::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 use rtsk::scope::ViewScope;
 use types::SidebarSelection;
 
@@ -14,7 +15,8 @@ use super::folders::{AccountForest, account_forest, folder_row_content, is_folde
 use super::order::{SidebarEntry, default_order, resolve, scope_key};
 use super::search_here::{build_search_here_folder_prefix, build_search_here_user_folder_prefix};
 use super::{
-    RowMenuAnchor, Sidebar, SidebarMessage, folder_display_name, universal_folder_selection,
+    FolderCommand, RowMenuAnchor, Sidebar, SidebarMessage, folder_display_name,
+    universal_folder_selection,
 };
 
 // ── Nav items ───────────────────────────────────────────
@@ -62,8 +64,8 @@ pub(super) fn current_order(sidebar: &Sidebar, scope: &ViewScope) -> Vec<Sidebar
 }
 
 /// System folders and the account's own folders in one reorderable list:
-/// drag a row onto another to take its place, right-click for separators,
-/// search-here and reset.
+/// drag a row onto another to take its place, right-click for the folder
+/// operations, separators, search-here and reset.
 pub(super) fn nav_items<'a>(
     sidebar: &'a Sidebar,
     scope: &ViewScope,
@@ -72,6 +74,7 @@ pub(super) fn nav_items<'a>(
     let forest = account_forest(sidebar, scope);
     let order = order_for(sidebar, scope, &universal, &forest);
     let in_scope = sidebar.selected_scope == *scope;
+    let shift = |index: usize| (index > 0, index + 1 < order.len());
 
     let mut col = column![].spacing(SPACE_XXS);
     for (index, entry) in order.iter().enumerate() {
@@ -113,11 +116,22 @@ pub(super) fn nav_items<'a>(
                         content,
                         active,
                         SidebarMessage::SelectIn(scope.clone(), selection),
-                        RowMenu::Folder(build_search_here_folder_prefix(
-                            &folder.name,
-                            sidebar,
-                            scope,
-                        )),
+                        RowMenu::Folder(FolderMenu {
+                            query_prefix: build_search_here_folder_prefix(
+                                &folder.name,
+                                sidebar,
+                                scope,
+                            ),
+                            root_index: index,
+                            shift: Some(shift(index)),
+                            folder: MenuFolder::System {
+                                account_ids: scope_accounts(sidebar, scope),
+                                folder_id: SYSTEM_FOLDER_ROLES
+                                    .iter()
+                                    .any(|role| role.label_id == folder.id)
+                                    .then(|| folder.id.clone()),
+                            },
+                        }),
                     ));
                 } else if let Some(root) = forest.roots.iter().find(|r| r.folder.id == *id) {
                     let active = is_folder_active(sidebar, scope, root.folder);
@@ -147,11 +161,16 @@ pub(super) fn nav_items<'a>(
                             scope.clone(),
                             universal_folder_selection(&root.folder.id),
                         ),
-                        RowMenu::Folder(build_search_here_user_folder_prefix(
-                            &root.folder.name,
-                            sidebar,
-                            scope,
-                        )),
+                        RowMenu::Folder(FolderMenu {
+                            query_prefix: build_search_here_user_folder_prefix(
+                                &root.folder.name,
+                                sidebar,
+                                scope,
+                            ),
+                            root_index: index,
+                            shift: Some(shift(index)),
+                            folder: MenuFolder::own(scope, root.folder),
+                        }),
                     ));
                     for child in forest.descendant_rows(sidebar, scope, root, index) {
                         col = col.push(child);
@@ -168,9 +187,62 @@ pub(super) fn nav_items<'a>(
 }
 
 enum RowMenu {
-    /// A folder row; carries its search-here query prefix.
-    Folder(String),
+    Folder(FolderMenu),
     Separator(u32),
+}
+
+/// What a folder row's right-click menu offers.
+pub(super) struct FolderMenu {
+    pub query_prefix: String,
+    /// The top-level row a new separator goes below.
+    pub root_index: usize,
+    /// Top-level rows only: whether the row can move up, and down.
+    pub shift: Option<(bool, bool)>,
+    pub folder: MenuFolder,
+}
+
+pub(super) enum MenuFolder {
+    /// One of the account's own folders: every operation.
+    Own {
+        account_id: String,
+        folder_id: String,
+        name: String,
+    },
+    /// A system row over `account_ids`; `folder_id` is set when the row is
+    /// a real mail folder whose messages can be marked read.
+    System {
+        account_ids: Vec<String>,
+        folder_id: Option<String>,
+    },
+    /// A folder of a view that is no single account (shared mailbox, ...).
+    Unmanaged,
+}
+
+impl MenuFolder {
+    pub(super) fn own(scope: &ViewScope, folder: &NavigationFolder) -> Self {
+        match scope {
+            ViewScope::Account(account_id) => Self::Own {
+                account_id: account_id.clone(),
+                folder_id: folder.id.clone(),
+                name: folder.name.clone(),
+            },
+            _ => Self::Unmanaged,
+        }
+    }
+}
+
+/// The accounts a system row of `scope` covers.
+fn scope_accounts(sidebar: &Sidebar, scope: &ViewScope) -> Vec<String> {
+    match scope {
+        ViewScope::Account(id) => vec![id.clone()],
+        ViewScope::AllAccounts => sidebar
+            .accounts
+            .iter()
+            .filter(|a| !a.is_deleting)
+            .map(|a| a.id.clone())
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// One draggable row. The inner `mouse_area` takes the press (so a press
@@ -222,7 +294,7 @@ fn reorderable_row<'a>(
     }
 
     let items = match menu {
-        RowMenu::Folder(query_prefix) => folder_menu_items(scope, query_prefix, index),
+        RowMenu::Folder(menu) => folder_menu_items(scope, menu, index),
         RowMenu::Separator(id) => column![menu_item(
             icon::x(),
             t!("main.sidebar.remove_separator"),
@@ -233,26 +305,151 @@ fn reorderable_row<'a>(
     with_row_menu(scope, row_el, items)
 }
 
-/// "Search Here" and "Add Separator Below", the separator going after the
-/// top-level row at `separator_after`.
+/// Outlook's folder menu: search, the folder operations the row allows,
+/// then "Add Separator Below" (after the top-level row `menu.root_index`).
+/// `index` is the row's own place, for moving it up or down.
 pub(super) fn folder_menu_items<'a>(
     scope: &ViewScope,
-    query_prefix: String,
-    separator_after: usize,
+    menu: FolderMenu,
+    index: usize,
 ) -> iced::widget::Column<'a, SidebarMessage> {
-    column![
-        menu_item(
-            icon::search(),
-            t!("main.sidebar.search_here"),
-            SidebarMessage::SearchHere(query_prefix),
-        ),
-        menu_item(
-            icon::minus(),
-            t!("main.sidebar.add_separator_below"),
-            SidebarMessage::AddSeparatorBelow(scope.clone(), separator_after),
-        ),
-    ]
-    .spacing(SPACE_XXS)
+    let folder = |command| SidebarMessage::Folder(command);
+    let mut items = column![menu_item(
+        icon::search(),
+        t!("main.sidebar.search_here"),
+        SidebarMessage::SearchHere(menu.query_prefix),
+    )]
+    .spacing(SPACE_XXS);
+
+    match &menu.folder {
+        MenuFolder::Own {
+            account_id,
+            folder_id,
+            name,
+        } => {
+            items = items
+                .push(menu_item(
+                    icon::plus(),
+                    t!("main.sidebar.new_folder"),
+                    folder(FolderCommand::Create {
+                        account_id: account_id.clone(),
+                        parent: Some((folder_id.clone(), name.clone())),
+                    }),
+                ))
+                .push(menu_item(
+                    icon::pencil(),
+                    t!("main.sidebar.rename_folder"),
+                    folder(FolderCommand::Rename {
+                        account_id: account_id.clone(),
+                        folder_id: folder_id.clone(),
+                        name: name.clone(),
+                    }),
+                ))
+                .push(menu_item(
+                    icon::folder(),
+                    t!("main.sidebar.move_folder"),
+                    folder(FolderCommand::Move {
+                        account_id: account_id.clone(),
+                        folder_id: folder_id.clone(),
+                        name: name.clone(),
+                    }),
+                ));
+        }
+        MenuFolder::System { account_ids, .. } => {
+            if let [account_id] = account_ids.as_slice() {
+                items = items.push(menu_item(
+                    icon::plus(),
+                    t!("main.sidebar.new_folder"),
+                    folder(FolderCommand::Create {
+                        account_id: account_id.clone(),
+                        parent: None,
+                    }),
+                ));
+            }
+        }
+        MenuFolder::Unmanaged => {}
+    }
+
+    if let Some((up, down)) = menu.shift {
+        if up {
+            items = items.push(menu_item(
+                icon::arrow_up(),
+                t!("main.sidebar.move_up"),
+                SidebarMessage::ShiftRow {
+                    scope: scope.clone(),
+                    index,
+                    up: true,
+                },
+            ));
+        }
+        if down {
+            items = items.push(menu_item(
+                icon::arrow_down(),
+                t!("main.sidebar.move_down"),
+                SidebarMessage::ShiftRow {
+                    scope: scope.clone(),
+                    index,
+                    up: false,
+                },
+            ));
+        }
+    }
+
+    match menu.folder {
+        MenuFolder::Own {
+            account_id,
+            folder_id,
+            name,
+        } => {
+            items = items
+                .push(menu_item(
+                    icon::x(),
+                    t!("main.sidebar.delete_folder"),
+                    folder(FolderCommand::Delete {
+                        account_id: account_id.clone(),
+                        folder_id: folder_id.clone(),
+                        name: name.clone(),
+                    }),
+                ))
+                .push(menu_item(
+                    icon::check(),
+                    t!("main.sidebar.mark_all_read"),
+                    folder(FolderCommand::MarkAllRead {
+                        account_ids: vec![account_id.clone()],
+                        folder_id: folder_id.clone(),
+                    }),
+                ))
+                .push(menu_item(
+                    icon::trash(),
+                    t!("main.sidebar.empty_folder"),
+                    folder(FolderCommand::Empty {
+                        account_id,
+                        folder_id,
+                        name,
+                    }),
+                ));
+        }
+        MenuFolder::System {
+            account_ids,
+            folder_id: Some(folder_id),
+        } if !account_ids.is_empty() => {
+            items = items.push(menu_item(
+                icon::check(),
+                t!("main.sidebar.mark_all_read"),
+                folder(FolderCommand::MarkAllRead {
+                    account_ids,
+                    folder_id,
+                }),
+            ));
+        }
+        MenuFolder::System { .. } | MenuFolder::Unmanaged => {}
+    }
+
+    items.push(menu_item(
+        icon::minus(),
+        t!("main.sidebar.add_separator_below"),
+        SidebarMessage::AddSeparatorBelow(scope.clone(), menu.root_index),
+    ))
 }
 
 /// The right-click menu card, ending with "Reset Folder Order".

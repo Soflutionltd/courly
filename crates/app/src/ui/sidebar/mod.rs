@@ -91,6 +91,14 @@ pub enum SidebarMessage {
     CloseRowMenu,
     AddSeparatorBelow(ViewScope, usize),
     RemoveSeparator(ViewScope, u32),
+    /// Move the top-level row at this index one place up or down.
+    ShiftRow {
+        scope: ViewScope,
+        index: usize,
+        up: bool,
+    },
+    /// A folder operation picked from the right-click menu.
+    Folder(FolderCommand),
     ResetOrder(ViewScope),
     /// Fold or unfold a section of the all-accounts tree, by scope key.
     ToggleSection(String),
@@ -101,6 +109,49 @@ pub enum SidebarMessage {
     SectionHover(String),
     SectionDragEnd,
     SectionDragCancel,
+}
+
+/// A provider-folder operation picked from the right-click menu, carried
+/// up to the App, which asks for a name, a parent or a confirmation.
+#[derive(Debug, Clone)]
+pub enum FolderCommand {
+    Create {
+        account_id: String,
+        /// Parent folder (id, name); `None` creates at the top level.
+        parent: Option<(String, String)>,
+    },
+    Rename {
+        account_id: String,
+        folder_id: String,
+        name: String,
+    },
+    Move {
+        account_id: String,
+        folder_id: String,
+        name: String,
+    },
+    MarkAllRead {
+        account_ids: Vec<String>,
+        folder_id: String,
+    },
+    Empty {
+        account_id: String,
+        folder_id: String,
+        name: String,
+    },
+    Delete {
+        account_id: String,
+        folder_id: String,
+        name: String,
+    },
+}
+
+/// A folder another one can move under; `parent_id: None` is the top level.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveTarget {
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub depth: u16,
 }
 
 /// A press on a folder-section row, tracked until release.
@@ -175,6 +226,7 @@ pub enum SidebarEvent {
     LayoutChanged(String),
     /// Account sections were dragged into a new order: `(id, sort_order)`.
     AccountsReordered(Vec<(String, i64)>),
+    Folder(FolderCommand),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -555,6 +607,24 @@ impl Component for Sidebar {
                 order::remove_separator(&mut order, id);
                 self.save_order(&scope, order)
             }
+            SidebarMessage::ShiftRow { scope, index, up } => {
+                let mut order = nav::current_order(self, &scope);
+                let to = if up {
+                    index.checked_sub(1)
+                } else {
+                    Some(index + 1).filter(|to| *to < order.len())
+                };
+                let Some(to) = to else {
+                    self.row_menu = None;
+                    return (Task::none(), None);
+                };
+                order::move_entry(&mut order, index, to);
+                self.save_order(&scope, order)
+            }
+            SidebarMessage::Folder(command) => {
+                self.row_menu = None;
+                (Task::none(), Some(SidebarEvent::Folder(command)))
+            }
             SidebarMessage::ToggleSection(key) => {
                 if !self.collapsed_sections.remove(&key) {
                     self.collapsed_sections.insert(key);
@@ -880,6 +950,68 @@ mod tests {
         let (_, event) = sidebar.update(SidebarMessage::ResetOrder(acc()));
         assert!(matches!(event, Some(SidebarEvent::LayoutChanged(_))));
         assert_eq!(sidebar.layouts.get("acc"), None);
+    }
+
+    #[test]
+    fn move_up_and_down_shift_one_row_and_stop_at_the_ends() {
+        let mut sidebar = sidebar();
+        let shift = |index, up| SidebarMessage::ShiftRow {
+            scope: acc(),
+            index,
+            up,
+        };
+        let (_, event) = sidebar.update(shift(3, true));
+        assert!(matches!(event, Some(SidebarEvent::LayoutChanged(_))));
+        assert_eq!(ids(&sidebar), ["INBOX", "SENT", "g-hotel", "TRASH"]);
+        let _ = sidebar.update(shift(0, false));
+        assert_eq!(ids(&sidebar), ["SENT", "INBOX", "g-hotel", "TRASH"]);
+        let (_, top) = sidebar.update(shift(0, true));
+        let (_, bottom) = sidebar.update(shift(3, false));
+        assert!(top.is_none() && bottom.is_none());
+        assert_eq!(ids(&sidebar), ["SENT", "INBOX", "g-hotel", "TRASH"]);
+    }
+
+    #[test]
+    fn a_folder_cannot_move_into_itself_or_its_subfolders() {
+        let child = |id: &str, name: &str, parent: &str| {
+            let mut f = folder(id, name, "AccountFolder");
+            f.parent_id = Some(parent.to_string());
+            f
+        };
+        let mut sidebar = sidebar();
+        if let Some(nav) = sidebar.nav_state.as_mut() {
+            nav.folders.extend([
+                child("g-resa", "Réservations", "g-hotel"),
+                child("g-2026", "2026", "g-resa"),
+                folder("g-admin", "Admin", "AccountFolder"),
+            ]);
+        }
+        let targets: Vec<Option<String>> = sidebar
+            .move_targets("acc", "g-resa")
+            .into_iter()
+            .map(|t| t.parent_id)
+            .collect();
+        assert_eq!(
+            targets,
+            [None, Some("g-hotel".to_string()), Some("g-admin".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_folder_command_closes_the_menu_and_goes_up() {
+        let mut sidebar = sidebar();
+        let _ = sidebar.update(SidebarMessage::OpenRowMenu(acc(), 3));
+        let (_, event) = sidebar.update(SidebarMessage::Folder(FolderCommand::Delete {
+            account_id: "acc".into(),
+            folder_id: "g-hotel".into(),
+            name: "Hotel".into(),
+        }));
+        assert!(sidebar.row_menu.is_none());
+        assert!(matches!(
+            event,
+            Some(SidebarEvent::Folder(FolderCommand::Delete { ref folder_id, .. }))
+                if folder_id == "g-hotel"
+        ));
     }
 
     fn account(id: &str, sort_order: i64) -> Account {
