@@ -574,7 +574,7 @@ mod tests {
     #[test]
     fn press_and_release_on_one_row_selects_it() {
         let mut sidebar = sidebar();
-        sidebar.update(SidebarMessage::RowPress(3));
+        let _ = sidebar.update(SidebarMessage::RowPress(3));
         let (_, event) = sidebar.update(SidebarMessage::RowRelease(3));
         assert!(matches!(
             event,
@@ -588,9 +588,9 @@ mod tests {
     fn dragging_trash_onto_inbox_moves_it_first_and_saves() {
         let mut sidebar = sidebar();
         assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
-        sidebar.update(SidebarMessage::RowPress(2));
-        sidebar.update(SidebarMessage::RowHover(1));
-        sidebar.update(SidebarMessage::RowHover(0));
+        let _ = sidebar.update(SidebarMessage::RowPress(2));
+        let _ = sidebar.update(SidebarMessage::RowHover(1));
+        let _ = sidebar.update(SidebarMessage::RowHover(0));
         let (_, release) = sidebar.update(SidebarMessage::RowRelease(0));
         assert!(release.is_none(), "a drag release must not select");
         let (_, event) = sidebar.update(SidebarMessage::DragEnd);
@@ -604,9 +604,9 @@ mod tests {
     #[test]
     fn separators_and_reset_round_trip() {
         let mut sidebar = sidebar();
-        sidebar.update(SidebarMessage::AddSeparatorBelow(2));
+        let _ = sidebar.update(SidebarMessage::AddSeparatorBelow(2));
         assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "sep0", "g-hotel"]);
-        sidebar.update(SidebarMessage::RemoveSeparator(0));
+        let _ = sidebar.update(SidebarMessage::RemoveSeparator(0));
         assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
         let (_, event) = sidebar.update(SidebarMessage::ResetOrder);
         assert!(matches!(event, Some(SidebarEvent::LayoutChanged(_))));
