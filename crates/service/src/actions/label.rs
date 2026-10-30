@@ -1,4 +1,7 @@
-use bifrost_types::{AccountId, ContainerId, ContainerKind, ContainerStyle, ObjectId};
+use bifrost_types::{
+    AccountId, CategoryDefinition, ContainerId, ContainerKind, ContainerStyle, ObjectId,
+};
+use label_colors::preset_colors;
 use common::typed_ids::LabelId;
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use types::{LabelKind, MailProviderKind};
@@ -575,6 +578,42 @@ fn container_style(style: Option<(&str, &str)>) -> Option<ContainerStyle> {
     style.map(|(bg, fg)| ContainerStyle::new(bg, fg))
 }
 
+/// Outlook categories only take its 25 colour presets; the settings palette
+/// is that same table, so the nearest preset is the chosen one.
+fn graph_preset(style: Option<(&str, &str)>) -> Option<String> {
+    style
+        .and_then(|(bg, _)| preset_colors::nearest_exchange_preset(bg))
+        .map(str::to_string)
+}
+
+fn preset_style(preset: Option<&str>) -> Option<(&'static str, &'static str)> {
+    preset.and_then(preset_colors::preset_to_hex)
+}
+
+fn failed(error: ActionError) -> ActionOutcome {
+    ActionOutcome::Failed { error }
+}
+
+/// Outlook master category write: create it, or set its colour.
+async fn upsert_graph_category(
+    account: &ResidentActionAccount,
+    account_id: &str,
+    name: &str,
+    preset: Option<String>,
+) -> Result<(), ActionOutcome> {
+    account
+        .engine
+        .category_definition_upsert(
+            &AccountId(account_id.to_string()),
+            CategoryDefinition {
+                name: name.to_string(),
+                color: preset,
+            },
+        )
+        .await
+        .map_err(|error| failed(engine_error_to_action_error(error)))
+}
+
 fn no_resident_label() -> ActionOutcome {
     ActionOutcome::LocalOnly {
         reason: ActionError::remote("resident engine unavailable"),
@@ -635,6 +674,27 @@ pub(crate) async fn create_label(
         return (outcome, None);
     };
 
+    if account.provider == BifrostProviderKind::Graph {
+        let storage_id = match LabelKind::graph_category(name) {
+            Ok(kind) => kind.storage_id(),
+            Err(error) => {
+                let outcome = failed(ActionError::invalid_state(error));
+                mlog.emit(&outcome);
+                return (outcome, None);
+            }
+        };
+        let preset = graph_preset(style);
+        if let Err(outcome) = upsert_graph_category(account, account_id, name, preset.clone()).await
+        {
+            mlog.emit(&outcome);
+            return (outcome, None);
+        }
+        upsert_local_label(ctx, account_id, &storage_id, name, preset_style(preset.as_deref())).await;
+        let outcome = ActionOutcome::Success;
+        mlog.emit(&outcome);
+        return (outcome, Some(storage_id));
+    }
+
     let new_native = match account
         .engine
         .container_create(
@@ -680,6 +740,12 @@ pub(crate) async fn rename_label(
         return outcome;
     };
 
+    if account.provider == BifrostProviderKind::Graph {
+        let outcome = recolor_graph_category(ctx, account, account_id, label_id, new_name, style).await;
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
     let native = ContainerId(native_label_id(label_id.as_str()));
     if let Err(error) = account
         .engine
@@ -702,6 +768,41 @@ pub(crate) async fn rename_label(
     let outcome = ActionOutcome::Success;
     mlog.emit(&outcome);
     outcome
+}
+
+/// Outlook category names cannot change once created, so only the colour is
+/// written; an unchanged name with no colour is nothing to do.
+async fn recolor_graph_category(
+    ctx: &ActionContext,
+    account: &ResidentActionAccount,
+    account_id: &str,
+    label_id: &LabelId,
+    new_name: &str,
+    style: Option<(&str, &str)>,
+) -> ActionOutcome {
+    let current = native_label_id(label_id.as_str());
+    if current != new_name {
+        return failed(ActionError::invalid_state(
+            "Outlook category names cannot be changed",
+        ));
+    }
+    if style.is_none() {
+        return ActionOutcome::NoOp;
+    }
+    let preset = graph_preset(style);
+    if let Err(outcome) = upsert_graph_category(account, account_id, &current, preset.clone()).await
+    {
+        return outcome;
+    }
+    upsert_local_label(
+        ctx,
+        account_id,
+        label_id.as_str(),
+        &current,
+        preset_style(preset.as_deref()),
+    )
+    .await;
+    ActionOutcome::Success
 }
 
 /// Recolor a label: a rename to its current name carrying the new style
@@ -731,12 +832,19 @@ pub(crate) async fn delete_label(
         return outcome;
     };
 
-    let native = ContainerId(native_label_id(label_id.as_str()));
-    if let Err(error) = account
-        .engine
-        .container_delete(&AccountId(account_id.to_string()), native)
-        .await
-    {
+    let native = native_label_id(label_id.as_str());
+    let remote = if account.provider == BifrostProviderKind::Graph {
+        account
+            .engine
+            .category_definition_delete(&AccountId(account_id.to_string()), native)
+            .await
+    } else {
+        account
+            .engine
+            .container_delete(&AccountId(account_id.to_string()), ContainerId(native))
+            .await
+    };
+    if let Err(error) = remote {
         let outcome = ActionOutcome::Failed {
             error: engine_error_to_action_error(error),
         };
@@ -772,4 +880,25 @@ pub(crate) async fn delete_label(
     let outcome = ActionOutcome::Success;
     mlog.emit(&outcome);
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{graph_preset, preset_style};
+    use label_colors::preset_colors::all_presets;
+
+    #[test]
+    fn every_palette_colour_maps_back_to_its_outlook_preset() {
+        for (preset, bg, fg) in all_presets() {
+            assert_eq!(graph_preset(Some((bg, fg))).as_deref(), Some(*preset));
+            assert_eq!(preset_style(Some(preset)), Some((*bg, *fg)));
+        }
+    }
+
+    #[test]
+    fn no_colour_and_no_preset_stay_empty() {
+        assert_eq!(graph_preset(None), None);
+        assert_eq!(preset_style(None), None);
+        assert_eq!(preset_style(Some("none")), None);
+    }
 }
