@@ -59,6 +59,8 @@ pub enum SettingValue {
     ThreadDateGroups(bool),
     /// Sidebar folder order and separators per scope, as JSON.
     SidebarLayout(String),
+    /// Toolbar buttons in order and label mode, as JSON.
+    ToolbarLayout(String),
 }
 
 impl SettingValue {
@@ -80,6 +82,7 @@ impl SettingValue {
             Self::EmailZoom(_) => "email_zoom",
             Self::ThreadDateGroups(_) => "thread_date_groups",
             Self::SidebarLayout(_) => "sidebar_layout",
+            Self::ToolbarLayout(_) => "toolbar_layout",
         }
     }
 
@@ -108,7 +111,8 @@ impl SettingValue {
             | Self::SyncPeriodDays(s)
             | Self::OpenedFilesCleanupDays(s)
             | Self::EmailZoom(s)
-            | Self::SidebarLayout(s) => s.clone(),
+            | Self::SidebarLayout(s)
+            | Self::ToolbarLayout(s) => s.clone(),
         }
     }
 }

@@ -741,6 +741,7 @@ mod tests {
             email_zoom: None,
             thread_date_groups: true,
             sidebar_layout: None,
+            toolbar_layout: None,
         }
     }
 
