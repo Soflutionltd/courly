@@ -26,9 +26,11 @@ const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/contacts.readonly ",
     "https://www.googleapis.com/auth/contacts.other.readonly"
 );
-/// Default Azure AD app registration for Ratatoskr (multi-tenant, public client).
+/// Default Microsoft Entra app registration for Ratatoskr (Soflution tenant,
+/// any Entra tenant plus personal accounts, public client whose only
+/// redirect URI is `http://127.0.0.1:17248`).
 /// Users can override per-account via oauth_client_id in the accounts table.
-pub const MICROSOFT_DEFAULT_CLIENT_ID: &str = "6cc5a95e-c892-4f8c-a35f-9803d2685039";
+pub const MICROSOFT_DEFAULT_CLIENT_ID: &str = "178b55ed-5064-4094-a26e-c081f946e49c";
 
 pub fn default_microsoft_client_id() -> &'static str {
     MICROSOFT_DEFAULT_CLIENT_ID
