@@ -60,7 +60,11 @@ pub fn ribbon<'a>(
     };
 
     let buttons = row![
-        widgets::primary_icon_button(icon::pencil(), "New mail", Message::Compose),
+        widgets::primary_icon_button(
+            icon::pencil(),
+            rust_i18n::t!("main.ribbon.new_mail"),
+            Message::Compose
+        ),
         Space::new().width(SPACE_XS),
         cmd(CommandId::EmailTrash, icon::trash()),
         cmd(CommandId::EmailArchive, icon::archive()),

@@ -76,7 +76,12 @@ pub fn command_icon_button<'a>(
 
     let content = row![
         container(ico.size(ICON_MD).style(icon_style)).align_y(Alignment::Center),
-        container(text(label).size(TEXT_SM).style(label_style)).align_y(Alignment::Center),
+        container(
+            text(crate::i18n::command(label))
+                .size(TEXT_SM)
+                .style(label_style),
+        )
+        .align_y(Alignment::Center),
     ]
     .spacing(SPACE_XXS)
     .align_y(Alignment::Center);
@@ -142,7 +147,7 @@ pub fn compose_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
 /// (the ribbon's "New mail").
 pub fn primary_icon_button<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     on_press: M,
 ) -> Element<'a, M> {
     button(
