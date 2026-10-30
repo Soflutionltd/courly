@@ -64,12 +64,14 @@ fn build_ai_config(
         .map(|s| normalize_provider_name(s))
         .unwrap_or("claude");
     let plain = |key: &str| settings.get(key).cloned();
+    // A value that fails to decrypt is treated as absent: the ciphertext
+    // must never go out as an API key.
     let secure = |key: &str| {
-        settings.get(key).map(|raw| {
+        settings.get(key).and_then(|raw| {
             if is_encrypted(raw) {
-                decrypt_value(encryption_key, raw).unwrap_or_else(|_| raw.clone())
+                decrypt_value(encryption_key, raw).ok()
             } else {
-                raw.clone()
+                Some(raw.clone())
             }
         })
     };

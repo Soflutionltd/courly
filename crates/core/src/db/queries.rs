@@ -153,9 +153,14 @@ const SECURE_SETTING_KEYS: &[&str] = &[
     "copilot_api_key",
 ];
 
+/// An encrypted value that fails to decrypt becomes empty, never the
+/// ciphertext: that string would otherwise be sent as an API key.
 fn decode_secure_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
     if is_encrypted(&raw) {
-        decrypt_value(encryption_key, &raw).unwrap_or(raw)
+        decrypt_value(encryption_key, &raw).unwrap_or_else(|error| {
+            log::warn!("secure setting could not be decrypted: {error}");
+            String::new()
+        })
     } else {
         raw
     }
