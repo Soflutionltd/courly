@@ -563,12 +563,19 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
             compose(ComposeMessage::PreviewShowRemote(which)),
         )
     };
-    let mut extras = column![].spacing(SPACE_SM).padding(PAD_CONTENT);
+    // Keyed so a signature arriving above the quote gets its own sensor
+    // instead of inheriting the quote's, which has already reported a width.
+    let mut extras = iced::widget::keyed_column(Vec::new())
+        .spacing(SPACE_SM)
+        .padding(PAD_CONTENT);
     if let Some(signature) = state.signature.as_ref() {
-        extras = extras.push(preview(signature, ComposePreview::Signature));
+        extras = extras.push(
+            ComposePreview::Signature,
+            preview(signature, ComposePreview::Signature),
+        );
     }
     if let Some(quote) = state.quote.as_ref() {
-        extras = extras.push(preview(quote, ComposePreview::Quote));
+        extras = extras.push(ComposePreview::Quote, preview(quote, ComposePreview::Quote));
     }
     let extras_card = container(iced::widget::scrollable(extras))
         .width(Length::Fill)
