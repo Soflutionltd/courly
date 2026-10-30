@@ -23,6 +23,12 @@ pub fn build_mdn_message(
     recipient_name: &str,
     is_manual: bool,
 ) -> Vec<u8> {
+    // The sender address and Message-ID come from the incoming mail; a CR
+    // or LF in them would inject headers or MIME parts into our reply.
+    let original_from = &strip_line_breaks(original_from);
+    let original_message_id = &strip_line_breaks(original_message_id);
+    let recipient_email = &strip_line_breaks(recipient_email);
+    let recipient_name = &strip_line_breaks(recipient_name);
     let boundary = format!("mdn-boundary-{}", uuid::Uuid::new_v4());
     let message_id = format!("<{}.mdn@ratatoskr>", uuid::Uuid::new_v4());
     // RFC 5322 Date header, fixed to +0000. `strftime` is locale-independent
@@ -87,6 +93,10 @@ pub fn build_mdn_message(
     raw.into_bytes()
 }
 
+fn strip_line_breaks(value: &str) -> String {
+    value.chars().filter(|&ch| ch != '\r' && ch != '\n').collect()
+}
+
 // Server-side `$MDNSent` / `$mdnsent` keyword write-back is a Bifrost
 // concern; it is an IMAP/JMAP keyword and Gmail and Graph have no
 // equivalent (Graph's `isReadReceiptRequested` is read-only), so those
@@ -120,6 +130,21 @@ mod tests {
         assert!(text.contains("Final-Recipient: rfc822;me@myhost.com"));
         assert!(text.contains("Original-Message-ID: <original-id@example.com>"));
         assert!(text.contains("manual-action/MDN-sent-manually;displayed"));
+    }
+
+    #[test]
+    fn mdn_inputs_cannot_inject_headers() {
+        let raw = build_mdn_message(
+            "sender@example.com>\r\nBcc: <victim@example.com",
+            "<id@example.com>\r\n\r\n--injected",
+            "me@myhost.com",
+            "Me\nX-Evil: 1",
+            false,
+        );
+        let text = String::from_utf8(raw).expect("valid utf8");
+        assert!(!text.contains("\r\nBcc:"));
+        assert!(!text.contains("\r\n--injected"));
+        assert!(!text.contains("\nX-Evil:"));
     }
 
     #[test]
