@@ -258,7 +258,11 @@ impl ComposeState {
         }
     }
 
-    pub fn new_reply(accounts: &[db::Account], mode: &ComposeMode, source: &ReplySource<'_>) -> Self {
+    pub fn new_reply(
+        accounts: &[db::Account],
+        mode: &ComposeMode,
+        source: &ReplySource<'_>,
+    ) -> Self {
         let mut state = Self::new(accounts);
         state.mode = mode.clone();
 

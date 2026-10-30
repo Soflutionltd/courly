@@ -554,7 +554,9 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         | ComposeMessage::QuoteRendered { .. }
         | ComposeMessage::QuoteLinkClicked(_)
         | ComposeMessage::QuoteShowRemote => {
-            log::warn!("quote preview message reached update_compose - dispatcher routing regression");
+            log::warn!(
+                "quote preview message reached update_compose - dispatcher routing regression"
+            );
         }
     }
 

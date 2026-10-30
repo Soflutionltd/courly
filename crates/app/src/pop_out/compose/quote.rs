@@ -129,10 +129,7 @@ pub fn split_draft_html(html: &str) -> (&str, Option<QuotedOriginal>) {
     match html.split_once(DRAFT_MARKER) {
         Some((editor, quoted)) if !quoted.trim().is_empty() => {
             let text = html_to_text(quoted);
-            (
-                editor,
-                Some(QuotedOriginal::new(quoted.to_string(), text)),
-            )
+            (editor, Some(QuotedOriginal::new(quoted.to_string(), text)))
         }
         Some((editor, _)) => (editor, None),
         None => (html, None),
@@ -158,7 +155,10 @@ fn header_fields(source: &ReplySource<'_>) -> Vec<(String, String)> {
     if let Some(cc) = source.cc_addresses.filter(|s| !s.trim().is_empty()) {
         fields.push((labels.cc, cc.to_string()));
     }
-    fields.push((labels.subject, source.subject.unwrap_or_default().to_string()));
+    fields.push((
+        labels.subject,
+        source.subject.unwrap_or_default().to_string(),
+    ));
     fields
 }
 
@@ -178,7 +178,10 @@ fn embeddable_body(html: &str) -> String {
     let mut styles = String::new();
     let mut cursor = 0;
     while let Some(open) = lower[cursor..body_open].find("<style").map(|i| cursor + i) {
-        let Some(close) = lower[open..body_open].find("</style>").map(|i| open + i + 8) else {
+        let Some(close) = lower[open..body_open]
+            .find("</style>")
+            .map(|i| open + i + 8)
+        else {
             break;
         };
         styles.push_str(&html[open..close]);
@@ -236,8 +239,16 @@ mod tests {
         ))
         .expect("quote");
         assert!(quote.html.starts_with("<hr"));
-        assert!(quote.html.contains("PayByPhone &lt;noreply@paybyphone.com&gt;"));
-        assert!(quote.html.contains("<style>p{color:red}</style><p>Hello</p>"));
+        assert!(
+            quote
+                .html
+                .contains("PayByPhone &lt;noreply@paybyphone.com&gt;")
+        );
+        assert!(
+            quote
+                .html
+                .contains("<style>p{color:red}</style><p>Hello</p>")
+        );
         assert!(!quote.html.contains("<body"));
         assert!(!quote.html.contains("ne prend pas en charge"));
         assert!(quote.text.starts_with(TEXT_RULE));
@@ -247,7 +258,11 @@ mod tests {
     fn text_only_original_is_escaped() {
         let quote =
             QuotedOriginal::from_source(&source(None, Some("a < b\n\nfin"))).expect("quote");
-        assert!(quote.html.contains("<div>a &lt; b</div><div><br></div><div>fin</div>"));
+        assert!(
+            quote
+                .html
+                .contains("<div>a &lt; b</div><div><br></div><div>fin</div>")
+        );
     }
 
     #[test]
