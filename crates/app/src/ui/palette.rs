@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use cmdk::{
@@ -6,6 +7,7 @@ use cmdk::{
 };
 use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
+use rust_i18n::t;
 
 use super::layout::*;
 use super::theme::{ContainerClass, TextClass};
@@ -187,20 +189,25 @@ impl Palette {
                         cmdk::ParamDef::Text { label, .. } => label,
                     })
                     .unwrap_or("option");
+                let param_label = crate::i18n::command(param_label);
 
                 match first {
                     // DateTime commands use preset options instead of a full picker
                     Some(cmdk::ParamDef::DateTime { .. }) => {
-                        let task = self.enter_snooze_stage2(id, param_label);
+                        let task = self.enter_snooze_stage2(id, &param_label);
                         (task, None)
                     }
                     // Free-text params take input from the palette query field
                     // directly; no resolver call.
                     Some(cmdk::ParamDef::Text { placeholder, .. }) => {
-                        let task = self.enter_text_stage2(id, param_label, placeholder);
+                        let task = self.enter_text_stage2(
+                            id,
+                            &param_label,
+                            &crate::i18n::command(placeholder),
+                        );
                         (task, None)
                     }
-                    _ => self.enter_option_stage2(id, param_label, ctx),
+                    _ => self.enter_option_stage2(id, &param_label, ctx),
                 }
             }
         }
@@ -389,7 +396,9 @@ impl Component for Palette {
                         self.query = query;
                     }
                     PaletteStage::CommandSearch => {
-                        self.results = self.registry.query(&ctx, &query);
+                        self.results =
+                            self.registry
+                                .query_localized(&ctx, &query, crate::i18n::command);
                         self.query = query;
                         self.selected_index = 0;
                     }
@@ -461,7 +470,7 @@ fn build_command_search_card(state: &Palette) -> Element<'_, PaletteMessage> {
     // carried by the message variant, but for the closure type we need
     // a default. We use a dummy that will be replaced by the App's
     // context wrapper when the message is mapped.
-    let input = text_input("Type a command...", &state.query)
+    let input = text_input(t!("palette.placeholder"), &state.query)
         .on_input(|q| PaletteMessage::QueryChanged(q, CommandContext::default()))
         .on_submit(PaletteMessage::Confirm(CommandContext::default()))
         .id("palette-input")
@@ -486,9 +495,9 @@ fn build_command_search_card(state: &Palette) -> Element<'_, PaletteMessage> {
 
 fn build_option_pick_card(state: &Palette) -> Element<'_, PaletteMessage> {
     let placeholder = if state.options_loading {
-        "Loading...".to_string()
+        t!("palette.loading")
     } else {
-        format!("Search {}...", state.stage2_label)
+        t!("palette.search_param", param = state.stage2_label)
     };
 
     let input = text_input(placeholder, &state.query)
@@ -523,9 +532,9 @@ fn build_results_column(
     for (i, result) in results.iter().enumerate() {
         let is_selected = i == selected_index;
         let row_element = palette_result_row(
-            result.category,
-            result.palette_label,
-            result.keybinding.clone(),
+            crate::i18n::command(result.category),
+            crate::i18n::command(result.palette_label),
+            result.keybinding.as_deref().map(localize_key_sequence),
             result.available,
             result.input_mode,
             is_selected,
@@ -621,9 +630,18 @@ fn format_option_path(path: &Option<Vec<String>>) -> String {
     }
 }
 
+/// cmdk displays a two-key sequence as "g then i".
+fn localize_key_sequence(binding: &str) -> String {
+    match binding.split_once(" then ") {
+        Some((first, second)) => t!("palette.key_sequence", first = first, second = second),
+        None => binding.into(),
+    }
+    .into_owned()
+}
+
 fn palette_result_row<'a>(
-    category_str: &'a str,
-    label_str: &'a str,
+    category_str: Cow<'static, str>,
+    label_str: Cow<'static, str>,
     keybinding_str: Option<String>,
     available: bool,
     input_mode: InputMode,
@@ -649,9 +667,9 @@ fn palette_result_row<'a>(
 
     // Command display name (center, fills)
     let label_text = if matches!(input_mode, InputMode::Parameterized { .. }) {
-        format!("{label_str}...")
+        t!("palette.parameterized", label = label_str).into_owned()
     } else {
-        label_str.to_string()
+        label_str.into_owned()
     };
     let label = container(text(label_text).size(TEXT_MD).style(label_style))
         .width(Length::Fill)
@@ -729,12 +747,18 @@ fn snooze_preset_options() -> Vec<OptionItem> {
         .unwrap_or(0);
 
     vec![
-        snooze_option("1 hour", now_secs + 3600),
-        snooze_option("2 hours", now_secs + 7200),
-        snooze_option("4 hours", now_secs + 14400),
-        snooze_option("Tomorrow 9am", next_morning_9am(now_secs)),
-        snooze_option("Tomorrow 1pm", next_afternoon_1pm(now_secs)),
-        snooze_option("Next week", next_week_morning(now_secs)),
+        snooze_option(&t!("palette.snooze.one_hour"), now_secs + 3600),
+        snooze_option(&t!("palette.snooze.two_hours"), now_secs + 7200),
+        snooze_option(&t!("palette.snooze.four_hours"), now_secs + 14400),
+        snooze_option(
+            &t!("palette.snooze.tomorrow_morning"),
+            next_morning_9am(now_secs),
+        ),
+        snooze_option(
+            &t!("palette.snooze.tomorrow_afternoon"),
+            next_afternoon_1pm(now_secs),
+        ),
+        snooze_option(&t!("palette.snooze.next_week"), next_week_morning(now_secs)),
     ]
 }
 
@@ -770,4 +794,56 @@ fn next_week_morning(now_secs: i64) -> i64 {
     // Add 7 days then round to 9am
     let next_week_start = (now_secs / day_secs + 7) * day_secs;
     next_week_start + 9 * 3600
+}
+
+#[cfg(test)]
+mod tests {
+    use cmdk::{CommandId, CommandRegistry, InputSchema, ParamDef};
+
+    fn param_strings(param: ParamDef) -> Vec<&'static str> {
+        match param {
+            ParamDef::ListPicker { label } | ParamDef::DateTime { label } => vec![label],
+            ParamDef::Enum { label, options } => std::iter::once(label)
+                .chain(options.iter().map(|o| o.label))
+                .collect(),
+            ParamDef::Text { label, placeholder } => vec![label, placeholder],
+        }
+    }
+
+    /// Every string the app shows from a cmdk command, so a new command
+    /// without a `cmd.` translation fails here.
+    fn displayed_command_strings() -> Vec<&'static str> {
+        let registry = CommandRegistry::new();
+        let mut strings = Vec::new();
+        for id in CommandId::all() {
+            let d = registry.get(*id).expect("registered command");
+            strings.extend([d.label, d.category]);
+            strings.extend(d.active_label);
+            strings.extend(d.palette_label);
+            match d.input_schema {
+                Some(InputSchema::Single { param }) => strings.extend(param_strings(param)),
+                Some(InputSchema::Sequence { params }) => {
+                    strings.extend(params.iter().copied().flat_map(param_strings));
+                }
+                None => {}
+            }
+        }
+        strings
+    }
+
+    #[test]
+    fn every_command_string_has_an_english_translation() {
+        let missing: Vec<_> = displayed_command_strings()
+            .into_iter()
+            .filter(|s| {
+                s.contains(": ")
+                    || crate::_rust_i18n_try_translate("en", format!("cmd.{s}")).as_deref()
+                        != Some(*s)
+            })
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "missing or wrong cmd. keys: {missing:?}"
+        );
+    }
 }

@@ -602,3 +602,35 @@ fn fuzzy_recency_does_not_override_availability() {
         );
     }
 }
+
+#[test]
+fn localized_query_matches_translated_label_and_palette_label() {
+    let registry = CommandRegistry::new();
+    let ctx = empty_context();
+    let localize = |english: &'static str| -> std::borrow::Cow<'static, str> {
+        match english {
+            "Mark Read" => "Marquer comme lu".into(),
+            "Mark as Read / Unread" => "Marquer comme lu / non lu".into(),
+            other => other.into(),
+        }
+    };
+    let ids = |query: &str| -> Vec<CommandId> {
+        registry
+            .query_localized(&ctx, query, localize)
+            .iter()
+            .map(|m| m.id)
+            .collect()
+    };
+    assert!(ids("marquer").contains(&CommandId::EmailMarkRead));
+    assert!(ids("non lu").contains(&CommandId::EmailMarkRead));
+    assert!(
+        ids("seen").contains(&CommandId::EmailMarkRead),
+        "English keywords still match"
+    );
+    assert!(
+        !registry
+            .query(&ctx, "marquer")
+            .iter()
+            .any(|m| m.id == CommandId::EmailMarkRead)
+    );
+}

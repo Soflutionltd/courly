@@ -1,4 +1,5 @@
 use iced::Task;
+use rust_i18n::t;
 
 use crate::command_dispatch;
 use crate::component::Component;
@@ -53,7 +54,7 @@ impl ReadyApp {
             }
             PaletteEvent::Dismissed => Task::none(),
             PaletteEvent::Error(msg) => {
-                self.status = format!("Palette error: {msg}");
+                self.status = t!("palette.error", message = msg).into_owned();
                 Task::none()
             }
         }

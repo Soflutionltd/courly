@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
@@ -95,10 +97,22 @@ impl CommandRegistry {
     }
 
     pub fn query(&self, ctx: &CommandContext, query: &str) -> Vec<CommandMatch> {
+        self.query_localized(ctx, query, Cow::Borrowed)
+    }
+
+    /// Like [`Self::query`], but a non-empty query also matches what
+    /// `localize` returns for each command's category, label and palette
+    /// label, so a translated interface can be searched in its language.
+    pub fn query_localized(
+        &self,
+        ctx: &CommandContext,
+        query: &str,
+        localize: impl Fn(&'static str) -> Cow<'static, str>,
+    ) -> Vec<CommandMatch> {
         if query.is_empty() {
             return self.query_empty(ctx);
         }
-        self.query_fuzzy(ctx, query)
+        self.query_fuzzy(ctx, query, &localize)
     }
 
     fn query_empty(&self, ctx: &CommandContext) -> Vec<CommandMatch> {
@@ -137,7 +151,12 @@ impl CommandRegistry {
         results
     }
 
-    fn query_fuzzy(&self, ctx: &CommandContext, query: &str) -> Vec<CommandMatch> {
+    fn query_fuzzy(
+        &self,
+        ctx: &CommandContext,
+        query: &str,
+        localize: &dyn Fn(&'static str) -> Cow<'static, str>,
+    ) -> Vec<CommandMatch> {
         let platform = current_platform();
         let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
@@ -147,7 +166,14 @@ impl CommandRegistry {
 
         for d in &self.descriptors {
             let label = d.resolved_label(ctx);
-            let haystack_str = build_command_haystack(d.category, label, d.keywords);
+            let mut haystack_str = build_command_haystack(d.category, label, d.keywords);
+            for english in [d.category, label, d.resolved_palette_label(ctx)] {
+                let localized = localize(english);
+                if localized != english {
+                    haystack_str.push(' ');
+                    haystack_str.push_str(&localized);
+                }
+            }
             let haystack = Utf32Str::new(&haystack_str, &mut buf);
 
             if let Some(raw_score) = pattern.score(haystack, &mut matcher) {
