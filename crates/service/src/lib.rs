@@ -185,7 +185,7 @@ fn default_app_data_dir() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .join("org.folknor.ratatoskr")
+        .join("com.soflution.mail")
 }
 
 /// When the Service is invoked directly via `cargo run -p app -- --service`

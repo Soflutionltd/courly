@@ -33,6 +33,7 @@ mod appearance;
 mod command_dispatch;
 mod command_resolver;
 mod component;
+mod data_dir;
 mod db;
 mod display;
 mod draft_wal;
@@ -104,7 +105,7 @@ pub fn run_app_blocking() -> RunResult {
     let app_data_dir = {
         let dev_dir = dirs::data_dir()
             .expect("no data dir")
-            .join("org.folknor.ratatoskr.dev");
+            .join(data_dir::DEV_DATA_DIR_NAME);
 
         let config = dev_seed::Config::load_or_default();
 
@@ -124,9 +125,7 @@ pub fn run_app_blocking() -> RunResult {
     };
 
     #[cfg(not(feature = "dev-seed"))]
-    let app_data_dir = dirs::data_dir()
-        .expect("no data dir")
-        .join("org.folknor.ratatoskr");
+    let app_data_dir = data_dir::resolve(&dirs::data_dir().expect("no data dir"));
 
     // The DB is no longer opened here. Phase 1.5 makes the Service the
     // canonical owner of boot-time DB work (migrations, recovery, sweep,
