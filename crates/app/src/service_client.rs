@@ -12,7 +12,8 @@ use service_api::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
     ContactSaveAck, ContactSaveParams, ContactSaveWithWritebackAck, DecryptForStorageAck,
     DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams, HealthPingResponse,
-    JsonRpcErrorObject, JsonRpcRequest, LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck,
+    FolderCreateParams, FolderDeleteParams, FolderDoneAck, FolderMoveParams, FolderRenameParams,
+    FolderWriteAck, JsonRpcErrorObject, JsonRpcRequest, LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck,
     LabelGroupReorderParams, LabelSaveAck, LabelSaveParams,
     Notification, OauthExchangeCodeAck, OauthExchangeCodeParams, PROTOCOL_VERSION,
     ParsedServiceMessage, PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams,
@@ -1481,6 +1482,31 @@ impl ServiceClient {
                 params: LabelGroupReorderParams { orders },
             })
             .await?;
+        Ok(())
+    }
+
+    /// Create a provider folder via `folder.create`; returns its storage id.
+    pub async fn create_folder(&self, params: FolderCreateParams) -> Result<String, ClientError> {
+        let ack: FolderWriteAck = self.request(RequestParams::FolderCreate { params }).await?;
+        Ok(ack.folder_id)
+    }
+
+    /// Rename a provider folder via `folder.rename`; returns its storage id
+    /// after the rename (re-keyed on path-based IMAP).
+    pub async fn rename_folder(&self, params: FolderRenameParams) -> Result<String, ClientError> {
+        let ack: FolderWriteAck = self.request(RequestParams::FolderRename { params }).await?;
+        Ok(ack.folder_id)
+    }
+
+    /// Move a provider folder under another parent via `folder.move`.
+    pub async fn move_folder(&self, params: FolderMoveParams) -> Result<(), ClientError> {
+        let _ack: FolderDoneAck = self.request(RequestParams::FolderMove { params }).await?;
+        Ok(())
+    }
+
+    /// Delete a provider folder via `folder.delete`.
+    pub async fn delete_folder(&self, params: FolderDeleteParams) -> Result<(), ClientError> {
+        let _ack: FolderDoneAck = self.request(RequestParams::FolderDelete { params }).await?;
         Ok(())
     }
 

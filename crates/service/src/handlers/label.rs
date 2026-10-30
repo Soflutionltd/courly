@@ -31,7 +31,7 @@ pub(crate) async fn handle_reorder(
     serde_json::to_value(LabelGroupReorderAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
-async fn action_context_and_account(
+pub(super) async fn action_context_and_account(
     boot_state: &Arc<BootSharedState>,
     account_id: &str,
 ) -> Result<(ActionContext, ResidentActionAccount), ServiceError> {
@@ -56,7 +56,7 @@ async fn action_context_and_account(
     Ok((ctx, account))
 }
 
-fn outcome_to_result(outcome: ActionOutcome) -> Result<(), ServiceError> {
+pub(super) fn outcome_to_result(outcome: ActionOutcome) -> Result<(), ServiceError> {
     match outcome {
         ActionOutcome::Success | ActionOutcome::NoOp => Ok(()),
         ActionOutcome::LocalOnly { reason, .. } => Err(ServiceError::Internal(reason.user_message())),

@@ -10,6 +10,7 @@ mod contacts;
 mod draft_wal;
 mod error;
 mod extract;
+mod folder;
 mod framing;
 mod internal;
 mod label;
@@ -81,6 +82,10 @@ pub use framing::{
 pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
+};
+pub use folder::{
+    FolderCreateParams, FolderDeleteParams, FolderDoneAck, FolderMoveParams, FolderRenameParams,
+    FolderWriteAck,
 };
 pub use label::{
     LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams,

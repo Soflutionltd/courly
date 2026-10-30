@@ -11,6 +11,7 @@ mod cal_action;
 mod calendar;
 mod contacts;
 pub(crate) mod extract;
+mod folder;
 mod gal;
 mod health;
 mod internal;
@@ -113,6 +114,10 @@ pub(crate) async fn dispatch(
         }
         RequestParams::LabelSave { params } => label::handle_save(&boot_state, params).await,
         RequestParams::LabelDelete { params } => label::handle_delete(&boot_state, params).await,
+        RequestParams::FolderCreate { params } => folder::handle_create(&boot_state, params).await,
+        RequestParams::FolderRename { params } => folder::handle_rename(&boot_state, params).await,
+        RequestParams::FolderMove { params } => folder::handle_move(&boot_state, params).await,
+        RequestParams::FolderDelete { params } => folder::handle_delete(&boot_state, params).await,
         RequestParams::ContactsGroupSave { params } => {
             contacts::handle_group_save(&boot_state, params).await
         }

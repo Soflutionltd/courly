@@ -21,6 +21,7 @@ use crate::extract::{ExtractStatusParams, IndexRebuildParams};
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
+use crate::folder::{FolderCreateParams, FolderDeleteParams, FolderMoveParams, FolderRenameParams};
 use crate::label::{LabelDeleteParams, LabelGroupReorderParams, LabelSaveParams};
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
@@ -1253,6 +1254,21 @@ pub enum RequestParams {
     LabelDelete {
         params: LabelDeleteParams,
     },
+    /// Create, rename, move or delete one provider folder and mirror it
+    /// locally. Mutating (a replayed create would duplicate the folder);
+    /// 30 s timeout: one provider round trip plus a local write.
+    FolderCreate {
+        params: FolderCreateParams,
+    },
+    FolderRename {
+        params: FolderRenameParams,
+    },
+    FolderMove {
+        params: FolderMoveParams,
+    },
+    FolderDelete {
+        params: FolderDeleteParams,
+    },
     /// Phase 6a: UPSERT a contact group + replace its member email
     /// list. The plan's original split (group_create / group_update)
     /// collapsed to one method because today's underlying DB function
@@ -1675,6 +1691,10 @@ impl RequestParams {
             Self::LabelGroupReorder { .. } => "label_group.reorder",
             Self::LabelSave { .. } => "label.save",
             Self::LabelDelete { .. } => "label.delete",
+            Self::FolderCreate { .. } => "folder.create",
+            Self::FolderRename { .. } => "folder.rename",
+            Self::FolderMove { .. } => "folder.move",
+            Self::FolderDelete { .. } => "folder.delete",
             Self::PinnedSearchCreateOrUpdate { .. } => "pinned_search.create_or_update",
             Self::PinnedSearchUpdate { .. } => "pinned_search.update",
             Self::PinnedSearchDelete { .. } => "pinned_search.delete",
@@ -1758,7 +1778,12 @@ impl RequestParams {
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
             Self::ActionMarkChatRead { .. } => RequestTimeoutKind::Finite(Duration::from_secs(10)),
-            Self::LabelSave { .. } | Self::LabelDelete { .. } => {
+            Self::LabelSave { .. }
+            | Self::LabelDelete { .. }
+            | Self::FolderCreate { .. }
+            | Self::FolderRename { .. }
+            | Self::FolderMove { .. }
+            | Self::FolderDelete { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(30))
             }
             // Handler budget: validate + per-attachment SHA-256 verify
@@ -1951,6 +1976,10 @@ impl RequestParams {
             | Self::AccountDelete { .. }
             | Self::LabelSave { .. }
             | Self::LabelDelete { .. }
+            | Self::FolderCreate { .. }
+            | Self::FolderRename { .. }
+            | Self::FolderMove { .. }
+            | Self::FolderDelete { .. }
             | Self::PinnedSearchCreateOrUpdate { .. } => Idempotency::Mutating,
 
             Self::ActionMarkChatRead { .. }
@@ -2077,6 +2106,10 @@ impl RequestParams {
             Self::LabelGroupReorder { params } => serde_json::json!({ "params": params }),
             Self::LabelSave { params } => serde_json::json!({ "params": params }),
             Self::LabelDelete { params } => serde_json::json!({ "params": params }),
+            Self::FolderCreate { params } => serde_json::json!({ "params": params }),
+            Self::FolderRename { params } => serde_json::json!({ "params": params }),
+            Self::FolderMove { params } => serde_json::json!({ "params": params }),
+            Self::FolderDelete { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchCreateOrUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchDelete { params } => serde_json::json!({ "params": params }),
@@ -2377,6 +2410,42 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("label.delete params: {e}"))?;
                 Ok(Self::LabelDelete { params: p.params })
+            }
+            "folder.create" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: FolderCreateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("folder.create params: {e}"))?;
+                Ok(Self::FolderCreate { params: p.params })
+            }
+            "folder.rename" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: FolderRenameParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("folder.rename params: {e}"))?;
+                Ok(Self::FolderRename { params: p.params })
+            }
+            "folder.move" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: FolderMoveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("folder.move params: {e}"))?;
+                Ok(Self::FolderMove { params: p.params })
+            }
+            "folder.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: FolderDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("folder.delete params: {e}"))?;
+                Ok(Self::FolderDelete { params: p.params })
             }
             "contacts.group_save" => {
                 #[derive(Deserialize)]
@@ -3628,6 +3697,63 @@ mod tests {
     #[test]
     fn label_write_methods_round_trip_from_method_params() {
         for original in [sample_label_save(), sample_label_delete()] {
+            let parsed = RequestParams::from_method_params(
+                original.method_name(),
+                Some(original.params_value()),
+            )
+            .expect("parse");
+            assert_eq!(parsed, original);
+        }
+    }
+
+    fn sample_folder_writes() -> Vec<RequestParams> {
+        vec![
+            RequestParams::FolderCreate {
+                params: FolderCreateParams {
+                    account_id: "acc".into(),
+                    name: "Réservations".into(),
+                    parent_id: Some("graph-parent".into()),
+                },
+            },
+            RequestParams::FolderRename {
+                params: FolderRenameParams {
+                    account_id: "acc".into(),
+                    folder_id: "graph-1".into(),
+                    name: "Factures".into(),
+                },
+            },
+            RequestParams::FolderMove {
+                params: FolderMoveParams {
+                    account_id: "acc".into(),
+                    folder_id: "graph-1".into(),
+                    parent_id: None,
+                },
+            },
+            RequestParams::FolderDelete {
+                params: FolderDeleteParams {
+                    account_id: "acc".into(),
+                    folder_id: "graph-1".into(),
+                },
+            },
+        ]
+    }
+
+    #[test]
+    fn folder_write_methods_are_dotted_mutating_and_thirty_seconds() {
+        let methods = ["folder.create", "folder.rename", "folder.move", "folder.delete"];
+        for (request, method) in sample_folder_writes().into_iter().zip(methods) {
+            assert_eq!(request.method_name(), method);
+            assert_eq!(request.idempotency(), Idempotency::Mutating);
+            assert_eq!(
+                request.timeout(),
+                RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            );
+        }
+    }
+
+    #[test]
+    fn folder_write_methods_round_trip_from_method_params() {
+        for original in sample_folder_writes() {
             let parsed = RequestParams::from_method_params(
                 original.method_name(),
                 Some(original.params_value()),
