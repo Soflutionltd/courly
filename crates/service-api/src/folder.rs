@@ -41,6 +41,20 @@ pub struct FolderWriteAck {
     pub folder_id: String,
 }
 
+/// `folder.mark_all_read` / `folder.empty` params: acts on the messages
+/// filed in this folder only, not on their whole conversations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderContentsParams {
+    pub account_id: String,
+    pub folder_id: String,
+}
+
+/// Ack of `folder.mark_all_read` / `folder.empty`: messages changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FolderContentsAck {
+    pub count: usize,
+}
+
 /// Ack of `folder.move` / `folder.delete`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FolderDoneAck;

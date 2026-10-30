@@ -118,6 +118,10 @@ pub(crate) async fn dispatch(
         RequestParams::FolderRename { params } => folder::handle_rename(&boot_state, params).await,
         RequestParams::FolderMove { params } => folder::handle_move(&boot_state, params).await,
         RequestParams::FolderDelete { params } => folder::handle_delete(&boot_state, params).await,
+        RequestParams::FolderMarkAllRead { params } => {
+            folder::handle_mark_all_read(&boot_state, params).await
+        }
+        RequestParams::FolderEmpty { params } => folder::handle_empty(&boot_state, params).await,
         RequestParams::ContactsGroupSave { params } => {
             contacts::handle_group_save(&boot_state, params).await
         }

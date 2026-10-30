@@ -21,7 +21,10 @@ use crate::extract::{ExtractStatusParams, IndexRebuildParams};
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
-use crate::folder::{FolderCreateParams, FolderDeleteParams, FolderMoveParams, FolderRenameParams};
+use crate::folder::{
+    FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderMoveParams,
+    FolderRenameParams,
+};
 use crate::label::{LabelDeleteParams, LabelGroupReorderParams, LabelSaveParams};
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
@@ -1269,6 +1272,17 @@ pub enum RequestParams {
     FolderDelete {
         params: FolderDeleteParams,
     },
+    /// Mark every unread message filed in one folder read (provider, then
+    /// local). Mutating; 300 s timeout: a large folder is one bulk campaign
+    /// chunked by the provider.
+    FolderMarkAllRead {
+        params: FolderContentsParams,
+    },
+    /// Move every message filed in one folder to Trash (provider, then
+    /// local). Mutating; 300 s timeout, same reason.
+    FolderEmpty {
+        params: FolderContentsParams,
+    },
     /// Phase 6a: UPSERT a contact group + replace its member email
     /// list. The plan's original split (group_create / group_update)
     /// collapsed to one method because today's underlying DB function
@@ -1695,6 +1709,8 @@ impl RequestParams {
             Self::FolderRename { .. } => "folder.rename",
             Self::FolderMove { .. } => "folder.move",
             Self::FolderDelete { .. } => "folder.delete",
+            Self::FolderMarkAllRead { .. } => "folder.mark_all_read",
+            Self::FolderEmpty { .. } => "folder.empty",
             Self::PinnedSearchCreateOrUpdate { .. } => "pinned_search.create_or_update",
             Self::PinnedSearchUpdate { .. } => "pinned_search.update",
             Self::PinnedSearchDelete { .. } => "pinned_search.delete",
@@ -1778,6 +1794,9 @@ impl RequestParams {
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
             Self::ActionMarkChatRead { .. } => RequestTimeoutKind::Finite(Duration::from_secs(10)),
+            Self::FolderMarkAllRead { .. } | Self::FolderEmpty { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(300))
+            }
             Self::LabelSave { .. }
             | Self::LabelDelete { .. }
             | Self::FolderCreate { .. }
@@ -1980,6 +1999,8 @@ impl RequestParams {
             | Self::FolderRename { .. }
             | Self::FolderMove { .. }
             | Self::FolderDelete { .. }
+            | Self::FolderMarkAllRead { .. }
+            | Self::FolderEmpty { .. }
             | Self::PinnedSearchCreateOrUpdate { .. } => Idempotency::Mutating,
 
             Self::ActionMarkChatRead { .. }
@@ -2110,6 +2131,8 @@ impl RequestParams {
             Self::FolderRename { params } => serde_json::json!({ "params": params }),
             Self::FolderMove { params } => serde_json::json!({ "params": params }),
             Self::FolderDelete { params } => serde_json::json!({ "params": params }),
+            Self::FolderMarkAllRead { params } => serde_json::json!({ "params": params }),
+            Self::FolderEmpty { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchCreateOrUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchUpdate { params } => serde_json::json!({ "params": params }),
             Self::PinnedSearchDelete { params } => serde_json::json!({ "params": params }),
@@ -2446,6 +2469,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("folder.delete params: {e}"))?;
                 Ok(Self::FolderDelete { params: p.params })
+            }
+            "folder.mark_all_read" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: FolderContentsParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("folder.mark_all_read params: {e}"))?;
+                Ok(Self::FolderMarkAllRead { params: p.params })
+            }
+            "folder.empty" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: FolderContentsParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("folder.empty params: {e}"))?;
+                Ok(Self::FolderEmpty { params: p.params })
             }
             "contacts.group_save" => {
                 #[derive(Deserialize)]
@@ -3748,6 +3789,32 @@ mod tests {
                 request.timeout(),
                 RequestTimeoutKind::Finite(Duration::from_secs(30)),
             );
+        }
+    }
+
+    #[test]
+    fn folder_contents_methods_are_mutating_five_minutes_and_round_trip() {
+        let params = FolderContentsParams {
+            account_id: "acc".into(),
+            folder_id: "graph-1".into(),
+        };
+        let requests = [
+            RequestParams::FolderMarkAllRead {
+                params: params.clone(),
+            },
+            RequestParams::FolderEmpty { params },
+        ];
+        for (request, method) in requests.into_iter().zip(["folder.mark_all_read", "folder.empty"]) {
+            assert_eq!(request.method_name(), method);
+            assert_eq!(request.idempotency(), Idempotency::Mutating);
+            assert_eq!(
+                request.timeout(),
+                RequestTimeoutKind::Finite(Duration::from_secs(300)),
+            );
+            let parsed =
+                RequestParams::from_method_params(request.method_name(), Some(request.params_value()))
+                    .expect("parse");
+            assert_eq!(parsed, request);
         }
     }
 

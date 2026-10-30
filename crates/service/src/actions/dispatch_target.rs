@@ -175,27 +175,37 @@ pub(crate) async fn resolve_thread_messages(
         ));
     }
 
-    let mut out = Vec::with_capacity(rows.len());
-    for (message_id, imap_folder, imap_uid, imap_uidvalidity) in rows {
-        let object_id = if provider == BifrostProviderKind::Imap {
-            let folder =
-                imap_folder.ok_or_else(|| ActionError::db("IMAP message missing folder"))?;
-            let uid = imap_uid.ok_or_else(|| ActionError::db("IMAP message missing UID"))?;
-            let uidvalidity = imap_uidvalidity
-                .ok_or_else(|| ActionError::db("IMAP message missing uidvalidity"))?;
-            ObjectId(format!(
-                "imap1:{}:{}:{}:{}",
-                folder.len(),
-                folder,
-                uidvalidity,
-                uid
-            ))
-        } else {
-            ObjectId(message_id)
-        };
-        out.push(object_id);
+    rows.into_iter()
+        .map(|(message_id, imap_folder, imap_uid, imap_uidvalidity)| {
+            message_object_id(provider, message_id, imap_folder, imap_uid, imap_uidvalidity)
+        })
+        .collect()
+}
+
+/// The provider `ObjectId` of one stored message. IMAP rebuilds it from the
+/// persisted `(imap_folder, imap_uid, imap_uidvalidity)` triple; every other
+/// provider round-trips its global message id.
+pub(crate) fn message_object_id(
+    provider: BifrostProviderKind,
+    message_id: String,
+    imap_folder: Option<String>,
+    imap_uid: Option<i64>,
+    imap_uidvalidity: Option<i64>,
+) -> Result<ObjectId, ActionError> {
+    if provider != BifrostProviderKind::Imap {
+        return Ok(ObjectId(message_id));
     }
-    Ok(out)
+    let folder = imap_folder.ok_or_else(|| ActionError::db("IMAP message missing folder"))?;
+    let uid = imap_uid.ok_or_else(|| ActionError::db("IMAP message missing UID"))?;
+    let uidvalidity =
+        imap_uidvalidity.ok_or_else(|| ActionError::db("IMAP message missing uidvalidity"))?;
+    Ok(ObjectId(format!(
+        "imap1:{}:{}:{}:{}",
+        folder.len(),
+        folder,
+        uidvalidity,
+        uid
+    )))
 }
 
 pub(crate) async fn resolve_message_object_id(

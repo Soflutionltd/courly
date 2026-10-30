@@ -84,8 +84,8 @@ pub use internal::{
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
 pub use folder::{
-    FolderCreateParams, FolderDeleteParams, FolderDoneAck, FolderMoveParams, FolderRenameParams,
-    FolderWriteAck,
+    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
+    FolderMoveParams, FolderRenameParams, FolderWriteAck,
 };
 pub use label::{
     LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams,

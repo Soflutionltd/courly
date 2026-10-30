@@ -11,7 +11,7 @@ use db::db::params;
 
 /// Create a minimal ActionContext backed by in-memory DBs + temp dirs.
 /// Returns (ctx, _tmpdir) - keep _tmpdir alive for the test duration.
-fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
+pub(super) fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     // Main DB with full migrations

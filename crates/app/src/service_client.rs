@@ -12,8 +12,8 @@ use service_api::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
     ContactSaveAck, ContactSaveParams, ContactSaveWithWritebackAck, DecryptForStorageAck,
     DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams, HealthPingResponse,
-    FolderCreateParams, FolderDeleteParams, FolderDoneAck, FolderMoveParams, FolderRenameParams,
-    FolderWriteAck, JsonRpcErrorObject, JsonRpcRequest, LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck,
+    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
+    FolderMoveParams, FolderRenameParams, FolderWriteAck, JsonRpcErrorObject, JsonRpcRequest, LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck,
     LabelGroupReorderParams, LabelSaveAck, LabelSaveParams,
     Notification, OauthExchangeCodeAck, OauthExchangeCodeParams, PROTOCOL_VERSION,
     ParsedServiceMessage, PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams,
@@ -1508,6 +1508,21 @@ impl ServiceClient {
     pub async fn delete_folder(&self, params: FolderDeleteParams) -> Result<(), ClientError> {
         let _ack: FolderDoneAck = self.request(RequestParams::FolderDelete { params }).await?;
         Ok(())
+    }
+
+    /// Mark every unread message of one folder read via
+    /// `folder.mark_all_read`; returns how many messages changed.
+    pub async fn mark_folder_read(&self, params: FolderContentsParams) -> Result<usize, ClientError> {
+        let ack: FolderContentsAck =
+            self.request(RequestParams::FolderMarkAllRead { params }).await?;
+        Ok(ack.count)
+    }
+
+    /// Move every message of one folder to Trash via `folder.empty`;
+    /// returns how many messages moved.
+    pub async fn empty_folder(&self, params: FolderContentsParams) -> Result<usize, ClientError> {
+        let ack: FolderContentsAck = self.request(RequestParams::FolderEmpty { params }).await?;
+        Ok(ack.count)
     }
 
     /// Create (`label_id: None`), rename or recolour one provider label

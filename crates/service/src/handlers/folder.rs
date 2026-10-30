@@ -6,8 +6,8 @@ use common::typed_ids::FolderId;
 use db::db::folder_roles::SYSTEM_FOLDER_ROLES;
 use serde_json::Value;
 use service_api::{
-    FolderCreateParams, FolderDeleteParams, FolderDoneAck, FolderMoveParams, FolderRenameParams,
-    FolderWriteAck, ServiceError,
+    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
+    FolderMoveParams, FolderRenameParams, FolderWriteAck, ServiceError,
 };
 
 use super::label::{action_context_and_account, outcome_to_result};
@@ -120,6 +120,30 @@ pub(crate) async fn handle_delete(
     .await;
     outcome_to_result(outcome)?;
     ack(FolderDoneAck)
+}
+
+pub(crate) async fn handle_mark_all_read(
+    boot_state: &Arc<BootSharedState>,
+    params: FolderContentsParams,
+) -> Result<Value, ServiceError> {
+    let (ctx, account) = action_context_and_account(boot_state, &params.account_id).await?;
+    let count =
+        crate::actions::mark_folder_read(&ctx, &account, &params.account_id, &params.folder_id)
+            .await
+            .map_err(|error| ServiceError::Internal(error.user_message()))?;
+    ack(FolderContentsAck { count })
+}
+
+pub(crate) async fn handle_empty(
+    boot_state: &Arc<BootSharedState>,
+    params: FolderContentsParams,
+) -> Result<Value, ServiceError> {
+    refuse_system_folder("folder.empty", &params.folder_id)?;
+    let (ctx, account) = action_context_and_account(boot_state, &params.account_id).await?;
+    let count = crate::actions::empty_folder(&ctx, &account, &params.account_id, &params.folder_id)
+        .await
+        .map_err(|error| ServiceError::Internal(error.user_message()))?;
+    ack(FolderContentsAck { count })
 }
 
 #[cfg(test)]
