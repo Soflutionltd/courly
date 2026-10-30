@@ -593,6 +593,15 @@ pub const PEOPLE_PILL_SPACING: f32 = 8.0;
 
 // ── HTML email body ─────────────────────────────────────
 
+/// HTML email body padding. Horizontal is zero: emails carry their own
+/// margins, and the card padding already separates them from the border.
+pub const PAD_HTML_BODY: Padding = Padding {
+    top: 4.0,
+    right: 0.0,
+    bottom: 4.0,
+    left: 0.0,
+};
+
 /// Space reserved for an HTML email body while it renders.
 pub const HTML_BODY_PLACEHOLDER_HEIGHT: f32 = 160.0;
 /// Padding inside the "remote images blocked" banner above an email body.

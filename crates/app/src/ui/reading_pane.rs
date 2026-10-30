@@ -895,7 +895,7 @@ fn message_matches_search_terms(msg: &ThreadMessage, terms: &[String]) -> bool {
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
-    let messages_pad = Padding::from([0.0, SPACE_LG]);
+    let messages_pad = Padding::from([0.0, SPACE_SM]);
     let first_message_date = pane.thread_messages.last().and_then(|m| m.date);
     let mut msg_col = column![].spacing(SPACE_XS).padding(messages_pad);
 

@@ -11,8 +11,8 @@ use crate::icon;
 use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{
     AVATAR_MESSAGE_CARD, AVATAR_THREAD_CARD, ICON_SM, ICON_XS, PAD_BADGE, PAD_BODY, PAD_CARD,
-    PAD_ICON_BTN, PAD_THREAD_CARD, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_LG, TEXT_MD,
-    TEXT_SM, TEXT_XS, THREAD_CARD_HEIGHT,
+    PAD_HTML_BODY, PAD_ICON_BTN, PAD_THREAD_CARD, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS,
+    TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS, THREAD_CARD_HEIGHT,
 };
 use crate::ui::theme;
 
@@ -380,7 +380,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     let header = column![avatar_rows, to_row].spacing(SPACE_XXS);
 
     let body_inner: Element<'_, M> = if let Some(rendered) = html_body {
-        container(rendered).padding(PAD_BODY).into()
+        container(rendered).padding(PAD_HTML_BODY).into()
     } else {
         let display = msg
             .body_text
