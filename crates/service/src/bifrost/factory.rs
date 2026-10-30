@@ -522,12 +522,9 @@ impl AccountCredentialsRow {
                 self.refresh_token.as_ref(),
                 &encryption_key,
             )?,
-            oauth_client_id: decrypt_optional(
-                &account_id,
-                "oauth_client_id",
-                self.oauth_client_id.as_ref(),
-                &encryption_key,
-            )?,
+            // A client id is public and stays in plaintext: the re-auth
+            // wizard reads it back to build the sign-in URL.
+            oauth_client_id: self.oauth_client_id.clone(),
             oauth_client_secret: decrypt_optional(
                 &account_id,
                 "oauth_client_secret",
@@ -1238,7 +1235,7 @@ mod tests {
     ) {
         let access = encrypt("access");
         let refresh = encrypt("refresh");
-        let client_id = encrypt("client");
+        let client_id = "client";
         let client_secret = encrypt("secret");
         writer
             .with_write({

@@ -185,11 +185,9 @@ pub(super) async fn seed_account_handle(
             .token_expires_at
             .or_else(|| uses_oauth.then(|| jiff::Timestamp::now().as_second() + 3_600)),
         oauth_provider,
-        oauth_client_id: encrypt_secret(
-            params
-                .oauth_client_id
-                .or_else(|| uses_oauth.then(|| "test-client-id".into())),
-        )?,
+        oauth_client_id: params
+            .oauth_client_id
+            .or_else(|| uses_oauth.then(|| "test-client-id".into())),
         oauth_client_secret: None,
         oauth_token_url: params.oauth_token_url,
         oauth_extra_scopes: params.oauth_extra_scopes,

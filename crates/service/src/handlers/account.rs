@@ -292,6 +292,8 @@ pub(crate) async fn handle_create(
             smtp_password,
         } => (access_token, refresh_token, imap_password, smtp_password),
     };
+    let (oauth_client_secret, _, _, _) =
+        encrypt_optional_credentials(key, p.oauth_client_secret, None, None, None).await?;
     let create = db::db::queries_extra::CreateAccountParams {
         email: p.email,
         provider: p.provider,
@@ -304,7 +306,7 @@ pub(crate) async fn handle_create(
         token_expires_at: p.token_expires_at,
         oauth_provider: p.oauth_provider,
         oauth_client_id: p.oauth_client_id,
-        oauth_client_secret: p.oauth_client_secret,
+        oauth_client_secret,
         oauth_token_url: None,
         oauth_extra_scopes: p.oauth_extra_scopes,
         imap_host: p.imap_host,

@@ -401,7 +401,6 @@ mod tests {
         let encrypted_access = crypto::encrypt_value(&KEY, access_token).expect("encrypt access");
         let encrypted_refresh =
             crypto::encrypt_value(&KEY, "refresh-secret").expect("encrypt refresh");
-        let encrypted_client = crypto::encrypt_value(&KEY, "client-id").expect("encrypt client");
         writer
             .with_write({
                 let account_id = account_id.to_string();
@@ -420,7 +419,7 @@ mod tests {
                             encrypted_access,
                             encrypted_refresh,
                             expires_at,
-                            encrypted_client,
+                            "client-id",
                         ],
                     )
                     .map_err(|error| error.to_string())?;
