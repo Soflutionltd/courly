@@ -1,5 +1,6 @@
 use iced::widget::{Space, column, row, scrollable, text};
 use iced::{Alignment, Element, Length, Task};
+use rust_i18n::t;
 use service_api::{RedactedString, VerifyAccountParams};
 
 use crate::font;
@@ -16,11 +17,11 @@ impl AddAccountWizard {
         &mut self,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if self.auth_state.username.trim().is_empty() {
-            self.error = Some("Username is required.".to_string());
+            self.error = Some(t!("account_setup.error.username_required").into_owned());
             return (Task::none(), None);
         }
         if self.auth_state.password.is_empty() {
-            self.error = Some("Password is required.".to_string());
+            self.error = Some(t!("account_setup.error.password_required").into_owned());
             return (Task::none(), None);
         }
 
@@ -29,14 +30,14 @@ impl AddAccountWizard {
         self.error = None;
         let generation = self.generation.next();
         let Some(client) = self.service_client.as_ref().cloned() else {
-            self.error = Some("Service not ready - try again in a moment.".to_string());
+            self.error = Some(t!("account_setup.error.service_not_ready_retry").into_owned());
             self.step = AddAccountStep::PasswordAuth;
             return (Task::none(), None);
         };
         let port = match self.auth_state.imap_port.parse() {
             Ok(port) => port,
             Err(_) => {
-                self.error = Some("Invalid port number".to_string());
+                self.error = Some(t!("account_setup.error.invalid_port").into_owned());
                 self.step = AddAccountStep::PasswordAuth;
                 return (Task::none(), None);
             }
@@ -64,9 +65,9 @@ impl AddAccountWizard {
                         if ack.ok {
                             Ok(())
                         } else {
-                            Err(ack
-                                .message
-                                .unwrap_or_else(|| "Could not verify account.".to_string()))
+                            Err(ack.message.unwrap_or_else(|| {
+                                t!("account_setup.error.verify_failed").into_owned()
+                            }))
                         }
                     });
                 (generation, result)
@@ -80,9 +81,9 @@ impl AddAccountWizard {
         let mut col = column![].spacing(SPACE_MD).width(Length::Fill);
 
         let heading = if self.reauth_account_id.is_some() {
-            "Re-authenticate"
+            t!("account_setup.reauthenticate")
         } else {
-            "Sign In"
+            t!("account_setup.sign_in")
         };
 
         col = col.push(
@@ -101,7 +102,11 @@ impl AddAccountWizard {
         }
 
         // IMAP section
-        col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
+        col = col.push(
+            text(t!("account_setup.incoming_imap"))
+                .size(TEXT_XL)
+                .style(text::base),
+        );
         col = col.push(server_port_row(
             "imap.example.com",
             &self.auth_state.imap_host,
@@ -115,7 +120,7 @@ impl AddAccountWizard {
             AddAccountMessage::AuthImapSecurityChanged,
         ));
         col = col.push(labeled_input(
-            "Username",
+            t!("account_setup.username"),
             "alice@example.com",
             &self.auth_state.username,
             AddAccountMessage::UsernameChanged,
@@ -124,7 +129,7 @@ impl AddAccountWizard {
         // This is a deliberate product decision per problem-statement.md.
         // Users need to see what they type for app-specific passwords.
         col = col.push(labeled_input(
-            "Password",
+            t!("account_setup.password"),
             "",
             &self.auth_state.password,
             AddAccountMessage::PasswordChanged,
@@ -132,7 +137,11 @@ impl AddAccountWizard {
 
         // SMTP section
         col = col.push(Space::new().height(SPACE_SM));
-        col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
+        col = col.push(
+            text(t!("account_setup.outgoing_smtp"))
+                .size(TEXT_XL)
+                .style(text::base),
+        );
         col = col.push(server_port_row(
             "smtp.example.com",
             &self.auth_state.smtp_host,
@@ -154,10 +163,13 @@ impl AddAccountWizard {
 
         col = col.push(Space::new().height(SPACE_SM));
         col = col.push(primary_button(
-            "Sign In",
+            t!("account_setup.sign_in"),
             AddAccountMessage::SubmitCredentials,
         ));
-        col = col.push(ghost_button("Back", AddAccountMessage::Back));
+        col = col.push(ghost_button(
+            t!("account_setup.back"),
+            AddAccountMessage::Back,
+        ));
 
         scrollable(col).spacing(SCROLLBAR_SPACING).into()
     }
@@ -170,7 +182,7 @@ impl AddAccountWizard {
                 iced::widget::checkbox(self.auth_state.use_separate_smtp_credentials)
                     .on_toggle(AddAccountMessage::ToggleSeparateSmtpCredentials)
                     .size(RADIO_SIZE),
-                text("Use different credentials for SMTP")
+                text(t!("account_setup.separate_smtp_credentials"))
                     .size(TEXT_LG)
                     .style(text::base),
             ]
@@ -180,13 +192,13 @@ impl AddAccountWizard {
 
         if self.auth_state.use_separate_smtp_credentials {
             col = col.push(labeled_input(
-                "SMTP Username",
+                t!("account_setup.smtp_username"),
                 "",
                 &self.auth_state.smtp_username,
                 AddAccountMessage::SmtpUsernameChanged,
             ));
             col = col.push(labeled_input(
-                "SMTP Password",
+                t!("account_setup.smtp_password"),
                 "",
                 &self.auth_state.smtp_password,
                 AddAccountMessage::SmtpPasswordChanged,
@@ -198,7 +210,7 @@ impl AddAccountWizard {
                 iced::widget::checkbox(self.auth_state.accept_invalid_certs)
                     .on_toggle(AddAccountMessage::ToggleAcceptInvalidCerts)
                     .size(RADIO_SIZE),
-                text("Accept self-signed certificates")
+                text(t!("account_setup.accept_self_signed"))
                     .size(TEXT_LG)
                     .style(text::base),
             ]
@@ -212,13 +224,13 @@ impl AddAccountWizard {
 
 pub(super) fn view_validating<'a>() -> Element<'a, AddAccountMessage> {
     column![
-        text("Validating credentials...")
+        text(t!("account_setup.validating"))
             .size(TEXT_LG)
             .style(text::secondary),
         Space::new().height(SPACE_MD),
         widgets::spinner(24.0),
         Space::new().height(SPACE_SM),
-        text("Connecting to your mail server...")
+        text(t!("account_setup.connecting"))
             .size(TEXT_SM)
             .style(text::secondary),
     ]

@@ -1,5 +1,6 @@
 use iced::widget::{Space, column, text};
 use iced::{Alignment, Element, Length, Task};
+use rust_i18n::t;
 
 use crate::font;
 use crate::ui::layout::*;
@@ -65,10 +66,13 @@ impl AddAccountWizard {
                 Some(issuer.to_string())
             } else {
                 self.step = AddAccountStep::PasswordAuth;
-                self.error = Some(format!(
-                    "No OAuth configuration found for provider \
-                     '{provider_id}'. Please enter credentials manually."
-                ));
+                self.error = Some(
+                    t!(
+                        "account_setup.error.no_oauth_config",
+                        provider = provider_id
+                    )
+                    .into_owned(),
+                );
                 return Task::none();
             }
         } else {
@@ -82,7 +86,7 @@ impl AddAccountWizard {
         let initial_client_id = client_id.clone();
 
         let Some(client) = self.service_client.as_ref().cloned() else {
-            self.error = Some("Service not ready".into());
+            self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
             return Task::none();
         };
         let reauth_account_id = self.reauth_account_id.clone();
@@ -109,7 +113,10 @@ impl AddAccountWizard {
                 } else if let Some(issuer) = oidc_issuer {
                     let endpoints = rtsk::discovery::oidc::probe_issuer(&issuer)
                         .await
-                        .ok_or_else(|| format!("OIDC discovery failed for issuer '{issuer}'"))?;
+                        .ok_or_else(|| {
+                            t!("account_setup.error.oidc_discovery_failed", issuer = issuer)
+                                .into_owned()
+                        })?;
                     (
                         endpoints.auth_url,
                         endpoints.token_url,
@@ -120,7 +127,7 @@ impl AddAccountWizard {
                     )
                 } else {
                     return Err::<Result<OAuthSuccess, String>, String>(
-                        "No OAuth configuration available".into(),
+                        t!("account_setup.error.no_oauth_config_available").into_owned(),
                     );
                 };
 
@@ -132,8 +139,7 @@ impl AddAccountWizard {
                     if let Some(endpoint) = registration_endpoint.as_deref() {
                         if !supports_public_client {
                             return Err::<Result<OAuthSuccess, String>, String>(
-                                "Provider does not support public clients; supply a Client ID."
-                                    .into(),
+                                t!("account_setup.error.no_public_clients").into_owned(),
                             );
                         }
                         let scope = scopes.join(" ");
@@ -152,17 +158,13 @@ impl AddAccountWizard {
                             }
                             None => {
                                 return Err::<Result<OAuthSuccess, String>, String>(
-                                    "Dynamic client registration failed; supply a Client ID \
-                                     manually."
-                                        .into(),
+                                    t!("account_setup.error.dyn_registration_failed").into_owned(),
                                 );
                             }
                         }
                     } else {
                         return Err::<Result<OAuthSuccess, String>, String>(
-                            "No Client ID supplied and the provider does not advertise a \
-                             registration endpoint."
-                                .into(),
+                            t!("account_setup.error.no_registration_endpoint").into_owned(),
                         );
                     }
                 } else {
@@ -234,7 +236,7 @@ impl AddAccountWizard {
         }
 
         let Some(client) = self.service_client.as_ref().cloned() else {
-            self.error = Some("Service not ready".into());
+            self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
             return (Task::none(), None);
         };
         self.step = AddAccountStep::Validating;
@@ -253,9 +255,9 @@ impl AddAccountWizard {
                             if ack.ok {
                                 Ok(())
                             } else {
-                                Err(ack
-                                    .message
-                                    .unwrap_or_else(|| "Could not verify account.".to_string()))
+                                Err(ack.message.unwrap_or_else(|| {
+                                    t!("account_setup.error.verify_failed").into_owned()
+                                }))
                             }
                         });
                     (generation, task_success, result)
@@ -316,7 +318,9 @@ impl AddAccountWizard {
                     return (task, None);
                 }
                 Err(e) => {
-                    self.error = Some(format!("Failed to look up account: {e}"));
+                    self.error = Some(
+                        t!("account_setup.error.account_lookup_failed", error = e).into_owned(),
+                    );
                     return (Task::none(), None);
                 }
             }
@@ -342,9 +346,9 @@ impl AddAccountWizard {
             .width(Length::Fill);
 
         let heading = if self.reauth_account_id.is_some() {
-            "Re-authenticate in your browser"
+            t!("account_setup.reauthenticate_in_browser")
         } else {
-            "Complete sign-in in your browser"
+            t!("account_setup.complete_sign_in_in_browser")
         };
 
         col = col.push(
@@ -363,7 +367,7 @@ impl AddAccountWizard {
         }
         col = col.push(Space::new().height(SPACE_MD));
         col = col.push(
-            text("Waiting for authorization...")
+            text(t!("account_setup.waiting_for_authorization"))
                 .size(TEXT_LG)
                 .style(text::secondary),
         );
@@ -372,11 +376,17 @@ impl AddAccountWizard {
             col = col.push(Space::new().height(SPACE_SM));
             col = col.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
             col = col.push(Space::new().height(SPACE_SM));
-            col = col.push(primary_button("Retry", AddAccountMessage::RetryOAuth));
+            col = col.push(primary_button(
+                t!("account_setup.retry"),
+                AddAccountMessage::RetryOAuth,
+            ));
         }
 
         col = col.push(Space::new().height(SPACE_LG));
-        col = col.push(ghost_button("Cancel", AddAccountMessage::CancelOAuth));
+        col = col.push(ghost_button(
+            t!("account_setup.cancel"),
+            AddAccountMessage::CancelOAuth,
+        ));
 
         col.into()
     }
@@ -546,21 +556,21 @@ pub(super) fn open_browser_url(url: &str) -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(url)
             .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
+            .map_err(|e| t!("account_setup.error.open_browser_failed", error = e).into_owned())?;
     }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
             .arg(url)
             .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
+            .map_err(|e| t!("account_setup.error.open_browser_failed", error = e).into_owned())?;
     }
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
             .args(["/c", "start", url])
             .spawn()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
+            .map_err(|e| t!("account_setup.error.open_browser_failed", error = e).into_owned())?;
     }
     Ok(())
 }

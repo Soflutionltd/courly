@@ -1,5 +1,6 @@
 use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
+use rust_i18n::t;
 
 use crate::font;
 use crate::ui::layout::*;
@@ -19,7 +20,7 @@ use super::views::{
 /// leaves them blank and the issuer advertises a registration endpoint.
 fn custom_oidc_fields(cfg: &CustomOidcConfig) -> Element<'_, AddAccountMessage> {
     fn field<'a>(
-        label: &'a str,
+        label: impl text::IntoFragment<'a>,
         placeholder: &'a str,
         value: &'a str,
         on_change: fn(String) -> AddAccountMessage,
@@ -38,21 +39,23 @@ fn custom_oidc_fields(cfg: &CustomOidcConfig) -> Element<'_, AddAccountMessage> 
     }
 
     column![
-        text("OIDC Provider").size(TEXT_XL).style(text::base),
+        text(t!("account_setup.oidc_provider"))
+            .size(TEXT_XL)
+            .style(text::base),
         field(
-            "Issuer URL",
+            t!("account_setup.issuer_url"),
             "https://auth.corp.example",
             &cfg.issuer_url,
             AddAccountMessage::CustomOidcIssuerChanged,
         ),
         field(
-            "Client ID (optional - leave blank to auto-register)",
+            t!("account_setup.client_id_optional"),
             "ratatoskr-corp",
             &cfg.client_id,
             AddAccountMessage::CustomOidcClientIdChanged,
         ),
         field(
-            "Client Secret (optional - for confidential clients)",
+            t!("account_setup.client_secret_optional"),
             "",
             &cfg.client_secret,
             AddAccountMessage::CustomOidcClientSecretChanged,
@@ -67,7 +70,7 @@ impl AddAccountWizard {
         &mut self,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         let Some(provider) = self.manual_config.selected_provider else {
-            self.error = Some("Please select a provider type.".to_string());
+            self.error = Some(t!("account_setup.error.select_provider").into_owned());
             return (Task::none(), None);
         };
 
@@ -98,7 +101,7 @@ impl AddAccountWizard {
             }
             ManualProvider::Jmap => {
                 if self.manual_config.jmap_url.trim().is_empty() {
-                    self.error = Some("Please enter a JMAP session URL.".to_string());
+                    self.error = Some(t!("account_setup.error.jmap_url_required").into_owned());
                     return (Task::none(), None);
                 }
                 // ManualProvider::Jmap is password-only now; the OAuth
@@ -126,11 +129,11 @@ impl AddAccountWizard {
             return (Task::none(), None);
         }
         if self.auth_state.imap_host.trim().is_empty() {
-            self.error = Some("Please enter an IMAP host.".to_string());
+            self.error = Some(t!("account_setup.error.imap_host_required").into_owned());
             return (Task::none(), None);
         }
         if self.auth_state.smtp_host.trim().is_empty() {
-            self.error = Some("Please enter an SMTP host.".to_string());
+            self.error = Some(t!("account_setup.error.smtp_host_required").into_owned());
             return (Task::none(), None);
         }
         let issuer = self
@@ -157,7 +160,7 @@ impl AddAccountWizard {
             return (Task::none(), None);
         }
         if self.manual_config.jmap_url.trim().is_empty() {
-            self.error = Some("Please enter a JMAP session URL.".to_string());
+            self.error = Some(t!("account_setup.error.jmap_url_required").into_owned());
             return (Task::none(), None);
         }
         let issuer = self
@@ -183,12 +186,10 @@ impl AddAccountWizard {
     fn validate_custom_oidc_issuer(&self) -> Result<(), String> {
         let trimmed = self.manual_config.custom_oidc.issuer_url.trim();
         if trimmed.is_empty() {
-            return Err("Please enter an OIDC issuer URL.".to_string());
+            return Err(t!("account_setup.error.issuer_required").into_owned());
         }
         if !rtsk::discovery::oidc::is_valid_https_url(trimmed) {
-            return Err(
-                "Issuer URL must be HTTPS, with no embedded credentials or fragment.".to_string(),
-            );
+            return Err(t!("account_setup.error.issuer_invalid").into_owned());
         }
         Ok(())
     }
@@ -197,7 +198,7 @@ impl AddAccountWizard {
         let mut col = column![].spacing(SPACE_MD).width(Length::Fill);
 
         col = col.push(
-            text("Manual Configuration")
+            text(t!("account_setup.manual_config_title"))
                 .size(TEXT_HEADING)
                 .style(text::base)
                 .font(iced::Font {
@@ -211,7 +212,11 @@ impl AddAccountWizard {
         }
 
         // Provider type selection
-        col = col.push(text("Provider").size(TEXT_SM).style(text::secondary));
+        col = col.push(
+            text(t!("account_setup.provider"))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
         let mut provider_row = row![].spacing(SPACE_XS);
         for &p in ManualProvider::ALL {
             let selected = self.manual_config.selected_provider == Some(p);
@@ -238,7 +243,11 @@ impl AddAccountWizard {
         match self.manual_config.selected_provider {
             Some(ManualProvider::Imap) => {
                 col = col.push(Space::new().height(SPACE_XS));
-                col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
+                col = col.push(
+                    text(t!("account_setup.incoming_imap"))
+                        .size(TEXT_XL)
+                        .style(text::base),
+                );
                 col = col.push(server_port_row(
                     "imap.example.com",
                     &self.auth_state.imap_host,
@@ -252,7 +261,11 @@ impl AddAccountWizard {
                     AddAccountMessage::ManualImapSecurityChanged,
                 ));
 
-                col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
+                col = col.push(
+                    text(t!("account_setup.outgoing_smtp"))
+                        .size(TEXT_XL)
+                        .style(text::base),
+                );
                 col = col.push(server_port_row(
                     "smtp.example.com",
                     &self.auth_state.smtp_host,
@@ -270,7 +283,7 @@ impl AddAccountWizard {
                 col = col.push(Space::new().height(SPACE_XS));
                 col = col.push(
                     column![
-                        text("JMAP Session URL")
+                        text(t!("account_setup.jmap_session_url"))
                             .size(TEXT_SM)
                             .style(text::secondary),
                         text_input(
@@ -287,14 +300,22 @@ impl AddAccountWizard {
                 );
 
                 // Auth method selector
-                col = col.push(text("Authentication").size(TEXT_SM).style(text::secondary));
+                col = col.push(
+                    text(t!("account_setup.authentication"))
+                        .size(TEXT_SM)
+                        .style(text::secondary),
+                );
                 col = col.push(auth_method_selector(self.manual_config.auth_method));
             }
             Some(ManualProvider::CustomOidcImap) => {
                 col = col.push(Space::new().height(SPACE_XS));
                 col = col.push(custom_oidc_fields(&self.manual_config.custom_oidc));
 
-                col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
+                col = col.push(
+                    text(t!("account_setup.incoming_imap"))
+                        .size(TEXT_XL)
+                        .style(text::base),
+                );
                 col = col.push(server_port_row(
                     "imap.corp.example",
                     &self.auth_state.imap_host,
@@ -308,7 +329,11 @@ impl AddAccountWizard {
                     AddAccountMessage::ManualImapSecurityChanged,
                 ));
 
-                col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
+                col = col.push(
+                    text(t!("account_setup.outgoing_smtp"))
+                        .size(TEXT_XL)
+                        .style(text::base),
+                );
                 col = col.push(server_port_row(
                     "smtp.corp.example",
                     &self.auth_state.smtp_host,
@@ -328,7 +353,7 @@ impl AddAccountWizard {
 
                 col = col.push(
                     column![
-                        text("JMAP Session URL")
+                        text(t!("account_setup.jmap_session_url"))
                             .size(TEXT_SM)
                             .style(text::secondary),
                         text_input(
@@ -347,12 +372,20 @@ impl AddAccountWizard {
             Some(ManualProvider::Gmail) | Some(ManualProvider::Microsoft365) => {
                 col = col.push(Space::new().height(SPACE_XS));
                 // Auth method selector
-                col = col.push(text("Authentication").size(TEXT_SM).style(text::secondary));
+                col = col.push(
+                    text(t!("account_setup.authentication"))
+                        .size(TEXT_SM)
+                        .style(text::secondary),
+                );
                 col = col.push(auth_method_selector(self.manual_config.auth_method));
 
                 // If password auth, show IMAP/SMTP fields
                 if self.manual_config.auth_method == ManualAuthMethod::Password {
-                    col = col.push(text("Incoming (IMAP)").size(TEXT_XL).style(text::base));
+                    col = col.push(
+                        text(t!("account_setup.incoming_imap"))
+                            .size(TEXT_XL)
+                            .style(text::base),
+                    );
                     col = col.push(server_port_row(
                         "imap.example.com",
                         &self.auth_state.imap_host,
@@ -366,7 +399,11 @@ impl AddAccountWizard {
                         AddAccountMessage::ManualImapSecurityChanged,
                     ));
 
-                    col = col.push(text("Outgoing (SMTP)").size(TEXT_XL).style(text::base));
+                    col = col.push(
+                        text(t!("account_setup.outgoing_smtp"))
+                            .size(TEXT_XL)
+                            .style(text::base),
+                    );
                     col = col.push(server_port_row(
                         "smtp.example.com",
                         &self.auth_state.smtp_host,
@@ -383,7 +420,7 @@ impl AddAccountWizard {
             }
             None => {
                 col = col.push(
-                    text("Select a provider type above to continue.")
+                    text(t!("account_setup.select_provider_hint"))
                         .size(TEXT_SM)
                         .style(text::secondary),
                 );
@@ -393,11 +430,14 @@ impl AddAccountWizard {
         col = col.push(Space::new().height(SPACE_SM));
         if self.manual_config.selected_provider.is_some() {
             col = col.push(primary_button(
-                "Continue",
+                t!("account_setup.continue"),
                 AddAccountMessage::SubmitManualConfig,
             ));
         }
-        col = col.push(ghost_button("Back", AddAccountMessage::Back));
+        col = col.push(ghost_button(
+            t!("account_setup.back"),
+            AddAccountMessage::Back,
+        ));
 
         scrollable(col).spacing(SCROLLBAR_SPACING).into()
     }

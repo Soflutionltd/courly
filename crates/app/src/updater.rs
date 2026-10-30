@@ -11,6 +11,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use rust_i18n::t;
 
 const MANIFEST_URL: &str =
     "https://github.com/Soflutionltd/ratatoskr/releases/latest/download/latest.json";
@@ -144,7 +145,7 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 
 fn client() -> Result<&'static reqwest::Client, String> {
     HTTP.as_ref()
-        .ok_or_else(|| "HTTP client unavailable".to_string())
+        .ok_or_else(|| t!("updater.error.http_client_unavailable").into_owned())
 }
 
 /// Fetch the manifest and return the update when it is newer than the
@@ -200,28 +201,29 @@ async fn install_inner(
     info: &UpdateInfo,
     events: &mut iced::futures::channel::mpsc::Sender<InstallEvent>,
 ) -> Result<(), String> {
-    let bundle = installed_bundle().ok_or("Ratatoskr is not running from an installed app")?;
+    let bundle =
+        installed_bundle().ok_or_else(|| t!("updater.error.not_installed").into_owned())?;
     let mut response = client()?
         .get(&info.url)
         .send()
         .await
-        .map_err(|error| format!("download: {error}"))?;
+        .map_err(|error| t!("updater.error.download", error = error).into_owned())?;
     if !response.status().is_success() {
-        return Err(format!("download: HTTP {}", response.status()));
+        return Err(t!("updater.error.download_http", status = response.status()).into_owned());
     }
     let total = response.content_length();
     if total.is_some_and(|size| size > MAX_ARCHIVE_BYTES) {
-        return Err("download: archive is too large".to_string());
+        return Err(t!("updater.error.archive_too_large").into_owned());
     }
     let mut archive = Vec::with_capacity(usize::try_from(total.unwrap_or(0)).unwrap_or(0));
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| format!("download: {error}"))?
+        .map_err(|error| t!("updater.error.download", error = error).into_owned())?
     {
         archive.extend_from_slice(&chunk);
         if archive.len() as u64 > MAX_ARCHIVE_BYTES {
-            return Err("download: archive is too large".to_string());
+            return Err(t!("updater.error.archive_too_large").into_owned());
         }
         let _ = events.try_send(InstallEvent::Progress {
             downloaded: archive.len() as u64,
@@ -233,29 +235,29 @@ async fn install_inner(
     let _ = events.try_send(InstallEvent::Installing);
     tokio::task::spawn_blocking(move || replace_bundle(&bundle, &archive))
         .await
-        .map_err(|error| format!("install: {error}"))?
+        .map_err(|error| t!("updater.error.install", error = error).into_owned())?
 }
 
-fn decode_base64_text(value: &str, what: &str) -> Result<String, String> {
+fn decode_base64_text(value: &str) -> Result<String, String> {
     let bytes = STANDARD
         .decode(value.trim())
-        .map_err(|error| format!("{what}: {error}"))?;
-    String::from_utf8(bytes).map_err(|error| format!("{what}: {error}"))
+        .map_err(|error| error.to_string())?;
+    String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 
 /// Check the minisign signature and that its trusted comment (covered by
 /// the signature) names the announced version, so a tampered manifest
 /// cannot pass an older signed archive off as a newer release.
 fn verify_signature(archive: &[u8], signature: &str, version: &str) -> Result<(), String> {
-    let public_key =
-        minisign_verify::PublicKey::decode(&decode_base64_text(PUBLIC_KEY, "updater public key")?)
-            .map_err(|error| format!("updater public key: {error}"))?;
-    let signature =
-        minisign_verify::Signature::decode(&decode_base64_text(signature, "update signature")?)
-            .map_err(|error| format!("update signature: {error}"))?;
+    let public_key = decode_base64_text(PUBLIC_KEY)
+        .and_then(|text| minisign_verify::PublicKey::decode(&text).map_err(|e| e.to_string()))
+        .map_err(|error| t!("updater.error.public_key", error = error).into_owned())?;
+    let signature = decode_base64_text(signature)
+        .and_then(|text| minisign_verify::Signature::decode(&text).map_err(|e| e.to_string()))
+        .map_err(|error| t!("updater.error.signature_decode", error = error).into_owned())?;
     public_key
         .verify(archive, &signature, true)
-        .map_err(|_| "the update signature is invalid".to_string())?;
+        .map_err(|_| t!("updater.error.signature_invalid").into_owned())?;
     let expected = format!("version:{version}");
     if signature
         .trusted_comment()
@@ -264,7 +266,7 @@ fn verify_signature(archive: &[u8], signature: &str, version: &str) -> Result<()
     {
         Ok(())
     } else {
-        Err(format!("the update signature is not for version {version}"))
+        Err(t!("updater.error.signature_wrong_version", version = version).into_owned())
     }
 }
 
@@ -272,47 +274,59 @@ fn verify_signature(archive: &[u8], signature: &str, version: &str) -> Result<()
 /// renames) and put the new bundle in place, restoring the old one if the
 /// second rename fails.
 fn replace_bundle(bundle: &Path, archive: &[u8]) -> Result<(), String> {
-    let parent = bundle.parent().ok_or("install: bundle has no parent")?;
+    let parent = bundle
+        .parent()
+        .ok_or_else(|| t!("updater.error.bundle_no_parent").into_owned())?;
     let name = bundle
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or("install: bundle name is not UTF-8")?;
+        .ok_or_else(|| t!("updater.error.bundle_name_not_utf8").into_owned())?;
     let staging = parent.join(format!(".{name}.update"));
     let previous = parent.join(format!(".{name}.previous"));
     for leftover in [&staging, &previous] {
         if leftover.exists() {
-            std::fs::remove_dir_all(leftover)
-                .map_err(|error| format!("install: clean {}: {error}", leftover.display()))?;
+            std::fs::remove_dir_all(leftover).map_err(|error| {
+                t!(
+                    "updater.error.clean",
+                    path = leftover.display(),
+                    error = error
+                )
+                .into_owned()
+            })?;
         }
     }
     std::fs::create_dir_all(&staging).map_err(|error| {
-        format!(
-            "install: cannot write next to {} ({error})",
-            bundle.display()
+        t!(
+            "updater.error.cannot_write",
+            path = bundle.display(),
+            error = error
         )
+        .into_owned()
     })?;
 
     let archive_path = staging.join("update.tar.gz");
-    std::fs::write(&archive_path, archive).map_err(|error| format!("install: {error}"))?;
+    std::fs::write(&archive_path, archive)
+        .map_err(|error| t!("updater.error.install", error = error).into_owned())?;
     let status = std::process::Command::new("/usr/bin/tar")
         .arg("-xzf")
         .arg(&archive_path)
         .arg("-C")
         .arg(&staging)
         .status()
-        .map_err(|error| format!("install: tar: {error}"))?;
+        .map_err(|error| t!("updater.error.tar", error = error).into_owned())?;
     if !status.success() {
-        return Err(format!("install: tar exited with {status}"));
+        return Err(t!("updater.error.tar_status", status = status).into_owned());
     }
     let new_bundle = staging.join(name);
     if !new_bundle.join("Contents/Info.plist").is_file() {
-        return Err(format!("install: archive does not contain {name}"));
+        return Err(t!("updater.error.archive_missing_bundle", name = name).into_owned());
     }
 
-    std::fs::rename(bundle, &previous).map_err(|error| format!("install: {error}"))?;
+    std::fs::rename(bundle, &previous)
+        .map_err(|error| t!("updater.error.install", error = error).into_owned())?;
     if let Err(error) = std::fs::rename(&new_bundle, bundle) {
         let _ = std::fs::rename(&previous, bundle);
-        return Err(format!("install: {error}"));
+        return Err(t!("updater.error.install", error = error).into_owned());
     }
     for leftover in [&staging, &previous] {
         if let Err(error) = std::fs::remove_dir_all(leftover) {
@@ -371,7 +385,7 @@ mod tests {
 
     #[test]
     fn embedded_public_key_decodes() {
-        let text = decode_base64_text(PUBLIC_KEY, "key").expect("base64");
+        let text = decode_base64_text(PUBLIC_KEY).expect("base64");
         minisign_verify::PublicKey::decode(&text).expect("minisign public key");
     }
 
