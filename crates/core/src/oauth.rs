@@ -26,7 +26,7 @@ const GOOGLE_SCOPES: &str = concat!(
     "https://www.googleapis.com/auth/contacts.readonly ",
     "https://www.googleapis.com/auth/contacts.other.readonly"
 );
-/// Default Microsoft Entra app registration for Ratatoskr (Soflution tenant,
+/// Default Microsoft Entra app registration for Courly (Soflution tenant,
 /// any Entra tenant plus personal accounts, public client whose only
 /// redirect URI is `http://127.0.0.1:17248`).
 /// Users can override per-account via oauth_client_id in the accounts table.
@@ -539,11 +539,11 @@ fn parse_callback(request: &str, expected_state: &str) -> CallbackOutcome {
 fn oauth_success_html() -> &'static str {
     r#"<!DOCTYPE html>
 <html>
-<head><title>Ratatoskr</title></head>
+<head><title>Courly</title></head>
 <body style="font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0;">
 <div style="text-align: center;">
 <h1 style="margin-bottom: 8px;">Account Connected!</h1>
-<p style="opacity: 0.7;">You can close this tab and return to Ratatoskr.</p>
+<p style="opacity: 0.7;">You can close this tab and return to Courly.</p>
 </div>
 </body>
 </html>"#

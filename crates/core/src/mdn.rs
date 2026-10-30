@@ -55,7 +55,7 @@ pub fn build_mdn_message(
 
     // Machine‑readable disposition notification (RFC 8098 §3.2.6)
     let machine_part = format!(
-        "Reporting-UA: Ratatoskr\r\n\
+        "Reporting-UA: Courly\r\n\
          Final-Recipient: rfc822;{recipient_email}\r\n\
          Original-Message-ID: {original_message_id}\r\n\
          Disposition: {disposition_mode};displayed\r\n"
@@ -126,7 +126,7 @@ mod tests {
         assert!(text.contains("To: <sender@example.com>"));
         assert!(text.contains("multipart/report"));
         assert!(text.contains("report-type=disposition-notification"));
-        assert!(text.contains("Reporting-UA: Ratatoskr"));
+        assert!(text.contains("Reporting-UA: Courly"));
         assert!(text.contains("Final-Recipient: rfc822;me@myhost.com"));
         assert!(text.contains("Original-Message-ID: <original-id@example.com>"));
         assert!(text.contains("manual-action/MDN-sent-manually;displayed"));

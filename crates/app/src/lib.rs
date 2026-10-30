@@ -70,7 +70,7 @@ pub(crate) static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLo
 pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 
 /// IT-distributable wizard defaults, loaded once at boot from
-/// `~/.config/ratatoskr/config.toml` (or platform equivalent). When no
+/// `~/.config/courly/config.toml` (or platform equivalent). When no
 /// file exists or it can't be parsed, this holds a `Default` (all
 /// sub-tables `None`, no pre-fill applies).
 pub(crate) static ADMIN_CONFIG: std::sync::OnceLock<admin_config::AdminConfig> =
@@ -92,7 +92,7 @@ pub fn run() -> RunResult {
 #[allow(clippy::unwrap_in_result)]
 pub fn run_app_blocking() -> RunResult {
     env_logger::init();
-    log::info!("Ratatoskr starting");
+    log::info!("Courly starting");
     i18n::init();
     #[cfg(feature = "hotpath")]
     let _hotpath = hotpath::HotpathGuardBuilder::new("ratatoskr::main")

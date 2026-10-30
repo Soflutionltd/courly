@@ -447,7 +447,7 @@ fn mark_quarantined(path: &Path) -> std::io::Result<()> {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    let value = format!("0081;{seconds:08x};Ratatoskr;");
+    let value = format!("0081;{seconds:08x};Courly;");
     let result = unsafe {
         libc::setxattr(
             c_path.as_ptr(),
@@ -620,7 +620,7 @@ mod tests {
             .expect("xattr");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(output.status.success(), "no quarantine attribute");
-        assert!(String::from_utf8_lossy(&output.stdout).contains(";Ratatoskr;"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains(";Courly;"));
     }
 
     #[test]

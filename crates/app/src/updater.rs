@@ -40,7 +40,7 @@ pub const AUTO_RETRIES: u32 = 2;
 static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
-        .user_agent(concat!("Ratatoskr/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Courly/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|error| log::warn!("updater: HTTP client unavailable: {error}"))
         .ok()
@@ -359,7 +359,7 @@ pub fn relaunch_after_exit() -> Result<(), String> {
 pub fn relaunch_after_exit() -> Result<(), String> {
     use std::os::unix::process::CommandExt as _;
 
-    let bundle = installed_bundle().ok_or("Ratatoskr is not running from an installed app")?;
+    let bundle = installed_bundle().ok_or("Courly is not running from an installed app")?;
     std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg("while /bin/kill -0 \"$0\" 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"$1\"")

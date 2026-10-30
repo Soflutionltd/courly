@@ -1,6 +1,6 @@
 //! IT-distributable admin config: pre-fill values for the add-account wizard.
 //!
-//! Lives at `~/.config/ratatoskr/config.toml` (or platform equivalent via
+//! Lives at `~/.config/courly/config.toml` (or platform equivalent via
 //! `dirs::config_dir()`). All fields optional; the user can override
 //! anything at the wizard. Best-effort load: a missing or malformed file
 //! never blocks app start, just degrades to no pre-fill.
@@ -44,11 +44,11 @@ pub struct JmapDefaults {
     pub url: Option<String>,
 }
 
-/// Resolved path: `~/.config/ratatoskr/config.toml` on Linux, the
+/// Resolved path: `~/.config/courly/config.toml` on Linux, the
 /// platform equivalent on macOS / Windows. `None` when no config dir is
 /// resolvable for the current user (rare).
 pub fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("ratatoskr").join("config.toml"))
+    dirs::config_dir().map(|d| d.join("courly").join("config.toml"))
 }
 
 /// Load the admin config from disk. Returns `None` for any failure mode
@@ -166,9 +166,9 @@ issuer_url = "https://auth.corp.example"
     #[test]
     fn config_path_returns_some_on_supported_platforms() {
         // dirs::config_dir() returns None on platforms with no
-        // convention; otherwise the joined path includes "ratatoskr".
+        // convention; otherwise the joined path includes "courly".
         if let Some(path) = config_path() {
-            assert!(path.to_string_lossy().contains("ratatoskr"));
+            assert!(path.to_string_lossy().contains("courly"));
             assert!(path.ends_with("config.toml"));
         }
     }

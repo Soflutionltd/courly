@@ -3,10 +3,10 @@ fn main() -> app::RunResult {
 
     // The parent-death test helper is a hidden mode of this same binary
     // rather than a separate sibling executable. Folding it in means the
-    // single `ratatoskr` binary the harness build produces always carries
+    // single `courly` binary the harness build produces always carries
     // the capability - there is no second binary that can be left unbuilt
     // in the harness bin dir (which is exactly what silently broke the
-    // `parent_sigkill` gate when the harness build emitted only `ratatoskr`
+    // `parent_sigkill` gate when the harness build emitted only `courly`
     // and no `parent_death_helper`). The flag is never passed in
     // production; only the service-harness spawns it.
     if let Some((service_binary, data_dir)) = parent_death_helper_args() {

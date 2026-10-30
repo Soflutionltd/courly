@@ -10,7 +10,7 @@ license.workspace = true
 workspace = true
 
 [[bin]]
-name = "ratatoskr"
+name = "courly"
 path = "src/main.rs"
 
 [dependencies]

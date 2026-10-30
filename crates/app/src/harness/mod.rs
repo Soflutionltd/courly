@@ -330,7 +330,7 @@ enum HarnessResource {
     Notifications(ServiceNotificationReceiver),
     Request(tokio::task::JoinHandle<Result<serde_json::Value, ClientError>>),
     /// The parent-death helper child the harness drives directly (the
-    /// `ratatoskr --parent-death-helper` mode of the same binary).
+    /// `courly --parent-death-helper` mode of the same binary).
     /// Held here so kill_on_drop fires on teardown and SIGCHLD reaps the child
     /// through the tokio runtime before the harness process exits. The Child
     /// itself is never read after insertion - it exists for Drop side effects.
@@ -435,7 +435,7 @@ fn lua_spawn_with_events(state: &mut State) -> dellingr::Result<u8> {
 }
 
 /// Spawn the parent-death helper (the `--parent-death-helper` mode of the
-/// `ratatoskr` binary) as a child of the harness, which in turn spawns the
+/// `courly` binary) as a child of the harness, which in turn spawns the
 /// Service with `PR_SET_PDEATHSIG = SIGTERM` set via `pre_exec`. The helper
 /// prints the Service's pid to stdout and sleeps; the Lua test then SIGKILLs
 /// the helper and polls the Service pid.
@@ -454,7 +454,7 @@ fn lua_spawn_parent_death_helper(state: &mut State) -> dellingr::Result<u8> {
         let guard = ctx.lock().unwrap_or_else(PoisonError::into_inner);
         (guard.handle.clone(), guard.app_binary.clone())
     };
-    // The parent-death helper is a hidden mode of the same `ratatoskr`
+    // The parent-death helper is a hidden mode of the same `courly`
     // binary (`--parent-death-helper <service_binary> <data_dir>`), not a
     // separately-built sibling executable. This guarantees the capability
     // ships with the one binary the harness build always produces - a
@@ -4667,12 +4667,12 @@ fn artefact_dir() -> std::io::Result<PathBuf> {
 
 fn app_binary_path() -> std::io::Result<PathBuf> {
     if let Some(dir) = std::env::var_os("BROKKR_TEST_BIN_DIR") {
-        let candidate = PathBuf::from(&dir).join("ratatoskr");
+        let candidate = PathBuf::from(&dir).join("courly");
         if candidate.exists() {
             return Ok(candidate);
         }
         return Err(std::io::Error::other(format!(
-            "BROKKR_TEST_BIN_DIR={dir:?} but ratatoskr binary not found at {}; \
+            "BROKKR_TEST_BIN_DIR={dir:?} but courly binary not found at {}; \
              a stale `app` binary from before the runner split is not a valid fallback",
             candidate.display()
         )));

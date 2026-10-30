@@ -472,19 +472,19 @@ impl BootFailureReason {
 
 /// Compute the user-visible message for a terminal boot failure. The
 /// `AnotherInstanceRunning` case is the only one with a genuinely
-/// user-actionable message ("Ratatoskr is already running"); everything
+/// user-actionable message ("Courly is already running"); everything
 /// else gets a technical message logged for the next launch's diagnosis
 /// per scope item 16's "no UI plumbing for the error dialog yet" exit
 /// criterion.
 pub(crate) fn terminal_failure_user_message(reason: &BootFailureReason) -> String {
     match reason {
         BootFailureReason::Classified(BootClassification::BootFailure { code }) => match code {
-            BootExitCode::AnotherInstanceRunning => "Ratatoskr is already running.".to_string(),
+            BootExitCode::AnotherInstanceRunning => "Courly is already running.".to_string(),
             BootExitCode::KeyLoadFailure => "Encryption key load failed.".to_string(),
             BootExitCode::MigrationFailure => "Database migration failed.".to_string(),
             BootExitCode::HandshakeFailure => "Service handshake failed.".to_string(),
             BootExitCode::LockIoFailure => {
-                "Could not acquire the Ratatoskr instance lock (check disk space and \
+                "Could not acquire the Courly instance lock (check disk space and \
                  directory permissions)."
                     .to_string()
             }
@@ -591,7 +591,7 @@ pub enum ClientError {
     /// Ready) and `VersionMismatch` (which means the protocol negotiation
     /// itself disagreed). Callers pattern-match on the classification to
     /// surface the right user message:
-    /// - `BootFailure { code: AnotherInstanceRunning }`: "Ratatoskr is
+    /// - `BootFailure { code: AnotherInstanceRunning }`: "Courly is
     ///   already running."
     /// - `BootFailure { code: KeyLoadFailure }`: "Encryption key load
     ///   failed."
@@ -3983,7 +3983,7 @@ mod tests {
         });
         assert_eq!(
             terminal_failure_user_message(&reason),
-            "Ratatoskr is already running.",
+            "Courly is already running.",
         );
     }
 

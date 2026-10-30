@@ -99,7 +99,7 @@ pub fn run_service_blocking() -> ! {
         Ok(guard) => guard,
         Err(instance_lock::AcquireError::Contended) => {
             log::error!(
-                "another Ratatoskr Service is already running for {}",
+                "another Courly Service is already running for {}",
                 app_data_dir.display()
             );
             std::process::exit(BootExitCode::AnotherInstanceRunning.as_i32());

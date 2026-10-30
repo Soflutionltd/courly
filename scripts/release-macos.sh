@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, sign, notarize and publish Ratatoskr for macOS (Apple silicon).
+# Build, sign, notarize and publish Courly for macOS (Apple silicon).
 #
 # Installed copies update themselves from the GitHub release this script
 # creates (crates/app/src/updater.rs reads latest.json from it).
@@ -18,7 +18,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REPO="Soflutionltd/ratatoskr"
-APP_NAME="Ratatoskr"
+APP_NAME="Courly"
 BUNDLE_ID="com.soflution.mail"
 TOOLCHAIN="+1.99.0"
 SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Soflution ltd (TB8CC687M3)}"
@@ -48,7 +48,7 @@ git merge-base --is-ancestor "$COMMIT" origin/main || die "HEAD is not pushed to
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   die "$TAG is already published; bump the version in Cargo.toml"
 fi
-[[ -n "$NOTES" ]] || NOTES="Ratatoskr ${VERSION}"
+[[ -n "$NOTES" ]] || NOTES="${APP_NAME} ${VERSION}"
 
 OUT="target/release-macos"
 APP="${OUT}/${APP_NAME}.app"
@@ -59,7 +59,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 echo "==> Building ${APP_NAME} ${VERSION}"
 cargo "$TOOLCHAIN" build --release --locked -p runner
-cp target/release/ratatoskr "$APP/Contents/MacOS/ratatoskr"
+cp target/release/courly "$APP/Contents/MacOS/courly"
 
 echo "==> Bundling"
 ICONSET="${OUT}/AppIcon.iconset"
@@ -87,7 +87,7 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 	<key>CFBundleDisplayName</key>
 	<string>${APP_NAME}</string>
 	<key>CFBundleExecutable</key>
-	<string>ratatoskr</string>
+	<string>courly</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>

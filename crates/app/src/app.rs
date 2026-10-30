@@ -587,7 +587,7 @@ impl ReadyApp {
 
     pub(crate) fn title(&self, window_id: iced::window::Id) -> String {
         if window_id == self.main_window_id {
-            return "Ratatoskr".to_string();
+            return "Courly".to_string();
         }
         match self.pop_out_windows.get(&window_id) {
             Some(PopOutWindow::MessageView(state)) => {
@@ -608,7 +608,7 @@ impl ReadyApp {
             }
             Some(PopOutWindow::Compose(state)) => state.window_title(),
             Some(PopOutWindow::Calendar(_)) => t!("main.window.calendar_title").into_owned(),
-            None => "Ratatoskr".to_string(),
+            None => "Courly".to_string(),
         }
     }
 
@@ -907,7 +907,7 @@ impl BootingApp {
         };
         iced::widget::container(
             iced::widget::column![
-                iced::widget::text("Ratatoskr").size(28),
+                iced::widget::text("Courly").size(28),
                 iced::widget::Space::new().height(iced::Length::Fixed(12.0)),
                 iced::widget::text(label).size(16),
                 iced::widget::Space::new().height(iced::Length::Fixed(4.0)),

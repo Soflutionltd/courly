@@ -266,7 +266,7 @@ pub(super) fn discovery_client() -> Option<reqwest::Client> {
         .https_only(!test_mode)
         .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(3))
-        .user_agent("Ratatoskr/1.0")
+        .user_agent("Courly/1.0")
         .build()
         .ok()
 }

@@ -1,11 +1,8 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/ratatoskr-logo-dark.svg">
-    <img src="assets/ratatoskr-logo.svg" width="140" alt="Ratatoskr">
-  </picture>
+  <img src="assets/icon.svg" width="140" alt="Courly">
   <br><br>
-  <strong>Ratatoskr</strong><br>
-  <em>A desktop email client built in Rust</em>
+  <strong>Courly</strong><br>
+  <em>A desktop email client built in Rust, based on <a href="https://github.com/folknor/ratatoskr">Ratatoskr</a></em>
 </p>
 
 <p align="center">

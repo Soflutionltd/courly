@@ -44,14 +44,14 @@ pub struct RegisteredClient {
     pub client_secret: Option<String>,
 }
 
-/// Default registration request shape for a public Ratatoskr desktop client.
+/// Default registration request shape for a public Courly desktop client.
 ///
 /// `redirect_uris` and `scope` are caller-supplied; everything else is the
 /// RFC 8252 "OAuth 2.0 for Native Apps" recommended set.
 pub fn public_client_request(redirect_uri: &str, scope: &str) -> RegistrationRequest {
     RegistrationRequest {
         redirect_uris: vec![redirect_uri.to_string()],
-        client_name: "Ratatoskr".to_string(),
+        client_name: "Courly".to_string(),
         grant_types: vec![
             "authorization_code".to_string(),
             "refresh_token".to_string(),
@@ -128,7 +128,7 @@ mod tests {
     fn public_client_request_shape() {
         let req = public_client_request("http://127.0.0.1:17248/callback", "openid email");
         assert_eq!(req.redirect_uris, vec!["http://127.0.0.1:17248/callback"]);
-        assert_eq!(req.client_name, "Ratatoskr");
+        assert_eq!(req.client_name, "Courly");
         assert_eq!(req.grant_types, vec!["authorization_code", "refresh_token"]);
         assert_eq!(req.response_types, vec!["code"]);
         assert_eq!(req.token_endpoint_auth_method, "none");
@@ -139,7 +139,7 @@ mod tests {
     fn registration_request_serializes_as_rfc7591_json() {
         let req = public_client_request("http://localhost/callback", "openid");
         let json = serde_json::to_value(&req).expect("serialize");
-        assert_eq!(json["client_name"], "Ratatoskr");
+        assert_eq!(json["client_name"], "Courly");
         assert_eq!(json["token_endpoint_auth_method"], "none");
         assert!(json["redirect_uris"].is_array());
         assert!(json["grant_types"].is_array());
