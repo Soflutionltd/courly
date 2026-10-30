@@ -519,6 +519,14 @@ fn emoji_toolbar_button<'a>(
 }
 
 fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
+    let has_extras = state.signature.is_some() || state.quote.is_some();
+    // With a signature or a quote under it, the editor is as tall as its
+    // text so the page around both scrolls as one, the way Outlook does.
+    let editor_height = if has_extras {
+        Length::Shrink.min(COMPOSE_EDITOR_MIN_HEIGHT)
+    } else {
+        Length::Fill
+    };
     let editor = rich_text_editor(&state.body)
         .on_action(move |action| {
             Message::PopOut(
@@ -526,18 +534,16 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
                 PopOutMessage::Compose(ComposeMessage::BodyChanged(action)),
             )
         })
-        .height(Length::Fill)
+        .height(editor_height)
         .font(font::text());
 
-    let has_extras = state.signature.is_some() || state.quote.is_some();
-    let editor_height = if has_extras {
-        Length::FillPortion(COMPOSE_EDITOR_PORTION)
-    } else {
-        Length::Fill
-    };
     let body_card = container(editor)
         .width(Length::Fill)
-        .height(editor_height)
+        .height(if has_extras {
+            Length::Shrink
+        } else {
+            Length::Fill
+        })
         .padding(PAD_CONTENT)
         .style(theme::ContainerClass::EmailBody.style());
 
@@ -578,21 +584,21 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
     if let Some(quote) = state.quote.as_ref() {
         extras = extras.push(ComposePreview::Quote, preview(quote, ComposePreview::Quote));
     }
-    let extras_card = container(iced::widget::scrollable(extras))
+    let extras_card = container(extras)
         .width(Length::Fill)
-        .height(Length::FillPortion(COMPOSE_QUOTE_PORTION))
         .style(theme::ContainerClass::EmailBody.style());
-    let content = column![body_card, extras_card].spacing(SPACE_XS);
-
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
+    let page = column![body_card, extras_card]
+        .spacing(SPACE_XS)
         .padding(iced::Padding {
             top: 0.0,
             right: SPACE_SM,
             bottom: 0.0,
             left: SPACE_SM,
-        })
+        });
+
+    iced::widget::scrollable(page)
+        .width(Length::Fill)
+        .height(Length::Fill)
         .into()
 }
 

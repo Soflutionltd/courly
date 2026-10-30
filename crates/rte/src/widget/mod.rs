@@ -63,6 +63,18 @@ use iced::{Color, Element, Event, Font, Length, Padding, Point, Rectangle, Size,
 /// The paragraph type used by the iced Renderer.
 type IcedParagraph = <iced::Renderer as TextRenderer>::Paragraph;
 
+/// Whether a height grows with the document instead of taking the space
+/// it is offered.
+fn is_content_sized(height: Length) -> bool {
+    !matches!(height, Length::Fixed(_)) && height.fill_factor() == 0
+}
+
+/// The scroll offset after a wheel movement, kept inside the document.
+fn scrolled_offset(current: f32, delta: f32, total_height: f32, viewport_height: f32) -> f32 {
+    let max_scroll = (total_height - viewport_height).max(0.0);
+    (current + delta).clamp(0.0, max_scroll)
+}
+
 // ── Widget tree state ───────────────────────────────────
 
 /// Internal widget state stored in the iced widget tree. Holds the paragraph
@@ -512,13 +524,20 @@ impl<Message> RichTextEditor<'_, Message> {
 
                 let total_height = widget_state.cache.total_height();
                 let viewport_height = bounds.height - self.padding.top - self.padding.bottom;
-                let max_scroll = (total_height - viewport_height).max(0.0);
+                let offset = scrolled_offset(
+                    widget_state.scroll_offset,
+                    delta_y,
+                    total_height,
+                    viewport_height,
+                );
 
-                widget_state.scroll_offset =
-                    (widget_state.scroll_offset + delta_y).clamp(0.0, max_scroll);
-
-                shell.capture_event();
-                shell.request_redraw();
+                // An editor sized to its text, or already at the end it is
+                // scrolled towards, leaves the wheel to the page around it.
+                if (offset - widget_state.scroll_offset).abs() > f32::EPSILON {
+                    widget_state.scroll_offset = offset;
+                    shell.capture_event();
+                    shell.request_redraw();
+                }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 widget_state.dragging = false;
@@ -915,15 +934,13 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
 
         let content_height = total_height + self.padding.top + self.padding.bottom;
 
-        let size = match self.height {
-            // Content-sized: the widget is as tall as its document.
-            Length::Shrink | Length::Fit => limits.height(Length::Fixed(content_height)).bounds(),
+        let size = if is_content_sized(self.height) {
+            // The widget is as tall as its document, within any bounds the
+            // length carries (`Length::Shrink.min(..)`).
+            limits.height(Length::Fixed(content_height)).bounds()
+        } else {
             // Fill-like: the widget takes the offered height and scrolls.
-            Length::Fill
-            | Length::FillPortion(_)
-            | Length::Fixed(_)
-            | Length::Bounded { .. }
-            | Length::Fluid(_) => limits.bounds(),
+            limits.bounds()
         };
         tree.size = size;
 
@@ -1395,5 +1412,29 @@ impl<'a, Message: 'a> From<RichTextEditor<'a, Message>>
 {
     fn from(editor: RichTextEditor<'a, Message>) -> Self {
         Self::new(editor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_content_sized, scrolled_offset};
+    use iced::Length;
+
+    #[test]
+    fn a_shrinking_height_with_a_minimum_still_follows_the_document() {
+        assert!(is_content_sized(Length::Shrink));
+        assert!(is_content_sized(Length::Shrink.min(160.0)));
+        assert!(is_content_sized(Length::Fit.max(400.0)));
+        assert!(!is_content_sized(Length::Fill));
+        assert!(!is_content_sized(Length::Fill.min(160.0)));
+        assert!(!is_content_sized(Length::Fixed(200.0)));
+    }
+
+    #[test]
+    fn an_editor_that_fits_its_text_does_not_move_under_the_wheel() {
+        assert_eq!(scrolled_offset(0.0, 40.0, 120.0, 300.0), 0.0);
+        assert_eq!(scrolled_offset(0.0, 40.0, 500.0, 300.0), 40.0);
+        assert_eq!(scrolled_offset(190.0, 40.0, 500.0, 300.0), 200.0);
+        assert_eq!(scrolled_offset(10.0, -40.0, 500.0, 300.0), 0.0);
     }
 }
