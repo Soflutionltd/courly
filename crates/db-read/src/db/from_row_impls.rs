@@ -374,6 +374,13 @@ impl_from_row!(DbPhishingAllowlistEntry {
 
 // ── Signature ───────────────────────────────────────────────
 
+impl_from_row!(DbTemplate {
+    id,
+    name,
+    subject,
+    body_html,
+});
+
 impl_from_row!(DbSignature {
     id,
     account_id,

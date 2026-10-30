@@ -139,6 +139,39 @@ impl EditorState {
         to_html(&self.document)
     }
 
+    /// Insert parsed HTML at the caret, replacing any selection, as one
+    /// undo step. A single paragraph goes inline; anything longer starts and
+    /// ends on its own lines when text sits before or after the caret.
+    pub fn insert_html(&mut self, html: &str) {
+        let mut blocks: Vec<Block> = from_html(html)
+            .blocks
+            .iter()
+            .map(|block| Block::clone(block))
+            .collect();
+        let single_paragraph = matches!(blocks.as_slice(), [Block::Paragraph { .. }]);
+        if !single_paragraph {
+            let start = self.selection.start();
+            let end = self.selection.end();
+            let end_len = self
+                .document
+                .block(end.block_index)
+                .map_or(0, Block::char_len);
+            let is_paragraph =
+                |block: Option<&Block>| matches!(block, Some(Block::Paragraph { .. }));
+            if start.offset > 0 || !is_paragraph(blocks.first()) {
+                blocks.insert(0, Block::paragraph(""));
+            }
+            if end.offset < end_len || !is_paragraph(blocks.last()) {
+                blocks.push(Block::paragraph(""));
+            }
+        }
+        self.paste_slice(&DocSlice {
+            blocks,
+            open_start: true,
+            open_end: true,
+        });
+    }
+
     /// Get the plain text of the current selection, or an empty string
     /// if the selection is collapsed.
     pub fn selection_text(&self) -> String {
@@ -1723,6 +1756,86 @@ mod tests {
                 .as_deref(),
             Some("worldhello world"),
         );
+    }
+
+    fn block_texts(state: &EditorState) -> Vec<String> {
+        (0..state.document.block_count())
+            .filter_map(|index| state.document.block(index).map(Block::flattened_text))
+            .collect()
+    }
+
+    #[test]
+    fn insert_html_puts_one_paragraph_inline_at_the_caret() {
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("Hi !")]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 3));
+        state.insert_html("<p><b>Ana</b></p>");
+
+        assert_eq!(block_texts(&state), vec!["Hi Ana!".to_string()]);
+        state.perform(Action::Undo);
+        assert_eq!(block_texts(&state), vec!["Hi !".to_string()]);
+    }
+
+    #[test]
+    fn insert_html_splits_the_caret_block_around_paragraphs() {
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("AB")]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 1));
+        state.insert_html("<p>one</p><p>two</p>");
+
+        assert_eq!(
+            block_texts(&state),
+            vec![
+                "A".to_string(),
+                "one".to_string(),
+                "two".to_string(),
+                "B".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn insert_html_fills_an_empty_line_without_extra_blocks() {
+        let mut state = EditorState::new();
+        state.insert_html("<p>one</p><p>two</p>");
+
+        assert_eq!(
+            block_texts(&state),
+            vec!["one".to_string(), "two".to_string()]
+        );
+    }
+
+    #[test]
+    fn insert_html_keeps_a_list_whole() {
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("Items:")]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 6));
+        state.insert_html("<ul><li>a</li><li>b</li></ul>");
+
+        assert_eq!(
+            block_texts(&state),
+            vec![
+                "Items:".to_string(),
+                "a".to_string(),
+                "b".to_string(),
+                String::new()
+            ]
+        );
+        assert!(matches!(
+            state.document.block(1),
+            Some(Block::ListItem { .. })
+        ));
+    }
+
+    #[test]
+    fn insert_html_replaces_the_selection() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "Hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 6), DocPosition::new(0, 11));
+        state.insert_html("<p>team</p>");
+
+        assert_eq!(block_texts(&state), vec!["Hello team".to_string()]);
     }
 
     #[test]

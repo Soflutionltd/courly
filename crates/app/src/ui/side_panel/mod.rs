@@ -2,6 +2,7 @@
 //! opens or closes only when the user asks: no window size folds it.
 
 pub mod my_day;
+pub mod templates;
 
 use iced::widget::{Space, column, container, row, scrollable};
 use iced::{Alignment, Element, Length};
@@ -21,20 +22,23 @@ use crate::ui::widgets;
 pub enum Module {
     #[default]
     MyDay,
+    Templates,
 }
 
 impl Module {
-    pub const ALL: [Self; 1] = [Self::MyDay];
+    pub const ALL: [Self; 2] = [Self::MyDay, Self::Templates];
 
     fn icon<'a>(self) -> iced::widget::Text<'a> {
         match self {
             Self::MyDay => icon::calendar(),
+            Self::Templates => icon::layout_template(),
         }
     }
 
     fn name(self) -> std::borrow::Cow<'static, str> {
         match self {
             Self::MyDay => t!("main.side_panel.module.my_day"),
+            Self::Templates => t!("main.side_panel.module.templates"),
         }
     }
 }
@@ -43,6 +47,7 @@ pub struct SidePanel {
     pub open: bool,
     pub module: Module,
     pub my_day: my_day::MyDay,
+    pub templates: templates::Templates,
 }
 
 impl SidePanel {
@@ -51,12 +56,18 @@ impl SidePanel {
             open,
             module,
             my_day: my_day::MyDay::new(jiff::Zoned::now().date()),
+            templates: templates::Templates::default(),
         }
     }
 
     /// Whether the My Day agenda is on screen and needs fresh events.
     pub fn shows_my_day(&self) -> bool {
         self.open && self.module == Module::MyDay
+    }
+
+    /// Whether the templates list is on screen and needs loading.
+    pub fn shows_templates(&self) -> bool {
+        self.open && self.module == Module::Templates
     }
 }
 
@@ -66,6 +77,7 @@ pub enum SidePanelMessage {
     Close,
     Show(Module),
     MyDay(my_day::MyDayMessage),
+    Templates(templates::TemplatesMessage),
 }
 
 fn panel_message(message: SidePanelMessage) -> Message {
@@ -101,6 +113,8 @@ pub fn view(panel: &SidePanel, week_start: Weekday) -> Element<'_, Message> {
     let body = match panel.module {
         Module::MyDay => my_day::view(&panel.my_day, week_start)
             .map(|message| panel_message(SidePanelMessage::MyDay(message))),
+        Module::Templates => templates::view(&panel.templates)
+            .map(|message| panel_message(SidePanelMessage::Templates(message))),
     };
 
     container(column![

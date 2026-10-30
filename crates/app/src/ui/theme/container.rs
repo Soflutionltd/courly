@@ -31,6 +31,9 @@ pub enum ContainerClass {
     /// Attachment card beside an email body. Its text follows the theme,
     /// so it only takes the white body sheet in a light theme.
     AttachmentCard,
+    /// Rich text field outside a message card: the email body sheet with
+    /// a visible edge, since the panel around it can be white too.
+    EditorField,
     /// Action bar (no radius).
     ActionBar,
     /// Floating tooltip/popover on primary background.
@@ -115,6 +118,7 @@ impl ContainerClass {
             Self::MessageCard => style_message_card_container,
             Self::EmailBody => style_email_body_container,
             Self::AttachmentCard => style_attachment_card_container,
+            Self::EditorField => style_editor_field_container,
             Self::ActionBar => style_action_bar_container,
             Self::Floating => style_floating_container,
             Self::SettingsSection => style_settings_section_container,
@@ -361,6 +365,24 @@ fn style_attachment_card_container(theme: &Theme) -> container::Style {
             color: p.background.strongest.color.scale_alpha(0.15),
             width: 1.0,
             radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_editor_field_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    let background = if email_body_is_white(theme) {
+        Color::WHITE
+    } else {
+        p.background.base.color
+    };
+    container::Style {
+        background: Some(background.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.3),
+            width: 1.0,
+            radius: RADIUS_SM.into(),
         },
         ..Default::default()
     }

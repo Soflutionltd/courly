@@ -82,6 +82,18 @@ static MIGRATIONS: &[Migration] = &[
         description: "Pinned search folder scope",
         sql: "ALTER TABLE pinned_searches ADD COLUMN scope_folder_id TEXT;",
     },
+    Migration {
+        version: 104,
+        description: "Email templates",
+        sql: "CREATE TABLE templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                subject TEXT,
+                body_html TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+              );",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.
@@ -300,6 +312,7 @@ mod tests {
         assert_eq!(column("messages", "is_pinned"), 1);
         assert_eq!(column("messages", "is_flag_complete"), 1);
         assert_eq!(column("threads", "is_flag_complete"), 1);
+        assert_eq!(column("templates", "body_html"), 1);
     }
 
     #[test]

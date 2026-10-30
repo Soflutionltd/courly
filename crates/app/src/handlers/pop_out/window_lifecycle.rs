@@ -96,6 +96,23 @@ impl ReadyApp {
         self.open_compose_window_with_state(state, mode)
     }
 
+    /// Open a new message whose subject and body come from a template.
+    pub(crate) fn open_compose_from_template(
+        &mut self,
+        subject: Option<&str>,
+        body_html: &str,
+    ) -> Task<Message> {
+        let mut state = ComposeState::new(&self.sidebar.accounts);
+        self.prepare_compose_state(&mut state, ComposeMode::New);
+        if let Some(subject) = subject {
+            state.subject = subject.to_string();
+        }
+        state.body = rte::EditorState::from_html(body_html);
+        let (window_id, open_task) = self.open_compose_window_for(state);
+        let sig_task = self.resolve_compose_signature(window_id);
+        Task::batch([open_task, sig_task])
+    }
+
     /// Open a compose window with pre-built state and mode.
     /// If a compose window already exists for the same reply thread,
     /// focuses it instead of opening a duplicate.

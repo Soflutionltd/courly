@@ -25,7 +25,8 @@ use service_api::{
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
     SignatureUpdateAck, SignatureUpdateParams, SmartFolderCreateAck, SmartFolderCreateParams,
     SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncResumeAccountParams,
-    SyncResumeAck, SyncRunId, SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck,
+    SyncResumeAck, SyncRunId, SyncStartAccountParams, SyncStartAck, TemplateDeleteAck,
+    TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams, ThreadUiStateSetAck,
     ThreadUiStateSetParams, WritebackOutcome, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, hash_map::Entry};
@@ -1455,6 +1456,23 @@ impl ServiceClient {
         let _ack: SignatureDeleteAck = self
             .request(RequestParams::SignatureDelete {
                 params: SignatureDeleteParams { id },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Create (no id) or update a template via `template.save`; returns
+    /// its id.
+    pub async fn save_template(&self, params: TemplateSaveParams) -> Result<String, ClientError> {
+        let ack: TemplateSaveAck = self.request(RequestParams::TemplateSave { params }).await?;
+        Ok(ack.id)
+    }
+
+    /// Delete a template via `template.delete`. Idempotent.
+    pub async fn delete_template(&self, id: String) -> Result<(), ClientError> {
+        let _ack: TemplateDeleteAck = self
+            .request(RequestParams::TemplateDelete {
+                params: TemplateDeleteParams { id },
             })
             .await?;
         Ok(())

@@ -252,6 +252,8 @@ pub const PAD_SIDE_PANEL: Padding = Padding {
 /// Time column of a My Day agenda row ("14:00" over "25 min").
 pub const MY_DAY_TIME_WIDTH: f32 = 52.0;
 /// Calendar color bar of a My Day agenda row.
+/// Height of the body field when writing a template in the side panel.
+pub const TEMPLATE_EDITOR_HEIGHT: f32 = 220.0;
 pub const MY_DAY_BAR_WIDTH: f32 = 3.0;
 
 /// Starred thread card warm background alpha

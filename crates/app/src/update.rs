@@ -1047,6 +1047,9 @@ impl ReadyApp {
             }
             Message::WindowFocused(id) => {
                 self.focused_window = id;
+                if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
+                    self.last_compose_window = Some(id);
+                }
                 let updater =
                     self.update(Message::Updater(crate::updater::UpdaterMessage::Check {
                         forced: false,

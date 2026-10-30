@@ -36,6 +36,7 @@ use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
 use crate::smart_folder::SmartFolderCreateParams;
+use crate::template::{TemplateDeleteParams, TemplateSaveParams};
 use crate::sync::{
     SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams, SyncStartAccountParams,
 };
@@ -1231,6 +1232,20 @@ pub enum RequestParams {
     SignatureDelete {
         params: SignatureDeleteParams,
     },
+    /// Create (no id) or update one row in `templates`. Not idempotent:
+    /// a replayed create would store the template twice.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    TemplateSave {
+        params: TemplateSaveParams,
+    },
+    /// Delete one row from `templates` by id. Idempotent; delete-of-missing
+    /// returns Ok.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    TemplateDelete {
+        params: TemplateDeleteParams,
+    },
     /// Phase 6a: assign `sort_order` to a flat list of signature ids
     /// in one transaction. Per-account ordering hazard documented on
     /// the wire type - stale acks are tolerable today; a generation
@@ -1702,6 +1717,8 @@ impl RequestParams {
             Self::SignatureUpdate { .. } => "signature.update",
             Self::SignatureDelete { .. } => "signature.delete",
             Self::SignatureReorder { .. } => "signature.reorder",
+            Self::TemplateSave { .. } => "template.save",
+            Self::TemplateDelete { .. } => "template.delete",
             Self::LabelGroupReorder { .. } => "label_group.reorder",
             Self::LabelSave { .. } => "label.save",
             Self::LabelDelete { .. } => "label.delete",
@@ -1846,6 +1863,8 @@ impl RequestParams {
             | Self::SignatureUpdate { .. }
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
+            | Self::TemplateSave { .. }
+            | Self::TemplateDelete { .. }
             | Self::LabelGroupReorder { .. }
             | Self::ContactsGroupSave { .. }
             | Self::ContactsGroupDelete { .. }
@@ -1985,6 +2004,7 @@ impl RequestParams {
             | Self::SyncResumeAccount { .. }
             | Self::CalendarCancelAccountSync { .. }
             | Self::SignatureCreate { .. }
+            | Self::TemplateSave { .. }
             | Self::SmartFolderCreate { .. }
             | Self::ContactsGroupSave { .. }
             | Self::ContactsGroupDelete { .. }
@@ -2013,6 +2033,7 @@ impl RequestParams {
             | Self::SignatureUpdate { .. }
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
+            | Self::TemplateDelete { .. }
             | Self::LabelGroupReorder { .. }
             | Self::PinnedSearchUpdate { .. }
             | Self::PinnedSearchDelete { .. }
@@ -2124,6 +2145,8 @@ impl RequestParams {
             Self::SignatureUpdate { params } => serde_json::json!({ "params": params }),
             Self::SignatureDelete { params } => serde_json::json!({ "params": params }),
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
+            Self::TemplateSave { params } => serde_json::json!({ "params": params }),
+            Self::TemplateDelete { params } => serde_json::json!({ "params": params }),
             Self::LabelGroupReorder { params } => serde_json::json!({ "params": params }),
             Self::LabelSave { params } => serde_json::json!({ "params": params }),
             Self::LabelDelete { params } => serde_json::json!({ "params": params }),
@@ -2406,6 +2429,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("signature.reorder params: {e}"))?;
                 Ok(Self::SignatureReorder { params: p.params })
+            }
+            "template.save" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TemplateSaveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("template.save params: {e}"))?;
+                Ok(Self::TemplateSave { params: p.params })
+            }
+            "template.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: TemplateDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("template.delete params: {e}"))?;
+                Ok(Self::TemplateDelete { params: p.params })
             }
             "label_group.reorder" => {
                 #[derive(Deserialize)]
@@ -4951,5 +4992,32 @@ mod tests {
         assert_eq!(parsed, original);
         assert_eq!(original.method_name(), "test.delay_next_write");
         assert_eq!(original.idempotency(), Idempotency::Mutating);
+    }
+
+    #[test]
+    fn template_requests_round_trip_from_method_params() {
+        let save = RequestParams::TemplateSave {
+            params: TemplateSaveParams {
+                id: Some("tpl-1".into()),
+                name: "Relance".into(),
+                subject: Some("Devis".into()),
+                body_html: "<p>Bonjour,</p>".into(),
+            },
+        };
+        let delete = RequestParams::TemplateDelete {
+            params: TemplateDeleteParams { id: "tpl-1".into() },
+        };
+        for original in [save, delete] {
+            let parsed = RequestParams::from_method_params(
+                original.method_name(),
+                Some(original.params_value()),
+            )
+            .expect("parse");
+            assert_eq!(parsed, original);
+            assert_eq!(
+                original.timeout(),
+                RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            );
+        }
     }
 }

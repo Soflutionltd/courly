@@ -25,6 +25,7 @@ mod settings;
 mod signature;
 mod smart_folder;
 mod sync;
+mod template;
 mod thread_ui_state;
 mod version;
 
@@ -135,6 +136,7 @@ pub use signature::{
     SignatureReorderAck, SignatureReorderParams, SignatureUpdateAck, SignatureUpdateParams,
 };
 pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
+pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams};
 pub use sync::{
     AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCancelAccountParams,
     SyncCancelAck, SyncCompleted, SyncFocusFolderAck, SyncFocusFolderParams, SyncPauseReason,

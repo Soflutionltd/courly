@@ -315,7 +315,7 @@ impl ReadyApp {
     }
 
     /// The inline compose, when it belongs to the conversation on screen.
-    fn inline_compose_for_selected_thread(
+    pub(crate) fn inline_compose_for_selected_thread(
         &self,
     ) -> Option<(iced::window::Id, &pop_out::compose::ComposeState)> {
         let id = self.inline_compose?;

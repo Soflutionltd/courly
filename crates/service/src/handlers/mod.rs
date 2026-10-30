@@ -21,6 +21,7 @@ mod pending_ops_kick;
 mod pinned_search;
 mod settings;
 mod signature;
+mod template;
 mod smart_folder;
 mod sync;
 pub(crate) mod test_helpers;
@@ -108,6 +109,10 @@ pub(crate) async fn dispatch(
         }
         RequestParams::SignatureReorder { params } => {
             signature::handle_reorder(&boot_state, params).await
+        }
+        RequestParams::TemplateSave { params } => template::handle_save(&boot_state, params).await,
+        RequestParams::TemplateDelete { params } => {
+            template::handle_delete(&boot_state, params).await
         }
         RequestParams::LabelGroupReorder { params } => {
             label::handle_reorder(&boot_state, params).await

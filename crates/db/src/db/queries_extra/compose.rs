@@ -1102,3 +1102,135 @@ mod sync_signature_tests {
         );
     }
 }
+
+// ── Templates ────────────────────────────────────────────
+
+/// A template to store. `id` set updates that template, unset creates one.
+#[derive(Debug, Clone)]
+pub struct SaveTemplateParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub subject: Option<String>,
+    pub body_html: String,
+}
+
+/// Create or update a template and return its id. Updating a template
+/// that no longer exists is an error rather than a silent re-create.
+pub fn db_save_template_sync(
+    conn: &impl WriteTarget,
+    p: &SaveTemplateParams,
+) -> Result<String, String> {
+    let name = p.name.trim();
+    if name.is_empty() {
+        return Err("a template needs a name".to_string());
+    }
+    let subject = p
+        .subject
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match &p.id {
+        Some(id) => {
+            let changed = conn
+                .execute(
+                    "UPDATE templates SET name = ?2, subject = ?3, body_html = ?4, \
+                     updated_at = unixepoch() WHERE id = ?1",
+                    params![id, name, subject, p.body_html],
+                )
+                .map_err(|e| e.to_string())?;
+            if changed == 0 {
+                return Err(format!("template {id} no longer exists"));
+            }
+            Ok(id.clone())
+        }
+        None => {
+            let id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO templates (id, name, subject, body_html) VALUES (?1, ?2, ?3, ?4)",
+                params![id, name, subject, p.body_html],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(id)
+        }
+    }
+}
+
+/// Delete a template by id. Idempotent, like signature deletion.
+pub fn db_delete_template_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM templates WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+    use crate::db::migrations;
+    use rusqlite::Connection;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        migrations::run_all(&conn).expect("migrations");
+        conn
+    }
+
+    fn stored(conn: &Connection, id: &str) -> (String, Option<String>, String) {
+        conn.query_row(
+            "SELECT name, subject, body_html FROM templates WHERE id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("template row")
+    }
+
+    fn params(id: Option<String>, name: &str, subject: Option<&str>) -> SaveTemplateParams {
+        SaveTemplateParams {
+            id,
+            name: name.to_string(),
+            subject: subject.map(str::to_string),
+            body_html: "<p>Bonjour,</p>".to_string(),
+        }
+    }
+
+    #[test]
+    fn creates_then_updates_a_template() {
+        let conn = setup_db();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let id =
+            db_save_template_sync(&write, &params(None, " Relance ", Some("  "))).expect("create");
+        assert_eq!(
+            stored(&conn, &id),
+            ("Relance".to_string(), None, "<p>Bonjour,</p>".to_string())
+        );
+
+        let again =
+            db_save_template_sync(&write, &params(Some(id.clone()), "Relance", Some("Devis")))
+                .expect("update");
+        assert_eq!(again, id);
+        assert_eq!(stored(&conn, &id).1.as_deref(), Some("Devis"));
+    }
+
+    #[test]
+    fn refuses_a_nameless_template_and_a_missing_one() {
+        let conn = setup_db();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        assert!(db_save_template_sync(&write, &params(None, "   ", None)).is_err());
+        assert!(
+            db_save_template_sync(&write, &params(Some("gone".to_string()), "Relance", None))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn deleting_is_idempotent() {
+        let conn = setup_db();
+        let write = crate::db::WriteConn::from_raw(&conn);
+        let id = db_save_template_sync(&write, &params(None, "Relance", None)).expect("create");
+        db_delete_template_sync(&write, &id).expect("delete");
+        db_delete_template_sync(&write, &id).expect("delete again");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM templates", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!(count, 0);
+    }
+}

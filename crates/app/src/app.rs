@@ -90,6 +90,9 @@ pub struct ReadyApp {
     pub(crate) inline_compose: Option<iced::window::Id>,
     /// The window last brought to the front.
     pub(crate) focused_window: iced::window::Id,
+    /// The compose window last brought to the front, where a template
+    /// from the side panel goes.
+    pub(crate) last_compose_window: Option<iced::window::Id>,
     #[cfg(target_os = "macos")]
     pub(crate) menu_bar: Option<crate::menu_bar::MenuBar>,
     pub(crate) pop_out_generation: GenerationCounter<PopOut>,
@@ -434,6 +437,7 @@ impl ReadyApp {
             pop_out_windows: HashMap::new(),
             inline_compose: None,
             focused_window: main_window_id,
+            last_compose_window: None,
             #[cfg(target_os = "macos")]
             menu_bar: None,
             pop_out_generation: GenerationCounter::new(),

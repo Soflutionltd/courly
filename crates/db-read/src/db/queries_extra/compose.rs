@@ -1,5 +1,5 @@
 use super::super::ReadDbState;
-use super::super::types::{DbLocalDraft, DbSignature};
+use super::super::types::{DbLocalDraft, DbSignature, DbTemplate};
 use crate::db::{query_as, query_one};
 use rusqlite::params;
 
@@ -32,6 +32,18 @@ pub async fn db_get_all_signatures(db: &ReadDbState) -> Result<Vec<DbSignature>,
              ORDER BY account_id, sort_order, name"
         );
         query_as::<DbSignature>(conn, &sql, &[])
+    })
+    .await
+}
+
+/// Every template, by name.
+pub async fn db_get_all_templates(db: &ReadDbState) -> Result<Vec<DbTemplate>, String> {
+    db.with_read(move |conn| {
+        query_as::<DbTemplate>(
+            conn,
+            "SELECT id, name, subject, body_html FROM templates ORDER BY name COLLATE NOCASE",
+            &[],
+        )
     })
     .await
 }
