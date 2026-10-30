@@ -4,11 +4,7 @@ use crate::discovery::types::{AuthConfig, AuthMethod, DiscoverySource, Protocol,
 pub async fn probe(domain: &str) -> Option<ProtocolOption> {
     let url = format!("https://{domain}/.well-known/jmap");
 
-    let client = reqwest::Client::builder()
-        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .build()
-        .ok()?;
+    let client = super::discovery_client()?;
 
     let resp = client.get(&url).send().await.ok()?;
     if !resp.status().is_success() {
@@ -16,7 +12,7 @@ pub async fn probe(domain: &str) -> Option<ProtocolOption> {
     }
 
     // Validate it looks like a JMAP session resource
-    let body = resp.text().await.ok()?;
+    let body = super::read_capped_text(resp).await?;
     if !body.contains("capabilities") {
         return None;
     }

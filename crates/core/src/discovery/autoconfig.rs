@@ -27,10 +27,7 @@ pub async fn fetch(domain: &str, email: &str) -> Vec<ProtocolOption> {
 }
 
 async fn try_fetch_and_parse(url: &str, email: &str) -> Option<Vec<ProtocolOption>> {
-    let client = reqwest::Client::builder()
-        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
-        .build()
-        .ok()?;
+    let client = super::discovery_client()?;
 
     // In production this is a no-op. In test mode the rewrite routes the
     // probe to saehrimnir; the constructed `source_url` (passed through
@@ -43,7 +40,7 @@ async fn try_fetch_and_parse(url: &str, email: &str) -> Option<Vec<ProtocolOptio
         return None;
     }
 
-    let body = resp.text().await.ok()?;
+    let body = super::read_capped_text(resp).await?;
     Some(parse_autoconfig_xml(&body, email, url))
 }
 

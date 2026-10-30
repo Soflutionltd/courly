@@ -271,6 +271,23 @@ pub(super) fn discovery_client() -> Option<reqwest::Client> {
         .ok()
 }
 
+/// Ceiling on a discovery document (autoconfig XML, JMAP session).
+pub(super) const MAX_DISCOVERY_BODY_BYTES: usize = 1_024 * 1_024;
+
+/// Read a discovery response body as text, chunk by chunk, giving up as
+/// soon as it passes [`MAX_DISCOVERY_BODY_BYTES`] instead of buffering
+/// whatever the server streams until the timeout.
+pub(super) async fn read_capped_text(mut response: reqwest::Response) -> Option<String> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len() + chunk.len() > MAX_DISCOVERY_BODY_BYTES {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).ok()
+}
+
 /// If `RATATOSKR_TEST_DISCOVERY_BASE` is set, rewrite an `https://{host}/...`
 /// URL so the request lands on saehrimnir at `${BASE}/{host}/...`. Query and
 /// fragment are preserved. Plain HTTP URLs (which only appear in test mode
@@ -512,6 +529,36 @@ fn err_diag(stage: &'static str) -> StageDiagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn serve_body_of(len: usize) -> Option<String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = stream.write_all(&vec![b'a'; len]).await;
+        });
+        let response = reqwest::get(format!("http://{addr}/"))
+            .await
+            .expect("get");
+        let body = read_capped_text(response).await;
+        server.abort();
+        body
+    }
+
+    #[tokio::test]
+    async fn discovery_body_is_capped_without_content_length() {
+        assert_eq!(serve_body_of(10).await.as_deref(), Some("aaaaaaaaaa"));
+        assert!(serve_body_of(MAX_DISCOVERY_BODY_BYTES + 1).await.is_none());
+    }
 
     #[test]
     fn extract_domain_accepts_normal_email() {
