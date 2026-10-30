@@ -14,6 +14,25 @@ use crate::ui::layout::{
 };
 use crate::ui::theme;
 
+/// Unicode bidirectional controls. In a sender-chosen filename they can
+/// reorder the visible text, e.g. `invoice<U+202E>fdp.app` renders as
+/// `invoiceppa.pdf`.
+pub(crate) fn is_bidi_control(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// Attachment filename as shown to the user, without bidi controls.
+pub(crate) fn display_filename(name: &str) -> Cow<'_, str> {
+    if name.chars().any(is_bidi_control) {
+        Cow::Owned(name.chars().filter(|&ch| !is_bidi_control(ch)).collect())
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
 /// Click-target messages for an attachment card.
 ///
 /// Bundled into a struct to keep `attachment_card`'s arity below the
@@ -41,7 +60,7 @@ pub fn attachment_card<'a, M: 'a + Clone>(
     let filename = primary
         .filename
         .as_deref()
-        .map_or_else(|| t!("compose.unnamed_attachment"), Cow::Borrowed);
+        .map_or_else(|| t!("compose.unnamed_attachment"), display_filename);
     let file_icon = file_type_icon(primary.mime_type.as_deref());
     let latest = versions.first().copied().unwrap_or(primary);
     let date_sender = format_attachment_date_sender(latest);

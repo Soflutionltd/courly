@@ -829,7 +829,7 @@ fn compact_attachment_card<'a>(
     let filename = att
         .filename
         .as_deref()
-        .map_or_else(|| t!("compose.unnamed_attachment"), Cow::Borrowed);
+        .map_or_else(|| t!("compose.unnamed_attachment"), widgets::display_filename);
     let file_ico = file_type_icon(att.mime_type.as_deref());
     let size_str = format_file_size(att.size);
 

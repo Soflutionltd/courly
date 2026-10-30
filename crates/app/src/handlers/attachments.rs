@@ -25,6 +25,7 @@ use rust_i18n::t;
 use crate::app::ReadyApp;
 use crate::message::Message;
 use crate::service_client::ServiceClient;
+use crate::ui::widgets::is_bidi_control;
 
 /// Bounded last-folder cache. ~64 entries is plenty for a session;
 /// the eviction policy is FIFO by insertion order, which gives
@@ -333,7 +334,7 @@ async fn save_all_attachments_worker(
 /// `_` so a `CON.pdf` attachment can be written on Windows.
 pub(crate) fn sanitize_attachment_filename(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
-    for ch in name.chars() {
+    for ch in name.chars().filter(|&ch| !is_bidi_control(ch)) {
         let bad = ch == '/'
             || ch == '\\'
             || ch == '<'
@@ -419,12 +420,48 @@ async fn atomic_write(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
     tmp_name.push(format!(".tmp.{}", std::process::id()));
     let tmp_path = parent.join(tmp_name);
     tokio::fs::write(&tmp_path, bytes).await?;
+    #[cfg(target_os = "macos")]
+    if let Err(e) = mark_quarantined(&tmp_path) {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return Err(e);
+    }
     match tokio::fs::rename(&tmp_path, dest).await {
         Ok(()) => Ok(()),
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             Err(e)
         }
+    }
+}
+
+/// Tag a file that came out of a mail with the macOS quarantine attribute,
+/// so Gatekeeper vets it on open exactly like a browser download (an
+/// attached `.app`, `.command` or `.terminal` is not launched silently).
+/// Any failure is an error: the file must not land without the tag.
+#[cfg(target_os = "macos")]
+fn mark_quarantined(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let value = format!("0081;{seconds:08x};Ratatoskr;");
+    let result = unsafe {
+        libc::setxattr(
+            c_path.as_ptr(),
+            c"com.apple.quarantine".as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+            0,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
 }
 
@@ -555,6 +592,35 @@ mod tests {
             sanitize_attachment_filename("hidden\u{0001}.pdf"),
             "hidden_.pdf"
         );
+    }
+
+    #[test]
+    fn sanitizer_drops_bidi_controls() {
+        assert_eq!(
+            sanitize_attachment_filename("invoice\u{202E}fdp.app"),
+            "invoicefdp.app"
+        );
+        assert_eq!(
+            sanitize_attachment_filename("a\u{2066}b\u{2069}\u{200F}.pdf"),
+            "ab.pdf"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn written_attachments_carry_the_quarantine_attribute() {
+        let dir = std::env::temp_dir().join(format!("rtsk-quarantine-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let dest = dir.join("payload.command");
+        atomic_write(&dest, b"#!/bin/sh\n").await.expect("write");
+        let output = std::process::Command::new("xattr")
+            .args(["-p", "com.apple.quarantine"])
+            .arg(&dest)
+            .output()
+            .expect("xattr");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(output.status.success(), "no quarantine attribute");
+        assert!(String::from_utf8_lossy(&output.stdout).contains(";Ratatoskr;"));
     }
 
     #[test]
