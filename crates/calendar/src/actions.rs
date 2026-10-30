@@ -1,7 +1,7 @@
 //! Calendar event write path through the bifrost `Account` surface.
 
 use action_types::{ActionError, ActionOutcome, CalendarActionContext, MutationLog};
-use bifrost_types::{Account, ProtocolKind, RsvpStatus};
+use bifrost_types::{Account, ProtocolKind, RsvpReply, RsvpStatus};
 use db::db::WriteConn;
 use db::db::queries_extra::{
     set_calendar_event_remote_id_and_etag, update_calendar_event_fields_and_etag,
@@ -436,6 +436,7 @@ pub async fn rsvp_calendar_event(
     _account_id: &str,
     event_id: &str,
     status: RsvpStatus,
+    reply: RsvpReply,
 ) -> ActionOutcome {
     let mut mlog = MutationLog::begin("rsvp_calendar_event", "", event_id);
     let db = ctx.write_db.clone();
@@ -495,7 +496,7 @@ pub async fn rsvp_calendar_event(
     }
     let id =
         idmap::event_id_for_writeback(provider, remote_event_id, None, Some(&calendar_remote_id)).0;
-    let out = match account.event_rsvp(id, status).await {
+    let out = match account.event_rsvp_reply(id, status, reply).await {
         Ok(()) => {
             let db = ctx.write_db.clone();
             let eid = event_id.to_string();
@@ -589,7 +590,14 @@ mod tests {
             })
             .expect("seed unsynced event");
 
-        let outcome = rsvp_calendar_event(&ctx, "acct", &event_id, RsvpStatus::Accepted).await;
+        let outcome = rsvp_calendar_event(
+            &ctx,
+            "acct",
+            &event_id,
+            RsvpStatus::Accepted,
+            RsvpReply::default(),
+        )
+        .await;
         match outcome {
             ActionOutcome::Failed { error } => assert!(
                 error.to_string().contains("unsynced"),

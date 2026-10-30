@@ -3931,7 +3931,11 @@ fn parse_wire_calendar_operation(
                     ));
                 }
             };
-            Ok(WireCalendarOperation::RsvpEvent { event_id, response })
+            Ok(WireCalendarOperation::RsvpEvent {
+                event_id,
+                response,
+                reply: service_api::WireRsvpReply::default(),
+            })
         }
         other => Err(lua_error_message(format!(
             "unknown calendar operation {other:?}"

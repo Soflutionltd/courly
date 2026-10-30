@@ -51,7 +51,7 @@ pub use boot::{
 pub use cal_action::{
     CalendarActionCompleted, CalendarActionPlan, CalendarActionPlanAck,
     CalendarActionWireOperation, CalendarOperationOutcome, CalendarOperationResult, RsvpResponse,
-    WireCalendarEventInput, WireCalendarOperation,
+    WireCalendarEventInput, WireCalendarOperation, WireRsvpReply,
 };
 pub use calendar::{
     CalendarCancelAccountSyncParams, CalendarCancelAck, CalendarChanged, CalendarRunCompleted,

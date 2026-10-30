@@ -36,7 +36,7 @@ use cal::actions::{
 };
 use service_api::{
     CalendarActionWireOperation, CalendarOperationResult, RsvpResponse, WireCalendarEventInput,
-    WireCalendarOperation,
+    WireCalendarOperation, WireRsvpReply,
 };
 use std::sync::Arc;
 
@@ -143,15 +143,53 @@ async fn run_one(ctx: &CalendarActionContext, op: &CalendarActionWireOperation) 
         WireCalendarOperation::DeleteEvent { event_id } => {
             delete_calendar_event(ctx, &op.account_id, event_id).await
         }
-        WireCalendarOperation::RsvpEvent { event_id, response } => {
+        WireCalendarOperation::RsvpEvent {
+            event_id,
+            response,
+            reply,
+        } => {
             let status = match response {
                 RsvpResponse::Accepted => bifrost_types::RsvpStatus::Accepted,
                 RsvpResponse::Declined => bifrost_types::RsvpStatus::Declined,
                 RsvpResponse::Tentative => bifrost_types::RsvpStatus::Tentative,
             };
-            rsvp_calendar_event(ctx, &op.account_id, event_id, status).await
+            let reply = match wire_reply_to_domain(reply) {
+                Ok(reply) => reply,
+                Err(error) => return ActionOutcome::Failed { error },
+            };
+            rsvp_calendar_event(ctx, &op.account_id, event_id, status, reply).await
         }
     }
+}
+
+/// A proposed time needs both ends, in order.
+fn wire_reply_to_domain(reply: &WireRsvpReply) -> Result<bifrost_types::RsvpReply, ActionError> {
+    let proposed_time = match (reply.proposed_start, reply.proposed_end) {
+        (None, None) => None,
+        (Some(start), Some(end)) if start < end => {
+            let at = |seconds| {
+                jiff::Timestamp::from_second(seconds)
+                    .map_err(|error| ActionError::invalid_state(format!("proposed time: {error}")))
+            };
+            Some(bifrost_types::ProposedTime {
+                start: at(start)?,
+                end: at(end)?,
+            })
+        }
+        _ => {
+            return Err(ActionError::invalid_state(
+                "proposed time needs a start before its end",
+            ));
+        }
+    };
+    Ok(bifrost_types::RsvpReply {
+        comment: reply
+            .comment
+            .clone()
+            .filter(|comment| !comment.trim().is_empty()),
+        send_response: reply.send_response,
+        proposed_time,
+    })
 }
 
 /// Convert the wire shape to the in-process domain shape. The two
@@ -219,5 +257,39 @@ mod tests {
             error: ActionError::not_found("calendar 404"),
         });
         assert!(matches!(result, CalendarOperationResult::Failed { .. }));
+    }
+
+    #[test]
+    fn wire_reply_keeps_comment_and_proposed_slot() {
+        let reply = wire_reply_to_domain(&WireRsvpReply {
+            comment: Some("Next week?".to_string()),
+            send_response: true,
+            proposed_start: Some(1_793_628_000),
+            proposed_end: Some(1_793_631_600),
+        })
+        .expect("valid reply");
+        assert_eq!(reply.comment.as_deref(), Some("Next week?"));
+        assert!(reply.send_response);
+        let slot = reply.proposed_time.expect("proposed slot");
+        assert_eq!(slot.start.as_second(), 1_793_628_000);
+        assert_eq!(slot.end.as_second(), 1_793_631_600);
+    }
+
+    #[test]
+    fn wire_reply_drops_blank_comment_and_rejects_reversed_slot() {
+        let blank = wire_reply_to_domain(&WireRsvpReply {
+            comment: Some("  ".to_string()),
+            ..WireRsvpReply::default()
+        })
+        .expect("blank comment is valid");
+        assert_eq!(blank.comment, None);
+        assert!(
+            wire_reply_to_domain(&WireRsvpReply {
+                proposed_start: Some(10),
+                proposed_end: Some(5),
+                ..WireRsvpReply::default()
+            })
+            .is_err()
+        );
     }
 }

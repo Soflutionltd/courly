@@ -106,13 +106,24 @@ pub enum WireCalendarOperation {
     /// for synced events; falls back to local-only delete for events
     /// with no `remote_event_id`.
     DeleteEvent { event_id: String },
-    /// Update the authenticated user's participation status. This operation
-    /// never sends organizer email; bifrost's RSVP contract has no delivery
-    /// flag and providers do not implement notification uniformly.
+    /// Update the authenticated user's participation status. `reply` says
+    /// what the organizer receives; providers without a reply surface only
+    /// honour a reply with no comment and no proposed time.
     RsvpEvent {
         event_id: String,
         response: RsvpResponse,
+        #[serde(default)]
+        reply: WireRsvpReply,
     },
+}
+
+/// Wire mirror of bifrost's `RsvpReply`. Times are Unix seconds.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireRsvpReply {
+    pub comment: Option<String>,
+    pub send_response: bool,
+    pub proposed_start: Option<i64>,
+    pub proposed_end: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
