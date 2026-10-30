@@ -630,7 +630,14 @@ impl ReadyApp {
             operations: vec![service_api::CalendarActionWireOperation {
                 operation_id: service_api::OperationId(0),
                 account_id,
-                operation: service_api::WireCalendarOperation::RsvpEvent { event_id, response },
+                operation: service_api::WireCalendarOperation::RsvpEvent {
+                    event_id,
+                    response,
+                    reply: service_api::WireRsvpReply {
+                        send_response: true,
+                        ..service_api::WireRsvpReply::default()
+                    },
+                },
             }],
         };
         let plan_id = plan.plan_id;
