@@ -418,6 +418,44 @@ impl ReadyApp {
         self.settings.begin_editing();
     }
 
+    /// Write the committed preferences when they differ from what was last
+    /// persisted. Runs after every message, so every way of closing settings
+    /// (Escape, the toggle, switching mode, opening another overlay) saves.
+    /// Nothing is written before the boot snapshot has been applied.
+    ///
+    /// Atomicity is preserved Service-side: the handler writes all values
+    /// in one `WriteConn::transaction`. Failure policy is log-only; the next
+    /// boot shows the old values.
+    pub(crate) fn persist_preferences_if_changed(&mut self) -> Task<Message> {
+        let prefs = self.settings.committed_preferences.clone();
+        if self.settings.persisted_preferences.as_ref() == Some(&prefs)
+            || self.settings.persisted_preferences.is_none()
+        {
+            return Task::none();
+        }
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("settings.set: no ServiceClient yet; preferences not persisted");
+            return Task::none();
+        };
+        self.settings.persisted_preferences = Some(prefs.clone());
+        let values = vec![
+            SettingValue::ShowSyncStatus(prefs.sync_status_bar),
+            SettingValue::AutoUpdate(prefs.auto_update),
+            SettingValue::BlockRemoteImages(prefs.block_remote_images),
+            SettingValue::PhishingDetectionEnabled(prefs.phishing_detection),
+            SettingValue::PhishingSensitivity(prefs.phishing_sensitivity.clone()),
+            SettingValue::Theme(prefs.theme.clone()),
+            SettingValue::FontSize(prefs.font_size.clone()),
+            SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
+        ];
+        Task::perform(async move { client.set_settings(values).await }, |result| {
+            if let Err(e) = result {
+                log::warn!("settings.set failed: {e}");
+            }
+            Message::Noop
+        })
+    }
+
     /// Close settings, committing preference changes.
     pub(crate) fn close_settings(&mut self) {
         self.settings.commit_preferences();
@@ -584,37 +622,8 @@ impl ReadyApp {
                 self.close_settings();
                 Task::none()
             }
-            SettingsEvent::PreferencesCommitted => {
-                // Phase 6a: persist via Service IPC instead of UI-side
-                // transaction. Atomicity is preserved Service-side - the
-                // handler writes all values in one `WriteConn::transaction`
-                // so a partial commit on failure is impossible. Failure
-                // policy is log-only (the user already sees the new
-                // values reflected; if the persist fails, the next boot
-                // shows the old values and the user can re-commit).
-                let prefs = self.settings.committed_preferences.clone();
-                let Some(client) = self.service_client.as_ref().cloned() else {
-                    log::warn!("settings.set: no ServiceClient yet; preferences not persisted");
-                    return Task::none();
-                };
-                let values = vec![
-                    SettingValue::ShowSyncStatus(prefs.sync_status_bar),
-                    SettingValue::AutoUpdate(prefs.auto_update),
-                    SettingValue::BlockRemoteImages(prefs.block_remote_images),
-                    SettingValue::PhishingDetectionEnabled(prefs.phishing_detection),
-                    SettingValue::PhishingSensitivity(prefs.phishing_sensitivity.clone()),
-                    SettingValue::Theme(prefs.theme.clone()),
-                    SettingValue::FontSize(prefs.font_size.clone()),
-                    SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
-                ];
-                Task::perform(async move { client.set_settings(values).await }, |result| {
-                    if let Err(e) = result {
-                        log::warn!("settings.set failed: {e}");
-                    }
-                    Message::Noop
-                })
-            }
-            SettingsEvent::PreferencesDiscarded => {
+            // Persisted by `persist_preferences_if_changed` after the message.
+            SettingsEvent::PreferencesCommitted | SettingsEvent::PreferencesDiscarded => {
                 // Live fields are already restored to committed state by Settings.
                 Task::none()
             }
@@ -1106,6 +1115,7 @@ impl ReadyApp {
                 }
             };
         self.settings.apply_bootstrap(&ui_snap, &settings_snap);
+        self.settings.persisted_preferences = Some(self.settings.committed_preferences.clone());
     }
 
     pub(crate) fn handle_accounts_loaded(&mut self, accounts: Vec<db::Account>) -> Task<Message> {

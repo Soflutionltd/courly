@@ -294,6 +294,9 @@ pub struct Settings {
     /// edits go here. Save commits it to `committed_preferences`, cancel
     /// discards it and restores the committed values.
     pub editing_preferences: Option<PreferencesState>,
+    /// Preferences as last written to the database. `None` until the boot
+    /// snapshot is applied.
+    pub persisted_preferences: Option<PreferencesState>,
     pub scale: f32,
     pub scale_preview: Option<f32>,
     pub theme: String,
@@ -537,6 +540,7 @@ impl Default for Settings {
             open_select: None,
             committed_preferences: initial_preferences,
             editing_preferences: None,
+            persisted_preferences: None,
             scale: 1.0,
             scale_preview: None,
             theme: "Light".into(),

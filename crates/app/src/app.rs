@@ -948,7 +948,10 @@ impl App {
                     task
                 }
             },
-            App::Ready(ready) => ready.update(message),
+            App::Ready(ready) => {
+                let task = ready.update(message);
+                Task::batch([task, ready.persist_preferences_if_changed()])
+            }
         }
     }
 
