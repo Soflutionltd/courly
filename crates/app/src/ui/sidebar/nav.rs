@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::layout::*;
@@ -11,7 +12,9 @@ use types::SidebarSelection;
 use super::folders::{AccountForest, account_forest, folder_row_content, is_folder_active};
 use super::order::{SidebarEntry, default_order, resolve, scope_key};
 use super::search_here::{build_search_here_folder_prefix, build_search_here_user_folder_prefix};
-use super::{RowMenuAnchor, Sidebar, SidebarMessage, universal_folder_selection};
+use super::{
+    RowMenuAnchor, Sidebar, SidebarMessage, folder_display_name, universal_folder_selection,
+};
 
 // ── Nav items ───────────────────────────────────────────
 
@@ -89,7 +92,7 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     let active = sidebar_nav_selection_is_active(sidebar, &selection);
                     let content = widgets::nav_button_content(
                         Some(universal_folder_icon(&folder.id)),
-                        &folder.name,
+                        folder_display_name(folder),
                         active,
                         widgets::NavSize::Compact,
                         folder
@@ -193,7 +196,7 @@ fn reorderable_row<'a>(
         RowMenu::Folder(query_prefix) => folder_menu_items(query_prefix, index),
         RowMenu::Separator(id) => column![menu_item(
             icon::x(),
-            "Remove Separator",
+            t!("main.sidebar.remove_separator"),
             SidebarMessage::RemoveSeparator(id),
         )]
         .spacing(SPACE_XXS),
@@ -201,7 +204,7 @@ fn reorderable_row<'a>(
     with_row_menu(row_el, items)
 }
 
-/// "Search Here" and "Add Separator Below", the separator going after the
+/// t!("main.sidebar.search_here") and t!("main.sidebar.add_separator_below"), the separator going after the
 /// top-level row at `separator_after`.
 pub(super) fn folder_menu_items<'a>(
     query_prefix: String,
@@ -210,12 +213,12 @@ pub(super) fn folder_menu_items<'a>(
     column![
         menu_item(
             icon::search(),
-            "Search Here",
+            t!("main.sidebar.search_here"),
             SidebarMessage::SearchHere(query_prefix),
         ),
         menu_item(
             icon::minus(),
-            "Add Separator Below",
+            t!("main.sidebar.add_separator_below"),
             SidebarMessage::AddSeparatorBelow(separator_after),
         ),
     ]
@@ -226,7 +229,7 @@ pub(super) fn folder_menu_items<'a>(
 fn menu_card<'a>(items: iced::widget::Column<'a, SidebarMessage>) -> Element<'a, SidebarMessage> {
     let items = items.push(widgets::divider()).push(menu_item(
         icon::undo(),
-        "Reset Folder Order",
+        t!("main.sidebar.reset_folder_order"),
         SidebarMessage::ResetOrder,
     ));
     container(items)
@@ -242,7 +245,7 @@ pub(super) fn background_menu(sidebar: &Sidebar) -> Element<'_, SidebarMessage> 
     if let Some(last) = current_order(sidebar).len().checked_sub(1) {
         items = items.push(menu_item(
             icon::minus(),
-            "Add Separator",
+            t!("main.sidebar.add_separator"),
             SidebarMessage::AddSeparatorBelow(last),
         ));
     }
@@ -264,7 +267,7 @@ pub(super) fn with_row_menu<'a>(
 
 fn menu_item<'a>(
     ico: iced::widget::Text<'a>,
-    label: &'a str,
+    label: std::borrow::Cow<'a, str>,
     on_press: SidebarMessage,
 ) -> Element<'a, SidebarMessage> {
     button(

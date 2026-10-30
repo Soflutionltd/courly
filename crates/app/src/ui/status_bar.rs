@@ -7,6 +7,7 @@ use iced::futures::StreamExt;
 use iced::futures::stream::BoxStream;
 use iced::widget::{Space, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length, Subscription};
+use rust_i18n::t;
 
 use crate::app::RebuildProgressState;
 use crate::component::Component;
@@ -136,8 +137,10 @@ impl SyncEvent {
             let error = json
                 .get("error")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown error")
-                .to_string();
+                .map_or_else(
+                    || t!("main.errors.unknown_error").into_owned(),
+                    str::to_string,
+                );
             return Self::Error { account_id, error };
         }
 
@@ -320,7 +323,9 @@ impl StatusBar {
             .is_none_or(|prev| now.duration_since(*prev) >= PUSH_CONFIRMATION_INTERVAL);
         self.last_push_at.insert(account_id, now);
         if should_confirm {
-            self.show_confirmation(format!("New mail in {account_label}"));
+            self.show_confirmation(
+                t!("main.status.new_mail", account = account_label).into_owned(),
+            );
         }
     }
 
@@ -481,30 +486,30 @@ impl StatusBar {
         let text = if warnings.len() == 1 {
             match &warning.kind {
                 WarningKind::TokenExpiry => {
-                    format!(
-                        "{} needs re-authentication \u{2014} click to sign in",
-                        warning.email,
-                    )
+                    t!("main.status.needs_reauth_click", email = warning.email)
                 }
-                WarningKind::ConnectionFailure { message } => {
-                    format!("{} \u{2014} connection failed ({})", warning.email, message,)
-                }
+                WarningKind::ConnectionFailure { message } => t!(
+                    "main.status.connection_failed",
+                    email = warning.email,
+                    error = message
+                ),
             }
         } else {
             let detail = match &warning.kind {
-                WarningKind::TokenExpiry => {
-                    format!("{} needs re-authentication", warning.email)
-                }
-                WarningKind::ConnectionFailure { message } => {
-                    format!("{} \u{2014} {}", warning.email, message)
-                }
+                WarningKind::TokenExpiry => t!("main.status.needs_reauth", email = warning.email),
+                WarningKind::ConnectionFailure { message } => t!(
+                    "main.status.account_error",
+                    email = warning.email,
+                    error = message
+                ),
             };
-            format!(
-                "{} accounts need attention \u{2014} {}",
-                warnings.len(),
-                detail,
+            t!(
+                "main.status.accounts_need_attention",
+                count = warnings.len(),
+                detail = detail
             )
-        };
+        }
+        .into_owned();
 
         ResolvedContent::Warning {
             text,
@@ -518,23 +523,24 @@ impl StatusBar {
 
         let text = if accounts.len() == 1 {
             let p = accounts[0];
-            format!(
-                "Syncing {} ({} / {})",
-                p.email,
-                format_number(p.current),
-                format_number(p.total),
+            t!(
+                "main.status.syncing_one",
+                email = p.email,
+                current = format_number(p.current),
+                total = format_number(p.total)
             )
         } else {
             let idx = self.sync_cycle_index % accounts.len();
             let p = accounts[idx];
-            format!(
-                "Syncing {} accounts... ({}: {} / {})",
-                accounts.len(),
-                p.email,
-                format_number(p.current),
-                format_number(p.total),
+            t!(
+                "main.status.syncing_many",
+                count = accounts.len(),
+                email = p.email,
+                current = format_number(p.current),
+                total = format_number(p.total)
             )
-        };
+        }
+        .into_owned();
 
         ResolvedContent::SyncProgress { text }
     }
@@ -595,7 +601,7 @@ impl StatusBar {
             }
             ResolvedContent::AutoReplyActive => build_status_row(
                 icon::mail(),
-                "Out of Office auto-reply is active",
+                &t!("main.status.auto_reply_active"),
                 TextClass::Accent,
             ),
         }
@@ -703,22 +709,23 @@ fn resolve_service_health(health: &ServiceHealth) -> Option<ResolvedContent> {
     match health {
         ServiceHealth::Healthy => None,
         ServiceHealth::Booting { phase } => Some(ResolvedContent::ServiceHealth {
-            text: format!("Service starting: {phase}"),
+            text: t!("main.status.service_starting", phase = phase).into_owned(),
             class: TextClass::Muted,
         }),
         ServiceHealth::Respawning {
             attempt,
             next_delay,
         } => Some(ResolvedContent::ServiceHealth {
-            text: format!(
-                "Service respawning after crash (attempt {}, retry in {}s)",
-                attempt,
-                next_delay.as_secs().max(1),
-            ),
+            text: t!(
+                "main.status.service_respawning",
+                attempt = attempt,
+                seconds = next_delay.as_secs().max(1)
+            )
+            .into_owned(),
             class: TextClass::Warning,
         }),
         ServiceHealth::PersistentlyFailing { reason } => Some(ResolvedContent::ServiceHealth {
-            text: format!("Service cannot restart: {reason}"),
+            text: t!("main.status.service_cannot_restart", reason = reason).into_owned(),
             class: TextClass::Warning,
         }),
     }
@@ -726,13 +733,14 @@ fn resolve_service_health(health: &ServiceHealth) -> Option<ResolvedContent> {
 
 fn resolve_rebuild_progress(rebuild: &RebuildProgressState) -> ResolvedContent {
     let text = if rebuild.total == 0 {
-        "Rebuilding search index".to_string()
+        t!("main.status.rebuilding_index")
     } else {
-        format!(
-            "Rebuilding search index ({} / {})",
-            format_number(rebuild.processed),
-            format_number(rebuild.total),
+        t!(
+            "main.status.rebuilding_index_progress",
+            processed = format_number(rebuild.processed),
+            total = format_number(rebuild.total)
         )
-    };
+    }
+    .into_owned();
     ResolvedContent::RebuildProgress { text }
 }

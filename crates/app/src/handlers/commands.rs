@@ -6,6 +6,7 @@ use crate::command_dispatch;
 use crate::{APP_DATA_DIR, Message, ReadyApp};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use rtsk::scope::ViewScope;
+use rust_i18n::t;
 use service_api::actions::{ActionOutcome, FolderId, LabelGroupId};
 
 #[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
@@ -124,7 +125,7 @@ impl ReadyApp {
         else {
             // NoOp (Unsubscribe)
             self.status_bar
-                .show_confirmation("Unsubscribed".to_string());
+                .show_confirmation(t!("main.action.unsubscribed").into_owned());
             return Task::none();
         };
 
@@ -211,9 +212,8 @@ impl ReadyApp {
             // Pre-Ready (no client) or Service crashed without respawn:
             // roll back optimistic state and surface a toast.
             self.rollback_optimistic(&plan.optimistic);
-            self.status_bar.show_confirmation(
-                "\u{26A0} Action unavailable \u{2014} service not connected".to_string(),
-            );
+            self.status_bar
+                .show_confirmation(t!("main.action.unavailable_not_connected").into_owned());
             return Task::none();
         };
 
@@ -270,9 +270,8 @@ impl ReadyApp {
                 blocking.len(),
             );
             self.rollback_optimistic(&plan.optimistic);
-            self.status_bar.show_confirmation(
-                "\u{26A0} Action deferred \u{2014} reconciling previous action".to_string(),
-            );
+            self.status_bar
+                .show_confirmation(t!("main.action.deferred_reconciling").into_owned());
             return Task::none();
         }
 
@@ -420,8 +419,9 @@ impl ReadyApp {
                     self.rollback_optimistic(&state.plan.optimistic);
                 }
                 log::warn!("action plan {plan_id} dispatch failed: {reason}");
-                self.status_bar
-                    .show_confirmation(format!("\u{26A0} Action failed: {reason}"));
+                self.status_bar.show_confirmation(
+                    t!("main.action.dispatch_failed", reason = reason).into_owned(),
+                );
                 Task::none()
             }
         }
@@ -563,9 +563,8 @@ impl ReadyApp {
                             .remove(&(account_id.clone(), thread_id.clone()));
                     }
                     self.rollback_optimistic(&state.plan.optimistic);
-                    self.status_bar.show_confirmation(
-                        "\u{26A0} Action lost during service restart \u{2014} reverted".to_string(),
-                    );
+                    self.status_bar
+                        .show_confirmation(t!("main.action.lost_on_restart").into_owned());
                 } else if self.in_flight_sends.remove(&plan_id).is_some() {
                     // Compose-send whose ack never arrived. The local
                     // Err path of the send_email future already fired
@@ -651,9 +650,9 @@ impl ReadyApp {
                 service_api::actions::ActionOutcome::Success
             } else {
                 service_api::actions::ActionOutcome::Failed {
-                    error: service_api::actions::ActionError::remote(
-                        "Send failed - see Service log for detail",
-                    ),
+                    error: service_api::actions::ActionError::remote(t!(
+                        "main.errors.send_failed_see_log"
+                    )),
                 }
             };
             return Task::done(Message::SendCompleted { window_id, outcome });
@@ -825,11 +824,14 @@ impl ReadyApp {
                     _ => None,
                 })
                 .collect();
-            self.status_bar.show_confirmation(format!(
-                "\u{26A0} {} failed: {}",
-                behavior.success_label,
-                errors.join("; ")
-            ));
+            self.status_bar.show_confirmation(
+                t!(
+                    "main.action.toast_failed_with_errors",
+                    action = behavior.success_label(),
+                    errors = errors.join("; ")
+                )
+                .into_owned(),
+            );
             // Rollback all optimistic toggle mutations on total failure
             if !plan.optimistic.is_empty() {
                 self.rollback_optimistic(&plan.optimistic);

@@ -16,6 +16,7 @@ use crate::ui::thread_list::{ThreadListEvent, ThreadListMessage};
 use cmdk::CommandId;
 use iced::Task;
 use rtsk::scope::ViewScope;
+use rust_i18n::t;
 use service_api::SettingValue;
 use std::sync::Arc;
 
@@ -326,7 +327,7 @@ impl ReadyApp {
         let Some(client) = self.service_client.as_ref().cloned() else {
             self.reading_pane.finish_invite_response(
                 &message_id,
-                Err("Cannot respond: service not connected".to_string()),
+                Err(t!("main.errors.cannot_respond_not_connected").into_owned()),
             );
             return Task::none();
         };
@@ -1248,20 +1249,22 @@ impl ReadyApp {
                     ns.folders
                         .iter()
                         .find(|f| f.id == nav_id)
-                        .map(|f| f.name.clone())
+                        .map(|f| ui::sidebar::folder_display_name(f).into_owned())
                 })
             })
-            .unwrap_or_else(|| "Inbox".to_string());
+            .unwrap_or_else(|| t!("main.folder.inbox").into_owned());
         let scope_name = match &self.sidebar.selected_scope {
-            ViewScope::AllAccounts => "All".to_string(),
+            ViewScope::AllAccounts => t!("main.thread_list.scope_all").into_owned(),
             ViewScope::Account(id) => self
                 .sidebar
                 .accounts
                 .iter()
                 .find(|a| a.id == *id)
                 .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
-                .unwrap_or("Account")
-                .to_string(),
+                .map_or_else(
+                    || t!("main.thread_list.scope_account").into_owned(),
+                    str::to_string,
+                ),
             ViewScope::SharedMailbox { mailbox_id, .. } => self
                 .sidebar
                 .shared_mailboxes

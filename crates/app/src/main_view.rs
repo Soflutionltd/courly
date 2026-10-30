@@ -11,6 +11,7 @@ use crate::ui::layout::{
 use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
 use iced::{Element, Length, Padding, Point, Task};
+use rust_i18n::t;
 
 impl ReadyApp {
     pub(crate) fn view(&self, window_id: iced::window::Id) -> Element<'_, Message> {
@@ -33,7 +34,7 @@ impl ReadyApp {
             };
         }
 
-        ui::widgets::empty_placeholder("Window not found", "")
+        ui::widgets::empty_placeholder(t!("main.window.not_found"), "")
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -203,7 +204,7 @@ impl ReadyApp {
                 timeline.view().map(Message::ChatTimeline)
             } else {
                 container(
-                    iced::widget::text("No chat selected")
+                    iced::widget::text(t!("main.chat.none_selected"))
                         .style(ui::theme::TextClass::Muted.style()),
                 )
                 .center_x(Length::Fill)

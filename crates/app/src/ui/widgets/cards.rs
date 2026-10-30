@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length, Theme};
+use rust_i18n::t;
 
 use crate::db::{DateDisplay, Thread, ThreadMessage};
 use crate::font;
@@ -28,6 +30,34 @@ pub(crate) fn local_dt(millis: i64) -> Option<jiff::Zoned> {
         .ok()
         .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
 }
+
+/// "Mar 12", "12 mars".
+pub(crate) fn short_date(dt: &jiff::Zoned) -> String {
+    t!(
+        "main.date.short",
+        month = crate::i18n::month_short(dt.month()),
+        day = dt.day()
+    )
+    .into_owned()
+}
+
+/// "Mar 12, 2026, 10:13 AM", "12 mars 2026, 10:13".
+fn medium_date_time(dt: &jiff::Zoned) -> String {
+    t!(
+        "main.date.medium_time",
+        month = crate::i18n::month_short(dt.month()),
+        day = dt.day(),
+        year = dt.year(),
+        time = crate::i18n::time_of_day(dt)
+    )
+    .into_owned()
+}
+
+/// Sender shown when a message has neither a name nor an address.
+fn sender_or_unknown<'a>(name: Option<&'a str>, address: Option<&'a str>) -> Cow<'a, str> {
+    name.or(address)
+        .map_or_else(|| t!("main.unknown_sender"), Cow::Borrowed)
+}
 use super::highlighted::highlighted_text_body;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -39,13 +69,12 @@ pub fn thread_card<'a, M: Clone + 'a>(
     bimi_logo: Option<&Path>,
     on_select: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
-    let sender = thread
-        .from_name
-        .as_deref()
-        .or(thread.from_address.as_deref())
-        .unwrap_or("(unknown)");
+    let sender = sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref());
 
-    let subject = thread.subject.as_deref().unwrap_or("(no subject)");
+    let subject = thread
+        .subject
+        .as_deref()
+        .map_or_else(|| t!("main.no_subject"), Cow::Borrowed);
     // Phase 7-8: when the search hit's primary match was an attachment,
     // surface that fact in the snippet slot so the user sees "matched in
     // <filename>" rather than an unrelated body snippet. Otherwise show
@@ -64,11 +93,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
             local_dt(ts).map(|dt| {
                 let diff = jiff::Timestamp::now().duration_since(dt.timestamp());
                 if diff.as_hours() < 24 {
-                    dt.strftime("%-I:%M %p").to_string().trim().to_string()
+                    crate::i18n::time_of_day(&dt)
                 } else if diff.as_hours() < 24 * 7 {
-                    dt.strftime("%a").to_string()
+                    crate::i18n::weekday_short(dt.weekday().to_monday_zero_offset().unsigned_abs())
                 } else {
-                    dt.strftime("%b %d").to_string()
+                    short_date(&dt)
                 }
             })
         })
@@ -90,7 +119,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
     if thread.is_local_draft {
         indicators = indicators.push(
             container(
-                text("Draft")
+                text(t!("main.thread_list.draft_badge"))
                     .size(TEXT_XS)
                     .style(theme::TextClass::Accent.style()),
             )
@@ -125,7 +154,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
 
     let top_row = row![
         container(
-            text(sender)
+            text(sender.clone())
                 .size(TEXT_MD)
                 .style(text::base)
                 .font(sender_font)
@@ -164,7 +193,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
         if let Some((filename, attachment_snippet)) = attachment_match {
             container(
                 row![
-                    text(format!("in {filename}: "))
+                    text(t!("main.search.attachment_match", filename = filename))
                         .size(TEXT_SM)
                         .style(text::secondary)
                         .font(font::text_italic())
@@ -201,7 +230,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
         .spacing(SPACE_XXXS)
         .width(Length::Fill);
 
-    let avatar = sender_avatar(sender, bimi_logo, AVATAR_THREAD_CARD);
+    let avatar = sender_avatar(&sender, bimi_logo, AVATAR_THREAD_CARD);
 
     let content = row![avatar, text_content]
         .spacing(SPACE_SM)
@@ -227,16 +256,26 @@ pub fn thread_card<'a, M: Clone + 'a>(
 }
 
 pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
-    let sender = thread
-        .from_name
-        .as_deref()
-        .or(thread.from_address.as_deref())
-        .unwrap_or("(unknown)");
+    let sender = sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref());
 
-    let avatar = avatar_circle(sender, AVATAR_MESSAGE_CARD);
+    let avatar = avatar_circle(&sender, AVATAR_MESSAGE_CARD);
     let date_str = thread
         .last_message_at
-        .and_then(|ts| local_dt(ts).map(|dt| dt.strftime("%a, %b %d, %Y, %-I:%M %p").to_string()))
+        .and_then(|ts| {
+            local_dt(ts).map(|dt| {
+                t!(
+                    "main.date.full_time",
+                    weekday = crate::i18n::weekday_short(
+                        dt.weekday().to_monday_zero_offset().unsigned_abs()
+                    ),
+                    month = crate::i18n::month_short(dt.month()),
+                    day = dt.day(),
+                    year = dt.year(),
+                    time = crate::i18n::time_of_day(&dt)
+                )
+                .into_owned()
+            })
+        })
         .unwrap_or_default();
 
     let header = row![
@@ -262,7 +301,7 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
     let body_text = thread
         .snippet
         .as_deref()
-        .unwrap_or("(no preview available)");
+        .map_or_else(|| t!("main.no_preview"), Cow::Borrowed);
     let body = container(text(body_text).size(TEXT_LG).style(text::secondary)).padding(PAD_BODY);
 
     container(column![header, body].spacing(SPACE_XS))
@@ -291,14 +330,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
-    let sender_name = msg
-        .from_name
-        .as_deref()
-        .or(msg.from_address.as_deref())
-        .unwrap_or("(unknown)");
+    let sender_name = sender_or_unknown(msg.from_name.as_deref(), msg.from_address.as_deref());
     let sender_email_str = msg.from_address.as_deref().unwrap_or("");
 
-    let avatar = avatar_circle(sender_name, AVATAR_MESSAGE_CARD);
+    let avatar = avatar_circle(&sender_name, AVATAR_MESSAGE_CARD);
     let date_str = format_message_date(msg.date, first_message_date, date_display);
 
     let recipients = msg.to_addresses.as_deref().unwrap_or("");
@@ -326,10 +361,26 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .style(theme::ButtonClass::Ghost.style());
 
     let message_actions = row![
-        header_icon_button(icon::reply(), "Reply", on_reply(index)),
-        header_icon_button(icon::reply_all(), "Reply All", on_reply_all(index)),
-        header_icon_button(icon::forward(), "Forward", on_forward(index)),
-        header_icon_button(icon::calendar(), "Create Event", on_create_event(index)),
+        header_icon_button(
+            icon::reply(),
+            t!("main.reading_pane.reply"),
+            on_reply(index)
+        ),
+        header_icon_button(
+            icon::reply_all(),
+            t!("main.reading_pane.reply_all"),
+            on_reply_all(index)
+        ),
+        header_icon_button(
+            icon::forward(),
+            t!("main.reading_pane.forward"),
+            on_forward(index)
+        ),
+        header_icon_button(
+            icon::calendar(),
+            t!("main.reading_pane.create_event"),
+            on_create_event(index)
+        ),
     ]
     .spacing(SPACE_XXXS)
     .align_y(Alignment::Center);
@@ -381,7 +432,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 
     let to_row = row![
         container(
-            text("To")
+            text(t!("main.reading_pane.to"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -402,12 +453,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 
     let body_inner: Element<'_, M> = if let Some(rendered) = html_body {
         container(rendered).padding(PAD_HTML_BODY).into()
-    } else {
-        let display = msg
-            .body_text
-            .as_deref()
-            .or(msg.snippet.as_deref())
-            .unwrap_or("(no preview available)");
+    } else if let Some(display) = msg.body_text.as_deref().or(msg.snippet.as_deref()) {
         if search_highlight_terms.is_empty() {
             container(super::linked_text(display, TEXT_LG, on_link))
                 .padding(PAD_BODY)
@@ -417,6 +463,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                 .padding(PAD_BODY)
                 .into()
         }
+    } else {
+        container(text(t!("main.no_preview")).size(TEXT_LG))
+            .padding(PAD_BODY)
+            .into()
     };
 
     let body: Element<'_, M> = container(body_inner)
@@ -440,7 +490,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 /// Icon-only action in a message header, named by its tooltip.
 fn header_icon_button<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    tip: &'a str,
+    tip: Cow<'a, str>,
     on_press: M,
 ) -> Element<'a, M> {
     iced::widget::tooltip(
@@ -464,15 +514,11 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
     index: usize,
     on_toggle: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
-    let sender = msg
-        .from_name
-        .as_deref()
-        .or(msg.from_address.as_deref())
-        .unwrap_or("(unknown)");
+    let sender = sender_or_unknown(msg.from_name.as_deref(), msg.from_address.as_deref());
 
     let short_date = msg
         .date
-        .and_then(|ts| local_dt(ts).map(|dt| dt.strftime("%b %d").to_string()))
+        .and_then(|ts| local_dt(ts).map(|dt| short_date(&dt)))
         .unwrap_or_default();
 
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
@@ -560,7 +606,7 @@ fn format_message_date(
 
     match display {
         DateDisplay::RelativeOffset => {
-            let abs = dt.strftime("%b %d, %Y, %-I:%M %p").to_string();
+            let abs = medium_date_time(&dt);
             match first_message_timestamp.and_then(local_dt) {
                 Some(first_dt) => {
                     let days = dt
@@ -569,19 +615,15 @@ fn format_message_date(
                         .as_hours()
                         / 24;
                     if days == 0 {
-                        abs.trim().to_string()
+                        abs
                     } else {
-                        format!("{} (+{}d)", abs.trim(), days)
+                        t!("main.date.relative_offset", date = abs, days = days).into_owned()
                     }
                 }
-                None => abs.trim().to_string(),
+                None => abs,
             }
         }
-        DateDisplay::Absolute => dt
-            .strftime("%b %d, %Y, %-I:%M %p")
-            .to_string()
-            .trim()
-            .to_string(),
+        DateDisplay::Absolute => medium_date_time(&dt),
     }
 }
 

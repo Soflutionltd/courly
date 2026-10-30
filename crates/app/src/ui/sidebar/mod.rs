@@ -1,13 +1,15 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use iced::widget::{Space, column, container, row, scrollable};
 use iced::{Alignment, Element, Length, Task};
+use rust_i18n::t;
 
 use crate::component::Component;
 use crate::db::{Account, PinnedPublicFolder, PinnedSearch, SharedMailbox};
 use crate::ui::layout::*;
 use crate::ui::widgets;
-use rtsk::db::queries_extra::navigation::{FolderKind, NavigationState};
+use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder, NavigationState};
 use rtsk::scope::ViewScope;
 use types::{FolderId, SidebarSelection};
 
@@ -539,6 +541,27 @@ pub fn truncate_query(query: &str, max_chars: usize) -> String {
         query.to_string()
     } else {
         format!("{}...", &query[..query.floor_char_boundary(max_chars)])
+    }
+}
+
+/// Name shown for a sidebar folder. Universal folders carry the app's own
+/// English names, so they follow the interface language; provider folder
+/// names are shown as the server sends them.
+pub(crate) fn folder_display_name(folder: &NavigationFolder) -> Cow<'_, str> {
+    if !matches!(folder.folder_kind, FolderKind::Universal) {
+        return Cow::Borrowed(&folder.name);
+    }
+    match folder.id.as_str() {
+        "INBOX" => t!("main.folder.inbox"),
+        "STARRED" => t!("main.folder.starred"),
+        "SNOOZED" => t!("main.folder.snoozed"),
+        "SENT" => t!("main.folder.sent"),
+        "DRAFT" => t!("main.folder.drafts"),
+        "archive" => t!("main.folder.archive"),
+        "TRASH" => t!("main.folder.trash"),
+        "SPAM" => t!("main.folder.spam"),
+        "all-mail" => t!("main.folder.all_mail"),
+        _ => Cow::Borrowed(&folder.name),
     }
 }
 

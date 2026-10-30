@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 use service_api::{PinnedSearchCreateOrUpdateParams, PinnedSearchUpdateParams, PinnedThreadRef};
 
 use crate::db::{self, Thread};
@@ -400,7 +401,7 @@ impl ReadyApp {
                             self.search_query.reset(ps.query.clone());
                             self.thread_list.search_query.clone_from(&ps.query);
                             self.thread_list.set_context(
-                                format!("Search: {label}"),
+                                t!("main.search.pinned_title", query = label).into_owned(),
                                 pinned_search_scope_name(self, ps),
                             );
                             self.status = format!(
@@ -730,12 +731,12 @@ impl ReadyApp {
             ),
             "before" | "after" => Some(
                 [
-                    ("Today", "0"),
-                    ("Yesterday", "-1"),
-                    ("Last 7 days", "-7"),
-                    ("Last 30 days", "-30"),
-                    ("Last 3 months", "-90"),
-                    ("Last year", "-365"),
+                    (t!("date.today"), "0"),
+                    (t!("date.yesterday"), "-1"),
+                    (t!("main.search.date.last_7_days"), "-7"),
+                    (t!("main.search.date.last_30_days"), "-30"),
+                    (t!("main.search.date.last_3_months"), "-90"),
+                    (t!("main.search.date.last_year"), "-365"),
                 ]
                 .iter()
                 .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
@@ -1009,7 +1010,7 @@ fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {
 
 fn pinned_search_scope_name(app: &ReadyApp, ps: &db::PinnedSearch) -> String {
     let Some(account_id) = ps.scope_account_id.as_deref() else {
-        return "All Accounts".to_string();
+        return t!("main.sidebar.all_accounts").into_owned();
     };
 
     app.sidebar
@@ -1023,7 +1024,7 @@ fn pinned_search_scope_name(app: &ReadyApp, ps: &db::PinnedSearch) -> String {
                 .or_else(|| account.display_name.clone())
                 .unwrap_or_else(|| account.email.clone())
         })
-        .unwrap_or_else(|| "All Accounts".to_string())
+        .unwrap_or_else(|| t!("main.sidebar.all_accounts").into_owned())
 }
 
 // ── Search phases 2+4 methods ──────────────────────────

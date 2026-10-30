@@ -1,4 +1,7 @@
+use std::borrow::Cow;
+
 use iced::Element;
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::theme;
@@ -10,50 +13,57 @@ use super::{Sidebar, SidebarMessage};
 // ── Scope dropdown ──────────────────────────────────────
 
 pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
-    let (trigger_icon, trigger_label): (DropdownIcon<'_>, &str) = match &sidebar.selected_scope {
-        ViewScope::Account(id) => {
-            let acc = sidebar.accounts.iter().find(|a| a.id == *id);
-            if let Some(acc) = acc {
-                let name = acc
-                    .account_name
-                    .as_deref()
-                    .or(acc.display_name.as_deref())
-                    .unwrap_or(&acc.email);
-                let icon = DropdownIcon::Avatar {
-                    name,
-                    color: acc.account_color.as_deref().map(theme::hex_to_color),
-                };
-                (icon, name)
-            } else {
-                (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts")
+    let (trigger_icon, trigger_label): (DropdownIcon<'_>, Cow<'_, str>) =
+        match &sidebar.selected_scope {
+            ViewScope::Account(id) => {
+                let acc = sidebar.accounts.iter().find(|a| a.id == *id);
+                if let Some(acc) = acc {
+                    let name = acc
+                        .account_name
+                        .as_deref()
+                        .or(acc.display_name.as_deref())
+                        .unwrap_or(&acc.email);
+                    let icon = DropdownIcon::Avatar {
+                        name,
+                        color: acc.account_color.as_deref().map(theme::hex_to_color),
+                    };
+                    (icon, Cow::Borrowed(name))
+                } else {
+                    (
+                        DropdownIcon::Icon(icon::INBOX_CODEPOINT),
+                        t!("main.sidebar.all_accounts"),
+                    )
+                }
             }
-        }
-        ViewScope::SharedMailbox { mailbox_id, .. } => {
-            let name = sidebar
-                .shared_mailboxes
-                .iter()
-                .find(|sm| sm.mailbox_id == *mailbox_id)
-                .and_then(|sm| sm.display_name.as_deref())
-                .unwrap_or(mailbox_id.as_str());
-            (DropdownIcon::Icon('\u{e1a4}'), name)
-        }
-        ViewScope::PublicFolder { folder_id, .. } => {
-            let name = sidebar
-                .pinned_public_folders
-                .iter()
-                .find(|pf| pf.folder_id == *folder_id)
-                .map(|pf| pf.display_name.as_str())
-                .unwrap_or(folder_id.as_str());
-            (DropdownIcon::Icon('\u{e0d7}'), name)
-        }
-        ViewScope::AllAccounts => (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts"),
-    };
+            ViewScope::SharedMailbox { mailbox_id, .. } => {
+                let name = sidebar
+                    .shared_mailboxes
+                    .iter()
+                    .find(|sm| sm.mailbox_id == *mailbox_id)
+                    .and_then(|sm| sm.display_name.as_deref())
+                    .unwrap_or(mailbox_id.as_str());
+                (DropdownIcon::Icon('\u{e1a4}'), Cow::Borrowed(name))
+            }
+            ViewScope::PublicFolder { folder_id, .. } => {
+                let name = sidebar
+                    .pinned_public_folders
+                    .iter()
+                    .find(|pf| pf.folder_id == *folder_id)
+                    .map(|pf| pf.display_name.as_str())
+                    .unwrap_or(folder_id.as_str());
+                (DropdownIcon::Icon('\u{e0d7}'), Cow::Borrowed(name))
+            }
+            ViewScope::AllAccounts => (
+                DropdownIcon::Icon(icon::INBOX_CODEPOINT),
+                t!("main.sidebar.all_accounts"),
+            ),
+        };
 
     let mut entries: Vec<DropdownEntry<'_, SidebarMessage>> = Vec::new();
 
     entries.push(DropdownEntry {
         icon: DropdownIcon::Icon(icon::INBOX_CODEPOINT),
-        label: "All Accounts",
+        label: t!("main.sidebar.all_accounts"),
         selected: matches!(sidebar.selected_scope, ViewScope::AllAccounts),
         on_press: SidebarMessage::SelectAllAccounts,
     });
@@ -69,7 +79,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 name,
                 color: acc.account_color.as_deref().map(theme::hex_to_color),
             },
-            label: name,
+            label: Cow::Borrowed(name),
             selected: matches!(&sidebar.selected_scope, ViewScope::Account(id) if *id == acc.id),
             on_press: SidebarMessage::SelectAccount(idx),
         });
@@ -85,7 +95,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         );
         entries.push(DropdownEntry {
             icon: DropdownIcon::Icon('\u{e1a4}'), // users icon
-            label: name,
+            label: Cow::Borrowed(name),
             selected,
             on_press: SidebarMessage::SelectSharedMailbox(
                 sm.account_id.clone(),
@@ -103,7 +113,7 @@ pub(super) fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         );
         entries.push(DropdownEntry {
             icon: DropdownIcon::Icon('\u{e0d7}'),
-            label: &pf.display_name,
+            label: Cow::Borrowed(&pf.display_name),
             selected,
             on_press: SidebarMessage::SelectPublicFolder(
                 pf.account_id.clone(),

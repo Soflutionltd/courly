@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::app::ReadyApp;
 use crate::message::Message;
@@ -226,7 +227,7 @@ async fn save_attachment_worker(
         save_dialog_filter(item.filename.as_deref(), item.mime_type.as_deref());
 
     let mut dialog = rfd::AsyncFileDialog::new()
-        .set_title("Save Attachment")
+        .set_title(t!("main.attachments.save_dialog_title"))
         .set_file_name(&suggested)
         .add_filter(filter_label.as_str(), &[filter_ext.as_str()]);
     if let Some(dir) = initial_dir.as_ref().filter(|p| p.exists()) {
@@ -270,7 +271,8 @@ async fn save_all_attachments_worker(
     items: Vec<AttachmentRef>,
     initial_dir: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    let mut dialog = rfd::AsyncFileDialog::new().set_title("Save All Attachments");
+    let mut dialog =
+        rfd::AsyncFileDialog::new().set_title(t!("main.attachments.save_all_dialog_title"));
     if let Some(dir) = initial_dir.as_ref().filter(|p| p.exists()) {
         dialog = dialog.set_directory(dir);
     } else if let Some(dl) = dirs::download_dir() {
@@ -474,7 +476,10 @@ fn save_dialog_filter(filename: Option<&str>, mime_type: Option<&str>) -> (Strin
         let lower = ext.to_ascii_lowercase();
         return (format!("{} (.{lower})", lower.to_ascii_uppercase()), lower);
     }
-    ("All files".to_string(), "*".to_string())
+    (
+        t!("main.attachments.all_files").into_owned(),
+        "*".to_string(),
+    )
 }
 
 fn mime_to_ext(mime: &str) -> Option<&'static str> {

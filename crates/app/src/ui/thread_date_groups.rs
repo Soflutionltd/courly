@@ -3,6 +3,7 @@
 use jiff::ToSpan as _;
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
+use rust_i18n::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateGroup {
@@ -17,17 +18,18 @@ pub enum DateGroup {
 }
 
 impl DateGroup {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Pinned => "Pinned",
-            Self::Today => "Today",
-            Self::Yesterday => "Yesterday",
-            Self::ThisWeek => "This Week",
-            Self::LastWeek => "Last Week",
-            Self::EarlierThisMonth => "Earlier This Month",
-            Self::LastMonth => "Last Month",
-            Self::Older => "Older",
+            Self::Pinned => t!("main.thread_list.group.pinned"),
+            Self::Today => t!("date.today"),
+            Self::Yesterday => t!("date.yesterday"),
+            Self::ThisWeek => t!("main.thread_list.group.this_week"),
+            Self::LastWeek => t!("main.thread_list.group.last_week"),
+            Self::EarlierThisMonth => t!("main.thread_list.group.earlier_this_month"),
+            Self::LastMonth => t!("main.thread_list.group.last_month"),
+            Self::Older => t!("main.thread_list.group.older"),
         }
+        .into_owned()
     }
 }
 

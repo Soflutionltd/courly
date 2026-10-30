@@ -1,4 +1,5 @@
 use iced::Element;
+use rust_i18n::t;
 
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::FolderKind;
@@ -42,7 +43,7 @@ pub(super) fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .collect();
 
     widgets::collapsible_section(
-        "SMART FOLDERS",
+        t!("main.sidebar.smart_folders"),
         sidebar.smart_folders_expanded,
         SidebarMessage::ToggleSmartFoldersSection,
         children,

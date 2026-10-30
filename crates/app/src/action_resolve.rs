@@ -8,6 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
+use rust_i18n::t;
 use service_api::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation};
 
 // ── Intent ──────────────────────────────────────────────
@@ -151,7 +152,14 @@ pub struct CompletionBehavior {
     pub view_effect: ViewEffect,
     pub post_success: PostSuccessEffect,
     pub undo: UndoBehavior,
-    pub success_label: &'static str,
+    /// Translation key of the toast text shown on success.
+    pub success_key: &'static str,
+}
+
+impl CompletionBehavior {
+    pub fn success_label(&self) -> String {
+        t!(self.success_key).into_owned()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,85 +193,85 @@ pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Archived",
+            success_key: "main.action.archived",
         },
         MailOperation::Trash => CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Moved to Trash",
+            success_key: "main.action.moved_to_trash",
         },
         MailOperation::PermanentDelete => CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Irreversible,
-            success_label: "Permanently deleted",
+            success_key: "main.action.permanently_deleted",
         },
         MailOperation::SetSpam { .. } => CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Spam status toggled",
+            success_key: "main.action.spam_toggled",
         },
         MailOperation::SetStarred { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Star toggled",
+            success_key: "main.action.star_toggled",
         },
         MailOperation::SetRead { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::RefreshNav,
             undo: UndoBehavior::Reversible,
-            success_label: "Read status toggled",
+            success_key: "main.action.read_toggled",
         },
         MailOperation::SetPinned { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Pin toggled",
+            success_key: "main.action.pin_toggled",
         },
         MailOperation::SetMuted { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Mute toggled",
+            success_key: "main.action.mute_toggled",
         },
         MailOperation::MoveToFolder { .. } => CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Moved to folder",
+            success_key: "main.action.moved_to_folder",
         },
         MailOperation::AddLabel { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Label applied",
+            success_key: "main.action.label_applied",
         },
         MailOperation::RemoveLabel { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Label removed",
+            success_key: "main.action.label_removed",
         },
         MailOperation::ApplyLabelGroup { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Label applied",
+            success_key: "main.action.label_applied",
         },
         MailOperation::RemoveLabelGroup { .. } => CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Label removed",
+            success_key: "main.action.label_removed",
         },
         MailOperation::Snooze { .. } => CompletionBehavior {
             view_effect: ViewEffect::LeavesCurrentView,
             post_success: PostSuccessEffect::None,
             undo: UndoBehavior::Reversible,
-            success_label: "Snoozed",
+            success_key: "main.action.snoozed",
         },
         // Phase 2 task 14: Unsnooze is the inverse of Snooze, dispatched
         // by the undo path. View stays on the inbox (the thread
@@ -274,7 +282,7 @@ pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
             view_effect: ViewEffect::Stays,
             post_success: PostSuccessEffect::RefreshNav,
             undo: UndoBehavior::Irreversible,
-            success_label: "Unsnoozed",
+            success_key: "main.action.unsnoozed",
         },
     }
 }
@@ -357,44 +365,72 @@ pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
     if payloads.is_empty() {
         return String::new();
     }
+    let thread_count = |key_one: &'static str, key_other: &'static str, count: usize| {
+        if count == 1 {
+            t!(key_one, count = count)
+        } else {
+            t!(key_other, count = count)
+        }
+    };
     match &payloads[0] {
-        MailUndoPayload::Archive { thread_ids, .. } => {
-            format!("Archived {} thread(s)", thread_ids.len())
-        }
-        MailUndoPayload::Trash { thread_ids, .. } => {
-            format!("Trashed {} thread(s)", thread_ids.len())
-        }
-        MailUndoPayload::MoveToFolder { thread_ids, .. } => {
-            format!("Moved {} thread(s)", thread_ids.len())
-        }
+        MailUndoPayload::Archive { thread_ids, .. } => thread_count(
+            "main.undo.archived_one",
+            "main.undo.archived_other",
+            thread_ids.len(),
+        ),
+        MailUndoPayload::Trash { thread_ids, .. } => thread_count(
+            "main.undo.trashed_one",
+            "main.undo.trashed_other",
+            thread_ids.len(),
+        ),
+        MailUndoPayload::MoveToFolder { thread_ids, .. } => thread_count(
+            "main.undo.moved_one",
+            "main.undo.moved_other",
+            thread_ids.len(),
+        ),
         MailUndoPayload::SetSpam { was_spam, .. } => {
             if *was_spam {
-                "Removed from spam".to_string()
+                t!("main.undo.removed_from_spam")
             } else {
-                "Marked as spam".to_string()
+                t!("main.undo.marked_as_spam")
             }
         }
         MailUndoPayload::SetStarred { was_starred, .. } => {
-            if *was_starred { "Unstarred" } else { "Starred" }.to_string()
+            if *was_starred {
+                t!("main.undo.unstarred")
+            } else {
+                t!("main.undo.starred")
+            }
         }
-        MailUndoPayload::SetRead { was_read, .. } => if *was_read {
-            "Marked as unread"
-        } else {
-            "Marked as read"
+        MailUndoPayload::SetRead { was_read, .. } => {
+            if *was_read {
+                t!("main.undo.marked_as_unread")
+            } else {
+                t!("main.undo.marked_as_read")
+            }
         }
-        .to_string(),
         MailUndoPayload::SetPinned { was_pinned, .. } => {
-            if *was_pinned { "Unpinned" } else { "Pinned" }.to_string()
+            if *was_pinned {
+                t!("main.undo.unpinned")
+            } else {
+                t!("main.undo.pinned")
+            }
         }
         MailUndoPayload::SetMuted { was_muted, .. } => {
-            if *was_muted { "Unmuted" } else { "Muted" }.to_string()
+            if *was_muted {
+                t!("main.undo.unmuted")
+            } else {
+                t!("main.undo.muted")
+            }
         }
-        MailUndoPayload::AddLabel { .. } => "Added label".to_string(),
-        MailUndoPayload::RemoveLabel { .. } => "Removed label".to_string(),
-        MailUndoPayload::ApplyLabelGroup { .. } => "Applied label".to_string(),
-        MailUndoPayload::RemoveLabelGroup { .. } => "Removed label".to_string(),
-        MailUndoPayload::Snooze { .. } => "Snoozed".to_string(),
+        MailUndoPayload::AddLabel { .. } => t!("main.undo.added_label"),
+        MailUndoPayload::RemoveLabel { .. } | MailUndoPayload::RemoveLabelGroup { .. } => {
+            t!("main.undo.removed_label")
+        }
+        MailUndoPayload::ApplyLabelGroup { .. } => t!("main.undo.applied_label"),
+        MailUndoPayload::Snooze { .. } => t!("main.undo.snoozed"),
     }
+    .into_owned()
 }
 
 // ── Toast formatting ────────────────────────────────────
@@ -411,20 +447,22 @@ pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOut
     let failed = outcomes.iter().filter(|o| o.is_failed()).count();
     let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
 
+    let action = behavior.success_label();
     if failed == total {
-        format!("\u{26A0} {} failed", behavior.success_label)
+        t!("main.action.toast_failed", action = action).into_owned()
     } else if failed > 0 {
-        format!(
-            "\u{26A0} {} {succeeded} of {total} threads \u{2014} {failed} failed",
-            behavior.success_label
+        t!(
+            "main.action.toast_partial",
+            action = action,
+            succeeded = succeeded,
+            total = total,
+            failed = failed
         )
+        .into_owned()
     } else if any_local_only {
-        format!(
-            "\u{26A0} {} locally \u{2014} sync may revert this",
-            behavior.success_label
-        )
+        t!("main.action.toast_local_only", action = action).into_owned()
     } else {
-        behavior.success_label.to_string()
+        action
     }
 }
 

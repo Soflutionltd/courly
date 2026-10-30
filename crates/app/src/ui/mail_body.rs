@@ -13,6 +13,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Padding, mouse};
 use mail_html::{Bytes, LinkArea, RemoteFetcher, RenderRequest, Url};
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::layout::*;
@@ -275,11 +276,10 @@ pub fn view<'a, M: Clone + 'a>(
                 page
             }
         }
-        Some(HtmlBodyState { failed: true, .. }) => text(
-            fallback_text
-                .unwrap_or("This message could not be displayed.")
-                .to_string(),
-        )
+        Some(HtmlBodyState { failed: true, .. }) => text(fallback_text.map_or_else(
+            || t!("main.reading_pane.body_unavailable").into_owned(),
+            str::to_string,
+        ))
         .size(TEXT_LG)
         .into(),
         _ => Space::new()
@@ -341,11 +341,11 @@ fn remote_banner<'a, M: Clone + 'a>(on_show_remote: M) -> Element<'a, M> {
             icon::shield()
                 .size(ICON_SM)
                 .style(theme::TextClass::Muted.style()),
-            text("Remote images were blocked to protect your privacy.")
+            text(t!("main.reading_pane.remote_images_blocked"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
             Space::new().width(Length::Fill),
-            button(text("Show images").size(TEXT_SM))
+            button(text(t!("main.reading_pane.show_images")).size(TEXT_SM))
                 .on_press(on_show_remote)
                 .padding(PAD_ICON_BTN)
                 .style(theme::ButtonClass::Secondary.style()),

@@ -50,7 +50,7 @@ impl NavBadge {
 /// Generic over message type so settings can use it with SettingsMessage.
 pub fn nav_button<'a, M: Clone + 'a>(
     ico: Option<iced::widget::Text<'a>>,
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     active: bool,
     size: NavSize,
     badge: Option<NavBadge>,
@@ -68,7 +68,7 @@ pub fn nav_button<'a, M: Clone + 'a>(
 /// own interaction (the reorderable sidebar rows).
 pub fn nav_button_content<'a, M: 'a>(
     ico: Option<iced::widget::Text<'a>>,
-    label: &'a str,
+    label: impl text::IntoFragment<'a>,
     active: bool,
     size: NavSize,
     badge: Option<NavBadge>,

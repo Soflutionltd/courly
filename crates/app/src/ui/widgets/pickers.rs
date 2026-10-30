@@ -4,6 +4,7 @@ use iced::widget::{
     Canvas, Space, button, canvas, column, container, row, scrollable, text, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse};
+use rust_i18n::t;
 
 use crate::ui::emoji_picker::{EMOJI_TABLE, EmojiCategory, EmojiEntry};
 use crate::ui::layout::{
@@ -40,7 +41,7 @@ pub fn emoji_picker<'a, M: 'a + Clone>(
             .collect()
     };
 
-    let search = text_input("Search emoji...", search_query)
+    let search = text_input(t!("main.emoji.search_placeholder"), search_query)
         .on_input(on_search_changed)
         .padding(PAD_INPUT)
         .size(TEXT_MD)

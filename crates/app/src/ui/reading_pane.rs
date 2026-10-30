@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Task};
+use rust_i18n::t;
 
 use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
@@ -620,7 +621,7 @@ impl Component for ReadingPane {
                             .find(|msg| msg.id == message_id)
                             .map(|msg| msg.account_id.clone());
                         let Some(account_id) = account_id else {
-                            card.finish(Err("The message is no longer open".to_string()));
+                            card.finish(Err(t!("main.reading_pane.message_not_open").into_owned()));
                             return (Task::none(), None);
                         };
                         (
@@ -822,8 +823,8 @@ fn command_toolbar<'a>(
 
 fn empty_reading_pane<'a>() -> Element<'a, ReadingPaneMessage> {
     container(widgets::empty_placeholder(
-        "No conversation selected",
-        "Select a thread to read",
+        t!("main.reading_pane.empty_title"),
+        t!("main.reading_pane.empty_subtitle"),
     ))
     .width(Length::Fill)
     .height(Length::Fill)
@@ -857,7 +858,10 @@ fn thread_header<'a>(
     labels: &'a [ResolvedLabel],
     may_set_keywords: bool,
 ) -> Element<'a, ReadingPaneMessage> {
-    let subject = thread_ref.subject.as_deref().unwrap_or("(no subject)");
+    let subject = thread_ref
+        .subject
+        .as_deref()
+        .map_or_else(|| t!("main.no_subject"), std::borrow::Cow::Borrowed);
 
     let star_icon_style: fn(&iced::Theme) -> text::Style = if !may_set_keywords {
         theme::TextClass::Tertiary.style()
@@ -876,9 +880,9 @@ fn thread_header<'a>(
     }
 
     let toggle_label = if message_expanded.iter().all(|&e| e) {
-        "Collapse all"
+        t!("main.reading_pane.collapse_all")
     } else {
-        "Expand all"
+        t!("main.reading_pane.expand_all")
     };
 
     let expand_collapse_btn = button(
@@ -946,10 +950,11 @@ fn thread_header<'a>(
 
 fn message_count_label(count: usize) -> String {
     if count == 1 {
-        "1 message".to_string()
+        t!("main.reading_pane.messages_one", count = count)
     } else {
-        format!("{count} messages")
+        t!("main.reading_pane.messages_other", count = count)
     }
+    .into_owned()
 }
 
 /// Check if a message's content matches any of the search terms (case-insensitive).
@@ -1061,10 +1066,13 @@ fn attachment_group<'a>(
             .align_y(Alignment::Center),
             Space::new().width(SPACE_XXS),
             container(
-                text(format!("Attachments ({})", deduped_indices.len()))
-                    .size(TEXT_MD)
-                    .font(font::text_semibold())
-                    .style(text::base),
+                text(t!(
+                    "main.reading_pane.attachments",
+                    count = deduped_indices.len()
+                ))
+                .size(TEXT_MD)
+                .font(font::text_semibold())
+                .style(text::base),
             )
             .align_y(Alignment::Center),
         ]
@@ -1081,7 +1089,9 @@ fn attachment_group<'a>(
     let save_all_btn = button(
         row![
             icon::download().size(ICON_SM).style(text::secondary),
-            text("Save All").size(TEXT_SM).style(text::secondary),
+            text(t!("main.reading_pane.save_all"))
+                .size(TEXT_SM)
+                .style(text::secondary),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),

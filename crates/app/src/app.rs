@@ -20,6 +20,8 @@ use cmdk::{BindingTable, Chord, CommandRegistry, FocusedRegion, UndoStack, curre
 use iced::{Task, Theme};
 use rtsk::db::queries_extra::get_calendar_default_view_sync;
 use rtsk::generation::{GenerationCounter, Nav, PopOut, Search, ThreadDetail};
+use rust_i18n::t;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -570,12 +572,23 @@ impl ReadyApp {
         }
         match self.pop_out_windows.get(&window_id) {
             Some(PopOutWindow::MessageView(state)) => {
-                let subject = state.subject.as_deref().unwrap_or("(no subject)");
-                let sender = state.from_address.as_deref().unwrap_or("unknown");
-                format!("{subject} \u{2014} {sender}")
+                let subject = state
+                    .subject
+                    .as_deref()
+                    .map_or_else(|| t!("main.no_subject"), Cow::Borrowed);
+                let sender = state
+                    .from_address
+                    .as_deref()
+                    .map_or_else(|| t!("main.window.unknown_sender"), Cow::Borrowed);
+                t!(
+                    "main.window.message_title",
+                    subject = subject,
+                    sender = sender
+                )
+                .into_owned()
             }
             Some(PopOutWindow::Compose(state)) => state.window_title(),
-            Some(PopOutWindow::Calendar(_)) => "Ratatoskr \u{2014} Calendar".to_string(),
+            Some(PopOutWindow::Calendar(_)) => t!("main.window.calendar_title").into_owned(),
             None => "Ratatoskr".to_string(),
         }
     }
@@ -659,28 +672,33 @@ impl SplashState {
     }
 
     /// Default user-visible label per phase.
-    fn label(&self) -> &'static str {
+    fn label(&self) -> String {
         match self.phase {
-            None => "Connecting to Service...",
-            Some(service_api::BootPhase::LoadingKey) => "Loading encryption key...",
-            Some(service_api::BootPhase::OpeningDatabase) => "Opening database...",
-            Some(service_api::BootPhase::Migrating { .. }) => "Migrating database...",
+            None => t!("main.splash.connecting"),
+            Some(service_api::BootPhase::LoadingKey) => t!("main.splash.loading_key"),
+            Some(service_api::BootPhase::OpeningDatabase) => t!("main.splash.opening_database"),
+            Some(service_api::BootPhase::Migrating { .. }) => t!("main.splash.migrating"),
             Some(service_api::BootPhase::RecoveringPendingOps) => {
-                "Recovering pending operations..."
+                t!("main.splash.recovering_pending_ops")
             }
-            Some(service_api::BootPhase::SweepingQueuedDrafts) => "Sweeping queued drafts...",
+            Some(service_api::BootPhase::SweepingQueuedDrafts) => {
+                t!("main.splash.sweeping_queued_drafts")
+            }
             Some(service_api::BootPhase::BackfillingThreadParticipants) => {
-                "Backfilling thread participants..."
+                t!("main.splash.backfilling_participants")
             }
-            Some(service_api::BootPhase::DrainingDraftWal) => "Draining draft WAL...",
+            Some(service_api::BootPhase::DrainingDraftWal) => t!("main.splash.draining_draft_wal"),
             Some(service_api::BootPhase::OpeningBodyAndInlineStores) => {
-                "Opening body and inline stores..."
+                t!("main.splash.opening_stores")
             }
-            Some(service_api::BootPhase::OpeningSearchIndex) => "Opening search index...",
+            Some(service_api::BootPhase::OpeningSearchIndex) => {
+                t!("main.splash.opening_search_index")
+            }
             Some(service_api::BootPhase::RunningInvariantPass) => {
-                "Running cross-store invariant pass..."
+                t!("main.splash.running_invariant_pass")
             }
         }
+        .into_owned()
     }
 }
 
@@ -719,7 +737,7 @@ impl BootingApp {
             Message::ServiceChildSpawned(client) => {
                 self.service_notifications = Some(client.notifications());
                 self.service_client = Some(client);
-                self.splash.message = Some("Service connected, awaiting boot.ready...".to_string());
+                self.splash.message = Some(t!("main.splash.service_connected").into_owned());
                 BootingUpdate::Stay(Task::none())
             }
             Message::ServiceBootReady(response) => {
@@ -847,20 +865,25 @@ impl BootingApp {
             Some(service_api::BootPhase::Migrating { current: 0, total }) => {
                 match self.splash.message.as_deref() {
                     Some(msg) => msg.to_string(),
-                    None => format!("Starting migration 1 of {total}"),
+                    None => t!("main.splash.starting_migration", total = total).into_owned(),
                 }
             }
             Some(service_api::BootPhase::Migrating { current, total }) => {
                 match self.splash.message.as_deref() {
                     Some(msg) => format!("{msg} ({current}/{total})"),
-                    None => format!("Migration {current} of {total}"),
+                    None => t!(
+                        "main.splash.migration_progress",
+                        current = current,
+                        total = total
+                    )
+                    .into_owned(),
                 }
             }
             _ => self
                 .splash
                 .message
                 .clone()
-                .unwrap_or_else(|| "Ratatoskr is starting...".to_string()),
+                .unwrap_or_else(|| t!("main.splash.starting").into_owned()),
         };
         iced::widget::container(
             iced::widget::column![
@@ -878,7 +901,7 @@ impl BootingApp {
     }
 
     pub(crate) fn title(&self, _window_id: iced::window::Id) -> String {
-        "Ratatoskr - Starting".to_string()
+        t!("main.window.starting_title").into_owned()
     }
 
     pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
