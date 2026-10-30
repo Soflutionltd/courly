@@ -139,6 +139,8 @@ pub struct UiBootstrapSnapshot {
     pub auto_update: bool,
     pub task_sidebar_visible: bool,
     pub sidebar_nav_config: Option<String>,
+    pub email_zoom: Option<String>,
+    pub thread_date_groups: bool,
 }
 
 const SECURE_SETTING_KEYS: &[&str] = &[
@@ -331,6 +333,8 @@ pub fn get_ui_bootstrap_snapshot(
         auto_update: get_bool("auto_update", false),
         task_sidebar_visible: get("task_sidebar_visible").is_some_and(|value| value == "true"),
         sidebar_nav_config: get("sidebar_nav_config"),
+        email_zoom: get("email_zoom"),
+        thread_date_groups: get_bool("thread_date_groups", true),
     })
 }
 

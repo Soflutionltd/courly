@@ -67,8 +67,7 @@ pub enum ReadingPaneMessage {
     /// A background HTML render finished.
     HtmlBodyRendered {
         index: usize,
-        ticket: u64,
-        width: f32,
+        inputs: super::mail_body::RenderInputs,
         body: Option<std::sync::Arc<super::mail_body::RenderedBody>>,
     },
     /// Load remote images for the message at this index.
@@ -218,7 +217,7 @@ impl ReadingPane {
         else {
             return Task::none();
         };
-        let Some((ticket, width, allow_remote)) = self
+        let Some(inputs) = self
             .html_bodies
             .get_mut(index)
             .and_then(super::mail_body::HtmlBodyState::start)
@@ -227,13 +226,27 @@ impl ReadingPane {
         };
         let inline_images = self.inline_image_bytes.clone();
         Task::perform(
-            super::mail_body::render(html, width, inline_images, allow_remote),
+            super::mail_body::render(html, inputs, inline_images),
             move |body| ReadingPaneMessage::HtmlBodyRendered {
                 index,
-                ticket,
-                width,
+                inputs,
                 body,
             },
+        )
+    }
+
+    /// Re-render every open HTML body at a new reading zoom.
+    pub fn set_reading_zoom(&mut self, zoom: f32) -> Task<ReadingPaneMessage> {
+        let starts: Vec<usize> = self
+            .html_bodies
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, state)| state.set_zoom(zoom).then_some(index))
+            .collect();
+        Task::batch(
+            starts
+                .into_iter()
+                .map(|index| self.start_html_render(index, true)),
         )
     }
 
@@ -594,14 +607,13 @@ impl Component for ReadingPane {
             }
             ReadingPaneMessage::HtmlBodyRendered {
                 index,
-                ticket,
-                width,
+                inputs,
                 body,
             } => {
                 let again = self
                     .html_bodies
                     .get_mut(index)
-                    .is_some_and(|state| state.finish(ticket, width, body));
+                    .is_some_and(|state| state.finish(inputs, body));
                 (self.start_html_render(index, again), None)
             }
             ReadingPaneMessage::ShowRemoteImages(index) => {

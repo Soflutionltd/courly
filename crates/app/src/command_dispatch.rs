@@ -4,6 +4,7 @@ use types::SidebarSelection;
 
 use crate::Message;
 use crate::ReadyApp;
+use crate::ui::settings::types::EmailZoomStep;
 
 // ── Supporting enums ────────────────────────────────────
 
@@ -451,6 +452,9 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
         CommandId::ViewReadingPaneHidden => {
             Some(Message::SetReadingPanePosition(ReadingPanePosition::Hidden))
         }
+        CommandId::ViewEmailZoomIn => Some(Message::EmailZoom(EmailZoomStep::In)),
+        CommandId::ViewEmailZoomOut => Some(Message::EmailZoom(EmailZoomStep::Out)),
+        CommandId::ViewEmailZoomActualSize => Some(Message::EmailZoom(EmailZoomStep::ActualSize)),
 
         // Calendar
         CommandId::CalendarToggle => Some(Message::ToggleAppMode),

@@ -59,6 +59,18 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 ),
                 SettingsMessage::ToggleSelect(SelectField::EmailBodyBg),
             ),
+            setting_row_with_description(
+                "Email Zoom",
+                Some("Size of email content in the reading pane. Cmd + and Cmd - change it too."),
+                widgets::select(
+                    EMAIL_ZOOM_LEVELS,
+                    &state.email_zoom,
+                    state.open_select == Some(SelectField::EmailZoom),
+                    SettingsMessage::ToggleSelect(SelectField::EmailZoom),
+                    SettingsMessage::EmailZoomChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::EmailZoom),
+            ),
             slider_row(
                 "Scale",
                 None,
@@ -84,6 +96,12 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                     SettingsMessage::DateDisplayChanged,
                 ),
                 SettingsMessage::ToggleSelect(SelectField::DateDisplay),
+            ),
+            toggle_row(
+                "Group messages by date",
+                "Show Today, Yesterday, This Week and older headers in the message list.",
+                state.thread_date_groups,
+                SettingsMessage::ToggleThreadDateGroups,
             ),
             toggle_row(
                 "Show status bar",

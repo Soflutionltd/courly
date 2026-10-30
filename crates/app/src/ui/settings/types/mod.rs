@@ -312,6 +312,8 @@ pub struct Settings {
     pub date_display: DateDisplay,
     pub default_rendering_mode: RenderingMode,
     pub email_body_background: EmailBodyBackground,
+    pub email_zoom: String,
+    pub thread_date_groups: bool,
     // Composing
     pub undo_delay: String,
     pub mark_as_read: String,
@@ -445,6 +447,15 @@ impl Settings {
         {
             self.phishing_sensitivity = canonical.into();
         }
+        if let Some(zoom) = ui.email_zoom.as_deref()
+            && email_zoom_factor(zoom).is_some()
+        {
+            self.email_zoom = zoom.into();
+        }
+        self.thread_date_groups = ui.thread_date_groups;
+        if let Some(zoom) = email_zoom_factor(&self.email_zoom) {
+            crate::ui::mail_body::set_reading_zoom(zoom);
+        }
         self.committed_preferences = self.snapshot_preferences();
     }
 
@@ -496,6 +507,8 @@ impl Settings {
             phishing_sensitivity: self.phishing_sensitivity.clone(),
             default_rendering_mode: self.default_rendering_mode,
             email_body_background: self.email_body_background,
+            email_zoom: self.email_zoom.clone(),
+            thread_date_groups: self.thread_date_groups,
         }
     }
 
@@ -515,6 +528,11 @@ impl Settings {
         self.default_rendering_mode = prefs.default_rendering_mode;
         self.email_body_background = prefs.email_body_background;
         crate::ui::theme::set_email_body_background(prefs.email_body_background);
+        self.email_zoom = prefs.email_zoom.clone();
+        self.thread_date_groups = prefs.thread_date_groups;
+        if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
+            crate::ui::mail_body::set_reading_zoom(zoom);
+        }
     }
 }
 
@@ -534,6 +552,8 @@ impl Default for Settings {
             phishing_sensitivity: "Default".into(),
             default_rendering_mode: RenderingMode::default(),
             email_body_background: EmailBodyBackground::default(),
+            email_zoom: DEFAULT_EMAIL_ZOOM.into(),
+            thread_date_groups: true,
         };
         Self {
             active_tab: Tab::General,
@@ -556,6 +576,8 @@ impl Default for Settings {
             date_display: DateDisplay::RelativeOffset,
             default_rendering_mode: RenderingMode::default(),
             email_body_background: EmailBodyBackground::default(),
+            email_zoom: DEFAULT_EMAIL_ZOOM.into(),
+            thread_date_groups: true,
             undo_delay: "5 seconds".into(),
             mark_as_read: "After 2 Seconds".into(),
             notifications_enabled: true,
@@ -715,6 +737,8 @@ mod tests {
             auto_update: false,
             task_sidebar_visible: false,
             sidebar_nav_config: None,
+            email_zoom: None,
+            thread_date_groups: true,
         }
     }
 

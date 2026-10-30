@@ -64,6 +64,9 @@ pub enum CommandId {
     ViewReadingPaneRight,
     ViewReadingPaneBottom,
     ViewReadingPaneHidden,
+    ViewEmailZoomIn,
+    ViewEmailZoomOut,
+    ViewEmailZoomActualSize,
 
     // Calendar
     CalendarToggle,
@@ -150,6 +153,12 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::ViewReadingPaneRight, "view.readingPaneRight"),
     (CommandId::ViewReadingPaneBottom, "view.readingPaneBottom"),
     (CommandId::ViewReadingPaneHidden, "view.readingPaneHidden"),
+    (CommandId::ViewEmailZoomIn, "view.emailZoomIn"),
+    (CommandId::ViewEmailZoomOut, "view.emailZoomOut"),
+    (
+        CommandId::ViewEmailZoomActualSize,
+        "view.emailZoomActualSize",
+    ),
     (CommandId::CalendarToggle, "calendar.toggle"),
     (CommandId::CalendarViewDay, "calendar.viewDay"),
     (CommandId::CalendarViewWorkWeek, "calendar.viewWorkWeek"),
@@ -247,6 +256,9 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::ViewReadingPaneRight,
     CommandId::ViewReadingPaneBottom,
     CommandId::ViewReadingPaneHidden,
+    CommandId::ViewEmailZoomIn,
+    CommandId::ViewEmailZoomOut,
+    CommandId::ViewEmailZoomActualSize,
     CommandId::CalendarToggle,
     CommandId::CalendarViewDay,
     CommandId::CalendarViewWorkWeek,

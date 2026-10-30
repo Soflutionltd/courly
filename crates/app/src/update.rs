@@ -114,6 +114,7 @@ impl ReadyApp {
                 self.reading_pane.date_display = display;
                 Task::none()
             }
+            Message::EmailZoom(step) => self.step_email_zoom(step),
 
             // Window management
             Message::WindowResized(id, size) => {

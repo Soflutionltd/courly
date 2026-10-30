@@ -215,6 +215,7 @@ pub enum Message {
     /// updates `Settings.focused_filter` accordingly.
     SettingsCheckFocus,
     SetDateDisplay(db::DateDisplay),
+    EmailZoom(crate::ui::settings::types::EmailZoomStep),
     WindowCloseRequested(iced::window::Id),
 
     // Command system (Slice 6a)

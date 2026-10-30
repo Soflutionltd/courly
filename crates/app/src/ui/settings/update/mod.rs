@@ -57,6 +57,18 @@ impl Component for Settings {
                     Some(SettingsEvent::DateDisplayChanged(self.date_display)),
                 );
             }
+            SettingsMessage::EmailZoomChanged(v) => {
+                self.open_select = None;
+                let Some(zoom) = email_zoom_factor(&v) else {
+                    return (Task::none(), None);
+                };
+                self.email_zoom = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.email_zoom = v;
+                }
+                crate::ui::mail_body::set_reading_zoom(zoom);
+                return (Task::none(), Some(SettingsEvent::EmailZoomChanged(zoom)));
+            }
             SettingsMessage::AddAccountFromSettings => {
                 return (Task::none(), Some(SettingsEvent::OpenAddAccountWizard));
             }
@@ -478,6 +490,12 @@ impl Settings {
                 self.theme = "Theme".into();
                 if let Some(ref mut prefs) = self.editing_preferences {
                     prefs.theme = "Theme".into();
+                }
+            }
+            SettingsMessage::ToggleThreadDateGroups(v) => {
+                self.thread_date_groups = v;
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.thread_date_groups = v;
                 }
             }
             SettingsMessage::ToggleSyncStatusBar(v) => {

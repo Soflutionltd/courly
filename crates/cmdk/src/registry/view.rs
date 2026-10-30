@@ -62,6 +62,43 @@ pub(super) fn register_view(out: &mut Vec<CommandDescriptor>) {
         "Show or hide the task panel.",
     ));
     register_view_reading_pane(out);
+    register_view_email_zoom(out);
+}
+
+fn register_view_email_zoom(out: &mut Vec<CommandDescriptor>) {
+    out.push(with_docs(
+        desc(
+            CommandId::ViewEmailZoomIn,
+            "Zoom In",
+            "View",
+            Some(KeyBinding::cmd_or_ctrl('=')),
+            always,
+        ),
+        "Zoom In",
+        "Make email content larger in the reading pane.",
+    ));
+    out.push(with_docs(
+        desc(
+            CommandId::ViewEmailZoomOut,
+            "Zoom Out",
+            "View",
+            Some(KeyBinding::cmd_or_ctrl('-')),
+            always,
+        ),
+        "Zoom Out",
+        "Make email content smaller in the reading pane.",
+    ));
+    out.push(with_docs(
+        desc(
+            CommandId::ViewEmailZoomActualSize,
+            "Actual Size",
+            "View",
+            Some(KeyBinding::cmd_or_ctrl('0')),
+            always,
+        ),
+        "Actual Size",
+        "Show email content at 100%.",
+    ));
 }
 
 fn register_view_reading_pane(out: &mut Vec<CommandDescriptor>) {

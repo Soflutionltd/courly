@@ -53,6 +53,10 @@ pub enum SettingValue {
     /// under `<app_data>/opened_attachments/`. String-typed to match
     /// the rest of the slider-backed numeric prefs.
     OpenedFilesCleanupDays(String),
+    /// Reading zoom for HTML email bodies, as its percent label ("90%").
+    EmailZoom(String),
+    /// Group the thread list under Today / Yesterday / ... headers.
+    ThreadDateGroups(bool),
 }
 
 impl SettingValue {
@@ -71,6 +75,8 @@ impl SettingValue {
             Self::CompressAttachments(_) => "compress_attachments",
             Self::AllowLossyCompression(_) => "allow_lossy_compression",
             Self::OpenedFilesCleanupDays(_) => "opened_files_cleanup_days",
+            Self::EmailZoom(_) => "email_zoom",
+            Self::ThreadDateGroups(_) => "thread_date_groups",
         }
     }
 
@@ -84,7 +90,8 @@ impl SettingValue {
             | Self::BlockRemoteImages(v)
             | Self::PhishingDetectionEnabled(v)
             | Self::CompressAttachments(v)
-            | Self::AllowLossyCompression(v) => {
+            | Self::AllowLossyCompression(v)
+            | Self::ThreadDateGroups(v) => {
                 if *v {
                     "true".to_string()
                 } else {
@@ -96,7 +103,8 @@ impl SettingValue {
             | Self::FontSize(s)
             | Self::ReadingPanePosition(s)
             | Self::SyncPeriodDays(s)
-            | Self::OpenedFilesCleanupDays(s) => s.clone(),
+            | Self::OpenedFilesCleanupDays(s)
+            | Self::EmailZoom(s) => s.clone(),
         }
     }
 }

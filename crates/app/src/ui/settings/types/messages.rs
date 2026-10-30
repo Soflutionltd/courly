@@ -26,6 +26,8 @@ pub enum SettingsMessage {
     PhishingSensitivityChanged(String),
     DateDisplayChanged(String),
     EmailBodyBgChanged(String),
+    EmailZoomChanged(String),
+    ToggleThreadDateGroups(bool),
     ToggleSelect(SelectField),
     // About
     CheckForUpdates,
@@ -239,6 +241,8 @@ pub enum SettingsEvent {
     /// Preferences were explicitly cancelled - committed state restored.
     PreferencesDiscarded,
     DateDisplayChanged(DateDisplay),
+    /// The reading zoom changed; re-render open HTML bodies.
+    EmailZoomChanged(f32),
     OpenAddAccountWizard,
     /// Request the App to save a signature (insert or update) via core CRUD.
     SaveSignature(SignatureSaveRequest),
@@ -331,4 +335,5 @@ pub enum SelectField {
     AiModel,
     DateDisplay,
     EmailBodyBg,
+    EmailZoom,
 }

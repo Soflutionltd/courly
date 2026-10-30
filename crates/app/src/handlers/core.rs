@@ -447,6 +447,8 @@ impl ReadyApp {
             SettingValue::Theme(prefs.theme.clone()),
             SettingValue::FontSize(prefs.font_size.clone()),
             SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
+            SettingValue::EmailZoom(prefs.email_zoom.clone()),
+            SettingValue::ThreadDateGroups(prefs.thread_date_groups),
         ];
         Task::perform(async move { client.set_settings(values).await }, |result| {
             if let Err(e) = result {
@@ -454,6 +456,33 @@ impl ReadyApp {
             }
             Message::Noop
         })
+    }
+
+    /// Apply a keyboard zoom step to the reading zoom preference.
+    pub(crate) fn step_email_zoom(
+        &mut self,
+        step: crate::ui::settings::types::EmailZoomStep,
+    ) -> Task<Message> {
+        use crate::ui::settings::types::{
+            ACTUAL_SIZE_EMAIL_ZOOM, EmailZoomStep, email_zoom_factor, step_email_zoom,
+        };
+        let label = match step {
+            EmailZoomStep::In => step_email_zoom(&self.settings.email_zoom, 1),
+            EmailZoomStep::Out => step_email_zoom(&self.settings.email_zoom, -1),
+            EmailZoomStep::ActualSize => ACTUAL_SIZE_EMAIL_ZOOM,
+        };
+        let Some(zoom) = email_zoom_factor(label) else {
+            return Task::none();
+        };
+        self.settings.email_zoom = label.into();
+        self.settings.committed_preferences.email_zoom = label.into();
+        if let Some(prefs) = self.settings.editing_preferences.as_mut() {
+            prefs.email_zoom = label.into();
+        }
+        crate::ui::mail_body::set_reading_zoom(zoom);
+        self.reading_pane
+            .set_reading_zoom(zoom)
+            .map(Message::ReadingPane)
     }
 
     /// Close settings, committing preference changes.
@@ -631,6 +660,10 @@ impl ReadyApp {
                 self.reading_pane.date_display = display;
                 Task::none()
             }
+            SettingsEvent::EmailZoomChanged(zoom) => self
+                .reading_pane
+                .set_reading_zoom(zoom)
+                .map(Message::ReadingPane),
             SettingsEvent::OpenAddAccountWizard => self.handle_open_add_account_wizard(),
             SettingsEvent::DeleteAccount(account_id) => self.handle_delete_account(account_id),
             SettingsEvent::SaveAccountChanges { account_id, params } => {

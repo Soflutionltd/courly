@@ -1,6 +1,7 @@
 //! HTML email bodies rendered off the UI thread by the `mail-html` engine
 //! and shown as image tiles with clickable link areas.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,10 +56,20 @@ impl std::fmt::Debug for RenderedBody {
     }
 }
 
+/// Inputs of one render pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderInputs {
+    pub ticket: u64,
+    pub width: f32,
+    pub zoom: f32,
+    pub allow_remote: bool,
+}
+
 /// Per-message render state in the reading pane.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct HtmlBodyState {
     desired_width: Option<f32>,
+    zoom: f32,
     /// Ticket of the render in flight, if any.
     in_flight: Option<u64>,
     failed: bool,
@@ -66,7 +77,42 @@ pub struct HtmlBodyState {
     rendered: Option<Arc<RenderedBody>>,
 }
 
+thread_local! {
+    static READING_ZOOM: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// Zoom applied to HTML bodies, set from the user's preference.
+pub fn reading_zoom() -> f32 {
+    READING_ZOOM.with(Cell::get)
+}
+
+pub fn set_reading_zoom(zoom: f32) {
+    READING_ZOOM.with(|cell| cell.set(zoom));
+}
+
+impl Default for HtmlBodyState {
+    fn default() -> Self {
+        Self {
+            desired_width: None,
+            zoom: reading_zoom(),
+            in_flight: None,
+            failed: false,
+            allow_remote: false,
+            rendered: None,
+        }
+    }
+}
+
 impl HtmlBodyState {
+    /// Change the reading zoom. Returns true when a new render should start.
+    pub fn set_zoom(&mut self, zoom: f32) -> bool {
+        if (self.zoom - zoom).abs() < f32::EPSILON {
+            return false;
+        }
+        self.zoom = zoom;
+        self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
     /// Record the width the body is laid out at. Returns true when a new
     /// render should start.
     pub fn set_width(&mut self, width: f32) -> bool {
@@ -88,16 +134,11 @@ impl HtmlBodyState {
         self.in_flight.is_none()
     }
 
-    /// Store a finished render. Returns true when the width changed while it
-    /// was running and another pass is needed. Results for any other ticket
-    /// are ignored.
-    pub fn finish(
-        &mut self,
-        ticket: u64,
-        rendered_width: f32,
-        body: Option<Arc<RenderedBody>>,
-    ) -> bool {
-        if self.in_flight != Some(ticket) {
+    /// Store a finished render. Returns true when the width or zoom changed
+    /// while it was running and another pass is needed. Results for any
+    /// other ticket are ignored.
+    pub fn finish(&mut self, inputs: RenderInputs, body: Option<Arc<RenderedBody>>) -> bool {
+        if self.in_flight != Some(inputs.ticket) {
             return false;
         }
         self.in_flight = None;
@@ -108,16 +149,23 @@ impl HtmlBodyState {
             }
             None => self.failed = true,
         }
-        self.desired_width
-            .is_some_and(|w| (w - rendered_width).abs() >= 1.0)
+        (self.zoom - inputs.zoom).abs() >= f32::EPSILON
+            || self
+                .desired_width
+                .is_some_and(|w| (w - inputs.width).abs() >= 1.0)
     }
 
-    /// Mark a render as started and return its ticket and inputs.
-    pub fn start(&mut self) -> Option<(u64, f32, bool)> {
+    /// Mark a render as started and return its inputs.
+    pub fn start(&mut self) -> Option<RenderInputs> {
         let width = self.desired_width?;
         let ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
         self.in_flight = Some(ticket);
-        Some((ticket, width, self.allow_remote))
+        Some(RenderInputs {
+            ticket,
+            width,
+            zoom: self.zoom,
+            allow_remote: self.allow_remote,
+        })
     }
 }
 
@@ -135,15 +183,17 @@ pub fn inline_image_bytes(handles: &HashMap<String, image::Handle>) -> HashMap<S
 /// Render one body on a blocking worker. `None` when the engine failed.
 pub async fn render(
     html: String,
-    width: f32,
+    inputs: RenderInputs,
     inline_images: HashMap<String, Bytes>,
-    allow_remote: bool,
 ) -> Option<Arc<RenderedBody>> {
-    let remote = allow_remote.then(|| remote_fetcher(tokio::runtime::Handle::current()));
+    let remote = inputs
+        .allow_remote
+        .then(|| remote_fetcher(tokio::runtime::Handle::current()));
     let result = tokio::task::spawn_blocking(move || {
         let mail = mail_html::render(RenderRequest {
             html,
-            width,
+            width: inputs.width,
+            zoom: inputs.zoom,
             inline_images,
             remote,
         });
@@ -317,35 +367,35 @@ mod tests {
     fn first_width_starts_a_render() {
         let mut state = HtmlBodyState::default();
         assert!(state.set_width(600.4));
-        let (_, width, remote) = state.start().expect("width known");
-        assert!((width - 600.0).abs() < f32::EPSILON);
-        assert!(!remote);
+        let inputs = state.start().expect("width known");
+        assert!((inputs.width - 600.0).abs() < f32::EPSILON);
+        assert!(!inputs.allow_remote);
     }
 
     #[test]
     fn width_change_during_render_triggers_one_more_pass() {
         let mut state = HtmlBodyState::default();
         state.set_width(600.0);
-        let (ticket, width, _) = state.start().expect("started");
+        let inputs = state.start().expect("started");
         assert!(!state.set_width(500.0), "no second render while in flight");
-        assert!(state.finish(ticket, width, body(width)));
-        let (ticket, width, _) = state.start().expect("restarted");
-        assert!(!state.finish(ticket, width, body(width)));
+        assert!(state.finish(inputs, body(inputs.width)));
+        let inputs = state.start().expect("restarted");
+        assert!(!state.finish(inputs, body(inputs.width)));
     }
 
     #[test]
     fn results_for_replaced_state_are_ignored() {
         let mut state = HtmlBodyState::default();
         state.set_width(600.0);
-        let (ticket, width, _) = state.start().expect("started");
+        let first = state.start().expect("started");
         let mut replaced = HtmlBodyState::default();
-        assert!(!replaced.finish(ticket, width, body(width)));
+        assert!(!replaced.finish(first, body(first.width)));
         assert!(replaced.rendered.is_none());
         state.set_width(700.0);
-        let (newer, _, _) = state.start().expect("restarted");
-        assert!(!state.finish(ticket, width, body(width)));
+        let newer = state.start().expect("restarted");
+        assert!(!state.finish(first, body(first.width)));
         assert!(state.rendered.is_none());
-        assert!(!state.finish(newer, 700.0, body(700.0)));
+        assert!(!state.finish(newer, body(700.0)));
         assert!(state.rendered.is_some());
     }
 
@@ -355,7 +405,20 @@ mod tests {
         state.set_width(600.0);
         assert!(state.allow_remote());
         assert!(!state.allow_remote());
-        let (_, _, remote) = state.start().expect("started");
-        assert!(remote);
+        assert!(state.start().expect("started").allow_remote);
+    }
+
+    #[test]
+    fn zoom_change_rerenders_at_the_new_zoom() {
+        let mut state = HtmlBodyState::default();
+        assert!(!state.set_zoom(0.9), "no width yet, nothing to render");
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        assert!((inputs.zoom - 0.9).abs() < f32::EPSILON);
+        assert!(!state.set_zoom(1.25), "no second render while in flight");
+        assert!(state.finish(inputs, body(600.0)));
+        let inputs = state.start().expect("restarted");
+        assert!((inputs.zoom - 1.25).abs() < f32::EPSILON);
+        assert!(!state.finish(inputs, body(600.0)));
     }
 }

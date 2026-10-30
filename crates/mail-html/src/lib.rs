@@ -29,8 +29,10 @@ const HIDPI_SCALE: f32 = 2.0;
 const HIDPI_MAX_HEIGHT: f32 = 6_000.0;
 /// Hard cap on rendered height (CSS px); anything below is cut off.
 const MAX_HEIGHT: f32 = 30_000.0;
-/// Hard cap on rendered width (CSS px) for emails wider than the pane.
+/// Hard cap on rendered width (display px) for emails wider than the pane.
 const MAX_WIDTH: f32 = 2_400.0;
+const MIN_ZOOM: f32 = 0.25;
+const MAX_ZOOM: f32 = 4.0;
 /// Height of each RGBA tile in device pixels. Kept under common GPU
 /// texture limits.
 const TILE_HEIGHT_PX: u32 = 4_096;
@@ -99,8 +101,11 @@ pub type RemoteFetcher = Arc<dyn Fn(&Url) -> Option<Bytes> + Send + Sync>;
 
 pub struct RenderRequest {
     pub html: String,
-    /// Available width in CSS px.
+    /// Available width in display px.
     pub width: f32,
+    /// Reading zoom. The email is laid out at `width / zoom` CSS px and
+    /// painted scaled by `zoom`, like a browser's page zoom.
+    pub zoom: f32,
     /// Inline parts keyed by Content-ID (without the `cid:` prefix).
     pub inline_images: HashMap<String, Bytes>,
     pub remote: Option<RemoteFetcher>,
@@ -126,12 +131,12 @@ pub struct LinkArea {
     pub href: String,
 }
 
+/// Sizes and positions are in display px, so already multiplied by the zoom.
 #[derive(Debug, Clone)]
 pub struct RenderedMail {
-    /// Rendered width in CSS px. Larger than the requested width when the
-    /// email has a fixed layout wider than the pane.
+    /// Rendered width. Larger than the requested width when the email has a
+    /// fixed layout wider than the pane.
     pub width: f32,
-    /// Rendered height in CSS px.
     pub height: f32,
     pub tiles: Vec<Tile>,
     pub links: Vec<LinkArea>,
@@ -196,7 +201,14 @@ fn device_pixels(value: f32) -> u32 {
 /// worker, never from the UI thread.
 pub fn render(request: RenderRequest) -> RenderedMail {
     let _rendering = RenderingGuard::enter();
-    let width = request.width.clamp(1.0, MAX_WIDTH).floor();
+    let zoom = if request.zoom.is_finite() {
+        request.zoom.clamp(MIN_ZOOM, MAX_ZOOM)
+    } else {
+        1.0
+    };
+    let width = (request.width.clamp(1.0, MAX_WIDTH) / zoom)
+        .floor()
+        .max(1.0);
     let pending = Arc::new(AtomicUsize::new(0));
     let net = Arc::new(MailNetProvider {
         inline_images: request.inline_images,
@@ -240,8 +252,10 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         .ceil();
     let content_width = width
         .max(layout.scrollable_overflow_rect.right)
-        .min(MAX_WIDTH)
+        .min(MAX_WIDTH / zoom)
         .ceil();
+    let content_height = (content_height * zoom).ceil();
+    let content_width = (content_width * zoom).ceil();
     let scale = if content_height > HIDPI_MAX_HEIGHT {
         1.0
     } else {
@@ -262,7 +276,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
             paint_scene(
                 scene,
                 document.as_mut(),
-                f64::from(scale),
+                f64::from(scale * zoom),
                 px_width,
                 px_height,
                 0,
@@ -274,7 +288,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     );
 
     let tiles = split_into_tiles(&buffer, px_width, px_height, scale);
-    let links = collect_links(&document);
+    let links = collect_links(&document, zoom);
 
     RenderedMail {
         width: content_width,
@@ -305,7 +319,7 @@ fn split_into_tiles(buffer: &[u8], px_width: u32, px_height: u32, scale: f32) ->
     tiles
 }
 
-fn collect_links(document: &HtmlDocument) -> Vec<LinkArea> {
+fn collect_links(document: &HtmlDocument, zoom: f32) -> Vec<LinkArea> {
     let doc = document.as_ref();
     let Ok(anchors) = doc.query_selector_all("a[href]") else {
         return Vec::new();
@@ -327,10 +341,10 @@ fn collect_links(document: &HtmlDocument) -> Vec<LinkArea> {
                 return None;
             }
             Some(LinkArea {
-                x: rect.x.to_f32()?,
-                y: rect.y.to_f32()?,
-                width: rect.width.to_f32()?,
-                height: rect.height.to_f32()?,
+                x: rect.x.to_f32()? * zoom,
+                y: rect.y.to_f32()? * zoom,
+                width: rect.width.to_f32()? * zoom,
+                height: rect.height.to_f32()? * zoom,
                 href: href.to_string(),
             })
         })
@@ -345,9 +359,32 @@ mod tests {
         render(RenderRequest {
             html: html.to_string(),
             width: 600.0,
+            zoom: 1.0,
             inline_images: HashMap::new(),
             remote: None,
         })
+    }
+
+    #[test]
+    fn zoom_lays_out_wider_and_paints_smaller() {
+        let mail = render(RenderRequest {
+            html: r#"<body style="margin:0"><div style="width:1000px;height:200px">
+                <a href="https://e.x/">x</a></div></body>"#
+                .to_string(),
+            width: 600.0,
+            zoom: 0.5,
+            inline_images: HashMap::new(),
+            remote: None,
+        });
+        assert!(mail.width <= 601.0, "width was {}", mail.width);
+        assert!(
+            (mail.height - 100.0).abs() < 2.0,
+            "height was {}",
+            mail.height
+        );
+        let covered: f32 = mail.tiles.iter().map(|t| t.height).sum();
+        assert!((covered - mail.height).abs() < 1.0);
+        assert!(mail.links[0].height < 15.0);
     }
 
     #[test]
