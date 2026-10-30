@@ -794,6 +794,9 @@ impl DecryptedAccountCredentials {
         };
         let mut config =
             SmtpSubmissionConfig::new(host, tls, bifrost_types::Address::bare(&self.row.email));
+        if test_endpoint.is_some() {
+            config = config.allow_cleartext_auth();
+        }
         let port = match port_override {
             Some(port) => Some(port),
             None => self.optional_port(self.row.smtp_port, "smtp_port")?,
