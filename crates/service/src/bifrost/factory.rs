@@ -216,9 +216,9 @@ pub(crate) fn factory_from_decrypted(
             // front: bifrost dropped the URL-only constructor because it minted
             // a random per-resource secret and discarded it, leaving the
             // receiver nothing to validate against. A URL with no secret is
-            // therefore a misconfiguration, not a degraded mode - it falls back
-            // to the default (EWS streaming) push path rather than subscribing
-            // with a secret nobody can check.
+            // therefore a misconfiguration, not a degraded mode - the account
+            // stays on delta polling (EWS streaming is never enabled here)
+            // rather than subscribing with a secret nobody can check.
             if let Ok(webhook_url) = std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL") {
                 match std::env::var("RATATOSKR_GRAPH_PUSH_CLIENT_STATE") {
                     Ok(client_state) if !client_state.is_empty() => {
