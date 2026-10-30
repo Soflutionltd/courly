@@ -391,7 +391,7 @@ fn normalize_subject(s: &str) -> String {
 }
 
 fn local_zoned(timestamp: i64) -> Option<jiff::Zoned> {
-    jiff::Timestamp::from_second(timestamp)
+    jiff::Timestamp::from_millisecond(timestamp)
         .ok()
         .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
 }

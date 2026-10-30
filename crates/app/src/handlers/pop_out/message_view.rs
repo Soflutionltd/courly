@@ -177,7 +177,7 @@ fn synthesize_pseudo_source(state: &MessageViewState) -> String {
         out.push_str(&format!("Subject: {subject}\n"));
     }
     if let Some(ts) = state.date
-        && let Ok(instant) = jiff::Timestamp::from_second(ts)
+        && let Ok(instant) = jiff::Timestamp::from_millisecond(ts)
     {
         // RFC 2822 Date header. Written out rather than relying on a helper:
         // jiff has no `to_rfc2822`, and the `%a`/`%b` names it emits are always

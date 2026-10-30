@@ -111,7 +111,7 @@ fn chat_entry_card<'a>(
 /// "2h", "3d"). Distinct from `format_relative_time` (used by pinned searches)
 /// because the chat sidebar entries need shorter labels per the chats spec.
 fn format_relative_time_short(timestamp: i64) -> String {
-    let Ok(dt) = jiff::Timestamp::from_second(timestamp) else {
+    let Ok(dt) = jiff::Timestamp::from_millisecond(timestamp) else {
         return String::new();
     };
     let delta = jiff::Timestamp::now().duration_since(dt);

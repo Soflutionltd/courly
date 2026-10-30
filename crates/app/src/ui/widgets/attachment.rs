@@ -205,7 +205,7 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
     let size = format_file_size(att.size);
     let date = att
         .date
-        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
         .map(|ts| {
             ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%b %d")
@@ -221,7 +221,7 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
 fn format_attachment_date_sender(att: &ThreadAttachment) -> String {
     let date = att
         .date
-        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
         .map(|ts| {
             ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%b %d")
@@ -238,7 +238,7 @@ fn format_attachment_version_line(att: &ThreadAttachment, is_latest: bool) -> St
     let size = format_file_size(att.size);
     let date = att
         .date
-        .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
         .map(|ts| {
             ts.to_zoned(jiff::tz::TimeZone::system())
                 .strftime("%b %d")

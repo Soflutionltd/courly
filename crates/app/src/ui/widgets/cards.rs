@@ -19,12 +19,13 @@ use crate::ui::theme;
 use super::avatars::{avatar_circle, label_dot, sender_avatar};
 use super::buttons::reply_button;
 
-/// The host-zone wall clock for a Unix second. Card timestamps are labels a
-/// user reads against their own clock; the chrono-era UTC rendering (an
-/// accidental missing `with_timezone(&Local)`) was off by the UTC offset for
-/// every non-UTC user.
-fn local_dt(seconds: i64) -> Option<jiff::Zoned> {
-    jiff::Timestamp::from_second(seconds)
+/// The host-zone wall clock for a stored message timestamp, which is Unix
+/// milliseconds (`messages.date`, `threads.last_message_at`). Card timestamps
+/// are labels a user reads against their own clock; the chrono-era UTC
+/// rendering (an accidental missing `with_timezone(&Local)`) was off by the
+/// UTC offset for every non-UTC user.
+pub(crate) fn local_dt(millis: i64) -> Option<jiff::Zoned> {
+    jiff::Timestamp::from_millisecond(millis)
         .ok()
         .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
 }
@@ -599,5 +600,16 @@ fn truncate_snippet(snippet: Option<&str>, max_chars: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..s.floor_char_boundary(max_chars)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_dt;
+
+    #[test]
+    fn local_dt_reads_stored_milliseconds() {
+        let dt = local_dt(1_793_308_640_000).expect("stored message timestamp renders");
+        assert_eq!(dt.year(), 2026);
     }
 }
