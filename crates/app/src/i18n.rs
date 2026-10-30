@@ -182,33 +182,85 @@ mod tests {
         assert_eq!(french, "vendredi 30 octobre 2026 10:13");
     }
 
-    fn locale_keys(path: &std::path::Path) -> std::collections::BTreeSet<String> {
-        std::fs::read_to_string(path)
-            .expect("locale file")
-            .lines()
-            .filter(|line| !line.starts_with('#') && !line.starts_with("_version"))
-            .filter_map(|line| line.split_once(':').map(|(key, _)| key.trim().to_string()))
-            .filter(|key| !key.is_empty() && !key.contains(' '))
+    type Entries = std::collections::BTreeMap<String, String>;
+
+    /// Every locale file is `locales/<lang>/<area>.<lang>.yml` with one
+    /// `key: "value"` per line; rust-i18n takes the locale from the last
+    /// dot segment of the file name.
+    fn locales() -> std::collections::BTreeMap<String, Entries> {
+        fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("locales dir") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() {
+                    walk(&path, files);
+                } else if path.extension().is_some_and(|ext| ext == "yml") {
+                    files.push(path);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales"),
+            &mut files,
+        );
+        let mut by_locale: std::collections::BTreeMap<String, Entries> = Default::default();
+        for path in files {
+            let stem = path.file_stem().and_then(|s| s.to_str()).expect("stem");
+            let locale = stem.rsplit('.').next().expect("locale").to_string();
+            let entries = by_locale.entry(locale).or_default();
+            for line in std::fs::read_to_string(&path).expect("locale file").lines() {
+                if line.trim().is_empty() || line.starts_with('#') || line.starts_with("_version") {
+                    continue;
+                }
+                let (key, value) = line
+                    .split_once(": ")
+                    .unwrap_or_else(|| panic!("{}: malformed line {line:?}", path.display()));
+                assert!(
+                    entries
+                        .insert(key.trim().to_string(), value.trim().to_string())
+                        .is_none(),
+                    "{}: duplicate key {key}",
+                    path.display()
+                );
+            }
+        }
+        by_locale
+    }
+
+    fn placeholders(value: &str) -> std::collections::BTreeSet<&str> {
+        value
+            .split("%{")
+            .skip(1)
+            .filter_map(|rest| rest.split_once('}').map(|(name, _)| name))
             .collect()
     }
 
     #[test]
-    fn every_locale_has_exactly_the_english_keys() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
-        let english = locale_keys(&dir.join("en.yml"));
-        let mut checked = 0;
-        for entry in std::fs::read_dir(&dir).expect("locales dir") {
-            let path = entry.expect("entry").path();
-            let keys = locale_keys(&path);
-            let missing: Vec<_> = english.difference(&keys).collect();
-            let extra: Vec<_> = keys.difference(&english).collect();
+    fn every_locale_has_exactly_the_english_keys_and_placeholders() {
+        let locales = locales();
+        let english = locales.get("en").expect("English locale");
+        assert!(locales.len() > 1);
+        for (locale, entries) in &locales {
+            let missing: Vec<_> = english
+                .keys()
+                .filter(|k| !entries.contains_key(*k))
+                .collect();
+            let extra: Vec<_> = entries
+                .keys()
+                .filter(|k| !english.contains_key(*k))
+                .collect();
             assert!(
                 missing.is_empty() && extra.is_empty(),
-                "{}: missing {missing:?}, extra {extra:?}",
-                path.display()
+                "{locale}: missing {missing:?}, extra {extra:?}"
             );
-            checked += 1;
+            for (key, value) in entries {
+                assert_eq!(
+                    placeholders(value),
+                    placeholders(&english[key]),
+                    "{locale}: placeholders differ for {key}"
+                );
+                assert!(value.len() > 2, "{locale}: empty value for {key}");
+            }
         }
-        assert!(checked > 1);
     }
 }
