@@ -311,19 +311,20 @@ impl Sidebar {
         if scope == self.selected_scope {
             return self.update(SidebarMessage::Select(selection));
         }
+        let event = match &scope {
+            ViewScope::Account(id) => {
+                let Some(index) = self.accounts.iter().position(|a| a.id == *id) else {
+                    return (Task::none(), None);
+                };
+                SidebarEvent::AccountSelected(index)
+            }
+            _ => SidebarEvent::AllAccountsSelected,
+        };
         self.row_menu = None;
         self.scope_dropdown_open = false;
         self.selection = selection;
-        let event = match &scope {
-            ViewScope::Account(id) => self
-                .accounts
-                .iter()
-                .position(|a| a.id == *id)
-                .map(SidebarEvent::AccountSelected),
-            _ => Some(SidebarEvent::AllAccountsSelected),
-        };
         self.selected_scope = scope;
-        (Task::none(), event)
+        (Task::none(), Some(event))
     }
 
     /// Move the account `from` to the place of `to` and renumber.
