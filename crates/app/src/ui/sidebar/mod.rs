@@ -23,6 +23,7 @@ mod public_folders;
 mod scope;
 mod search_here;
 mod smart;
+mod tree;
 
 use chats::chats_section;
 use labels::labels_section;
@@ -45,6 +46,8 @@ pub enum SidebarMessage {
     ToggleLabelsSection,
     ToggleSmartFoldersSection,
     ToggleFolderExpand(String),
+    /// Click on a folder row of the section for this scope.
+    SelectIn(ViewScope, SidebarSelection),
     Compose,
     AddAccount,
     ToggleSettings,
@@ -68,33 +71,66 @@ pub enum SidebarMessage {
     /// Carries (account_id, folder_id).
     SelectPublicFolder(String, String),
     /// Left press on a folder-section row: a click or the start of a drag.
-    RowPress(usize),
-    RowRelease(usize),
-    RowHover(usize),
+    RowPress(ViewScope, usize),
+    RowRelease(ViewScope, usize),
+    RowHover(ViewScope, usize),
     /// Left release anywhere in the folder section: drops a moved row.
     DragEnd,
     DragCancel,
-    OpenRowMenu(usize),
+    OpenRowMenu(ViewScope, usize),
     /// Right-click on a subfolder row.
     OpenChildMenu {
+        scope: ViewScope,
         folder_id: String,
         root_index: usize,
     },
     /// Right-click anywhere else in the sidebar, at this window position.
     OpenBackgroundMenu(iced::Point),
     CloseRowMenu,
-    AddSeparatorBelow(usize),
-    RemoveSeparator(u32),
-    ResetOrder,
+    AddSeparatorBelow(ViewScope, usize),
+    RemoveSeparator(ViewScope, u32),
+    ResetOrder(ViewScope),
+    /// Fold or unfold a section of the all-accounts tree, by scope key.
+    ToggleSection(String),
+    /// Left press on an account header: a fold toggle or the start of a
+    /// drag that reorders the accounts.
+    SectionPress(String),
+    SectionRelease(String),
+    SectionHover(String),
+    SectionDragEnd,
+    SectionDragCancel,
 }
 
 /// A press on a folder-section row, tracked until release.
 #[derive(Debug, Clone)]
 pub struct SidebarDrag {
+    pub scope: ViewScope,
     pub from: SidebarEntry,
     pub target: Option<SidebarEntry>,
     /// The cursor reached another row, so release drops instead of clicking.
     pub moved: bool,
+}
+
+/// A press on an account header, tracked until release.
+#[derive(Debug, Clone)]
+pub struct SectionDrag {
+    pub from: String,
+    pub target: Option<String>,
+    pub moved: bool,
+}
+
+/// Folders for the all-accounts tree: the unified section, then one
+/// section per account, keyed by account id.
+#[derive(Debug, Clone)]
+pub struct NavigationTree {
+    pub all: NavigationState,
+    pub accounts: Vec<(String, NavigationState)>,
+}
+
+/// Whether the sidebar lays its folders out like Outlook: a unified
+/// section, then one collapsible section per account.
+pub fn shows_tree(scope: &ViewScope, account_count: usize) -> bool {
+    account_count >= 2 && matches!(scope, ViewScope::AllAccounts | ViewScope::Account(_))
 }
 
 /// Events the sidebar emits upward to the App.
@@ -135,6 +171,8 @@ pub enum SidebarEvent {
     },
     /// The folder arrangement changed; carries the `sidebar_layout` JSON.
     LayoutChanged(String),
+    /// Account sections were dragged into a new order: `(id, sort_order)`.
+    AccountsReordered(Vec<(String, i64)>),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -142,6 +180,10 @@ pub enum SidebarEvent {
 pub struct Sidebar {
     pub accounts: Vec<Account>,
     pub nav_state: Option<NavigationState>,
+    pub tree: Option<NavigationTree>,
+    /// Folded tree sections, by scope key.
+    pub collapsed_sections: HashSet<String>,
+    pub section_drag: Option<SectionDrag>,
     pub selected_scope: ViewScope,
     pub selection: SidebarSelection,
     pub scope_dropdown_open: bool,
@@ -174,11 +216,12 @@ pub struct Sidebar {
 /// Where the folder-section right-click menu is open.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowMenuAnchor {
-    /// A top-level row, by its index in the folder order.
-    Entry(usize),
+    /// A top-level row, by its index in its section's folder order.
+    Entry(ViewScope, usize),
     /// A subfolder row; separators go below its top-level ancestor, since
     /// only top-level rows can be reordered.
     Child {
+        scope: ViewScope,
         folder_id: String,
         root_index: usize,
     },
@@ -191,6 +234,9 @@ impl Sidebar {
         Self {
             accounts: Vec::new(),
             nav_state: None,
+            tree: None,
+            collapsed_sections: HashSet::new(),
+            section_drag: None,
             selected_scope: ViewScope::AllAccounts,
             selection: SidebarSelection::Inbox,
             scope_dropdown_open: false,
@@ -210,25 +256,91 @@ impl Sidebar {
         }
     }
 
-    fn entry_at(&self, index: usize) -> Option<SidebarEntry> {
-        nav::current_order(self).into_iter().nth(index)
+    fn entry_at(&self, scope: &ViewScope, index: usize) -> Option<SidebarEntry> {
+        nav::current_order(self, scope).into_iter().nth(index)
     }
 
     fn save_order(
         &mut self,
+        scope: &ViewScope,
         order: Vec<SidebarEntry>,
     ) -> (Task<SidebarMessage>, Option<SidebarEvent>) {
         self.row_menu = None;
-        self.layouts
-            .set(order::scope_key(&self.selected_scope), order);
+        self.layouts.set(order::scope_key(scope), order);
         (
             Task::none(),
             Some(SidebarEvent::LayoutChanged(self.layouts.to_json())),
         )
     }
 
-    pub fn is_all_accounts(&self) -> bool {
-        matches!(self.selected_scope, ViewScope::AllAccounts)
+    /// Whether the folders show as the all-accounts tree.
+    pub fn shows_tree(&self) -> bool {
+        self.tree.is_some()
+            && shows_tree(
+                &self.selected_scope,
+                self.accounts.iter().filter(|a| !a.is_deleting).count(),
+            )
+    }
+
+    /// Folders of the section for `scope`: a tree section, or the whole
+    /// sidebar when it shows the selected scope alone.
+    pub(super) fn section_nav(&self, scope: &ViewScope) -> Option<&NavigationState> {
+        if let Some(tree) = self.tree.as_ref().filter(|_| self.shows_tree()) {
+            return match scope {
+                ViewScope::AllAccounts => Some(&tree.all),
+                ViewScope::Account(id) => tree
+                    .accounts
+                    .iter()
+                    .find(|(account_id, _)| account_id == id)
+                    .map(|(_, nav)| nav),
+                _ => None,
+            };
+        }
+        self.nav_state
+            .as_ref()
+            .filter(|_| *scope == self.selected_scope)
+    }
+
+    /// Select `selection` in the section for `scope`, switching scope
+    /// when the row belongs to another section of the tree.
+    fn select_in(
+        &mut self,
+        scope: ViewScope,
+        selection: SidebarSelection,
+    ) -> (Task<SidebarMessage>, Option<SidebarEvent>) {
+        if scope == self.selected_scope {
+            return self.update(SidebarMessage::Select(selection));
+        }
+        self.row_menu = None;
+        self.scope_dropdown_open = false;
+        self.selection = selection;
+        let event = match &scope {
+            ViewScope::Account(id) => self
+                .accounts
+                .iter()
+                .position(|a| a.id == *id)
+                .map(SidebarEvent::AccountSelected),
+            _ => Some(SidebarEvent::AllAccountsSelected),
+        };
+        self.selected_scope = scope;
+        (Task::none(), event)
+    }
+
+    /// Move the account `from` to the place of `to` and renumber.
+    fn move_account(&mut self, from: &str, to: &str) -> Option<SidebarEvent> {
+        let from = self.accounts.iter().position(|a| a.id == from)?;
+        let to = self.accounts.iter().position(|a| a.id == to)?;
+        if from == to {
+            return None;
+        }
+        let account = self.accounts.remove(from);
+        self.accounts.insert(to, account);
+        let mut orders = Vec::with_capacity(self.accounts.len());
+        for (position, account) in (0_i64..).zip(self.accounts.iter_mut()) {
+            account.sort_order = position;
+            orders.push((account.id.clone(), position));
+        }
+        Some(SidebarEvent::AccountsReordered(orders))
     }
 
     /// Return the selected account index, if scope is a single account.
@@ -332,17 +444,23 @@ impl Component for Sidebar {
                     Some(SidebarEvent::SearchHere { query_prefix }),
                 )
             }
-            SidebarMessage::RowPress(index) => {
+            SidebarMessage::SelectIn(scope, selection) => self.select_in(scope, selection),
+            SidebarMessage::RowPress(scope, index) => {
                 self.row_menu = None;
-                self.drag = self.entry_at(index).map(|from| SidebarDrag {
+                self.drag = self.entry_at(&scope, index).map(|from| SidebarDrag {
+                    scope,
                     from,
                     target: None,
                     moved: false,
                 });
                 (Task::none(), None)
             }
-            SidebarMessage::RowHover(index) => {
-                let entry = self.drag.as_ref().and_then(|_| self.entry_at(index));
+            SidebarMessage::RowHover(scope, index) => {
+                let entry = self
+                    .drag
+                    .as_ref()
+                    .filter(|drag| drag.scope == scope)
+                    .and_then(|_| self.entry_at(&scope, index));
                 if let (Some(drag), Some(entry)) = (self.drag.as_mut(), entry) {
                     drag.moved |= entry != drag.from;
                     if drag.moved {
@@ -351,17 +469,19 @@ impl Component for Sidebar {
                 }
                 (Task::none(), None)
             }
-            SidebarMessage::RowRelease(index) => {
+            SidebarMessage::RowRelease(scope, index) => {
                 let clicked = self.drag.as_ref().is_some_and(|drag| {
-                    !drag.moved && Some(&drag.from) == self.entry_at(index).as_ref()
+                    drag.scope == scope
+                        && !drag.moved
+                        && Some(&drag.from) == self.entry_at(&scope, index).as_ref()
                 });
                 if !clicked {
                     return (Task::none(), None);
                 }
                 self.drag = None;
-                match self.entry_at(index) {
+                match self.entry_at(&scope, index) {
                     Some(SidebarEntry::Folder(id)) => {
-                        self.update(SidebarMessage::Select(universal_folder_selection(&id)))
+                        self.select_in(scope, universal_folder_selection(&id))
                     }
                     _ => (Task::none(), None),
                 }
@@ -373,13 +493,13 @@ impl Component for Sidebar {
                 let Some(target) = drag.target.filter(|_| drag.moved) else {
                     return (Task::none(), None);
                 };
-                let mut order = nav::current_order(self);
+                let mut order = nav::current_order(self, &drag.scope);
                 let from = order.iter().position(|e| *e == drag.from);
                 let to = order.iter().position(|e| *e == target);
                 match (from, to) {
                     (Some(from), Some(to)) if from != to => {
                         order::move_entry(&mut order, from, to);
-                        self.save_order(order)
+                        self.save_order(&drag.scope, order)
                     }
                     _ => (Task::none(), None),
                 }
@@ -388,17 +508,19 @@ impl Component for Sidebar {
                 self.drag = None;
                 (Task::none(), None)
             }
-            SidebarMessage::OpenRowMenu(index) => {
+            SidebarMessage::OpenRowMenu(scope, index) => {
                 self.drag = None;
-                self.row_menu = Some(RowMenuAnchor::Entry(index));
+                self.row_menu = Some(RowMenuAnchor::Entry(scope, index));
                 (Task::none(), None)
             }
             SidebarMessage::OpenChildMenu {
+                scope,
                 folder_id,
                 root_index,
             } => {
                 self.drag = None;
                 self.row_menu = Some(RowMenuAnchor::Child {
+                    scope,
                     folder_id,
                     root_index,
                 });
@@ -413,19 +535,67 @@ impl Component for Sidebar {
                 self.row_menu = None;
                 (Task::none(), None)
             }
-            SidebarMessage::AddSeparatorBelow(index) => {
-                let mut order = nav::current_order(self);
+            SidebarMessage::AddSeparatorBelow(scope, index) => {
+                let mut order = nav::current_order(self, &scope);
                 order::insert_separator_after(&mut order, index);
-                self.save_order(order)
+                self.save_order(&scope, order)
             }
-            SidebarMessage::RemoveSeparator(id) => {
-                let mut order = nav::current_order(self);
+            SidebarMessage::RemoveSeparator(scope, id) => {
+                let mut order = nav::current_order(self, &scope);
                 order::remove_separator(&mut order, id);
-                self.save_order(order)
+                self.save_order(&scope, order)
             }
-            SidebarMessage::ResetOrder => {
+            SidebarMessage::ToggleSection(key) => {
+                if !self.collapsed_sections.remove(&key) {
+                    self.collapsed_sections.insert(key);
+                }
+                (Task::none(), None)
+            }
+            SidebarMessage::SectionPress(id) => {
                 self.row_menu = None;
-                if !self.layouts.reset(&order::scope_key(&self.selected_scope)) {
+                self.section_drag = Some(SectionDrag {
+                    from: id,
+                    target: None,
+                    moved: false,
+                });
+                (Task::none(), None)
+            }
+            SidebarMessage::SectionHover(id) => {
+                if let Some(drag) = self.section_drag.as_mut() {
+                    drag.moved |= id != drag.from;
+                    if drag.moved {
+                        drag.target = Some(id);
+                    }
+                }
+                (Task::none(), None)
+            }
+            SidebarMessage::SectionRelease(id) => {
+                let clicked = self
+                    .section_drag
+                    .as_ref()
+                    .is_some_and(|drag| !drag.moved && drag.from == id);
+                if clicked {
+                    self.section_drag = None;
+                    return self.update(SidebarMessage::ToggleSection(id));
+                }
+                (Task::none(), None)
+            }
+            SidebarMessage::SectionDragEnd => {
+                let Some(drag) = self.section_drag.take() else {
+                    return (Task::none(), None);
+                };
+                match drag.target.filter(|_| drag.moved) {
+                    Some(target) => (Task::none(), self.move_account(&drag.from, &target)),
+                    None => (Task::none(), None),
+                }
+            }
+            SidebarMessage::SectionDragCancel => {
+                self.section_drag = None;
+                (Task::none(), None)
+            }
+            SidebarMessage::ResetOrder(scope) => {
+                self.row_menu = None;
+                if !self.layouts.reset(&order::scope_key(&scope)) {
                     return (Task::none(), None);
                 }
                 (
@@ -493,7 +663,11 @@ impl Component for Sidebar {
         }
 
         scroll_content = scroll_content.push(Space::new().height(SPACE_XS));
-        scroll_content = scroll_content.push(nav_items(self));
+        scroll_content = scroll_content.push(if self.shows_tree() {
+            tree::tree_view(self)
+        } else {
+            nav_items(self, &self.selected_scope)
+        });
         scroll_content = scroll_content.push(widgets::section_break());
         scroll_content = scroll_content.push(smart_folders(self));
 
@@ -628,8 +802,12 @@ mod tests {
         sidebar
     }
 
+    fn acc() -> ViewScope {
+        ViewScope::Account("acc".to_string())
+    }
+
     fn ids(sidebar: &Sidebar) -> Vec<String> {
-        nav::current_order(sidebar)
+        nav::current_order(sidebar, &acc())
             .into_iter()
             .map(|entry| match entry {
                 SidebarEntry::Folder(id) => id,
@@ -641,8 +819,8 @@ mod tests {
     #[test]
     fn press_and_release_on_one_row_selects_it() {
         let mut sidebar = sidebar();
-        let _ = sidebar.update(SidebarMessage::RowPress(3));
-        let (_, event) = sidebar.update(SidebarMessage::RowRelease(3));
+        let _ = sidebar.update(SidebarMessage::RowPress(acc(), 3));
+        let (_, event) = sidebar.update(SidebarMessage::RowRelease(acc(), 3));
         assert!(matches!(
             event,
             Some(SidebarEvent::SelectionChanged(SidebarSelection::ProviderFolder(ref id)))
@@ -655,10 +833,10 @@ mod tests {
     fn dragging_trash_onto_inbox_moves_it_first_and_saves() {
         let mut sidebar = sidebar();
         assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
-        let _ = sidebar.update(SidebarMessage::RowPress(2));
-        let _ = sidebar.update(SidebarMessage::RowHover(1));
-        let _ = sidebar.update(SidebarMessage::RowHover(0));
-        let (_, release) = sidebar.update(SidebarMessage::RowRelease(0));
+        let _ = sidebar.update(SidebarMessage::RowPress(acc(), 2));
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 1));
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 0));
+        let (_, release) = sidebar.update(SidebarMessage::RowRelease(acc(), 0));
         assert!(release.is_none(), "a drag release must not select");
         let (_, event) = sidebar.update(SidebarMessage::DragEnd);
         assert_eq!(ids(&sidebar), ["TRASH", "INBOX", "SENT", "g-hotel"]);
@@ -671,12 +849,115 @@ mod tests {
     #[test]
     fn separators_and_reset_round_trip() {
         let mut sidebar = sidebar();
-        let _ = sidebar.update(SidebarMessage::AddSeparatorBelow(2));
+        let _ = sidebar.update(SidebarMessage::AddSeparatorBelow(acc(), 2));
         assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "sep0", "g-hotel"]);
-        let _ = sidebar.update(SidebarMessage::RemoveSeparator(0));
+        let _ = sidebar.update(SidebarMessage::RemoveSeparator(acc(), 0));
         assert_eq!(ids(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
-        let (_, event) = sidebar.update(SidebarMessage::ResetOrder);
+        let (_, event) = sidebar.update(SidebarMessage::ResetOrder(acc()));
         assert!(matches!(event, Some(SidebarEvent::LayoutChanged(_))));
         assert_eq!(sidebar.layouts.get("acc"), None);
+    }
+
+    fn account(id: &str, sort_order: i64) -> Account {
+        Account {
+            id: id.to_string(),
+            email: format!("{id}@example.com"),
+            display_name: None,
+            provider: "imap".to_string(),
+            account_name: Some(id.to_uppercase()),
+            account_color: None,
+            last_sync_at: None,
+            token_expires_at: None,
+            is_active: true,
+            sort_order,
+            is_deleting: false,
+        }
+    }
+
+    fn nav(scope: AccountScope, folders: Vec<NavigationFolder>) -> NavigationState {
+        NavigationState { scope, folders }
+    }
+
+    fn tree_sidebar() -> Sidebar {
+        let mut sidebar = Sidebar::new();
+        sidebar.accounts = vec![account("antoine", 0), account("villart", 1)];
+        sidebar.selected_scope = ViewScope::AllAccounts;
+        let universal = || {
+            vec![
+                folder("INBOX", "Inbox", "Universal"),
+                folder("SENT", "Sent", "Universal"),
+            ]
+        };
+        let mut villart = universal();
+        villart.push(folder("v-hotel", "Hotel", "AccountFolder"));
+        sidebar.tree = Some(NavigationTree {
+            all: nav(AccountScope::All, universal()),
+            accounts: vec![
+                (
+                    "antoine".to_string(),
+                    nav(AccountScope::Single("antoine".to_string()), universal()),
+                ),
+                (
+                    "villart".to_string(),
+                    nav(AccountScope::Single("villart".to_string()), villart),
+                ),
+            ],
+        });
+        sidebar
+    }
+
+    #[test]
+    fn clicking_a_folder_of_another_account_switches_to_that_account() {
+        let mut sidebar = tree_sidebar();
+        assert!(sidebar.shows_tree());
+        let villart = ViewScope::Account("villart".to_string());
+        assert_eq!(
+            nav::current_order(&sidebar, &villart),
+            [
+                SidebarEntry::Folder("INBOX".to_string()),
+                SidebarEntry::Folder("SENT".to_string()),
+                SidebarEntry::Folder("v-hotel".to_string()),
+            ]
+        );
+        let _ = sidebar.update(SidebarMessage::RowPress(villart.clone(), 2));
+        let (_, event) = sidebar.update(SidebarMessage::RowRelease(villart.clone(), 2));
+        assert!(matches!(event, Some(SidebarEvent::AccountSelected(1))));
+        assert_eq!(sidebar.selected_scope, villart);
+        assert!(matches!(
+            &sidebar.selection,
+            SidebarSelection::ProviderFolder(id) if id.as_str() == "v-hotel"
+        ));
+        assert!(sidebar.shows_tree(), "the tree stays after the switch");
+    }
+
+    #[test]
+    fn dragging_an_account_header_reorders_the_accounts() {
+        let mut sidebar = tree_sidebar();
+        let _ = sidebar.update(SidebarMessage::SectionPress("villart".to_string()));
+        let _ = sidebar.update(SidebarMessage::SectionHover("antoine".to_string()));
+        let _ = sidebar.update(SidebarMessage::SectionRelease("antoine".to_string()));
+        let (_, event) = sidebar.update(SidebarMessage::SectionDragEnd);
+        let Some(SidebarEvent::AccountsReordered(orders)) = event else {
+            panic!("expected AccountsReordered");
+        };
+        assert_eq!(
+            orders,
+            [("villart".to_string(), 0), ("antoine".to_string(), 1)]
+        );
+        let ids: Vec<&str> = sidebar.accounts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["villart", "antoine"]);
+    }
+
+    #[test]
+    fn clicking_an_account_header_folds_its_section() {
+        let mut sidebar = tree_sidebar();
+        let _ = sidebar.update(SidebarMessage::SectionPress("antoine".to_string()));
+        let _ = sidebar.update(SidebarMessage::SectionRelease("antoine".to_string()));
+        let (_, event) = sidebar.update(SidebarMessage::SectionDragEnd);
+        assert!(event.is_none());
+        assert!(sidebar.collapsed_sections.contains("antoine"));
+        let _ = sidebar.update(SidebarMessage::SectionPress("antoine".to_string()));
+        let _ = sidebar.update(SidebarMessage::SectionRelease("antoine".to_string()));
+        assert!(!sidebar.collapsed_sections.contains("antoine"));
     }
 }

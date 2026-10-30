@@ -149,6 +149,12 @@ pub enum Message {
     // Existing data loading
     AccountsLoaded(GenerationToken<Nav>, Result<Vec<db::Account>, String>),
     NavigationLoaded(GenerationToken<Nav>, Result<NavigationState, String>),
+    /// Per-account folders for the all-accounts sidebar tree; `None` when
+    /// the sidebar shows a single scope.
+    NavigationTreeLoaded(
+        GenerationToken<Nav>,
+        Result<Option<crate::ui::sidebar::NavigationTree>, String>,
+    ),
     ThreadsLoaded(GenerationToken<Nav>, Result<Vec<Thread>, String>),
 
     // Existing UI

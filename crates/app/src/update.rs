@@ -48,6 +48,17 @@ impl ReadyApp {
                 self.sidebar.nav_state = Some(nav_state);
                 Task::none()
             }
+            Message::NavigationTreeLoaded(g, _) if !self.nav_generation.is_current(g) => {
+                Task::none()
+            }
+            Message::NavigationTreeLoaded(_, Ok(tree)) => {
+                self.sidebar.tree = tree;
+                Task::none()
+            }
+            Message::NavigationTreeLoaded(_, Err(e)) => {
+                log::error!("Navigation tree load error: {e}");
+                Task::none()
+            }
             Message::NavigationLoaded(_, Err(e)) => {
                 log::error!("Navigation load error: {e}");
                 self.status = format!("Navigation error: {e}");

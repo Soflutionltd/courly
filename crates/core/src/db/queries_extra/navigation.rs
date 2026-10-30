@@ -166,6 +166,24 @@ pub fn get_navigation_state(
     })
 }
 
+/// Universal folders and, for a single account, that account's own
+/// folders: one section of the all-accounts sidebar tree. Smart folders
+/// and label groups are scope-independent and come from
+/// [`get_navigation_state`].
+pub fn get_folder_navigation(
+    conn: &ReadConn<'_>,
+    scope: &AccountScope,
+) -> Result<NavigationState, String> {
+    let mut folders = build_universal_folders(conn, scope)?;
+    if let AccountScope::Single(account_id) = scope {
+        folders.extend(build_account_folders(conn, account_id)?);
+    }
+    Ok(NavigationState {
+        scope: scope.clone(),
+        folders,
+    })
+}
+
 // ── Helpers (each ≤100 lines) ───────────────────────────────
 
 /// The ordered set of universal sidebar folders.

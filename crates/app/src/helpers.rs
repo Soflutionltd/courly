@@ -5,7 +5,7 @@ use crate::ui::label_paint::LabelPaint;
 use iced::Task;
 use rtsk::db::queries::get_threads_for_bundle;
 use rtsk::db::queries_extra::navigation::{
-    NavigationState, get_navigation_state, get_shared_mailbox_navigation,
+    NavigationState, get_folder_navigation, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
     get_active_account_ids_sync, get_snoozed_threads, get_starred_threads,
@@ -27,7 +27,7 @@ impl ReadyApp {
     pub(crate) fn fire_navigation_load(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
-        Task::perform(
+        let nav_task = Task::perform(
             async move {
                 let r = match &view_scope {
                     ViewScope::SharedMailbox {
@@ -54,6 +54,43 @@ impl ReadyApp {
                 (load_gen, r)
             },
             |(g, result)| Message::NavigationLoaded(g, result),
+        );
+        Task::batch([nav_task, self.fire_navigation_tree_load(load_gen)])
+    }
+
+    /// Loads one folder section per account (plus the unified one) when the
+    /// sidebar shows them as a tree; otherwise clears the tree.
+    fn fire_navigation_tree_load(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
+        let account_ids: Vec<String> = self
+            .sidebar
+            .accounts
+            .iter()
+            .filter(|a| !a.is_deleting)
+            .map(|a| a.id.clone())
+            .collect();
+        if !crate::ui::sidebar::shows_tree(&self.sidebar.selected_scope, account_ids.len()) {
+            return Task::done(Message::NavigationTreeLoaded(load_gen, Ok(None)));
+        }
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                let tree = db
+                    .with_read(move |conn| {
+                        let all = get_folder_navigation(conn, &AccountScope::All)?;
+                        let accounts = account_ids
+                            .into_iter()
+                            .map(|id| {
+                                let nav =
+                                    get_folder_navigation(conn, &AccountScope::Single(id.clone()))?;
+                                Ok((id, nav))
+                            })
+                            .collect::<Result<Vec<_>, String>>()?;
+                        Ok(crate::ui::sidebar::NavigationTree { all, accounts })
+                    })
+                    .await;
+                (load_gen, tree.map(Some))
+            },
+            |(g, result)| Message::NavigationTreeLoaded(g, result),
         )
     }
 

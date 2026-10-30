@@ -170,6 +170,18 @@ pub const PAD_SIDEBAR_SEPARATOR: Padding = Padding {
     bottom: 6.0,
     left: 8.0,
 };
+/// Header of an all-accounts tree section ("All Accounts", an account).
+pub const PAD_SIDEBAR_SECTION_TITLE: Padding = Padding {
+    top: 6.0,
+    right: 8.0,
+    bottom: 4.0,
+    left: 4.0,
+};
+/// Fold chevron slot of a tree section header; the account email below
+/// the name is indented by the same width.
+pub const SIDEBAR_SECTION_CHEVRON_SLOT: f32 = 16.0;
+/// Space between the sections of the all-accounts tree.
+pub const SIDEBAR_SECTION_GAP: f32 = SPACE_SM;
 /// Date group header above thread cards ("Today", "Yesterday", ...).
 pub const PAD_THREAD_GROUP_HEADER: Padding = Padding {
     top: 10.0,

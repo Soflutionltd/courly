@@ -8,6 +8,7 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
+use rtsk::scope::ViewScope;
 use types::{FolderId, SidebarSelection};
 
 use super::search_here::build_search_here_user_folder_prefix;
@@ -31,16 +32,16 @@ pub(super) struct AccountRoot<'a> {
     descendants: Vec<TreeNode<'a>>,
 }
 
-/// The scoped account's user-created folders as top-level roots, each
-/// carrying its subtree. Empty in All-Accounts scope (user folders don't
+/// A section's user-created folders as top-level roots, each carrying its
+/// subtree. Empty for the All-Accounts section (user folders don't
 /// aggregate across accounts).
 pub(super) struct AccountForest<'a> {
     folders: Vec<&'a NavigationFolder>,
     pub roots: Vec<AccountRoot<'a>>,
 }
 
-pub(super) fn account_forest(sidebar: &Sidebar) -> AccountForest<'_> {
-    if sidebar.is_all_accounts() {
+pub(super) fn account_forest<'a>(sidebar: &'a Sidebar, scope: &ViewScope) -> AccountForest<'a> {
+    if matches!(scope, ViewScope::AllAccounts) {
         return AccountForest {
             folders: Vec::new(),
             roots: Vec::new(),
@@ -48,8 +49,7 @@ pub(super) fn account_forest(sidebar: &Sidebar) -> AccountForest<'_> {
     }
 
     let folders: Vec<&NavigationFolder> = sidebar
-        .nav_state
-        .as_ref()
+        .section_nav(scope)
         .map(|ns| &ns.folders[..])
         .unwrap_or(&[])
         .iter()
@@ -90,6 +90,7 @@ impl AccountForest<'_> {
     pub(super) fn descendant_rows<'a>(
         &self,
         sidebar: &'a Sidebar,
+        scope: &ViewScope,
         root: &AccountRoot<'a>,
         root_index: usize,
     ) -> Vec<Element<'a, SidebarMessage>> {
@@ -113,19 +114,23 @@ impl AccountForest<'_> {
                 let indent = TREE_INDENT * f32::from(node.depth);
                 folder_row(
                     sidebar,
+                    (scope, root_index),
                     node.folder,
                     indent,
                     tree_state,
-                    is_folder_active(sidebar, node.folder),
-                    root_index,
                 )
             })
             .collect()
     }
 }
 
-pub(super) fn is_folder_active(sidebar: &Sidebar, folder: &NavigationFolder) -> bool {
-    sidebar.active_pinned_search.is_none()
+pub(super) fn is_folder_active(
+    sidebar: &Sidebar,
+    scope: &ViewScope,
+    folder: &NavigationFolder,
+) -> bool {
+    sidebar.selected_scope == *scope
+        && sidebar.active_pinned_search.is_none()
         && matches!(
             &sidebar.selection,
             SidebarSelection::ProviderFolder(fid) if fid.as_str() == folder.id
@@ -259,38 +264,42 @@ pub(super) fn folder_row_content<'a>(
 /// add-separator (below its top-level ancestor at `root_index`).
 fn folder_row<'a>(
     sidebar: &'a Sidebar,
+    (scope, root_index): (&ViewScope, usize),
     folder: &'a NavigationFolder,
     indent: f32,
     tree_state: Option<(bool, bool)>,
-    active: bool,
-    root_index: usize,
 ) -> Element<'a, SidebarMessage> {
+    let active = is_folder_active(sidebar, scope, folder);
     let label_btn: Element<'_, SidebarMessage> =
         button(folder_row_content(folder, indent, tree_state, active))
-            .on_press(SidebarMessage::Select(SidebarSelection::ProviderFolder(
-                FolderId::from(folder.id.clone()),
-            )))
+            .on_press(SidebarMessage::SelectIn(
+                scope.clone(),
+                SidebarSelection::ProviderFolder(FolderId::from(folder.id.clone())),
+            ))
             .padding(0)
             .style(theme::ButtonClass::Nav { active }.style())
             .width(Length::Fill)
             .into();
 
-    let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar);
+    let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar, scope);
     let row_el: Element<'a, SidebarMessage> = mouse_area(label_btn)
         .on_right_press(SidebarMessage::OpenChildMenu {
+            scope: scope.clone(),
             folder_id: folder.id.clone(),
             root_index,
         })
         .into();
     let menu_open = matches!(
         &sidebar.row_menu,
-        Some(RowMenuAnchor::Child { folder_id, .. }) if *folder_id == folder.id
+        Some(RowMenuAnchor::Child { scope: menu_scope, folder_id, .. })
+            if *folder_id == folder.id && menu_scope == scope
     );
     if !menu_open {
         return row_el;
     }
     super::nav::with_row_menu(
+        scope,
         row_el,
-        super::nav::folder_menu_items(query_prefix, root_index),
+        super::nav::folder_menu_items(scope, query_prefix, root_index),
     )
 }

@@ -46,6 +46,7 @@ impl ReadyApp {
                 let token = self.nav_generation.next();
                 self.load_threads_for_current_view(token)
             }
+            SidebarEvent::AccountsReordered(orders) => self.handle_reorder_accounts(orders),
             SidebarEvent::Compose => self.update(Message::Compose),
             SidebarEvent::AddAccount => self.handle_open_add_account_wizard(),
             SidebarEvent::ToggleSettings => self.update(Message::ToggleSettings),

@@ -51,7 +51,8 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 folder.unread_count(),
                 SidebarMessage::Select(SidebarSelection::LabelGroup(group_id)),
             );
-            let query_prefix = build_search_here_prefix(&folder.name, sidebar);
+            let query_prefix =
+                build_search_here_prefix(&folder.name, sidebar, &sidebar.selected_scope);
             mouse_area(item)
                 .on_right_press(SidebarMessage::SearchHere(query_prefix))
                 .into()

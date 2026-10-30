@@ -7,6 +7,7 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
+use rtsk::scope::ViewScope;
 use types::SidebarSelection;
 
 use super::folders::{AccountForest, account_forest, folder_row_content, is_folder_active};
@@ -18,22 +19,23 @@ use super::{
 
 // ── Nav items ───────────────────────────────────────────
 
-fn universal_folders(sidebar: &Sidebar) -> Vec<&NavigationFolder> {
+fn universal_folders<'a>(sidebar: &'a Sidebar, scope: &ViewScope) -> Vec<&'a NavigationFolder> {
+    let all_accounts = matches!(scope, ViewScope::AllAccounts);
     sidebar
-        .nav_state
-        .as_ref()
+        .section_nav(scope)
         .map(|ns| &ns.folders[..])
         .unwrap_or(&[])
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::Universal))
         // All Mail is the per-account "literally everything" view - it
         // doesn't aggregate meaningfully, so single-account only.
-        .filter(|f| !(sidebar.is_all_accounts() && f.id == "all-mail"))
+        .filter(|f| !(all_accounts && f.id == "all-mail"))
         .collect()
 }
 
 fn order_for(
     sidebar: &Sidebar,
+    scope: &ViewScope,
     universal: &[&NavigationFolder],
     forest: &AccountForest<'_>,
 ) -> Vec<SidebarEntry> {
@@ -45,26 +47,31 @@ fn order_for(
         .collect();
     resolve(
         default_order(&universal_ids, &roots),
-        sidebar.layouts.get(&scope_key(&sidebar.selected_scope)),
+        sidebar.layouts.get(&scope_key(scope)),
     )
 }
 
-/// The folder section as currently arranged for the selected scope.
-pub(super) fn current_order(sidebar: &Sidebar) -> Vec<SidebarEntry> {
+/// The folders of the section for `scope`, as currently arranged.
+pub(super) fn current_order(sidebar: &Sidebar, scope: &ViewScope) -> Vec<SidebarEntry> {
     order_for(
         sidebar,
-        &universal_folders(sidebar),
-        &account_forest(sidebar),
+        scope,
+        &universal_folders(sidebar, scope),
+        &account_forest(sidebar, scope),
     )
 }
 
 /// System folders and the account's own folders in one reorderable list:
 /// drag a row onto another to take its place, right-click for separators,
 /// search-here and reset.
-pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
-    let universal = universal_folders(sidebar);
-    let forest = account_forest(sidebar);
-    let order = order_for(sidebar, &universal, &forest);
+pub(super) fn nav_items<'a>(
+    sidebar: &'a Sidebar,
+    scope: &ViewScope,
+) -> Element<'a, SidebarMessage> {
+    let universal = universal_folders(sidebar, scope);
+    let forest = account_forest(sidebar, scope);
+    let order = order_for(sidebar, scope, &universal, &forest);
+    let in_scope = sidebar.selected_scope == *scope;
 
     let mut col = column![].spacing(SPACE_XXS);
     for (index, entry) in order.iter().enumerate() {
@@ -78,7 +85,7 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 .width(Length::Fill);
                 col = col.push(reorderable_row(
                     sidebar,
-                    index,
+                    (scope, index),
                     entry,
                     line.into(),
                     false,
@@ -89,7 +96,7 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             SidebarEntry::Folder(id) => {
                 if let Some(folder) = universal.iter().find(|f| f.id == *id) {
                     let selection = universal_folder_selection(&folder.id);
-                    let active = sidebar_nav_selection_is_active(sidebar, &selection);
+                    let active = in_scope && sidebar_nav_selection_is_active(sidebar, &selection);
                     let content = widgets::nav_button_content(
                         Some(universal_folder_icon(&folder.id)),
                         folder_display_name(folder),
@@ -101,15 +108,19 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     );
                     col = col.push(reorderable_row(
                         sidebar,
-                        index,
+                        (scope, index),
                         entry,
                         content,
                         active,
-                        SidebarMessage::Select(selection),
-                        RowMenu::Folder(build_search_here_folder_prefix(&folder.name, sidebar)),
+                        SidebarMessage::SelectIn(scope.clone(), selection),
+                        RowMenu::Folder(build_search_here_folder_prefix(
+                            &folder.name,
+                            sidebar,
+                            scope,
+                        )),
                     ));
                 } else if let Some(root) = forest.roots.iter().find(|r| r.folder.id == *id) {
-                    let active = is_folder_active(sidebar, root.folder);
+                    let active = is_folder_active(sidebar, scope, root.folder);
                     let content = folder_row_content(
                         root.folder,
                         0.0,
@@ -118,17 +129,21 @@ pub(super) fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     );
                     col = col.push(reorderable_row(
                         sidebar,
-                        index,
+                        (scope, index),
                         entry,
                         content,
                         active,
-                        SidebarMessage::Select(universal_folder_selection(&root.folder.id)),
+                        SidebarMessage::SelectIn(
+                            scope.clone(),
+                            universal_folder_selection(&root.folder.id),
+                        ),
                         RowMenu::Folder(build_search_here_user_folder_prefix(
                             &root.folder.name,
                             sidebar,
+                            scope,
                         )),
                     ));
-                    for child in forest.descendant_rows(sidebar, root, index) {
+                    for child in forest.descendant_rows(sidebar, scope, root, index) {
                         col = col.push(child);
                     }
                 }
@@ -153,7 +168,7 @@ enum RowMenu {
 /// only supplies the hover and active styling.
 fn reorderable_row<'a>(
     sidebar: &'a Sidebar,
-    index: usize,
+    (scope, index): (&ViewScope, usize),
     entry: &SidebarEntry,
     content: Element<'a, SidebarMessage>,
     active: bool,
@@ -161,10 +176,10 @@ fn reorderable_row<'a>(
     menu: RowMenu,
 ) -> Element<'a, SidebarMessage> {
     let hit = mouse_area(content)
-        .on_press(SidebarMessage::RowPress(index))
-        .on_release(SidebarMessage::RowRelease(index))
-        .on_enter(SidebarMessage::RowHover(index))
-        .on_right_press(SidebarMessage::OpenRowMenu(index));
+        .on_press(SidebarMessage::RowPress(scope.clone(), index))
+        .on_release(SidebarMessage::RowRelease(scope.clone(), index))
+        .on_enter(SidebarMessage::RowHover(scope.clone(), index))
+        .on_right_press(SidebarMessage::OpenRowMenu(scope.clone(), index));
     let mut row_el: Element<'a, SidebarMessage> = button(hit)
         .on_press(on_press)
         .padding(0)
@@ -172,7 +187,11 @@ fn reorderable_row<'a>(
         .width(Length::Fill)
         .into();
 
-    if let Some(drag) = sidebar.drag.as_ref().filter(|drag| drag.moved) {
+    if let Some(drag) = sidebar
+        .drag
+        .as_ref()
+        .filter(|drag| drag.moved && drag.scope == *scope)
+    {
         let class = if drag.from == *entry {
             Some(theme::ContainerClass::DraggingRow)
         } else if drag.target.as_ref() == Some(entry) {
@@ -188,25 +207,26 @@ fn reorderable_row<'a>(
         }
     }
 
-    if sidebar.row_menu != Some(RowMenuAnchor::Entry(index)) {
+    if sidebar.row_menu != Some(RowMenuAnchor::Entry(scope.clone(), index)) {
         return row_el;
     }
 
     let items = match menu {
-        RowMenu::Folder(query_prefix) => folder_menu_items(query_prefix, index),
+        RowMenu::Folder(query_prefix) => folder_menu_items(scope, query_prefix, index),
         RowMenu::Separator(id) => column![menu_item(
             icon::x(),
             t!("main.sidebar.remove_separator"),
-            SidebarMessage::RemoveSeparator(id),
+            SidebarMessage::RemoveSeparator(scope.clone(), id),
         )]
         .spacing(SPACE_XXS),
     };
-    with_row_menu(row_el, items)
+    with_row_menu(scope, row_el, items)
 }
 
 /// "Search Here" and "Add Separator Below", the separator going after the
 /// top-level row at `separator_after`.
 pub(super) fn folder_menu_items<'a>(
+    scope: &ViewScope,
     query_prefix: String,
     separator_after: usize,
 ) -> iced::widget::Column<'a, SidebarMessage> {
@@ -219,18 +239,21 @@ pub(super) fn folder_menu_items<'a>(
         menu_item(
             icon::minus(),
             t!("main.sidebar.add_separator_below"),
-            SidebarMessage::AddSeparatorBelow(separator_after),
+            SidebarMessage::AddSeparatorBelow(scope.clone(), separator_after),
         ),
     ]
     .spacing(SPACE_XXS)
 }
 
 /// The right-click menu card, ending with "Reset Folder Order".
-fn menu_card<'a>(items: iced::widget::Column<'a, SidebarMessage>) -> Element<'a, SidebarMessage> {
+fn menu_card<'a>(
+    scope: &ViewScope,
+    items: iced::widget::Column<'a, SidebarMessage>,
+) -> Element<'a, SidebarMessage> {
     let items = items.push(widgets::divider()).push(menu_item(
         icon::undo(),
         t!("main.sidebar.reset_folder_order"),
-        SidebarMessage::ResetOrder,
+        SidebarMessage::ResetOrder(scope.clone()),
     ));
     container(items)
         .padding(PAD_DROPDOWN)
@@ -239,26 +262,29 @@ fn menu_card<'a>(items: iced::widget::Column<'a, SidebarMessage>) -> Element<'a,
 }
 
 /// Menu for a right-click outside the folder rows: the separator goes
-/// after the last folder, from where it can be dragged.
+/// after the last folder of the selected section, from where it can be
+/// dragged.
 pub(super) fn background_menu(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let scope = &sidebar.selected_scope;
     let mut items = column![].spacing(SPACE_XXS);
-    if let Some(last) = current_order(sidebar).len().checked_sub(1) {
+    if let Some(last) = current_order(sidebar, scope).len().checked_sub(1) {
         items = items.push(menu_item(
             icon::minus(),
             t!("main.sidebar.add_separator"),
-            SidebarMessage::AddSeparatorBelow(last),
+            SidebarMessage::AddSeparatorBelow(scope.clone(), last),
         ));
     }
-    menu_card(items)
+    menu_card(scope, items)
 }
 
 /// Float the right-click menu below `row_el`.
 pub(super) fn with_row_menu<'a>(
+    scope: &ViewScope,
     row_el: Element<'a, SidebarMessage>,
     items: iced::widget::Column<'a, SidebarMessage>,
 ) -> Element<'a, SidebarMessage> {
     crate::ui::anchored_overlay::anchored_overlay(row_el)
-        .popup(menu_card(items))
+        .popup(menu_card(scope, items))
         .popup_width(SIDEBAR_MIN_WIDTH)
         .position(crate::ui::anchored_overlay::AnchorPosition::Below)
         .on_dismiss(SidebarMessage::CloseRowMenu)
