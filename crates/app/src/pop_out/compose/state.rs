@@ -275,38 +275,15 @@ impl ComposeState {
 
         state.subject = mode.prefixed_subject();
 
-        if !matches!(state.mode, ComposeMode::Forward { .. })
-            && let Some(email) = source.from_address
-        {
-            let label = source.from_name.filter(|n| !n.is_empty()).unwrap_or(email);
-            let id = state.to.next_token_id();
-            state.to.tokens.push(token_input::Token {
-                id,
-                email: email.to_string(),
-                label: label.to_string(),
-                is_group: false,
-                group_id: None,
-                member_count: None,
-            });
+        let (to, cc) = reply_recipients(accounts, &state.mode, source);
+        for (name, email) in to {
+            push_recipient(&mut state.to, name, email);
         }
-
-        if let ComposeMode::ReplyAll { .. } = &state.mode
-            && let Some(cc_str) = source.cc_addresses
-        {
-            for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-                let id = state.cc.next_token_id();
-                state.cc.tokens.push(token_input::Token {
-                    id,
-                    email: addr.to_string(),
-                    label: addr.to_string(),
-                    is_group: false,
-                    group_id: None,
-                    member_count: None,
-                });
-            }
-            if !state.cc.tokens.is_empty() {
-                state.show_cc = true;
-            }
+        for (name, email) in cc {
+            push_recipient(&mut state.cc, name, email);
+        }
+        if !state.cc.tokens.is_empty() {
+            state.show_cc = true;
         }
 
         state.quote = HtmlBlock::quote(source);
@@ -378,5 +355,168 @@ impl ComposeState {
         let body_text = self.body.document.flattened_text();
         let trimmed = body_text.trim();
         !trimmed.is_empty()
+    }
+}
+
+type Recipient = (Option<String>, String);
+
+/// Outlook's rules: replying to a message we sent goes back to its original
+/// recipients, Reply All keeps the original To and Cc, and our own addresses
+/// are never added.
+fn reply_recipients(
+    accounts: &[db::Account],
+    mode: &ComposeMode,
+    source: &ReplySource<'_>,
+) -> (Vec<Recipient>, Vec<Recipient>) {
+    use rtsk::seen_addresses::parse::parse_address_list;
+
+    let is_own = |email: &str| accounts.iter().any(|a| a.email.eq_ignore_ascii_case(email));
+    let sender: Vec<Recipient> = source
+        .from_address
+        .map(|email| {
+            let name = source.from_name.filter(|n| !n.is_empty()).map(String::from);
+            vec![(name, email.to_string())]
+        })
+        .unwrap_or_default();
+    let original_to = parse_address_list(source.to_addresses.unwrap_or_default());
+    let original_cc = parse_address_list(source.cc_addresses.unwrap_or_default());
+    let from_self = source.from_address.is_some_and(is_own);
+
+    let (to, cc) = match mode {
+        ComposeMode::New | ComposeMode::Forward { .. } => return (Vec::new(), Vec::new()),
+        ComposeMode::Reply { .. } if from_self => (original_to, Vec::new()),
+        ComposeMode::Reply { .. } => (sender.clone(), Vec::new()),
+        ComposeMode::ReplyAll { .. } if from_self => (original_to, original_cc),
+        ComposeMode::ReplyAll { .. } => (
+            sender.iter().cloned().chain(original_to).collect(),
+            original_cc,
+        ),
+    };
+
+    let mut seen: Vec<String> = Vec::new();
+    let mut keep = |list: Vec<Recipient>| -> Vec<Recipient> {
+        list.into_iter()
+            .filter(|(_, email)| {
+                let key = email.to_lowercase();
+                if is_own(email) || seen.contains(&key) {
+                    return false;
+                }
+                seen.push(key);
+                true
+            })
+            .collect()
+    };
+    let to = keep(to);
+    let cc = keep(cc);
+    if to.is_empty() && cc.is_empty() {
+        // A note to ourselves: answer it to ourselves rather than to nobody.
+        return (sender, Vec::new());
+    }
+    (to, cc)
+}
+
+fn push_recipient(input: &mut TokenInputValue, name: Option<String>, email: String) {
+    let id = input.next_token_id();
+    input.tokens.push(token_input::Token {
+        id,
+        label: name
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| email.clone()),
+        email,
+        is_group: false,
+        group_id: None,
+        member_count: None,
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(email: &str) -> db::Account {
+        db::Account {
+            id: email.to_string(),
+            email: email.to_string(),
+            display_name: None,
+            provider: "imap".to_string(),
+            account_name: None,
+            account_color: None,
+            last_sync_at: None,
+            token_expires_at: None,
+            is_active: true,
+            sort_order: 0,
+            is_deleting: false,
+        }
+    }
+
+    fn emails(list: &[Recipient]) -> Vec<&str> {
+        list.iter().map(|(_, email)| email.as_str()).collect()
+    }
+
+    fn reply() -> ComposeMode {
+        ComposeMode::Reply {
+            original_subject: String::new(),
+        }
+    }
+
+    fn reply_all() -> ComposeMode {
+        ComposeMode::ReplyAll {
+            original_subject: String::new(),
+        }
+    }
+
+    const ME: &str = "me@example.com";
+
+    #[test]
+    fn reply_goes_to_the_sender() {
+        let source = ReplySource {
+            from_name: Some("Ann"),
+            from_address: Some("ann@example.com"),
+            to_addresses: Some("Me <ME@example.com>, bob@example.com"),
+            ..Default::default()
+        };
+        let (to, cc) = reply_recipients(&[account(ME)], &reply(), &source);
+        assert_eq!(emails(&to), ["ann@example.com"]);
+        assert!(cc.is_empty());
+    }
+
+    #[test]
+    fn reply_all_keeps_everyone_but_us() {
+        let source = ReplySource {
+            from_address: Some("ann@example.com"),
+            to_addresses: Some("Me <me@example.com>, Bob <bob@example.com>"),
+            cc_addresses: Some("carl@example.com, ann@example.com"),
+            ..Default::default()
+        };
+        let (to, cc) = reply_recipients(&[account(ME)], &reply_all(), &source);
+        assert_eq!(emails(&to), ["ann@example.com", "bob@example.com"]);
+        assert_eq!(emails(&cc), ["carl@example.com"]);
+    }
+
+    #[test]
+    fn replying_to_our_own_message_goes_to_its_recipients() {
+        let source = ReplySource {
+            from_address: Some(ME),
+            to_addresses: Some("Bob <bob@example.com>"),
+            cc_addresses: Some("carl@example.com"),
+            ..Default::default()
+        };
+        let (to, cc) = reply_recipients(&[account(ME)], &reply(), &source);
+        assert_eq!(emails(&to), ["bob@example.com"]);
+        assert!(cc.is_empty());
+        let (to, cc) = reply_recipients(&[account(ME)], &reply_all(), &source);
+        assert_eq!(emails(&to), ["bob@example.com"]);
+        assert_eq!(emails(&cc), ["carl@example.com"]);
+    }
+
+    #[test]
+    fn a_note_to_ourselves_is_answered_to_ourselves() {
+        let source = ReplySource {
+            from_address: Some(ME),
+            to_addresses: Some(ME),
+            ..Default::default()
+        };
+        let (to, _) = reply_recipients(&[account(ME)], &reply(), &source);
+        assert_eq!(emails(&to), [ME]);
     }
 }
