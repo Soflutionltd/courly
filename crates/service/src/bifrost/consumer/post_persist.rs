@@ -326,6 +326,7 @@ mod tests {
             inline_images: Vec::new(),
             is_important: false,
             is_pinned: false,
+            is_flag_complete: false,
             reaction_emoji: None,
         }
     }

@@ -70,6 +70,7 @@ impl_from_row!(DbThread {
     snooze_until,
     bool is_pinned,
     bool is_muted,
+    bool is_flag_complete,
     from_name,
     from_address,
 });

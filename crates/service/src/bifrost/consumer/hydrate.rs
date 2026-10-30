@@ -92,6 +92,8 @@ pub struct ConsumerMessageRow {
     /// Outlook's pin (the `$pinned` engine flag). Only Graph carries a
     /// provider pin; every other provider leaves the thread pin local.
     pub is_pinned: bool,
+    /// Outlook's "flag marked complete" (`$flag-complete`), Graph only.
+    pub is_flag_complete: bool,
     pub reaction_emoji: Option<String>,
 }
 
@@ -303,6 +305,7 @@ pub async fn hydrate_change_to_message_insert_row(
                         search_document: minimal_search_document(&account_id.0, &object.id.0),
                         is_important: false,
                         is_pinned: false,
+                        is_flag_complete: false,
                         reaction_emoji: None,
                     }),
                     outcome,
@@ -409,6 +412,7 @@ pub fn hydrate_change_to_message_insert_row_offline(
                     search_document: minimal_search_document(account_id, &object.id.0),
                     is_important: false,
                     is_pinned: false,
+                    is_flag_complete: false,
                     reaction_emoji: None,
                 }),
                 outcome,
@@ -833,6 +837,8 @@ pub(crate) fn build_consumer_row(
         is_important: matches!(message.importance, Importance::High)
             || flags.contains("$important"),
         is_pinned: provider == BifrostProviderKind::Graph && flags.contains("$pinned"),
+        is_flag_complete: provider == BifrostProviderKind::Graph
+            && flags.contains("$flag-complete"),
         reaction_emoji,
     }
 }
@@ -1330,6 +1336,11 @@ fn synthetic_to_row(
         .keywords
         .iter()
         .any(|keyword| keyword == "$important");
+    let is_flag_complete = provider == BifrostProviderKind::Graph
+        && synthetic
+            .keywords
+            .iter()
+            .any(|keyword| keyword == "$flag-complete");
     let is_pinned = provider == BifrostProviderKind::Graph
         && synthetic
             .keywords
@@ -1348,6 +1359,7 @@ fn synthetic_to_row(
             search_document,
             is_important,
             is_pinned,
+            is_flag_complete,
             reaction_emoji: synthetic.reaction_emoji,
         }),
         outcome,

@@ -151,6 +151,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .style(theme::TextClass::Tertiary.style()),
         );
     }
+    // A thread flagged again after completion shows the flag, not the check,
+    // as Outlook does.
+    if thread.is_flag_complete && !thread.is_starred {
+        indicators = indicators.push(icon::check().size(ICON_XS).style(text::success));
+    }
 
     let top_row = row![
         container(

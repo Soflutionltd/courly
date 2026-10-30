@@ -656,6 +656,7 @@ mod tests {
             snooze_until: None,
             is_pinned: false,
             is_muted: false,
+            is_flag_complete: false,
             from_name: Some("Alice".to_owned()),
             from_address: Some("alice@test.com".to_owned()),
         };
@@ -754,6 +755,7 @@ mod tests {
             snooze_until: None,
             is_pinned: false,
             is_muted: false,
+            is_flag_complete: false,
             from_name: Some("Latest sender".to_owned()),
             from_address: Some("latest@test.com".to_owned()),
         };

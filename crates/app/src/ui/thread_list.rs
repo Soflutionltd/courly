@@ -804,6 +804,7 @@ mod tests {
             is_forwarded: false,
             is_pinned: false,
             is_muted: false,
+            is_flag_complete: false,
             has_attachments: false,
             label_paints: Vec::new(),
             from_name: None,

@@ -77,6 +77,12 @@ static MIGRATIONS: &[Migration] = &[
         description: "Per-message provider pin state",
         sql: "ALTER TABLE messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;",
     },
+    Migration {
+        version: 102,
+        description: "Provider flag-complete state",
+        sql: "ALTER TABLE messages ADD COLUMN is_flag_complete INTEGER NOT NULL DEFAULT 0;
+              ALTER TABLE threads ADD COLUMN is_flag_complete INTEGER NOT NULL DEFAULT 0;",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.
@@ -282,15 +288,19 @@ mod tests {
         .expect("mark v100 applied");
 
         let applied = run_all(&conn).expect("upgrade from v100");
-        assert_eq!(applied, 1, "only v101 runs on a v100 database");
-        let pinned_column: u32 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'is_pinned'",
-                [],
+        let expected = u32::try_from(MIGRATIONS.len() - 1).expect("migration count fits u32");
+        assert_eq!(applied, expected, "every migration after v100 runs");
+        let column = |table: &str, name: &str| -> u32 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+                [table, name],
                 |row| row.get(0),
             )
-            .expect("query");
-        assert_eq!(pinned_column, 1);
+            .expect("query")
+        };
+        assert_eq!(column("messages", "is_pinned"), 1);
+        assert_eq!(column("messages", "is_flag_complete"), 1);
+        assert_eq!(column("threads", "is_flag_complete"), 1);
     }
 
     #[test]
@@ -350,8 +360,8 @@ mod tests {
     /// Locks in the per-migration progress contract: each migration produces
     /// exactly two callback invocations - one BEFORE the transaction begins
     /// (current=index, 0-based) and one AFTER the commit completes
-    /// (current=index+1, 1-based). A fresh DB with v100 and v101 sees
-    /// `(0, 2) (1, 2)` then `(1, 2) (2, 2)`.
+    /// (current=index+1, 1-based). A fresh DB sees `(0, n) (1, n)` for
+    /// the first migration, then `(1, n) (2, n)`, and so on.
     #[test]
     fn run_all_with_progress_emits_before_and_after_commit() {
         let conn = Connection::open_in_memory().expect("open in-memory db");

@@ -280,16 +280,20 @@ pub async fn persist_in_namespace(
                             })?;
                             if provider == BifrostProviderKind::Graph {
                                 tx.execute(
-                                    "UPDATE messages SET is_pinned = ?3 \
+                                    "UPDATE messages SET is_pinned = ?3, is_flag_complete = ?4 \
                                      WHERE account_id = ?1 AND id = ?2",
                                     rusqlite::params![
                                         row.message.account_id,
                                         row.message.id,
-                                        row.is_pinned
+                                        row.is_pinned,
+                                        row.is_flag_complete
                                     ],
                                 )
                                 .map_err(|error| {
-                                    format!("write pin state for {}: {error}", row.message.id)
+                                    format!(
+                                        "write pin and flag state for {}: {error}",
+                                        row.message.id
+                                    )
                                 })?;
                             }
                             if provider == BifrostProviderKind::Gmail {
@@ -388,7 +392,7 @@ pub async fn persist_in_namespace(
                         )
                         .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
                         if provider == BifrostProviderKind::Graph {
-                            sync_thread_pin_from_messages(&tx, account_id, thread_id)?;
+                            sync_thread_provider_flags(&tx, account_id, thread_id)?;
                         }
                         if matches!(
                             provider,
@@ -577,18 +581,23 @@ fn resolve_imap_deleted_ids(
         .map(|ids| ids.into_iter().flatten().collect())
 }
 
-/// Outlook pins messages, the list pins threads: a thread is pinned while any
-/// of its messages carries the pin.
-fn sync_thread_pin_from_messages(
+/// Outlook pins and flags messages, the list shows threads: a thread is
+/// pinned (or carries a completed flag) while any of its messages does.
+fn sync_thread_provider_flags(
     tx: &db::db::WriteTxn<'_>,
     account_id: &str,
     thread_id: &str,
 ) -> Result<(), String> {
     tx.execute(
-        "UPDATE threads SET is_pinned = EXISTS (
-             SELECT 1 FROM messages
-             WHERE account_id = ?1 AND thread_id = ?2 AND is_pinned = 1
-         )
+        "UPDATE threads SET
+             is_pinned = EXISTS (
+                 SELECT 1 FROM messages
+                 WHERE account_id = ?1 AND thread_id = ?2 AND is_pinned = 1
+             ),
+             is_flag_complete = EXISTS (
+                 SELECT 1 FROM messages
+                 WHERE account_id = ?1 AND thread_id = ?2 AND is_flag_complete = 1
+             )
          WHERE account_id = ?1 AND id = ?2",
         rusqlite::params![account_id, thread_id],
     )
@@ -801,6 +810,32 @@ mod tests {
         let rows = offline_rows(graph, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
         persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
         assert_eq!(count(&state, THREAD_PINNED, "t1").await, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_completed_outlook_flag_marks_the_thread_and_clears_with_it() {
+        let (state, tmp) = state();
+        let stores = stores(state.clone(), &tmp);
+        let graph = BifrostProviderKind::Graph;
+        const COMPLETE: &str =
+            "SELECT is_flag_complete FROM threads WHERE account_id = 'acc' AND id = ?1";
+
+        let rows = offline_rows(
+            graph,
+            &[synthetic_change(
+                "m1",
+                "t1",
+                &["INBOX"],
+                &[],
+                &["$flag-complete"],
+            )],
+        );
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, COMPLETE, "t1").await, 1);
+
+        let rows = offline_rows(graph, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, COMPLETE, "t1").await, 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]

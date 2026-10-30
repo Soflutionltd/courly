@@ -80,6 +80,8 @@ pub struct DbThread {
     pub snooze_until: Option<i64>,
     pub is_pinned: bool,
     pub is_muted: bool,
+    /// Outlook "flag marked complete" on any message of the thread.
+    pub is_flag_complete: bool,
     // Joined from latest message
     pub from_name: Option<String>,
     pub from_address: Option<String>,
