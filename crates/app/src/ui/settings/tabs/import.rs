@@ -1,6 +1,8 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
+use super::accounts::tr;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -24,7 +26,7 @@ pub(super) fn import_wizard_sheet(state: &Settings) -> Element<'_, SettingsMessa
         .spacing(SPACE_LG)
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
     col = col.push(
-        text("Import Contacts")
+        text(t!("settings.import.title"))
             .size(TEXT_HEADING)
             .style(text::base)
             .font(iced::Font {
@@ -38,15 +40,15 @@ pub(super) fn import_wizard_sheet(state: &Settings) -> Element<'_, SettingsMessa
 
 fn import_step_file_select(_wizard: &ImportWizardState) -> Element<'_, SettingsMessage> {
     let items = vec![import_file_select_row()];
-    section("Select File", items)
+    section(tr(t!("settings.import.select_file")), items)
 }
 
 fn import_file_select_row() -> RowBuilder<'static> {
-    let description = "Select a .csv, .xlsx, or .vcf file to import contacts from.";
+    let description = t!("settings.import.select_file_description");
     settings_row_container(
         SETTINGS_TOGGLE_ROW_HEIGHT,
         column![
-            text("Choose a CSV, Excel, or vCard file to import.")
+            text(t!("settings.import.choose_file"))
                 .size(TEXT_LG)
                 .style(text::base),
             Space::new().height(SPACE_XS),
@@ -54,7 +56,7 @@ fn import_file_select_row() -> RowBuilder<'static> {
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
             Space::new().height(SPACE_SM),
-            text("Use the file browser to select a file. Supported formats: .csv, .xlsx, .vcf")
+            text(t!("settings.import.supported_formats"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
         ],
@@ -101,8 +103,8 @@ fn import_file_info_row(path: &str) -> Element<'_, SettingsMessage> {
 
 fn import_header_toggle(has_header: bool) -> Element<'static, SettingsMessage> {
     build_row(toggle_row(
-        "First row is a header",
-        "Enable if the first row contains column names, not data.",
+        tr(t!("settings.import.header_row")),
+        tr(t!("settings.import.header_row_description")),
         has_header,
         SettingsMessage::ImportToggleHeader,
     ))
@@ -130,7 +132,7 @@ fn import_mapping_table<'a>(
         }
     }
 
-    section("Column Mapping", items)
+    section(tr(t!("settings.import.column_mapping")), items)
 }
 
 fn import_column_mapping_row(
@@ -149,7 +151,7 @@ fn import_column_mapping_row(
                         .align_y(Alignment::Center)
                         .width(Length::FillPortion(1)),
                     container(
-                        text(format!("-> {selected}"))
+                        text(t!("settings.import.mapped_to", field = selected))
                             .size(TEXT_LG)
                             .style(text::primary),
                     )
@@ -184,7 +186,7 @@ fn cycle_import_field(current: ImportContactField) -> ImportContactField {
 fn import_sample_header<'a>() -> RowBuilder<'a> {
     settings_row_container(
         SETTINGS_ROW_HEIGHT,
-        text("Preview (first rows)")
+        text(t!("settings.import.preview_first_rows"))
             .size(TEXT_SM)
             .style(theme::TextClass::Tertiary.style())
             .font(iced::Font {
@@ -228,16 +230,23 @@ fn import_preview_stats<'a>(
     let has_email = mappings.contains(&ImportContactField::Email);
     let status = if has_email {
         let skipped = preview.stats.skipped_total();
-        if skipped > 0 {
-            format!(
-                "{} rows to import. {skipped} skipped.",
-                preview.stats.importable
-            )
-        } else {
-            format!("{} rows to import.", preview.stats.importable)
+        let count = preview.stats.importable;
+        match (count == 1, skipped > 0) {
+            (true, true) => t!(
+                "settings.import.rows_to_import_skipped_one",
+                count = count,
+                skipped = skipped
+            ),
+            (false, true) => t!(
+                "settings.import.rows_to_import_skipped_other",
+                count = count,
+                skipped = skipped
+            ),
+            (true, false) => t!("settings.import.rows_to_import_one", count = count),
+            (false, false) => t!("settings.import.rows_to_import_other", count = count),
         }
     } else {
-        "No Email column mapped. Map at least one column to Email.".to_string()
+        t!("settings.import.no_email_column")
     };
     build_row(settings_row_container(
         SETTINGS_ROW_HEIGHT,
@@ -262,7 +271,7 @@ fn import_account_selector<'a>(
         theme::ButtonClass::Ghost
     };
     btn_row = btn_row.push(
-        button(text("Local").size(TEXT_SM))
+        button(text(t!("settings.import.local")).size(TEXT_SM))
             .style(local_style.style())
             .on_press(SettingsMessage::ImportAccountChanged(None))
             .padding(PAD_ICON_BTN),
@@ -285,7 +294,7 @@ fn import_account_selector<'a>(
     }
 
     container(column![
-        text("Import to account")
+        text(t!("settings.import.target_account"))
             .size(TEXT_SM)
             .style(theme::TextClass::Tertiary.style()),
         Space::new().height(SPACE_XXXS),
@@ -298,8 +307,8 @@ fn import_account_selector<'a>(
 
 fn import_update_toggle(update_existing: bool) -> Element<'static, SettingsMessage> {
     build_row(toggle_row(
-        "Update existing contacts",
-        "When a duplicate email is found, update the existing contact with imported data.",
+        tr(t!("settings.import.update_existing")),
+        tr(t!("settings.import.update_existing_description")),
         update_existing,
         SettingsMessage::ImportToggleUpdateExisting,
     ))
@@ -307,7 +316,7 @@ fn import_update_toggle(update_existing: bool) -> Element<'static, SettingsMessa
 
 fn import_execute_button() -> Element<'static, SettingsMessage> {
     container(
-        button(container(text("Import").size(TEXT_LG)).center_x(Length::Fill))
+        button(container(text(t!("settings.import.import")).size(TEXT_LG)).center_x(Length::Fill))
             .on_press(SettingsMessage::ImportExecute)
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Primary.style())
@@ -337,8 +346,21 @@ fn import_step_vcf_preview<'a>(
     let total = preview.total_rows;
     let skipped = preview.stats.skipped_total();
 
-    let stat_text =
-        format!("{total} contacts found. {valid_count} with valid email, {skipped} without.",);
+    let stat_text = if total == 1 {
+        t!(
+            "settings.import.vcf_stats_one",
+            total = total,
+            valid = valid_count,
+            skipped = skipped
+        )
+    } else {
+        t!(
+            "settings.import.vcf_stats_other",
+            total = total,
+            valid = valid_count,
+            skipped = skipped
+        )
+    };
     col = col.push(build_row(settings_row_container(
         SETTINGS_ROW_HEIGHT,
         text(stat_text).size(TEXT_LG).style(text::base),
@@ -349,7 +371,7 @@ fn import_step_vcf_preview<'a>(
         preview_items.push(import_vcf_contact_row(row));
     }
     if !preview_items.is_empty() {
-        col = col.push(section("Preview", preview_items));
+        col = col.push(section(tr(t!("settings.import.preview")), preview_items));
     }
 
     col = col.push(import_account_selector(wizard, accounts));
@@ -365,10 +387,10 @@ fn import_vcf_contact_row(row: &::import::ContactPreviewRow) -> RowBuilder<'_> {
     let contact = &row.contact;
     let name = contact
         .effective_display_name()
-        .unwrap_or_else(|| "(no name)".to_string());
+        .unwrap_or_else(|| t!("settings.import.no_name").into_owned());
     let email = contact
         .normalized_email()
-        .unwrap_or_else(|| "(no email)".to_string());
+        .unwrap_or_else(|| t!("settings.import.no_email").into_owned());
 
     let email_style: fn(&iced::Theme) -> text::Style = if row.status.is_importable() {
         text::secondary
@@ -401,11 +423,11 @@ fn import_step_importing() -> Element<'static, SettingsMessage> {
     build_row(settings_row_container(
         SETTINGS_TOGGLE_ROW_HEIGHT,
         column![
-            text("Importing contacts...")
+            text(t!("settings.import.importing"))
                 .size(TEXT_LG)
                 .style(text::base),
             Space::new().height(SPACE_XS),
-            text("Please wait.")
+            text(t!("settings.import.please_wait"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         ],
@@ -417,41 +439,52 @@ fn import_step_summary(wizard: &ImportWizardState) -> Element<'_, SettingsMessag
 
     if let Some(ref result) = wizard.result {
         let mut stats: Vec<RowBuilder<'_>> = Vec::new();
-        stats.push(import_stat_row("Imported", result.imported));
+        stats.push(import_stat_row(
+            tr(t!("settings.import.imported")),
+            result.imported,
+        ));
         if result.updated > 0 {
-            stats.push(import_stat_row("Updated", result.updated));
+            stats.push(import_stat_row(
+                tr(t!("settings.import.updated")),
+                result.updated,
+            ));
         }
         if result.skipped_no_email > 0 {
             stats.push(import_stat_row(
-                "Skipped (no email)",
+                tr(t!("settings.import.skipped_no_email")),
                 result.skipped_no_email,
             ));
         }
         if result.skipped_invalid_email > 0 {
             stats.push(import_stat_row(
-                "Skipped (invalid email)",
+                tr(t!("settings.import.skipped_invalid_email")),
                 result.skipped_invalid_email,
             ));
         }
         if result.skipped_duplicate > 0 {
             stats.push(import_stat_row(
-                "Skipped (duplicate)",
+                tr(t!("settings.import.skipped_duplicate")),
                 result.skipped_duplicate,
             ));
         }
         if result.groups_created > 0 {
-            stats.push(import_stat_row("Groups created", result.groups_created));
+            stats.push(import_stat_row(
+                tr(t!("settings.import.groups_created")),
+                result.groups_created,
+            ));
         }
-        col = col.push(section("Import Complete", stats));
+        col = col.push(section(tr(t!("settings.import.complete")), stats));
     }
 
     col = col.push(
         container(
-            button(container(text("Done").size(TEXT_LG)).center_x(Length::Fill))
-                .on_press(SettingsMessage::ImportBack)
-                .padding(PAD_BUTTON)
-                .style(theme::ButtonClass::Primary.style())
-                .width(Length::Fixed(EDITOR_BUTTON_WIDTH)),
+            button(
+                container(text(t!("settings.import.done")).size(TEXT_LG)).center_x(Length::Fill),
+            )
+            .on_press(SettingsMessage::ImportBack)
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Primary.style())
+            .width(Length::Fixed(EDITOR_BUTTON_WIDTH)),
         )
         .width(Length::Fill)
         .align_x(Alignment::End)

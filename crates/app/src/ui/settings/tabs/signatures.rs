@@ -1,8 +1,10 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use rte::{Action as RteAction, BlockKind, EditAction, InlineStyle, rich_text_editor};
 
+use super::accounts::tr;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -14,12 +16,15 @@ use crate::ui::widgets;
 pub(super) fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
     if state.managed_accounts.is_empty() {
         return section(
-            "Signatures",
-            vec![coming_soon_row("No accounts configured")],
+            tr(t!("settings.signatures.title")),
+            vec![coming_soon_row(tr(t!("settings.signatures.no_accounts")))],
         );
     }
 
-    section("Signatures", vec![signatures_section_body(state)])
+    section(
+        tr(t!("settings.signatures.title")),
+        vec![signatures_section_body(state)],
+    )
 }
 
 /// Section body that merges the signature rows and the trailing
@@ -61,7 +66,7 @@ fn add_signature_button<'a>(position: RowPosition) -> Element<'a, SettingsMessag
         container(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
-                text("Add Signature")
+                text(t!("settings.signatures.add"))
                     .size(TEXT_LG)
                     .style(text::base)
                     .font(iced::Font {
@@ -108,16 +113,24 @@ fn signature_card<'a>(
 
     if sig.is_default {
         content = content.push(
-            container(text("New messages").size(TEXT_XS).style(text::secondary))
-                .padding(PAD_BADGE)
-                .style(theme::ContainerClass::KeyBadge.style()),
+            container(
+                text(t!("settings.signatures.badge_new_messages"))
+                    .size(TEXT_XS)
+                    .style(text::secondary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
         );
     }
     if sig.is_reply_default {
         content = content.push(
-            container(text("Replies").size(TEXT_XS).style(text::secondary))
-                .padding(PAD_BADGE)
-                .style(theme::ContainerClass::KeyBadge.style()),
+            container(
+                text(t!("settings.signatures.badge_replies"))
+                    .size(TEXT_XS)
+                    .style(text::secondary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
         );
     }
 
@@ -152,9 +165,9 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
 
     let is_new = editor.signature_id.is_none();
     let title = if is_new {
-        "New Signature"
+        t!("settings.signatures.new_title")
     } else {
-        "Edit Signature"
+        t!("settings.signatures.edit_title")
     };
 
     let mut col = column![]
@@ -170,11 +183,9 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
                     weight: iced::font::Weight::Bold,
                     ..crate::font::text()
                 }),
-            text(
-                "Signature changes are not saved automatically. Use the Save button at the bottom."
-            )
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
+            text(t!("settings.signatures.editor_not_saved"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXS),
     );
@@ -187,8 +198,8 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
         ),
         input_row(
             "sig-name",
-            "Name",
-            "Signature name",
+            &t!("settings.signatures.name"),
+            &t!("settings.signatures.name_placeholder"),
             editor.name.text(),
             SettingsMessage::SignatureEditorNameChanged,
             InputField::SignatureName,
@@ -196,17 +207,17 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     ]));
 
     col = col.push(section_with_subtitle(
-        "Defaults",
-        "Each account has one default for new messages and one for replies. Setting these here clears them on the account's other signatures, if any.",
+        tr(t!("settings.signatures.defaults")),
+        tr(t!("settings.signatures.defaults_description")),
         vec![
             toggle_row(
-                "New messages",
+                tr(t!("settings.signatures.default_new_messages")),
                 "",
                 editor.is_default,
                 SettingsMessage::SignatureEditorToggleDefault,
             ),
             toggle_row(
-                "Replies & forwards",
+                tr(t!("settings.signatures.default_replies")),
                 "",
                 editor.is_reply_default,
                 SettingsMessage::SignatureEditorToggleReplyDefault,
@@ -215,7 +226,7 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     ));
 
     col = col.push(section(
-        "Signature",
+        tr(t!("settings.signatures.body")),
         vec![static_row(
             container(signature_body(editor))
                 .padding(PAD_SETTINGS_ROW)
@@ -231,28 +242,40 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
 
         if is_confirming {
             btn_row = btn_row.push(
-                text("Delete this signature?")
+                text(t!("settings.signatures.delete_confirm"))
                     .size(TEXT_LG)
                     .style(text::danger),
             );
             btn_row = btn_row.push(
-                button(text("Cancel").size(TEXT_LG).style(text::base))
-                    .on_press(SettingsMessage::SignatureDeleteCancelled)
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.signatures.cancel"))
+                        .size(TEXT_LG)
+                        .style(text::base),
+                )
+                .on_press(SettingsMessage::SignatureDeleteCancelled)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
             btn_row = btn_row.push(
-                button(text("Confirm").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::SignatureDeleteConfirmed(del_id))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.signatures.confirm"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::SignatureDeleteConfirmed(del_id))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
         } else {
             btn_row = btn_row.push(
-                button(text("Delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::SignatureDelete(del_id))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.signatures.delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::SignatureDelete(del_id))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
         }
     }
@@ -260,10 +283,12 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
     let can_save = !editor.name.text().trim().is_empty() && !editor.account_id.is_empty();
-    let mut save_btn = button(container(text("Save").size(TEXT_LG)).center_x(Length::Fill))
-        .padding(PAD_BUTTON)
-        .style(theme::ButtonClass::Primary.style())
-        .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+    let mut save_btn = button(
+        container(text(t!("settings.signatures.save")).size(TEXT_LG)).center_x(Length::Fill),
+    )
+    .padding(PAD_BUTTON)
+    .style(theme::ButtonClass::Primary.style())
+    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::SignatureEditorSave);
     }
@@ -278,9 +303,9 @@ pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMe
 /// HTML, with the import actions under it.
 fn signature_body(editor: &SignatureEditorState) -> Element<'_, SettingsMessage> {
     let import_label = if editor.raw_html.is_some() {
-        "Replace with an HTML file..."
+        t!("settings.signatures.replace_html")
     } else {
-        "Import an HTML file..."
+        t!("settings.signatures.import_html")
     };
     let mut actions = row![
         button(text(import_label).size(TEXT_SM))
@@ -292,7 +317,7 @@ fn signature_body(editor: &SignatureEditorState) -> Element<'_, SettingsMessage>
     .align_y(Alignment::Center);
     if editor.raw_html.is_some() {
         actions = actions.push(
-            button(text("Edit as plain text").size(TEXT_SM))
+            button(text(t!("settings.signatures.edit_as_plain_text")).size(TEXT_SM))
                 .on_press(SettingsMessage::SignatureEditorUseRichText)
                 .padding(PAD_ICON_BTN)
                 .style(theme::ButtonClass::Secondary.style()),
@@ -373,16 +398,14 @@ fn signature_account_row<'a>(
         selected,
         open,
         enabled,
-        "Choose account",
+        tr(t!("settings.signatures.choose_account")),
         SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
         SettingsMessage::SignatureEditorAccountChanged,
     );
 
     setting_row_with_description(
-        "Account",
-        Some(
-            "When supported, signatures are stored with your cloud provider, and each signature is exclusive to its selected account.",
-        ),
+        tr(t!("settings.signatures.account")),
+        Some(tr(t!("settings.signatures.account_description"))),
         dropdown,
         SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
     )

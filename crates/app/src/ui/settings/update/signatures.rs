@@ -1,5 +1,6 @@
 use iced::Task;
 use iced::time::Instant;
+use rust_i18n::t;
 
 use crate::ui::settings::types::*;
 
@@ -50,7 +51,8 @@ impl Settings {
                 editor.preview.restart()
             }
             SettingsMessage::SignatureEditorHtmlImported(Err(error)) => {
-                editor.import_error = Some(error);
+                editor.import_error =
+                    Some(t!("settings.signatures.import_failed", error = error).into_owned());
                 false
             }
             SettingsMessage::SignatureEditorUseRichText => {

@@ -1,6 +1,8 @@
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
+use super::accounts::tr;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -13,7 +15,11 @@ pub(super) fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
     };
 
     let is_new = editor.group_id.is_none();
-    let title = if is_new { "New Group" } else { "Edit Group" };
+    let title = if is_new {
+        t!("settings.groups.new_title")
+    } else {
+        t!("settings.groups.edit_title")
+    };
 
     let mut col = column![]
         .spacing(SPACE_LG)
@@ -28,7 +34,7 @@ pub(super) fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
                     weight: iced::font::Weight::Bold,
                     ..crate::font::text()
                 }),
-            text("Group changes are not saved automatically. Use the Save button at the bottom.")
+            text(t!("settings.groups.editor_not_saved"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         ]
@@ -36,11 +42,11 @@ pub(super) fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
     );
 
     col = col.push(section(
-        "Name",
+        tr(t!("settings.groups.name")),
         vec![input_row(
             "group-name",
-            "Name",
-            "Group name",
+            &t!("settings.groups.name"),
+            &t!("settings.groups.name_placeholder"),
             editor.name.text(),
             SettingsMessage::GroupEditorNameChanged,
             InputField::GroupName,
@@ -64,7 +70,7 @@ fn group_add_members_section<'a>(
         static_row(
             container(super::people::filter_row(
                 "group-add-filter",
-                "Filter contacts...",
+                tr(t!("settings.groups.filter_contacts")),
                 &editor.filter,
                 SettingsMessage::GroupEditorFilterChanged,
                 FilterId::GroupAddMembers,
@@ -77,8 +83,8 @@ fn group_add_members_section<'a>(
     ];
 
     section_with_subtitle(
-        "Add Members",
-        "You can paste a large list of email addresses here.",
+        tr(t!("settings.groups.add_members")),
+        tr(t!("settings.groups.add_members_description")),
         items,
     )
 }
@@ -139,9 +145,9 @@ fn group_add_candidates_panel<'a>(
 
     let panel: Element<'_, SettingsMessage> = if candidates.is_empty() {
         let msg = if filter_lower.is_empty() {
-            "All contacts are already in this group."
+            t!("settings.groups.all_contacts_added")
         } else {
-            "No matching contacts."
+            t!("settings.groups.no_matching_contacts")
         };
         container(
             text(msg)
@@ -194,11 +200,11 @@ fn group_members_list_section<'a>(
     editor: &'a GroupEditorState,
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
-    let title = format!("Members ({})", editor.members.len());
+    let title = t!("settings.groups.members", count = editor.members.len()).into_owned();
 
     let filter = container(super::people::filter_row(
         "group-members-filter",
-        "Filter members...",
+        tr(t!("settings.groups.filter_members")),
         &editor.members_filter,
         SettingsMessage::GroupEditorMembersFilterChanged,
         FilterId::GroupMembers,
@@ -209,7 +215,7 @@ fn group_members_list_section<'a>(
 
     let panel: Element<'_, SettingsMessage> = if editor.members.is_empty() {
         let empty_panel = container(
-            text("No members yet. Use the list above or paste emails to add them.")
+            text(t!("settings.groups.no_members"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -229,7 +235,7 @@ fn group_members_list_section<'a>(
 
     section_dynamic_with_subtitle(
         title,
-        "Click a member to remove them from the group.".to_string(),
+        t!("settings.groups.members_description").into_owned(),
         vec![static_row(filter), static_row(panel)],
     )
 }
@@ -261,7 +267,7 @@ fn group_members_list_panel<'a>(
 
     if visible.is_empty() {
         let empty = container(
-            text("No members match the filter.")
+            text(t!("settings.groups.no_members_match"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -371,23 +377,31 @@ fn group_editor_buttons<'a>(
         let is_confirming = confirm_delete.as_deref() == Some(id.as_str());
         if is_confirming {
             btn_row = btn_row.push(
-                button(text("Confirm delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::GroupConfirmDelete(id.clone()))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.groups.confirm_delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::GroupConfirmDelete(id.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
             btn_row = btn_row.push(
-                button(text("Cancel").size(TEXT_LG))
+                button(text(t!("settings.groups.cancel")).size(TEXT_LG))
                     .on_press(SettingsMessage::GroupCancelDelete)
                     .padding(PAD_BUTTON)
                     .style(theme::ButtonClass::Ghost.style()),
             );
         } else {
             btn_row = btn_row.push(
-                button(text("Delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::GroupDelete(id.clone()))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.groups.delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::GroupDelete(id.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
         }
     }
@@ -395,10 +409,11 @@ fn group_editor_buttons<'a>(
     btn_row = btn_row.push(iced::widget::Space::new().width(Length::Fill));
 
     let can_save = !editor.name.text().trim().is_empty();
-    let mut save_btn = button(container(text("Save").size(TEXT_LG)).center_x(Length::Fill))
-        .padding(PAD_BUTTON)
-        .style(theme::ButtonClass::Primary.style())
-        .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+    let mut save_btn =
+        button(container(text(t!("settings.groups.save")).size(TEXT_LG)).center_x(Length::Fill))
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Primary.style())
+            .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
     if can_save {
         save_btn = save_btn.on_press(SettingsMessage::GroupEditorSave);
     }

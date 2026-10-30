@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use rust_i18n::t;
 
 use crate::ui::add_account::{AddAccountEvent, AddAccountWizard};
 use crate::{Message, ReadyApp, load_accounts};
@@ -31,8 +32,9 @@ impl ReadyApp {
                 self.add_account_wizard = None;
                 self.status_bar.clear_warning(&account_id);
                 let email = self.email_for_account(&account_id);
-                self.status_bar
-                    .show_confirmation(format!("{email} re-authenticated successfully"));
+                self.status_bar.show_confirmation(
+                    t!("settings.accounts.reauth_success", email = email).into_owned(),
+                );
                 Task::none()
             }
             AddAccountEvent::Cancelled => {
@@ -74,8 +76,9 @@ impl ReadyApp {
             }
             Err(e) => {
                 log::error!("Failed to open re-auth wizard for {email}: {e}");
-                self.status_bar
-                    .show_confirmation(format!("Could not re-authenticate {email}: {e}"));
+                self.status_bar.show_confirmation(
+                    t!("settings.accounts.reauth_failed", email = email, error = e).into_owned(),
+                );
                 Task::none()
             }
         }

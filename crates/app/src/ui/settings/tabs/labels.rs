@@ -11,7 +11,9 @@
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
+use rust_i18n::t;
 
+use super::accounts::tr;
 use crate::icon;
 use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::*;
@@ -30,14 +32,17 @@ pub(super) fn labels_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section_with_subtitle(
-        "Labels",
-        "These are your labels. They appear in the sidebar, in the command palette, and on every thread you have tagged. A label is a coloured name that bundles one or more underlying tags from your accounts - applying it to a thread writes the right tag in each account.",
-        vec![label_groups_list_builder(&state.label_groups, &state.drag_state)],
+        tr(t!("settings.labels.title")),
+        tr(t!("settings.labels.description")),
+        vec![label_groups_list_builder(
+            &state.label_groups,
+            &state.drag_state,
+        )],
     ));
 
     col = col.push(section_with_subtitle(
-        "From your accounts",
-        "These are the raw tags your providers expose - Gmail labels, Outlook categories, IMAP keywords. Nothing here appears anywhere else in Ratatoskr until you add it to a label above. Listed for reference, and for editing each tag's name or colour at the provider.",
+        tr(t!("settings.labels.from_accounts")),
+        tr(t!("settings.labels.from_accounts_description")),
         vec![provider_labels_list_builder(&state.labels_by_account)],
     ));
 
@@ -121,9 +126,15 @@ fn label_group_row<'a>(
     });
 
     let subtitle = if group.member_count == 1 {
-        "Bundles 1 tag".to_owned()
+        t!(
+            "settings.labels.bundles_tags_one",
+            count = group.member_count
+        )
     } else {
-        format!("Bundles {} tags", group.member_count)
+        t!(
+            "settings.labels.bundles_tags_other",
+            count = group.member_count
+        )
     };
     let identity = column![
         text(group.name.clone()).size(TEXT_LG).style(text::base),
@@ -176,7 +187,7 @@ fn add_label_group_row<'a>(position: RowPosition) -> Element<'a, SettingsMessage
         container(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
-                text("Add Label")
+                text(t!("settings.labels.add"))
                     .size(TEXT_LG)
                     .style(text::base)
                     .font(crate::font::text_bold()),
@@ -247,7 +258,7 @@ fn add_provider_label_row<'a>(position: RowPosition) -> Element<'a, SettingsMess
         container(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
-                text("Create new tag")
+                text(t!("settings.labels.create_tag"))
                     .size(TEXT_LG)
                     .style(text::base)
                     .font(crate::font::text_bold()),
@@ -335,7 +346,11 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
     };
 
     let is_new = editor.label_id.is_empty();
-    let title = if is_new { "New tag" } else { "Edit tag" };
+    let title = if is_new {
+        t!("settings.labels.new_tag_title")
+    } else {
+        t!("settings.labels.edit_tag_title")
+    };
 
     let mut col = column![]
         .spacing(SPACE_LG)
@@ -347,24 +362,19 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
                 .size(TEXT_HEADING)
                 .style(text::base)
                 .font(crate::font::text_bold()),
-            text(
-                "Provider tag - lives on the account itself, not in Ratatoskr. \
-                 Edits here change the tag at the provider. To make this tag \
-                 appear in the sidebar, add it to a Label. Changes are not \
-                 saved automatically - click Save at the bottom when you're done."
-            )
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
+            text(t!("settings.labels.tag_editor_description"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXS),
     );
 
     col = col.push(section(
-        "Name",
+        tr(t!("settings.labels.name")),
         vec![input_row(
             "label-name",
-            "Name",
-            "Tag name",
+            &t!("settings.labels.name"),
+            &t!("settings.labels.tag_name_placeholder"),
             &editor.name,
             SettingsMessage::LabelEditorNameChanged,
             InputField::LabelName,
@@ -372,8 +382,8 @@ pub(super) fn label_editor_sheet(state: &Settings) -> Element<'_, SettingsMessag
     ));
 
     col = col.push(section_with_subtitle(
-        "Colour",
-        "Not shown anywhere in Ratatoskr - the tag's colour only matters in your provider's own client (Gmail web, Outlook, etc.). Changing it here updates it there.",
+        tr(t!("settings.labels.colour")),
+        tr(t!("settings.labels.tag_colour_description")),
         vec![static_row(
             container(widgets::color_palette_grid(
                 editor.color_index,
@@ -398,23 +408,31 @@ fn label_editor_buttons<'a>(editor: &'a LabelEditorState) -> Element<'a, Setting
     if !is_new && !editor.is_undeletable {
         if editor.show_delete_confirmation {
             btn_row = btn_row.push(
-                button(text("Confirm delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::LabelEditorDelete)
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.labels.confirm_delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::LabelEditorDelete)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
             btn_row = btn_row.push(
-                button(text("Cancel").size(TEXT_LG))
+                button(text(t!("settings.labels.cancel")).size(TEXT_LG))
                     .on_press(SettingsMessage::LabelEditorCancelDelete)
                     .padding(PAD_BUTTON)
                     .style(theme::ButtonClass::Ghost.style()),
             );
         } else {
             btn_row = btn_row.push(
-                button(text("Delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::LabelEditorConfirmDelete)
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.labels.delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::LabelEditorConfirmDelete)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
         }
     }
@@ -422,13 +440,17 @@ fn label_editor_buttons<'a>(editor: &'a LabelEditorState) -> Element<'a, Setting
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
     btn_row = btn_row.push(
-        button(text("Cancel").size(TEXT_LG))
+        button(text(t!("settings.labels.cancel")).size(TEXT_LG))
             .on_press(SettingsMessage::LabelEditorCancel)
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Ghost.style()),
     );
 
-    let save_label = if is_new { "Create" } else { "Save" };
+    let save_label = if is_new {
+        t!("settings.labels.create")
+    } else {
+        t!("settings.labels.save")
+    };
     let name_filled = !editor.name.trim().is_empty();
     let can_save = name_filled && (is_new || editor.dirty);
     let mut save_btn = button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))
@@ -452,7 +474,11 @@ pub(super) fn label_group_editor_sheet(state: &Settings) -> Element<'_, Settings
     };
 
     let is_new = editor.group_id.is_none();
-    let title = if is_new { "New Label" } else { "Edit Label" };
+    let title = if is_new {
+        t!("settings.labels.new_label_title")
+    } else {
+        t!("settings.labels.edit_label_title")
+    };
 
     let mut col = column![]
         .spacing(SPACE_LG)
@@ -464,25 +490,20 @@ pub(super) fn label_group_editor_sheet(state: &Settings) -> Element<'_, Settings
                 .size(TEXT_HEADING)
                 .style(text::base)
                 .font(crate::font::text_bold()),
-            text(
-                "Give your label a name and colour, then pick the underlying \
-                 provider tags it represents. Applying this label to a thread \
-                 writes each underlying tag in its account. Changes are not \
-                 saved automatically - click Save at the bottom when you're done."
-            )
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
+            text(t!("settings.labels.label_editor_description"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXS),
     );
 
     // Name.
     col = col.push(section(
-        "Name",
+        tr(t!("settings.labels.name")),
         vec![input_row(
             "label-group-name",
-            "Name",
-            "Label name",
+            &t!("settings.labels.name"),
+            &t!("settings.labels.label_name_placeholder"),
             &editor.name,
             SettingsMessage::LabelGroupEditorNameChanged,
             InputField::GroupName,
@@ -490,7 +511,7 @@ pub(super) fn label_group_editor_sheet(state: &Settings) -> Element<'_, Settings
     ));
 
     col = col.push(section(
-        "Colour",
+        tr(t!("settings.labels.colour")),
         vec![static_row(
             container(widgets::color_palette_grid(
                 editor.color_index,
@@ -516,8 +537,8 @@ fn label_group_add_tags_section<'a>(
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
     section_with_subtitle(
-        "Add Tags",
-        "Pick tags from your accounts to bundle into this label.",
+        tr(t!("settings.labels.add_tags")),
+        tr(t!("settings.labels.add_tags_description")),
         vec![static_row(label_group_add_candidates_panel(editor, state))],
     )
 }
@@ -554,7 +575,7 @@ fn label_group_add_candidates_panel<'a>(
 
     let panel: Element<'_, SettingsMessage> = if candidates.is_empty() {
         container(
-            text("Every tag from your accounts is already in this label.")
+            text(t!("settings.labels.all_tags_added"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -640,11 +661,11 @@ fn label_group_members_section<'a>(
     editor: &'a LabelGroupEditorState,
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
-    let title = format!("Members ({})", editor.members.len());
+    let title = t!("settings.labels.members", count = editor.members.len()).into_owned();
 
     let panel: Element<'_, SettingsMessage> = if editor.members.is_empty() {
         let empty_panel = container(
-            text("No tags yet. Use the list above to add some.")
+            text(t!("settings.labels.no_members"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -664,7 +685,7 @@ fn label_group_members_section<'a>(
 
     section_dynamic_with_subtitle(
         title,
-        "Click a tag to remove it from this label.".to_string(),
+        t!("settings.labels.members_description").into_owned(),
         vec![static_row(panel)],
     )
 }
@@ -783,23 +804,31 @@ fn label_group_editor_buttons<'a>(
     if !is_new {
         if editor.show_delete_confirmation {
             btn_row = btn_row.push(
-                button(text("Confirm delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::LabelGroupEditorDelete)
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.labels.confirm_delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::LabelGroupEditorDelete)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
             btn_row = btn_row.push(
-                button(text("Cancel").size(TEXT_LG))
+                button(text(t!("settings.labels.cancel")).size(TEXT_LG))
                     .on_press(SettingsMessage::LabelGroupEditorCancelDelete)
                     .padding(PAD_BUTTON)
                     .style(theme::ButtonClass::Ghost.style()),
             );
         } else {
             btn_row = btn_row.push(
-                button(text("Delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::LabelGroupEditorConfirmDelete)
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.labels.delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::LabelGroupEditorConfirmDelete)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
         }
     }
@@ -807,13 +836,17 @@ fn label_group_editor_buttons<'a>(
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
     btn_row = btn_row.push(
-        button(text("Cancel").size(TEXT_LG))
+        button(text(t!("settings.labels.cancel")).size(TEXT_LG))
             .on_press(SettingsMessage::LabelGroupEditorCancel)
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Ghost.style()),
     );
 
-    let save_label = if is_new { "Create" } else { "Save" };
+    let save_label = if is_new {
+        t!("settings.labels.create")
+    } else {
+        t!("settings.labels.save")
+    };
     let name_filled = !editor.name.trim().is_empty();
     let can_save = name_filled && (is_new || editor.dirty);
     let mut save_btn = button(container(text(save_label).size(TEXT_LG)).center_x(Length::Fill))

@@ -2,7 +2,9 @@ use iced::widget::{
     Space, button, column, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
+use super::accounts::tr;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
@@ -16,8 +18,8 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
     col = col.push(section_untitled(vec![action_row(
-        "Import Contacts",
-        Some("Import from CSV or vCard file"),
+        tr(t!("settings.people.import_contacts")),
+        Some(tr(t!("settings.people.import_contacts_description"))),
         Some(icon::upload()),
         ActionKind::InApp,
         SettingsMessage::ImportContactsOpen,
@@ -29,10 +31,13 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
             state.focused_filter == Some(FilterId::Contacts),
         )),
         static_row(contact_list_panel(state)),
-        people_add_button("New Contact", SettingsMessage::ContactCreate),
+        people_add_button(
+            tr(t!("settings.people.new_contact")),
+            SettingsMessage::ContactCreate,
+        ),
     ];
 
-    col = col.push(section("Contacts", contact_items));
+    col = col.push(section(tr(t!("settings.people.contacts")), contact_items));
 
     let group_items: Vec<RowBuilder<'_>> = vec![
         static_row(group_filter_row(
@@ -40,10 +45,13 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
             state.focused_filter == Some(FilterId::Groups),
         )),
         static_row(group_list_panel(state)),
-        people_add_button("New Group", SettingsMessage::GroupCreate),
+        people_add_button(
+            tr(t!("settings.people.new_group")),
+            SettingsMessage::GroupCreate,
+        ),
     ];
 
-    col = col.push(section("Groups", group_items));
+    col = col.push(section(tr(t!("settings.people.groups")), group_items));
 
     col.into()
 }
@@ -51,7 +59,7 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 fn contact_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
     container(filter_row(
         "contact-filter",
-        "Filter contacts...",
+        tr(t!("settings.people.filter_contacts")),
         filter,
         SettingsMessage::ContactFilterChanged,
         FilterId::Contacts,
@@ -65,7 +73,7 @@ fn contact_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessag
 fn group_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
     container(filter_row(
         "group-filter",
-        "Filter groups...",
+        tr(t!("settings.people.filter_groups")),
         filter,
         SettingsMessage::GroupFilterChanged,
         FilterId::Groups,
@@ -134,9 +142,9 @@ pub(super) fn filter_row<'a>(
 fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
     let panel: Element<'_, SettingsMessage> = if state.contacts.is_empty() {
         let msg = if state.contact_filter.trim().is_empty() {
-            "No contacts yet."
+            t!("settings.people.no_contacts")
         } else {
-            "No contacts match the filter."
+            t!("settings.people.no_contacts_match")
         };
         container(
             text(msg)
@@ -189,7 +197,10 @@ fn contact_card<'a>(
     contact: &'a crate::db::ContactEntry,
     accounts: &'a [ManagedAccount],
 ) -> Element<'a, SettingsMessage> {
-    let name = contact.display_name.as_deref().unwrap_or("(no name)");
+    let name = contact
+        .display_name
+        .as_deref()
+        .unwrap_or(tr(t!("settings.people.no_name")));
     let id = contact.id.clone();
 
     let header = row![
@@ -215,21 +226,21 @@ fn contact_card<'a>(
     let mut details = column![].spacing(SPACE_XXXS);
     if let Some(ref phone) = contact.phone {
         details = details.push(
-            text(format!("Phone: {phone}"))
+            text(t!("settings.people.phone", phone = phone))
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
     }
     if let Some(ref company) = contact.company {
         details = details.push(
-            text(format!("Company: {company}"))
+            text(t!("settings.people.company", company = company))
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
     }
     if let Some(ref notes) = contact.notes {
         details = details.push(
-            text(format!("Notes: {notes}"))
+            text(t!("settings.people.notes", notes = notes))
                 .size(TEXT_SM)
                 .style(text::secondary),
         );
@@ -332,22 +343,32 @@ fn contact_card<'a>(
 fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
     let id = group.id.clone();
     let member_label = if group.member_count == 1 {
-        "1 member".to_string()
+        t!("settings.people.members_one", count = group.member_count)
     } else {
-        format!("{} members", group.member_count)
+        t!("settings.people.members_other", count = group.member_count)
     };
     let format_date = |ts: i64| -> String {
         jiff::Timestamp::from_second(ts)
             .map(|instant| {
-                instant
-                    .to_zoned(jiff::tz::TimeZone::system())
-                    .strftime("%b %d, %Y")
-                    .to_string()
+                let zoned = instant.to_zoned(jiff::tz::TimeZone::system());
+                t!(
+                    "settings.people.date",
+                    month = crate::i18n::month_short(zoned.month()),
+                    day = zoned.day(),
+                    year = zoned.year()
+                )
+                .into_owned()
             })
             .unwrap_or_default()
     };
-    let created_label = format!("Created: {}", format_date(group.created_at));
-    let updated_label = format!("Last updated: {}", format_date(group.updated_at));
+    let created_label = t!(
+        "settings.people.created",
+        date = format_date(group.created_at)
+    );
+    let updated_label = t!(
+        "settings.people.updated",
+        date = format_date(group.updated_at)
+    );
 
     let top_row = row![
         container(text(&group.name).size(TEXT_LG).style(text::base))
@@ -391,9 +412,9 @@ fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
 fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
     let panel: Element<'_, SettingsMessage> = if state.groups.is_empty() {
         let msg = if state.group_filter.trim().is_empty() {
-            "No groups yet."
+            t!("settings.people.no_groups")
         } else {
-            "No groups match the filter."
+            t!("settings.people.no_groups_match")
         };
         container(
             text(msg)

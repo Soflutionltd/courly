@@ -1,6 +1,8 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
+use super::accounts::tr;
 use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
@@ -20,9 +22,9 @@ pub(super) fn contact_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
 
     let is_new = editor.contact_id.is_none();
     let title = if is_new {
-        "New Contact"
+        t!("settings.contacts.new_title")
     } else {
-        "Edit Contact"
+        t!("settings.contacts.edit_title")
     };
 
     let mut col = column![]
@@ -68,7 +70,7 @@ fn contact_account_selector<'a>(
     let mut options: Vec<widgets::SelectOption<'a>> = Vec::with_capacity(accounts.len() + 1);
     options.push(widgets::SelectOption {
         value: CONTACT_LOCAL_VALUE.to_owned(),
-        label: "Local",
+        label: tr(t!("settings.contacts.local")),
         icon: None,
     });
     for account in accounts {
@@ -93,7 +95,7 @@ fn contact_account_selector<'a>(
         Some(selected_value),
         open,
         true,
-        "Choose account",
+        tr(t!("settings.contacts.choose_account")),
         SettingsMessage::ToggleSelect(SelectField::ContactAccount),
         |value| {
             SettingsMessage::ContactEditorAccountChanged(if value == CONTACT_LOCAL_VALUE {
@@ -105,10 +107,8 @@ fn contact_account_selector<'a>(
     );
 
     setting_row_with_description(
-        "Account",
-        Some(
-            "Choose the account that owns this contact. Local contacts are stored only in Ratatoskr and are not synced to any provider.",
-        ),
+        tr(t!("settings.contacts.account")),
+        Some(tr(t!("settings.contacts.account_description"))),
         dropdown,
         SettingsMessage::ToggleSelect(SelectField::ContactAccount),
     )
@@ -118,15 +118,15 @@ fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMes
     let fields = vec![
         contact_field_input(
             "contact-display-name",
-            "Display name",
-            "Name",
+            &t!("settings.contacts.display_name"),
+            &t!("settings.contacts.display_name_placeholder"),
             editor.display_name.text(),
             ContactField::DisplayName,
             InputField::ContactDisplayName,
         ),
         contact_field_input(
             "contact-email",
-            "Email",
+            &t!("settings.contacts.email"),
             "email@example.com",
             editor.email.text(),
             ContactField::Email,
@@ -134,38 +134,38 @@ fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMes
         ),
         contact_field_input(
             "contact-email2",
-            "Email 2",
-            "Optional second email",
+            &t!("settings.contacts.email2"),
+            &t!("settings.contacts.email2_placeholder"),
             editor.email2.text(),
             ContactField::Email2,
             InputField::ContactEmail2,
         ),
         contact_field_input(
             "contact-phone",
-            "Phone",
-            "Optional phone number",
+            &t!("settings.contacts.phone"),
+            &t!("settings.contacts.phone_placeholder"),
             editor.phone.text(),
             ContactField::Phone,
             InputField::ContactPhone,
         ),
         contact_field_input(
             "contact-company",
-            "Company",
-            "Optional company",
+            &t!("settings.contacts.company"),
+            &t!("settings.contacts.company_placeholder"),
             editor.company.text(),
             ContactField::Company,
             InputField::ContactCompany,
         ),
         contact_field_input(
             "contact-notes",
-            "Notes",
-            "Optional notes",
+            &t!("settings.contacts.notes"),
+            &t!("settings.contacts.notes_placeholder"),
             editor.notes.text(),
             ContactField::Notes,
             InputField::ContactNotes,
         ),
     ];
-    section("Details", fields)
+    section(tr(t!("settings.contacts.details")), fields)
 }
 
 fn contact_field_input(
@@ -196,23 +196,31 @@ fn contact_editor_buttons<'a>(
         let is_confirming = confirm_delete.as_deref() == Some(id.as_str());
         if is_confirming {
             btn_row = btn_row.push(
-                button(text("Confirm delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::ContactConfirmDelete(id.clone()))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.contacts.confirm_delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::ContactConfirmDelete(id.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
             btn_row = btn_row.push(
-                button(text("Cancel").size(TEXT_LG))
+                button(text(t!("settings.contacts.cancel")).size(TEXT_LG))
                     .on_press(SettingsMessage::ContactCancelDelete)
                     .padding(PAD_BUTTON)
                     .style(theme::ButtonClass::Ghost.style()),
             );
         } else {
             btn_row = btn_row.push(
-                button(text("Delete").size(TEXT_LG).style(text::danger))
-                    .on_press(SettingsMessage::ContactDelete(id.clone()))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Action.style()),
+                button(
+                    text(t!("settings.contacts.delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::ContactDelete(id.clone()))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
             );
         }
     }
@@ -222,14 +230,20 @@ fn contact_editor_buttons<'a>(
     let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
     if is_local {
         if editor.contact_id.is_some() {
-            btn_row = btn_row.push(text("Auto-saved").size(TEXT_SM).style(text::secondary));
+            btn_row = btn_row.push(
+                text(t!("settings.contacts.auto_saved"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
         } else {
             let can_save = !editor.email.text().trim().is_empty();
-            let mut save_btn =
-                button(container(text("Create").size(TEXT_LG)).center_x(Length::Fill))
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Primary.style())
-                    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+            let mut save_btn = button(
+                container(text(t!("settings.contacts.create")).size(TEXT_LG))
+                    .center_x(Length::Fill),
+            )
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Primary.style())
+            .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
             if can_save {
                 save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
             }
@@ -237,10 +251,12 @@ fn contact_editor_buttons<'a>(
         }
     } else {
         let can_save = !editor.email.text().trim().is_empty() && editor.dirty;
-        let mut save_btn = button(container(text("Save").size(TEXT_LG)).center_x(Length::Fill))
-            .padding(PAD_BUTTON)
-            .style(theme::ButtonClass::Primary.style())
-            .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+        let mut save_btn = button(
+            container(text(t!("settings.contacts.save")).size(TEXT_LG)).center_x(Length::Fill),
+        )
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Primary.style())
+        .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
         if can_save {
             save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
         }

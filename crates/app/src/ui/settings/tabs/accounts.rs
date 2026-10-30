@@ -1,5 +1,8 @@
+use std::borrow::Cow;
+
 use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::layout::*;
@@ -9,12 +12,25 @@ use crate::ui::theme;
 use crate::ui::theme::RowPosition;
 use crate::ui::widgets;
 
+/// The settings row helpers borrow their labels for the lifetime of the
+/// view. A `t!` lookup without arguments is always borrowed from the
+/// compiled-in translation table, so it can be handed out as `'static`.
+pub(super) fn tr(text: Cow<'static, str>) -> &'static str {
+    match text {
+        Cow::Borrowed(text) => text,
+        Cow::Owned(text) => text.leak(),
+    }
+}
+
 pub(super) fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
-    col = col.push(section("Accounts", vec![accounts_section_body(state)]));
+    col = col.push(section(
+        tr(t!("settings.accounts.title")),
+        vec![accounts_section_body(state)],
+    ));
 
     col.into()
 }
@@ -73,7 +89,7 @@ fn add_account_button<'a>(position: RowPosition) -> Element<'a, SettingsMessage>
         container(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
-                text("Add Account")
+                text(t!("settings.accounts.add"))
                     .size(TEXT_LG)
                     .style(text::base)
                     .font(iced::Font {
@@ -216,20 +232,34 @@ fn format_provider_label(provider: &str) -> String {
 
 fn format_last_sync(last_sync_at: Option<i64>) -> String {
     match last_sync_at {
-        None => "Never synced".to_string(),
+        None => t!("settings.accounts.never_synced").into_owned(),
         Some(ts) => {
             let Ok(dt) = jiff::Timestamp::from_second(ts) else {
-                return "Unknown".to_string();
+                return t!("settings.accounts.sync_unknown").into_owned();
             };
             let diff = jiff::Timestamp::now().duration_since(dt);
             if diff.as_mins() < 1 {
-                "Just now".to_string()
+                t!("settings.accounts.synced_just_now").into_owned()
             } else if diff.as_mins() < 60 {
-                format!("{} min ago", diff.as_mins())
+                t!(
+                    "settings.accounts.synced_minutes_ago",
+                    count = diff.as_mins()
+                )
+                .into_owned()
             } else if diff.as_hours() < 24 {
-                format!("{} hours ago", diff.as_hours())
+                let hours = diff.as_hours();
+                if hours == 1 {
+                    t!("settings.accounts.synced_hours_ago_one", count = hours).into_owned()
+                } else {
+                    t!("settings.accounts.synced_hours_ago_other", count = hours).into_owned()
+                }
             } else {
-                format!("{} days ago", diff.as_hours() / 24)
+                let days = diff.as_hours() / 24;
+                if days == 1 {
+                    t!("settings.accounts.synced_days_ago_one", count = days).into_owned()
+                } else {
+                    t!("settings.accounts.synced_days_ago_other", count = days).into_owned()
+                }
             }
         }
     }
@@ -247,14 +277,17 @@ pub(super) fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
 
     col = col.push(
         column![
-            text(format!("Edit account: {}", editor.account_email))
-                .size(TEXT_HEADING)
-                .style(text::base)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..crate::font::text()
-                }),
-            text("Account changes are not saved automatically. Use the Save button at the bottom.")
+            text(t!(
+                "settings.accounts.editor_title",
+                email = editor.account_email
+            ))
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..crate::font::text()
+            }),
+            text(t!("settings.accounts.editor_not_saved"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         ]
@@ -278,10 +311,10 @@ pub(super) fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
     }
 
     col = col.push(section(
-        "Authentication",
+        tr(t!("settings.accounts.authentication")),
         vec![action_row(
-            "Re-authenticate",
-            Some("Sign in again to refresh credentials"),
+            tr(t!("settings.accounts.reauthenticate")),
+            Some(tr(t!("settings.accounts.reauthenticate_description"))),
             None,
             ActionKind::InApp,
             SettingsMessage::ReauthenticateAccount(editor.account_id.clone()),
@@ -297,8 +330,12 @@ pub(super) fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
     // own "Test & Save" button, the simple fields (name, display name,
     // colour) can move to live-save and this global Save can go away.
     let mut save_btn = button(
-        container(text("Save Changes").size(TEXT_LG).color(theme::ON_AVATAR))
-            .center_x(Length::Fill),
+        container(
+            text(t!("settings.accounts.save_changes"))
+                .size(TEXT_LG)
+                .color(theme::ON_AVATAR),
+        )
+        .center_x(Length::Fill),
     )
     .padding(PAD_BUTTON)
     .style(theme::ButtonClass::Primary.style())
@@ -313,21 +350,21 @@ pub(super) fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
 
 fn account_editor_names_section(editor: &AccountEditor) -> Element<'_, SettingsMessage> {
     section_with_subtitle(
-        "Names",
-        "Account Name is the local label for this account in your sidebar. Display Name is the name recipients see on emails you send from it.",
+        tr(t!("settings.accounts.names")),
+        tr(t!("settings.accounts.names_description")),
         vec![
             input_row(
                 "account-name",
-                "Account Name",
-                "e.g. Work",
+                &t!("settings.accounts.account_name"),
+                &t!("settings.accounts.account_name_placeholder"),
                 editor.account_name.text(),
                 SettingsMessage::AccountNameEditorChanged,
                 InputField::AccountName,
             ),
             input_row(
                 "account-display-name",
-                "Display Name",
-                "Your Name",
+                &t!("settings.accounts.display_name"),
+                &t!("settings.accounts.display_name_placeholder"),
                 editor.display_name.text(),
                 SettingsMessage::DisplayNameEditorChanged,
                 InputField::AccountDisplayName,
@@ -368,7 +405,7 @@ fn account_editor_color_section<'a>(
     );
 
     section(
-        "Account Color",
+        tr(t!("settings.accounts.color")),
         vec![static_row(
             container(grid)
                 .padding(PAD_SETTINGS_ROW)
@@ -379,12 +416,12 @@ fn account_editor_color_section<'a>(
 
 fn account_editor_caldav_section(editor: &AccountEditor) -> Element<'_, SettingsMessage> {
     section_with_subtitle(
-        "Calendar (CalDAV)",
-        "Optional CalDAV server for calendar sync. Leave blank if your provider doesn't support CalDAV or you don't want calendar in this account.",
+        tr(t!("settings.accounts.caldav")),
+        tr(t!("settings.accounts.caldav_description")),
         vec![
             input_row(
                 "caldav-url",
-                "CalDAV URL",
+                &t!("settings.accounts.caldav_url"),
                 "https://",
                 editor.caldav_url.text(),
                 SettingsMessage::CaldavUrlChanged,
@@ -392,7 +429,7 @@ fn account_editor_caldav_section(editor: &AccountEditor) -> Element<'_, Settings
             ),
             input_row(
                 "caldav-username",
-                "Username",
+                &t!("settings.accounts.caldav_username"),
                 "",
                 editor.caldav_username.text(),
                 SettingsMessage::CaldavUsernameChanged,
@@ -400,7 +437,7 @@ fn account_editor_caldav_section(editor: &AccountEditor) -> Element<'_, Settings
             ),
             input_row_secure(
                 "caldav-password",
-                "Password",
+                &t!("settings.accounts.caldav_password"),
                 "",
                 editor.caldav_password.text(),
                 SettingsMessage::CaldavPasswordChanged,
@@ -415,10 +452,10 @@ fn account_editor_delete_section(editor: &AccountEditor) -> Element<'_, Settings
     // settings-tabs root, gated on `editor.show_delete_confirmation`),
     // so this section just renders the action row in both states.
     section(
-        "Danger Zone",
+        tr(t!("settings.accounts.danger_zone")),
         vec![action_row(
-            "Delete Account",
-            Some("Remove this account and all its data"),
+            tr(t!("settings.accounts.delete")),
+            Some(tr(t!("settings.accounts.delete_description"))),
             None,
             ActionKind::Danger,
             SettingsMessage::DeleteAccountRequested(editor.account_id.clone()),
