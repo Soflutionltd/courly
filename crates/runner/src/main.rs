@@ -42,12 +42,15 @@ fn main() -> app::RunResult {
 /// `panic = "abort"` profile (the UI classifies a dead Service from that
 /// signal), except inside the HTML email renderer: Blitz is beta and panics
 /// on odd markup, and that one email falls back to its plain-text body
-/// instead of closing the app. Debug builds keep unwinding as before.
+/// instead of closing the app. Attachment text extraction (PDF, OOXML) is
+/// exempt too: it parses untrusted files with no click, so a panic there
+/// skips the one file instead of crash-looping the Service on every boot.
+/// Debug builds keep unwinding as before.
 fn install_abort_on_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         default_hook(info);
-        if !cfg!(debug_assertions) && !mail_html::is_rendering() {
+        if !cfg!(debug_assertions) && !mail_html::is_rendering() && !service::is_extracting() {
             std::process::abort();
         }
     }));

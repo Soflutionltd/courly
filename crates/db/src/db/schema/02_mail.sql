@@ -313,7 +313,7 @@ CREATE INDEX IF NOT EXISTS idx_attachments_text_indexed_at
 --   permanent (no retry): 'indexed', 'skipped:opaque', 'skipped:encrypted',
 --     'skipped:oversize', 'skipped:encoding', 'skipped:empty',
 --     'skipped:ocr', 'skipped:unknown_mime', 'skipped:privacy',
---     'skipped:zipbomb'.
+--     'skipped:zipbomb', 'skipped:panic'.
 --   retry-eligible: 'failed:transient', 'skipped:bytes_gone',
 --     'skipped:timeout'.
 -- Worker pre-flight skips only on permanent statuses; retry-eligible rows

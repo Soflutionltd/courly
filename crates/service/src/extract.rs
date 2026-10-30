@@ -656,7 +656,9 @@ async fn run_extraction_pipeline(
     let mime_for_task = mime_type.clone();
     let filename_for_task = filename.clone();
     let extract_fut = tokio::task::spawn_blocking(move || {
-        run_extractor(&bytes, &mime_for_task, &filename_for_task)
+        crate::text_extract::while_extracting(|| {
+            run_extractor(&bytes, &mime_for_task, &filename_for_task)
+        })
     });
     let outcome = match tokio::time::timeout(
         std::time::Duration::from_secs(PER_EXTRACTION_TIMEOUT_SECS),
@@ -665,6 +667,16 @@ async fn run_extraction_pipeline(
     .await
     {
         Ok(Ok(o)) => o,
+        Ok(Err(join_err)) if join_err.is_panic() => {
+            log::error!(
+                "extractor panicked on hash {} ({} bytes, mime {mime_type}); skipping it for good",
+                work.content_hash,
+                bytes_len,
+            );
+            ExtractionOutcome::Skipped {
+                reason: SkipReason::ExtractorPanicked,
+            }
+        }
         Ok(Err(join_err)) => {
             log::error!(
                 "extractor JoinError on hash {} ({} bytes, mime {mime_type}): {join_err:?}",

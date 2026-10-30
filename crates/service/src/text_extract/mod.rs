@@ -45,6 +45,34 @@ pub(crate) mod ooxml;
 pub(crate) mod pdf;
 pub(crate) mod plain;
 
+use std::cell::Cell;
+
+thread_local! {
+    static EXTRACTING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// True while the current thread runs an attachment extractor. The
+/// release panic hook lets such a panic unwind: one malformed attachment
+/// becomes a `skipped:panic` row instead of aborting the Service, which
+/// would otherwise crash again on the same file at the next prefetch.
+pub fn is_extracting() -> bool {
+    EXTRACTING.with(Cell::get)
+}
+
+/// Run `extract` with [`is_extracting`] set for its duration, including
+/// while a panic unwinds out of it.
+pub(crate) fn while_extracting<T>(extract: impl FnOnce() -> T) -> T {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            EXTRACTING.with(|flag| flag.set(false));
+        }
+    }
+    EXTRACTING.with(|flag| flag.set(true));
+    let _guard = Guard;
+    extract()
+}
+
 /// Cap on input bytes. Files larger than this skip extraction entirely.
 pub(crate) const MAX_INPUT_BYTES: usize = 50 * 1024 * 1024;
 
@@ -123,6 +151,9 @@ pub(crate) enum SkipReason {
     /// Permanent: OOXML decompressed size > 2 * MAX_INPUT_BYTES, OR a
     /// containing zip's compression ratio crosses a sane threshold.
     ZipBomb,
+    /// Permanent: the extractor panicked on these bytes; a retry would
+    /// panic again.
+    ExtractorPanicked,
 }
 
 impl SkipReason {
@@ -141,6 +172,7 @@ impl SkipReason {
             Self::UnknownMime => "skipped:unknown_mime",
             Self::PrivacyExempt => "skipped:privacy",
             Self::ZipBomb => "skipped:zipbomb",
+            Self::ExtractorPanicked => "skipped:panic",
         }
     }
 
@@ -514,6 +546,7 @@ mod tests {
             SkipReason::UnknownMime,
             SkipReason::PrivacyExempt,
             SkipReason::ZipBomb,
+            SkipReason::ExtractorPanicked,
         ];
         let strings: Vec<&str> = all.iter().map(|r| r.status_string()).collect();
         let mut deduped = strings.clone();
@@ -538,6 +571,7 @@ mod tests {
             SkipReason::UnknownMime,
             SkipReason::PrivacyExempt,
             SkipReason::ZipBomb,
+            SkipReason::ExtractorPanicked,
         ] {
             assert!(
                 !reason.is_retry_eligible(),
@@ -548,5 +582,17 @@ mod tests {
         for reason in [SkipReason::Timeout, SkipReason::BytesGone] {
             assert!(reason.is_retry_eligible(), "{reason:?} should retry");
         }
+    }
+
+    #[test]
+    fn extracting_flag_is_set_only_inside_the_extractor_even_on_panic() {
+        assert!(!is_extracting());
+        assert!(while_extracting(is_extracting));
+        assert!(!is_extracting());
+        let unwound = std::panic::catch_unwind(|| {
+            while_extracting(|| panic!("malformed attachment"));
+        });
+        assert!(unwound.is_err());
+        assert!(!is_extracting());
     }
 }

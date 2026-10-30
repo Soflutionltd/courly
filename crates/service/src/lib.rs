@@ -37,6 +37,7 @@ use service_api::BootExitCode;
 use std::path::PathBuf;
 
 pub use dispatch::run_service_with_io;
+pub use text_extract::is_extracting;
 
 pub fn run_service_blocking() -> ! {
     // 1. Parent-death recheck - closes the fork-to-recheck window. The

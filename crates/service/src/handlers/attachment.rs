@@ -257,7 +257,7 @@ pub(crate) async fn handle_fetch(
 /// Returns false for permanent statuses (`indexed`, `skipped:opaque`,
 /// `skipped:encrypted`, `skipped:oversize`, `skipped:encoding`,
 /// `skipped:empty`, `skipped:ocr`, `skipped:unknown_mime`,
-/// `skipped:privacy`, `skipped:zipbomb`).
+/// `skipped:privacy`, `skipped:zipbomb`, `skipped:panic`).
 fn should_enqueue_extraction(status: Option<&str>) -> bool {
     match status {
         None => true,

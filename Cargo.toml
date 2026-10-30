@@ -138,8 +138,9 @@ hotpath = "0.27.0"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
-# Unwinding is only relied on for the HTML email renderer; the runner's
-# panic hook aborts on every other panic in release builds.
+# Unwinding is only relied on for the HTML email renderer and attachment
+# text extraction; the runner's panic hook aborts on every other panic in
+# release builds.
 panic = "unwind"
 
 [profile.release.package."*"]
