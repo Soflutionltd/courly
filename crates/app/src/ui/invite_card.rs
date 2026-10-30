@@ -910,7 +910,8 @@ mod tests {
 
     #[test]
     fn proposed_slot_reads_local_time() {
-        let (start, end) = proposed_slot("2026-11-02", "14:00", "15:30", &paris()).unwrap();
+        let (start, end) =
+            proposed_slot("2026-11-02", "14:00", "15:30", &paris()).expect("valid slot");
         assert_eq!(start, 1_793_624_400);
         assert_eq!(end - start, 5_400);
         assert!(proposed_slot("2026-11-02", "15:00", "14:00", &paris()).is_err());
@@ -925,7 +926,7 @@ mod tests {
 
     #[test]
     fn local_day_window_spans_the_local_day() {
-        let (start, end) = local_day_window(1_793_624_400, &paris()).unwrap();
+        let (start, end) = local_day_window(1_793_624_400, &paris()).expect("valid day");
         assert_eq!(end - start, 86_400);
         assert!(start <= 1_793_624_400 && 1_793_624_400 < end);
     }
