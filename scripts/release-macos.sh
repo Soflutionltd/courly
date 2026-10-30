@@ -74,6 +74,10 @@ rm -rf "$ICONSET"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 cargo about generate --manifest-path crates/runner/Cargo.toml --locked about.hbs \
   -o "$APP/Contents/Resources/THIRD-PARTY-LICENSES.html"
+mkdir -p "$APP/Contents/Resources/fonts"
+for font_dir in crates/mail-html/fonts/*/; do
+  cp "${font_dir}OFL.txt" "$APP/Contents/Resources/fonts/$(basename "$font_dir")-OFL.txt"
+done
 
 cat >"$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

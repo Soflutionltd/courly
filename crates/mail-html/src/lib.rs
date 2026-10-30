@@ -5,6 +5,8 @@
 //! unless the caller opts in per message. Output is a set of RGBA tiles plus
 //! the hit areas of every link, so the UI layer only has to draw images.
 
+mod fonts;
+
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -254,6 +256,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
             base_url: Some(format!("https://{BASE_HOST}/")),
             net_provider: Some(Arc::clone(&net) as Arc<dyn NetProvider>),
             ua_stylesheets: vec![UserAgentStylesheet::default_sheet(), EMAIL_UA_SHEET.clone()],
+            font_ctx: Some(fonts::context_for(&request.html)),
             ..Default::default()
         },
     );
