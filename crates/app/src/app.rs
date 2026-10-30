@@ -82,6 +82,10 @@ pub struct ReadyApp {
 
     pub(crate) main_window_id: iced::window::Id,
     pub(crate) pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
+    /// Compose shown in the main window instead of the reading pane. Its
+    /// state lives in `pop_out_windows` under this id, which no real window
+    /// uses, so every compose handler works for it unchanged.
+    pub(crate) inline_compose: Option<iced::window::Id>,
     pub(crate) pop_out_generation: GenerationCounter<PopOut>,
     pub(crate) nav_generation: GenerationCounter<Nav>,
     pub(crate) thread_generation: GenerationCounter<ThreadDetail>,
@@ -404,6 +408,7 @@ impl ReadyApp {
             window,
             main_window_id,
             pop_out_windows: HashMap::new(),
+            inline_compose: None,
             pop_out_generation: GenerationCounter::new(),
             nav_generation: GenerationCounter::new(),
             thread_generation: GenerationCounter::new(),

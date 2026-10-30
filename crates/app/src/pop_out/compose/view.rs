@@ -659,14 +659,28 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
-    let footer_row = row![
-        discard_btn,
-        attach_btn,
-        save_btn,
-        Space::new().width(Length::Fill),
-        send_btn,
-    ]
-    .align_y(Alignment::Center);
+    let mut footer_row = row![discard_btn, attach_btn, save_btn].align_y(Alignment::Center);
+    if state.inline {
+        footer_row = footer_row.push(
+            button(
+                row![
+                    icon::external_link().size(ICON_LG),
+                    text("Pop Out").size(TEXT_LG)
+                ]
+                .spacing(SPACE_XXS)
+                .align_y(Alignment::Center),
+            )
+            .style(theme::ButtonClass::Action.style())
+            .on_press(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::PopOut),
+            ))
+            .padding(PAD_BUTTON),
+        );
+    }
+    let footer_row = footer_row
+        .push(Space::new().width(Length::Fill))
+        .push(send_btn);
 
     container(footer_row)
         .padding(iced::Padding {

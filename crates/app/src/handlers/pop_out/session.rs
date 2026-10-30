@@ -20,7 +20,10 @@ impl ReadyApp {
         let mut message_views = Vec::new();
         let mut compose_windows = Vec::new();
         let mut calendar_window = None;
-        for window in self.pop_out_windows.values() {
+        for (&id, window) in &self.pop_out_windows {
+            if Some(id) == self.inline_compose {
+                continue;
+            }
             match window {
                 PopOutWindow::MessageView(state) => {
                     message_views.push(MessageViewSessionEntry {

@@ -59,6 +59,8 @@ pub enum ComposeMessage {
     /// state immediately rather than waiting for the next auto-save tick.
     SaveDraftNow,
     Discard,
+    /// Move a compose shown in the main window into its own window.
+    PopOut,
     /// Toggle discard confirmation dialog.
     ToggleDiscardConfirm,
     /// Autocomplete results arrived from the database.

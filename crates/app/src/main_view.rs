@@ -218,11 +218,14 @@ impl ReadyApp {
                 .width(self.thread_list_width)
                 .height(Length::Fill);
             let divider_thread = self.build_divider(Divider::ThreadList);
-            let reading_pane = pane(self.reading_pane.view_with_commands(
-                &self.registry,
-                &self.binding_table,
-                &ctx,
-            ));
+            let reading_pane = match self.inline_compose_for_selected_thread() {
+                Some((id, state)) => pane(pop_out::compose::view_compose_window(id, state)),
+                None => pane(self.reading_pane.view_with_commands(
+                    &self.registry,
+                    &self.binding_table,
+                    &ctx,
+                )),
+            };
             let rs_data = ui::right_sidebar::RightSidebarData {
                 calendar: &self.calendar,
                 threads: &self.thread_list.threads,
@@ -244,6 +247,21 @@ impl ReadyApp {
             .spacing(PANE_GAP)
             .height(Length::Fill)
             .into()
+    }
+
+    /// The inline compose, when it belongs to the conversation on screen.
+    fn inline_compose_for_selected_thread(
+        &self,
+    ) -> Option<(iced::window::Id, &pop_out::compose::ComposeState)> {
+        let id = self.inline_compose?;
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get(&id) else {
+            return None;
+        };
+        let selected = self
+            .thread_list
+            .selected_thread
+            .and_then(|idx| self.thread_list.threads.get(idx))?;
+        (state.reply_thread_id.as_deref() == Some(selected.id.as_str())).then_some((id, &**state))
     }
 
     pub(crate) fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {

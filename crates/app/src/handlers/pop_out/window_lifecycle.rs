@@ -104,15 +104,86 @@ impl ReadyApp {
         mut state: ComposeState,
         mode: ComposeMode,
     ) -> Task<Message> {
-        // Dedup: if replying to a thread that already has a compose window, focus it
-        if let Some(ref tid) = state.reply_thread_id
-            && let Some((&existing_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
-                matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
-            })
-        {
-            return iced::window::gain_focus(existing_id);
+        if let Some(existing) = self.existing_compose_for_thread(&state) {
+            return existing;
         }
+        self.prepare_compose_state(&mut state, mode);
+        let (window_id, open_task) = self.open_compose_window_for(state);
 
+        // Dispatch initial signature resolution for the default From account.
+        let sig_task = self.resolve_compose_signature(window_id);
+
+        Task::batch([open_task, sig_task])
+    }
+
+    /// Reply or forward in the main window, in place of the reading pane,
+    /// the way Outlook does. A reply already open for another conversation
+    /// is kept as a draft.
+    pub(crate) fn open_inline_compose(
+        &mut self,
+        mut state: ComposeState,
+        mode: ComposeMode,
+    ) -> Task<Message> {
+        if let Some(existing) = self.existing_compose_for_thread(&state) {
+            return existing;
+        }
+        if let Some(previous) = self.inline_compose {
+            let has_content = matches!(
+                self.pop_out_windows.get(&previous),
+                Some(PopOutWindow::Compose(s)) if s.has_user_content()
+            );
+            if has_content && !self.save_compose_draft_sync(previous) {
+                log::warn!("Inline compose draft save failed, keeping it open");
+                return Task::none();
+            }
+            self.pop_out_windows.remove(&previous);
+        }
+        self.prepare_compose_state(&mut state, mode);
+        state.inline = true;
+        let id = iced::window::Id::unique();
+        self.pop_out_windows
+            .insert(id, PopOutWindow::Compose(Box::new(state)));
+        self.inline_compose = Some(id);
+        self.resolve_compose_signature(id)
+    }
+
+    /// Move the inline compose into its own window.
+    pub(crate) fn pop_out_inline_compose(&mut self, id: iced::window::Id) -> Task<Message> {
+        if self.inline_compose != Some(id) {
+            return Task::none();
+        }
+        self.inline_compose = None;
+        let Some(PopOutWindow::Compose(mut state)) = self.pop_out_windows.remove(&id) else {
+            return Task::none();
+        };
+        state.inline = false;
+        self.open_compose_window_for(*state).1
+    }
+
+    /// Remove a compose and close its window; an inline compose just leaves
+    /// the reading pane.
+    pub(crate) fn close_compose(&mut self, id: iced::window::Id) -> Task<Message> {
+        self.pop_out_windows.remove(&id);
+        if self.inline_compose == Some(id) {
+            self.inline_compose = None;
+            return Task::none();
+        }
+        iced::window::close(id)
+    }
+
+    /// Focus the compose already open for the same conversation, if any.
+    fn existing_compose_for_thread(&self, state: &ComposeState) -> Option<Task<Message>> {
+        let tid = state.reply_thread_id.as_deref()?;
+        let (&existing_id, _) = self.pop_out_windows.iter().find(|(_, w)| {
+            matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
+        })?;
+        if self.inline_compose == Some(existing_id) {
+            return Some(Task::none());
+        }
+        Some(iced::window::gain_focus(existing_id))
+    }
+
+    fn prepare_compose_state(&self, state: &mut ComposeState, mode: ComposeMode) {
         // Auto-select shared mailbox identity only for reply/forward flows
         // originating from shared-mailbox scope, and only when mailbox rights
         // do not explicitly deny submit.
@@ -129,22 +200,23 @@ impl ReadyApp {
 
         state.mode = mode;
         state.subject = state.mode.prefixed_subject();
+    }
 
+    /// Open a compose window holding `state`.
+    fn open_compose_window_for(
+        &mut self,
+        state: ComposeState,
+    ) -> (iced::window::Id, Task<Message>) {
         let settings = iced::window::Settings {
             size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
             min_size: Some(Size::new(COMPOSE_MIN_WIDTH, COMPOSE_MIN_HEIGHT)),
             exit_on_close_request: false,
             ..Default::default()
         };
-
         let (window_id, open_task) = iced::window::open(settings);
         self.pop_out_windows
             .insert(window_id, PopOutWindow::Compose(Box::new(state)));
-
-        // Dispatch initial signature resolution for the default From account.
-        let sig_task = self.resolve_compose_signature(window_id);
-
-        Task::batch([open_task.discard(), sig_task])
+        (window_id, open_task.discard())
     }
 
     fn current_mailbox_may_submit(&self) -> Option<bool> {
@@ -240,7 +312,7 @@ impl ReadyApp {
             .unwrap_or_default();
         let state = ComposeState::new_reply(&self.sidebar.accounts, &mode, &source);
 
-        self.open_compose_window_with_state(state, mode)
+        self.open_inline_compose(state, mode)
     }
 
     /// Increment and return the next pop-out generation token.

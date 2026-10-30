@@ -204,10 +204,9 @@ impl ReadyApp {
         match outcome {
             service_api::actions::ActionOutcome::Success
             | service_api::actions::ActionOutcome::NoOp => {
-                self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
-                iced::window::close(window_id)
+                self.close_compose(window_id)
             }
             // LocalOnly should not occur for send (send uses Failed for all
             // failures), but handle it defensively as failure for safety.

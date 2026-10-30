@@ -587,7 +587,7 @@ impl ReadyApp {
         let state =
             pop_out::compose::ComposeState::new_reply(&self.sidebar.accounts, &mode, &source);
 
-        self.open_compose_window_with_state(state, mode)
+        self.open_inline_compose(state, mode)
     }
 
     pub(crate) fn handle_status_bar(&mut self, msg: StatusBarMessage) -> Task<Message> {
@@ -854,8 +854,7 @@ impl ReadyApp {
             .collect();
         let mut close_tasks: Vec<Task<Message>> = Vec::new();
         for win_id in windows_to_close {
-            self.pop_out_windows.remove(&win_id);
-            close_tasks.push(iced::window::close(win_id));
+            close_tasks.push(self.close_compose(win_id));
         }
 
         // If the deleted account is referenced by the current scope, revert to All Accounts
@@ -1020,9 +1019,11 @@ impl ReadyApp {
             for win_id in compose_ids {
                 self.save_compose_draft_sync(win_id);
             }
+            let inline = self.inline_compose.take();
             let mut tasks: Vec<Task<Message>> = self
                 .pop_out_windows
                 .keys()
+                .filter(|&&win_id| Some(win_id) != inline)
                 .map(|&win_id| iced::window::close(win_id))
                 .collect();
             self.pop_out_windows.clear();

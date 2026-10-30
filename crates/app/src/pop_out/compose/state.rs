@@ -44,6 +44,9 @@ pub struct ComposeState {
     // Compose mode
     pub mode: ComposeMode,
 
+    /// Shown in the main window rather than in its own window.
+    pub inline: bool,
+
     // Reply context
     pub reply_thread_id: Option<String>,
     pub reply_message_id: Option<String>,
@@ -137,6 +140,7 @@ impl ComposeState {
             signature: None,
             quote: None,
             mode: ComposeMode::New,
+            inline: false,
             reply_thread_id: None,
             reply_message_id: None,
             reply_source_message_id: None,
@@ -225,6 +229,7 @@ impl ComposeState {
             signature,
             quote,
             mode: ComposeMode::New,
+            inline: false,
             reply_thread_id: draft.thread_id.clone(),
             reply_message_id: draft.reply_to_message_id.clone(),
             reply_source_message_id: None,

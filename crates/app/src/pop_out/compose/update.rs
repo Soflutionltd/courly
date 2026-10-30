@@ -563,6 +563,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.active_signature_id = signature_id;
             state.draft_dirty = true;
         }
+        ComposeMessage::PopOut => {
+            log::warn!(
+                "compose pop-out message reached update_compose - dispatcher routing regression"
+            );
+        }
         ComposeMessage::PreviewResized(..)
         | ComposeMessage::PreviewRendered { .. }
         | ComposeMessage::PreviewLinkClicked(_)

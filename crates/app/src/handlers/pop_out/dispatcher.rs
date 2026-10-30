@@ -116,8 +116,10 @@ impl ReadyApp {
             }
             // Compose discard
             (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Discard)) => {
-                self.pop_out_windows.remove(&window_id);
-                iced::window::close(window_id)
+                self.close_compose(window_id)
+            }
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::PopOut)) => {
+                self.pop_out_inline_compose(window_id)
             }
             // Compose send - build MIME, queue for outbox, close window
             (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Send)) => {
