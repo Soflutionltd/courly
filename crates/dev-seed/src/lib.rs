@@ -32,6 +32,13 @@ pub fn weighted_choice<T: Copy>(rng: &mut impl RngExt, items: &[T], weights: &[f
 }
 
 /// Generate a deterministic UUID v4 from the seeded RNG.
+/// `messages.date`, `messages.internal_date`, `threads.last_message_at` and
+/// `chat_contacts.latest_message_at` hold Unix milliseconds; the generators
+/// work in seconds.
+pub fn millis(seconds: i64) -> i64 {
+    seconds * 1000
+}
+
 pub fn next_uuid(rng: &mut impl RngExt) -> String {
     let mut bytes = [0u8; 16];
     rng.fill(&mut bytes);

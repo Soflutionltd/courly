@@ -303,7 +303,13 @@ pub fn seed_chats(
                  is_important, is_pinned, is_snoozed, snooze_until, is_muted,
                  is_chat_thread)
                  VALUES (?1, ?2, ?3, ?3, ?4, ?5, 1, 0, 0, 0, 0, 0, NULL, 0, 1)",
-                rusqlite::params![thread_id, acc.id, subject, thread_start, n_msgs,],
+                rusqlite::params![
+                    thread_id,
+                    acc.id,
+                    subject,
+                    crate::millis(thread_start),
+                    n_msgs,
+                ],
             )
             .map_err(|e| format!("insert chat thread: {e}"))?;
             stats.chat_threads += 1;
@@ -400,7 +406,7 @@ pub fn seed_chats(
                         to_addr,
                         msg_subject,
                         snippet,
-                        msg_date,
+                        crate::millis(msg_date),
                         msg_is_read as i32,
                         raw_size,
                         msg_id_header,
@@ -482,7 +488,7 @@ pub fn seed_chats(
                  WHERE account_id = ?4 AND id = ?5",
                 rusqlite::params![
                     latest_snippet,
-                    latest_date,
+                    crate::millis(latest_date),
                     thread_is_read as i32,
                     acc.id,
                     thread_id,
@@ -530,7 +536,7 @@ pub fn seed_chats(
                 designated_at,
                 sort_order,
                 partner.display_name,
-                contact_latest_date,
+                crate::millis(contact_latest_date),
                 contact_latest_preview,
                 contact_unread,
             ],
