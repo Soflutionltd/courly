@@ -17,7 +17,6 @@ use crate::ui::layout::{
 use crate::ui::theme;
 
 use super::avatars::{avatar_circle, label_dot, sender_avatar};
-use super::buttons::reply_button;
 
 /// The host-zone wall clock for a stored message timestamp, which is Unix
 /// milliseconds (`messages.date`, `threads.last_message_at`). Card timestamps
@@ -314,6 +313,15 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
+    let message_actions = row![
+        header_icon_button(icon::reply(), "Reply", on_reply(index)),
+        header_icon_button(icon::reply_all(), "Reply All", on_reply_all(index)),
+        header_icon_button(icon::forward(), "Forward", on_forward(index)),
+        header_icon_button(icon::calendar(), "Create Event", on_create_event(index)),
+    ]
+    .spacing(SPACE_XXXS)
+    .align_y(Alignment::Center);
+
     let mut state_indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     if msg.is_replied {
         state_indicators = state_indicators.push(
@@ -343,6 +351,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                         .style(theme::TextClass::Tertiary.style()),
                 )
                 .align_y(Alignment::Center),
+                message_actions,
                 collapse_btn,
                 pop_out_btn,
             ]
@@ -403,18 +412,6 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .style(theme::ContainerClass::EmailBody.style())
         .into();
 
-    let cal_btn = button(
-        row![
-            icon::calendar().size(ICON_SM).style(text::secondary),
-            text("Event").size(TEXT_SM).style(text::secondary),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_create_event(index))
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
-
     let rsvp_actions: Option<Element<'_, M>> = msg.has_meeting_invite.then(|| {
         let respond = |label, response| {
             let button = button(text(label).size(TEXT_SM).style(text::secondary))
@@ -448,15 +445,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         }
     });
 
-    let actions = row![
-        reply_button(icon::reply(), "Reply", on_reply(index)),
-        reply_button(icon::reply_all(), "Reply All", on_reply_all(index)),
-        reply_button(icon::forward(), "Forward", on_forward(index)),
-        cal_btn,
-    ]
-    .spacing(SPACE_XS);
-
-    let mut card_content = column![header, body, actions].spacing(SPACE_XS);
+    let mut card_content = column![header, body].spacing(SPACE_XS);
     if let Some(rsvp_actions) = rsvp_actions {
         card_content = card_content.push(rsvp_actions);
     }
@@ -466,6 +455,27 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .width(Length::Fill)
         .style(theme::ContainerClass::MessageCard.style())
         .into()
+}
+
+/// Icon-only action in a message header, named by its tooltip.
+fn header_icon_button<'a, M: Clone + 'a>(
+    ico: iced::widget::Text<'a>,
+    tip: &'a str,
+    on_press: M,
+) -> Element<'a, M> {
+    iced::widget::tooltip(
+        button(ico.size(ICON_SM).style(text::secondary))
+            .on_press(on_press)
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::Ghost.style()),
+        text(tip)
+            .size(TEXT_XS)
+            .style(theme::TextClass::OnPrimary.style()),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .gap(SPACE_XXS)
+    .style(theme::ContainerClass::Floating.style())
+    .into()
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

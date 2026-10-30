@@ -8,8 +8,8 @@ use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 use crate::Message;
 use crate::icon;
 use crate::ui::layout::{
-    ICON_LG, ICON_MD, ICON_RAIL, ICON_SM, ICON_XL, PAD_BUTTON, PAD_DROPDOWN, PAD_ICON_BTN,
-    RAIL_BUTTON_SIZE, SPACE_XS, SPACE_XXS, TEXT_LG, TEXT_SM,
+    ICON_LG, ICON_MD, ICON_RAIL, ICON_XL, PAD_BUTTON, PAD_DROPDOWN, PAD_ICON_BTN, RAIL_BUTTON_SIZE,
+    SPACE_XS, SPACE_XXS, TEXT_LG, TEXT_SM,
 };
 use crate::ui::theme;
 
@@ -108,25 +108,6 @@ pub fn action_icon_button<'a, M: Clone + 'a>(
     .on_press(on_press)
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::Action.style())
-    .into()
-}
-
-pub fn reply_button<'a, M: Clone + 'a>(
-    ico: iced::widget::Text<'a>,
-    label: &'a str,
-    on_press: M,
-) -> Element<'a, M> {
-    button(
-        row![
-            ico.size(ICON_SM).style(text::secondary),
-            text(label).size(TEXT_SM).style(text::secondary),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_press)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style())
     .into()
 }
 

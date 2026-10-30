@@ -701,28 +701,8 @@ fn command_toolbar<'a>(
     binding_table: &BindingTable,
     ctx: &CommandContext,
 ) -> Element<'a, Message> {
+    // Reply, Reply All and Forward live in each message's header.
     let toolbar = row![
-        widgets::command_icon_button(
-            CommandId::ComposeReply,
-            icon::reply(),
-            registry,
-            binding_table,
-            ctx,
-        ),
-        widgets::command_icon_button(
-            CommandId::ComposeReplyAll,
-            icon::reply_all(),
-            registry,
-            binding_table,
-            ctx,
-        ),
-        widgets::command_icon_button(
-            CommandId::ComposeForward,
-            icon::forward(),
-            registry,
-            binding_table,
-            ctx,
-        ),
         Space::new().width(Length::Fill),
         widgets::command_icon_button(
             CommandId::EmailArchive,
