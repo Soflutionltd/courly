@@ -1293,6 +1293,20 @@ impl ServiceClient {
         self.subscribe_or_consume(ack.run_id).await
     }
 
+    pub async fn focus_sync_folder(
+        &self,
+        account_id: Option<String>,
+        folder_id: Option<String>,
+    ) -> Result<service_api::SyncFocusFolderAck, ClientError> {
+        self.request(RequestParams::SyncFocusFolder {
+            params: service_api::SyncFocusFolderParams {
+                account_id,
+                folder_id,
+            },
+        })
+        .await
+    }
+
     pub async fn resume_sync_account(
         &self,
         account_id: String,

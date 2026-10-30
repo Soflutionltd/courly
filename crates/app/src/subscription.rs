@@ -18,9 +18,7 @@ impl ReadyApp {
                 iced::Event::Window(iced::window::Event::Moved(point)) => {
                     Some(Message::WindowMoved(id, point))
                 }
-                iced::Event::Window(iced::window::Event::Focused) => {
-                    Some(Message::Updater(UpdaterMessage::Check { forced: false }))
-                }
+                iced::Event::Window(iced::window::Event::Focused) => Some(Message::WindowFocused),
                 _ => None,
             }),
             iced::time::every(updater::CHECK_INTERVAL)

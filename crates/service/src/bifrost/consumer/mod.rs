@@ -209,6 +209,10 @@ pub struct ConsumerDriveReport {
     pub completed: bool,
     pub scopes_completed: u32,
     pub batches_acked: u32,
+    /// True once a batch or a drive-end reconcile wrote server-side changes.
+    /// `batches_acked` cannot say this: an unchanged folder still acks the
+    /// fresh delta token every re-read.
+    pub wrote_changes: bool,
     pub lagged: bool,
     pub terminal: Option<TerminalFailure>,
 }
@@ -778,6 +782,7 @@ impl ChangeStreamConsumer {
                 .map_err(|error| Error::Other(format!("bifrost post-persist: {error}")))?;
                 self.stores.search.flush_now().await.map_err(Error::Other)?;
                 if wrote_changes {
+                    report.wrote_changes = true;
                     self.signal_mutation();
                 }
                 if matches!(hook, Some(ConsumerHook::CrashBeforeAck)) {
@@ -1003,7 +1008,8 @@ impl ChangeStreamConsumer {
     /// destination folder re-asserted membership); only a true purge - removed
     /// and never seen live - is deleted. No-op for non-Graph providers (they
     /// never populate `removed`) and when nothing needs deleting.
-    async fn flush_pending_deletions(&self, pending: &PendingDeletions) -> Result<(), Error> {
+    /// Returns whether anything was deleted.
+    async fn flush_pending_deletions(&self, pending: &PendingDeletions) -> Result<bool, Error> {
         let to_delete: Vec<String> = pending
             .removed
             .iter()
@@ -1011,7 +1017,7 @@ impl ChangeStreamConsumer {
             .cloned()
             .collect();
         if to_delete.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         write::persist(
             &self.stores,
@@ -1023,7 +1029,7 @@ impl ChangeStreamConsumer {
         .await
         .map_err(|error| Error::Other(format!("bifrost drive-end delete: {error}")))?;
         self.signal_mutation();
-        Ok(())
+        Ok(true)
     }
 
     async fn flush_imap_drive_end(
@@ -1061,7 +1067,9 @@ impl ChangeStreamConsumer {
         report: &mut ConsumerDriveReport,
         flush_imap: bool,
     ) -> Result<(), Error> {
-        self.flush_pending_deletions(pending).await?;
+        if self.flush_pending_deletions(pending).await? {
+            report.wrote_changes = true;
+        }
         if self.crash_before_drive_end_threading {
             return Err(Error::Other(
                 "bifrost consumer crash_before_drive_end_threading hook fired".to_string(),

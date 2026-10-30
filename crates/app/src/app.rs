@@ -150,6 +150,8 @@ pub struct ReadyApp {
     /// Stamped on `Notification::MailboxChanged`; cleared by the 250 ms
     /// `MailboxReloadTick` handler once it reloads the list and counts.
     pub(crate) pending_mailbox_reload: Option<std::time::Instant>,
+    /// When the last window-focus re-read of every account ran.
+    pub(crate) last_focus_sync: Option<std::time::Instant>,
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
@@ -432,6 +434,7 @@ impl ReadyApp {
             pending_reader_reload: None,
             pending_calendar_reload: None,
             pending_mailbox_reload: None,
+            last_focus_sync: None,
             chat_timeline: None,
             chat_generation: GenerationCounter::new(),
             chat_list_generation: GenerationCounter::new(),

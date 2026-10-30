@@ -472,6 +472,9 @@ pub enum Message {
     /// next `SyncTick`.
     MailboxReloadTick,
 
+    /// A window of the app came to the front.
+    WindowFocused,
+
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
 

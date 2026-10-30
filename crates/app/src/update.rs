@@ -1034,6 +1034,13 @@ impl ReadyApp {
                 self.pending_calendar_reload = None;
                 self.reload_calendar_events()
             }
+            Message::WindowFocused => {
+                let updater =
+                    self.update(Message::Updater(crate::updater::UpdaterMessage::Check {
+                        forced: false,
+                    }));
+                Task::batch([updater, self.sync_on_window_focus()])
+            }
             Message::MailboxReloadTick => {
                 let Some(stamp) = self.pending_mailbox_reload else {
                     return Task::none();

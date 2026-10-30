@@ -117,6 +117,31 @@ impl ContainerIndex {
         self.storage_ids.get(native).map(String::as_str)
     }
 
+    /// The bifrost-native id of the folder stored under `storage_id`.
+    pub fn native_for_storage_id(&self, storage_id: &str) -> Option<&str> {
+        self.storage_ids
+            .iter()
+            .find(|(_, storage)| storage.as_str() == storage_id)
+            .map(|(native, _)| native.as_str())
+    }
+
+    /// Native ids of the personal system folders: where mail arrives, where
+    /// Outlook moves what the user deletes, files or sends.
+    pub fn personal_system_folders(&self) -> Vec<String> {
+        [
+            FolderRole::Inbox,
+            FolderRole::Sent,
+            FolderRole::Drafts,
+            FolderRole::Archive,
+            FolderRole::Trash,
+            FolderRole::Spam,
+        ]
+        .into_iter()
+        .filter_map(|role| self.role_target(&NamespaceAttribution::Personal, role))
+        .map(str::to_string)
+        .collect()
+    }
+
     /// Resolve a system destination without crossing a mailbox namespace.
     /// The returned value is the bifrost-native container id, suitable for a
     /// provider mutation, rather than Ratatoskr's namespaced storage id.

@@ -733,3 +733,63 @@ fn persist_reaps_destroyed_personal_folder_and_keeps_seeded_and_shared_rows() {
         "shared-namespace row is not the personal reap's to manage, survivors: {survivors:?}"
     );
 }
+
+fn graph_folder(native: &str, role: Option<FolderRole>) -> Container {
+    Container::new(
+        ContainerId(native.to_string()),
+        ContainerKind::Folder,
+        role,
+        Provenance {
+            provider: ProtocolKind::Graph,
+            kind: ContainerKind::Folder,
+            native: native.to_string(),
+        },
+        native.to_string(),
+        None,
+    )
+}
+
+#[test]
+fn the_hot_cadence_covers_every_personal_system_folder_and_nothing_else() {
+    let (_, _, index) = build_container_rows(
+        ACCOUNT,
+        &[
+            graph_folder("AAMkInbox", Some(FolderRole::Inbox)),
+            graph_folder("AAMkSent", Some(FolderRole::Sent)),
+            graph_folder("AAMkTrash", Some(FolderRole::Trash)),
+            graph_folder("AAMkProjects", None),
+            graph_folder("AAMkSharedInbox", Some(FolderRole::Inbox))
+                .with_namespace(ContainerNamespace::Shared)
+                .with_owner(Some(MailboxId("alice@example.test".to_string())))
+                .with_owner_local_id(Some("AAMkSharedInbox".to_string())),
+        ],
+    )
+    .unwrap();
+
+    let mut hot = index.personal_system_folders();
+    hot.sort();
+    assert_eq!(hot, ["AAMkInbox", "AAMkSent", "AAMkTrash"]);
+}
+
+#[test]
+fn a_sidebar_folder_id_resolves_to_its_graph_folder() {
+    let (_, _, index) = build_container_rows(
+        ACCOUNT,
+        &[
+            graph_folder("AAMkInbox", Some(FolderRole::Inbox)),
+            graph_folder("AAMkProjects", None),
+        ],
+    )
+    .unwrap();
+    let projects_storage = index
+        .storage_id_for_native("AAMkProjects")
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        index.native_for_storage_id(&projects_storage),
+        Some("AAMkProjects")
+    );
+    assert_eq!(index.native_for_storage_id("INBOX"), Some("AAMkInbox"));
+    assert_eq!(index.native_for_storage_id("not-a-folder"), None);
+}

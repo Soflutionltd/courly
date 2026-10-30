@@ -32,7 +32,9 @@ use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
 use crate::smart_folder::SmartFolderCreateParams;
-use crate::sync::{SyncCancelAccountParams, SyncResumeAccountParams, SyncStartAccountParams};
+use crate::sync::{
+    SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams, SyncStartAccountParams,
+};
 use crate::thread_ui_state::ThreadUiStateSetParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1142,6 +1144,13 @@ pub enum RequestParams {
     SyncResumeAccount {
         params: SyncResumeAccountParams,
     },
+    /// Tell the resident sync engine which folder the user is looking at,
+    /// so it is re-read on the fast cadence alongside the system folders.
+    ///
+    /// 5 s timeout: the handler only swaps an in-memory value.
+    SyncFocusFolder {
+        params: SyncFocusFolderParams,
+    },
     /// Phase 5: explicit-request calendar sync (manual "Sync now",
     /// post-account-add, RSVP-then-resync). The handler returns within
     /// microseconds: it acquires the per-account map, spawns or returns
@@ -1642,6 +1651,7 @@ impl RequestParams {
             Self::SyncStartAccount { .. } => "sync.start_account",
             Self::SyncCancelAccount { .. } => "sync.cancel_account",
             Self::SyncResumeAccount { .. } => "sync.resume_account",
+            Self::SyncFocusFolder { .. } => "sync.focus_folder",
             Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
             Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
@@ -1758,6 +1768,7 @@ impl RequestParams {
             // `run_id`. Cancellation propagation is async.
             Self::SyncCancelAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::SyncResumeAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::SyncFocusFolder { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Handler-only budgets for the calendar request pair.
             // Same shape as the sync pair above.
             Self::CalendarStartAccountSync { .. } => {
@@ -1926,6 +1937,7 @@ impl RequestParams {
 
             Self::ActionMarkChatRead { .. }
             | Self::SyncStartAccount { .. }
+            | Self::SyncFocusFolder { .. }
             | Self::CalendarStartAccountSync { .. }
             | Self::CalendarSetVisibility { .. }
             | Self::ThreadUiStateSet { .. }
@@ -2032,6 +2044,7 @@ impl RequestParams {
             Self::SyncStartAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncCancelAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncResumeAccount { params } => serde_json::json!({ "params": params }),
+            Self::SyncFocusFolder { params } => serde_json::json!({ "params": params }),
             Self::CalendarStartAccountSync { params } => serde_json::json!({ "params": params }),
             Self::CalendarCancelAccountSync { params } => {
                 serde_json::json!({ "params": params })
@@ -2227,6 +2240,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("sync.resume_account params: {e}"))?;
                 Ok(Self::SyncResumeAccount { params: p.params })
+            }
+            "sync.focus_folder" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SyncFocusFolderParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("sync.focus_folder params: {e}"))?;
+                Ok(Self::SyncFocusFolder { params: p.params })
             }
             "calendar.start_account_sync" => {
                 #[derive(Deserialize)]
@@ -3198,6 +3220,23 @@ mod tests {
                 account_id: "acc-1".into(),
             },
         };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn sync_focus_folder_round_trips_from_method_params() {
+        let original = RequestParams::SyncFocusFolder {
+            params: SyncFocusFolderParams {
+                account_id: None,
+                folder_id: Some("graph-AAMk".into()),
+            },
+        };
+        assert_eq!(original.method_name(), "sync.focus_folder");
         let parsed = RequestParams::from_method_params(
             original.method_name(),
             Some(original.params_value()),

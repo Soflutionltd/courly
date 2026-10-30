@@ -16,8 +16,8 @@
 use crate::boot::BootSharedState;
 use serde_json::Value;
 use service_api::{
-    ServiceError, SyncCancelAccountParams, SyncResumeAccountParams, SyncResumeAck,
-    SyncStartAccountParams,
+    ServiceError, SyncCancelAccountParams, SyncFocusFolderAck, SyncFocusFolderParams,
+    SyncResumeAccountParams, SyncResumeAck, SyncStartAccountParams,
 };
 use std::sync::Arc;
 
@@ -70,6 +70,24 @@ pub(crate) async fn handle_cancel_account(
     }
 
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_focus_folder(
+    boot_state: &Arc<BootSharedState>,
+    params: SyncFocusFolderParams,
+) -> Result<Value, ServiceError> {
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "sync.focus_folder received before SyncRuntime was installed; \
+             UI must wait for boot.ready"
+                .into(),
+        )
+    })?;
+    let focused_accounts = runtime
+        .focus_folder(params.account_id.as_deref(), params.folder_id.as_deref())
+        .await;
+    serde_json::to_value(SyncFocusFolderAck { focused_accounts })
+        .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_resume_account(

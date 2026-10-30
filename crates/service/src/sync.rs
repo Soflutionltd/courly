@@ -451,6 +451,15 @@ impl SyncRuntime {
         self.inner.resident_engine.resume_account(account_id).await
     }
 
+    /// Point the resident engine's fast cadence at the folder the user is
+    /// looking at. Returns how many attached accounts hold it in focus.
+    pub async fn focus_folder(&self, account_id: Option<&str>, folder_id: Option<&str>) -> u32 {
+        self.inner
+            .resident_engine
+            .focus_folder(account_id, folder_id)
+            .await
+    }
+
     /// Read the resident slot's bounded re-drive telemetry as
     /// `(cumulative_total, current_attempt)`, or `None` when no slot is
     /// attached. Test-probe pass-through for the § 4.3 bounded-re-drive gate.

@@ -80,6 +80,9 @@ pub(crate) async fn dispatch(
         RequestParams::SyncResumeAccount { params } => {
             sync::handle_resume_account(&boot_state, params).await
         }
+        RequestParams::SyncFocusFolder { params } => {
+            sync::handle_focus_folder(&boot_state, params).await
+        }
         RequestParams::CalendarStartAccountSync { params } => {
             calendar::handle_start_account_sync(&boot_state, params).await
         }

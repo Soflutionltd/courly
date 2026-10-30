@@ -101,6 +101,24 @@ pub struct SyncResumeAccountParams {
     pub account_id: String,
 }
 
+/// `sync.focus_folder` request body: the folder the user is looking at, so
+/// the resident engine re-reads it on the fast cadence of the system
+/// folders. `folder_id` is the storage id the sidebar shows; `None` clears
+/// the focus. `account_id` is `None` in the unified view, where the service
+/// matches the folder against every attached account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncFocusFolderParams {
+    pub account_id: Option<String>,
+    pub folder_id: Option<String>,
+}
+
+/// Synchronous response to `sync.focus_folder`: how many attached accounts
+/// now poll the folder on the fast cadence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncFocusFolderAck {
+    pub focused_accounts: u32,
+}
+
 /// Synchronous response to `sync.resume_account`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncResumeAck {

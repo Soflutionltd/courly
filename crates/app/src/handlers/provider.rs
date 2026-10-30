@@ -63,6 +63,46 @@ impl ReadyApp {
         Task::batch(tasks)
     }
 
+    /// Tell the Service which provider folder is on screen, so the resident
+    /// engine re-reads it every few seconds like the system folders. Any
+    /// other selection clears the focus: system folders are always on the
+    /// fast cadence and virtual views have no folder of their own.
+    pub(crate) fn focus_selected_folder(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        let folder_id = match &self.sidebar.selection {
+            types::SidebarSelection::ProviderFolder(id) => Some(id.as_str().to_string()),
+            _ => None,
+        };
+        let account_id = self.sidebar.selected_scope.account_id().map(str::to_string);
+        Task::perform(
+            async move {
+                if let Err(error) = client.focus_sync_folder(account_id, folder_id).await {
+                    log::debug!("sync.focus_folder failed: {error}");
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
+    /// Re-read every account when the window comes back to the front, so
+    /// what changed in Outlook meanwhile shows at once. Focus flips often
+    /// when switching apps; one full re-read per `FOCUS_SYNC_MIN_GAP` is
+    /// enough.
+    pub(crate) fn sync_on_window_focus(&mut self) -> Task<Message> {
+        const FOCUS_SYNC_MIN_GAP: std::time::Duration = std::time::Duration::from_secs(30);
+        let now = std::time::Instant::now();
+        if self
+            .last_focus_sync
+            .is_some_and(|last| now.duration_since(last) < FOCUS_SYNC_MIN_GAP)
+        {
+            return Task::none();
+        }
+        self.last_focus_sync = Some(now);
+        self.sync_all_accounts()
+    }
+
     /// Nudge the Service to drain the `pending_operations` retry queue.
     ///
     /// Phase 2 task 18: the periodic drainer runs Service-side; the UI

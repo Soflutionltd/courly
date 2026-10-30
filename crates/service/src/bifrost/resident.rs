@@ -95,6 +95,9 @@ struct ResidentSlot {
     /// Raised by the consumer after each write of server-side changes;
     /// `mailbox_changed_loop` turns it into a `MailboxChanged` frame.
     mutation_signal: Arc<tokio::sync::Notify>,
+    /// Native id of the folder the user is looking at, re-read on the hot
+    /// cadence with the system folders.
+    focused_folder: std::sync::Mutex<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -350,6 +353,7 @@ impl ResidentEngine {
             provider,
             containers: Arc::clone(&containers),
             mutation_signal: Arc::new(tokio::sync::Notify::new()),
+            focused_folder: std::sync::Mutex::new(None),
         });
         let task_slot = Arc::clone(&slot);
         let inner = Arc::clone(&self.inner);
@@ -392,12 +396,54 @@ impl ResidentEngine {
             account_id.to_string(),
             Arc::clone(&slot.mutation_signal),
         ));
+        if provider == BifrostProviderKind::Graph {
+            tokio::spawn(hot_poll_loop(
+                Arc::clone(&self.inner),
+                Arc::clone(&slot),
+                account_id.to_string(),
+            ));
+        }
         self.inner
             .slots
             .lock()
             .await
             .insert(account_id.to_string(), slot);
         Ok(())
+    }
+
+    /// Point the hot cadence at the folder stored under `storage_id` (or
+    /// clear it with `None`) on `account_id`, or on every attached account
+    /// when `account_id` is `None`. A newly focused folder is re-read at
+    /// once. Returns how many accounts now hold the folder in focus.
+    pub async fn focus_folder(&self, account_id: Option<&str>, storage_id: Option<&str>) -> u32 {
+        let slots: Vec<(String, Arc<ResidentSlot>)> = {
+            let slots = self.inner.slots.lock().await;
+            slots
+                .iter()
+                .filter(|(id, _)| account_id.is_none_or(|wanted| wanted == id.as_str()))
+                .map(|(id, slot)| (id.clone(), Arc::clone(slot)))
+                .collect()
+        };
+        let mut focused = 0;
+        for (id, slot) in slots {
+            let native = storage_id
+                .and_then(|storage| slot.containers.native_for_storage_id(storage))
+                .map(str::to_string);
+            let previous = std::mem::replace(
+                &mut *slot
+                    .focused_folder
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                native.clone(),
+            );
+            if let Some(native) = native {
+                focused += 1;
+                if previous.as_deref() != Some(native.as_str()) {
+                    invalidate_folder(&self.inner, &AccountId(id), native);
+                }
+            }
+        }
+        focused
     }
 
     pub async fn resume_account(&self, account_id: &str) -> Result<bool, String> {
@@ -923,7 +969,7 @@ async fn resident_consumer_loop(
                         let previous_seq = *slot.caught_up.borrow();
                         let seq = slot.run_seq.load(Ordering::SeqCst);
                         let _ = slot.caught_up.send(seq);
-                        if report.batches_acked > 0 && seq == previous_seq && initial_was_completed {
+                        if report.wrote_changes && seq == previous_seq && initial_was_completed {
                             emit_push_event(&inner, &account_id).await;
                         }
                     }
@@ -1073,6 +1119,54 @@ fn repush_full_reconcile(inner: &ResidentEngineInner, account_id: &str) {
             hint: InvalidationHint {
                 source: PushSource::Coalesced,
                 payload: HintPayload::Unknown,
+            },
+        },
+    );
+}
+
+/// Cadence for the system folders and the focused folder of a Graph
+/// account. Graph has no push a desktop client can receive (webhooks need a
+/// public endpoint; EWS streaming is being retired), and its delta query on
+/// an unchanged folder is a few hundred bytes, so a short re-read is how a
+/// change made in Outlook shows here within seconds. Six or seven folders
+/// every 5 s stay far below Outlook's 10,000 requests per 10 minutes.
+const HOT_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+async fn hot_poll_loop(
+    inner: Arc<ResidentEngineInner>,
+    slot: Arc<ResidentSlot>,
+    account_id: String,
+) {
+    let account = AccountId(account_id);
+    let system = slot.containers.personal_system_folders();
+    loop {
+        tokio::select! {
+            () = slot.cancel.cancelled() => return,
+            () = tokio::time::sleep(HOT_POLL_INTERVAL) => {}
+        }
+        let focused = slot
+            .focused_folder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .filter(|native| !system.contains(native));
+        for native in system.iter().cloned().chain(focused) {
+            invalidate_folder(&inner, &account, native);
+        }
+    }
+}
+
+/// Ask the engine's reconciler to re-read one mail folder now.
+fn invalidate_folder(inner: &ResidentEngineInner, account: &AccountId, native: String) {
+    inner.engine.engine().invalidation_sink().push(
+        account.clone(),
+        WatchEvent::Invalidated {
+            hint: InvalidationHint {
+                source: PushSource::Coalesced,
+                payload: HintPayload::SpecificCursorScope(CursorScope::FolderType {
+                    folder: FolderId(native),
+                    ty: ObjectType::Email,
+                }),
             },
         },
     );

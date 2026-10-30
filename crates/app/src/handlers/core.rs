@@ -35,16 +35,25 @@ impl ReadyApp {
         match event {
             SidebarEvent::AccountSelected(_idx) => {
                 self.reset_view_state();
-                self.load_navigation_and_threads()
+                Task::batch([
+                    self.load_navigation_and_threads(),
+                    self.focus_selected_folder(),
+                ])
             }
             SidebarEvent::AllAccountsSelected => {
                 self.reset_view_state();
-                self.load_navigation_and_threads()
+                Task::batch([
+                    self.load_navigation_and_threads(),
+                    self.focus_selected_folder(),
+                ])
             }
             SidebarEvent::SelectionChanged(_sel) => {
                 self.reset_view_state();
                 let token = self.nav_generation.next();
-                self.load_threads_for_current_view(token)
+                Task::batch([
+                    self.load_threads_for_current_view(token),
+                    self.focus_selected_folder(),
+                ])
             }
             SidebarEvent::AccountsReordered(orders) => self.handle_reorder_accounts(orders),
             SidebarEvent::Compose => self.update(Message::Compose),
@@ -66,7 +75,10 @@ impl ReadyApp {
             }
             SidebarEvent::SharedMailboxSelected { .. } => {
                 self.reset_view_state();
-                self.load_navigation_and_threads()
+                Task::batch([
+                    self.load_navigation_and_threads(),
+                    self.focus_selected_folder(),
+                ])
             }
             SidebarEvent::PublicFolderSelected { .. } => {
                 self.reset_view_state();
