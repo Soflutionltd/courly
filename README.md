@@ -6,16 +6,16 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/rust-1.92+-orange?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/platform-linux-informational?logo=linux&logoColor=white" alt="Linux">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-proprietary-blue" alt="License"></a>
+  <img src="https://img.shields.io/badge/rust-1.97+-orange?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/platform-macOS-informational?logo=apple&logoColor=white" alt="macOS">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a>
 </p>
 
 ---
 
 Multi-provider email client with calendar and contacts. Connects to Gmail, Microsoft Exchange, JMAP, and IMAP accounts from a single native UI built on [iced](https://iced.rs).
 
-**Not ready for production use - note the lack of releases!**
+**Not ready for production use.**
 
 Built with LLMs. See [LLM.md](LLM.md).
 
