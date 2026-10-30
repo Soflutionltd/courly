@@ -108,18 +108,25 @@ fn read_zip_text(
     archive: &mut ZipArchive<Cursor<&[u8]>>,
     path: &str,
 ) -> Result<String, ImportError> {
-    let mut file = archive
+    let file = archive
         .by_name(path)
         .map_err(|e| ImportError::ParseError(format!("{path}: {e}")))?;
-    if file.size() > MAX_XLSX_XML_BYTES {
+    read_capped_part(file, path)
+}
+
+/// The declared size comes from the archive, so the decompressed bytes are
+/// capped as they are read.
+fn read_capped_part(file: impl Read, path: &str) -> Result<String, ImportError> {
+    let mut bytes = Vec::new();
+    file.take(MAX_XLSX_XML_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| ImportError::ParseError(format!("{path}: {e}")))?;
+    if bytes.len() as u64 > MAX_XLSX_XML_BYTES {
         return Err(ImportError::ParseError(format!(
             "{path}: XML part is too large for contact import"
         )));
     }
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(|e| ImportError::ParseError(format!("{path}: {e}")))?;
-    Ok(text)
+    String::from_utf8(bytes).map_err(|e| ImportError::ParseError(format!("{path}: {e}")))
 }
 
 fn read_optional_zip_text(
@@ -127,17 +134,7 @@ fn read_optional_zip_text(
     path: &str,
 ) -> Result<Option<String>, ImportError> {
     match archive.by_name(path) {
-        Ok(mut file) => {
-            if file.size() > MAX_XLSX_XML_BYTES {
-                return Err(ImportError::ParseError(format!(
-                    "{path}: XML part is too large for contact import"
-                )));
-            }
-            let mut text = String::new();
-            file.read_to_string(&mut text)
-                .map_err(|e| ImportError::ParseError(format!("{path}: {e}")))?;
-            Ok(Some(text))
-        }
+        Ok(file) => read_capped_part(file, path).map(Some),
         Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(e) => Err(ImportError::ParseError(format!("{path}: {e}"))),
     }
@@ -412,6 +409,15 @@ mod tests {
             rows[1],
             vec!["alice@example.com".to_string(), "42".to_string()]
         );
+    }
+
+    #[test]
+    fn xml_parts_are_capped_on_decompressed_bytes() {
+        let at_limit = std::io::repeat(b'a').take(MAX_XLSX_XML_BYTES);
+        assert!(read_capped_part(at_limit, "xl/sheet1.xml").is_ok());
+
+        let beyond = std::io::repeat(b'a').take(MAX_XLSX_XML_BYTES * 4);
+        assert!(read_capped_part(beyond, "xl/sheet1.xml").is_err());
     }
 
     #[test]
