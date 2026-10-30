@@ -439,6 +439,9 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
 
         // View
         CommandId::ViewToggleSidebar => Some(Message::ToggleSidebar),
+        CommandId::ViewToggleSidePanel => Some(Message::SidePanel(
+            crate::ui::side_panel::SidePanelMessage::Toggle,
+        )),
         CommandId::ViewSetThemeLight => Some(Message::SetTheme("Light".to_string())),
         CommandId::ViewSetThemeDark => Some(Message::SetTheme("Dark".to_string())),
         CommandId::ViewSetThemeSystem => Some(Message::SetTheme("System".to_string())),

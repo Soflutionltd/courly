@@ -418,10 +418,50 @@ pub fn mini_month<'a, M: 'a + Clone>(
     ]
     .align_y(Alignment::Center);
 
-    // Day-of-week header (two-letter abbreviations).
+    let Some(first_of_month) = civil_date(year, month, 1) else {
+        return header.into();
+    };
+    let grid_start = rewind_to_weekday(first_of_month, week_start);
+    let last = last_day_of_month(year, month);
+    let total = days_between(grid_start, last) + 1;
+    let grid = day_grid(
+        DayGrid {
+            first_day: grid_start,
+            weeks: total.div_ceil(7).max(5),
+            month: Some((year, month)),
+            selected: selected_date,
+            today,
+            week_start,
+            dates_with_events,
+        },
+        on_date_click,
+    );
+
+    column![header, grid].spacing(SPACE_XXS).into()
+}
+
+/// The weeks a mini calendar shows under its header.
+#[derive(Clone, Copy)]
+pub struct DayGrid<'a> {
+    /// The first cell, on `week_start`.
+    pub first_day: NaiveDate,
+    pub weeks: usize,
+    /// Days outside this (year, month) are muted and carry no event dot.
+    pub month: Option<(i32, u32)>,
+    pub selected: Option<NaiveDate>,
+    pub today: NaiveDate,
+    pub week_start: Weekday,
+    pub dates_with_events: &'a std::collections::HashSet<NaiveDate>,
+}
+
+/// Two-letter weekday initials over `grid.weeks` rows of clickable days.
+pub fn day_grid<'a, M: 'a + Clone>(
+    grid: DayGrid<'a>,
+    on_date_click: impl Fn(NaiveDate) -> M + 'a,
+) -> Element<'a, M> {
     let mut dow_row = row![].spacing(SPACE_0);
     for i in 0..7 {
-        let day = weekday_offset(week_start, i);
+        let day = weekday_offset(grid.week_start, i);
         let label = weekday_two_letter(day);
         dow_row = dow_row.push(
             container(
@@ -436,27 +476,18 @@ pub fn mini_month<'a, M: 'a + Clone>(
         );
     }
 
-    // Date grid.
-    let Some(first_of_month) = civil_date(year, month, 1) else {
-        return container(column![header, dow_row]).into();
-    };
-    let grid_start = rewind_to_weekday(first_of_month, week_start);
-    let last = last_day_of_month(year, month);
-    let total = days_between(grid_start, last) + 1;
-    let num_weeks = total.div_ceil(7).max(5);
-
-    let mut grid = column![].spacing(SPACE_0);
-    for w in 0..num_weeks {
+    let mut rows = column![].spacing(SPACE_0);
+    for w in 0..grid.weeks {
         let mut week_row = row![].spacing(SPACE_0);
         for d in 0..7 {
             #[allow(clippy::cast_possible_wrap)]
             let offset = (w * 7 + d) as i64;
-            let date = add_days(grid_start, offset);
-            let in_month =
-                u32::from(date.month().unsigned_abs()) == month && i32::from(date.year()) == year;
-            let is_today = date == today;
-            let is_selected = selected_date == Some(date);
-
+            let date = add_days(grid.first_day, offset);
+            let in_month = grid.month.is_none_or(|(year, month)| {
+                u32::from(date.month().unsigned_abs()) == month && i32::from(date.year()) == year
+            });
+            let is_today = date == grid.today;
+            let is_selected = grid.selected == Some(date);
             let num_str = format!("{}", date.day());
             let text_style: fn(&Theme) -> text::Style = if is_today {
                 text::primary
@@ -471,7 +502,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
                 crate::font::text()
             };
 
-            let has_events = dates_with_events.contains(&date);
+            let has_events = grid.dates_with_events.contains(&date);
             let label = text(num_str).size(TEXT_XS).style(text_style).font(font);
 
             // Always reserve space for the event dot so it doesn't shift the
@@ -512,10 +543,10 @@ pub fn mini_month<'a, M: 'a + Clone>(
 
             week_row = week_row.push(cell_btn);
         }
-        grid = grid.push(week_row);
+        rows = rows.push(week_row);
     }
 
-    column![header, dow_row, grid].spacing(SPACE_XXS).into()
+    column![dow_row, rows].spacing(SPACE_XXS).into()
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -535,7 +566,7 @@ fn max_events_with_overflow() -> usize {
 }
 
 /// Rewind a date to the previous (or same) occurrence of `target` weekday.
-fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
+pub(crate) fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
     let current = date.weekday();
     let diff = (days_from_monday(current) - days_from_monday(target) + 7) % 7;
     add_days(date, -diff)

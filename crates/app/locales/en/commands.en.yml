@@ -91,6 +91,7 @@ _version: 1
 "cmd.View All": "View All"
 "cmd.View All Tasks": "View All Tasks"
 "cmd.Toggle Sidebar": "Toggle Sidebar"
+"cmd.Toggle Side Panel": "Toggle Side Panel"
 "cmd.Light Theme": "Light Theme"
 "cmd.Dark Theme": "Dark Theme"
 "cmd.System Theme": "System Theme"

@@ -1,4 +1,4 @@
-use iced::widget::{container, mouse_area, row, text};
+use iced::widget::{container, mouse_area, row};
 use iced::{Alignment, Element, Length};
 
 use crate::ui::calendar_month;
@@ -23,7 +23,16 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
     let main_view = calendar_main_view(state);
 
     let base = row![sidebar, main_view].height(Length::Fill);
+    with_surfaces(base.into(), state, std::convert::identity)
+}
 
+/// Lay the open event popover or dialog over `base`: the calendar's own
+/// view, or the mail view when My Day opened the event.
+pub fn with_surfaces<'a, M: Clone + 'a>(
+    base: Element<'a, M>,
+    state: &'a CalendarState,
+    map: fn(CalendarMessage) -> M,
+) -> Element<'a, M> {
     if let Some(modal) = &state.active_modal {
         let card = match modal {
             CalendarModal::EventFull { event } => event_full_modal(event, state),
@@ -37,7 +46,7 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
                             "EventEditor modal without editing workflow: {other:?}"
                         );
                         log::error!("EventEditor modal without editing workflow state");
-                        return container(text("")).into();
+                        return base;
                     }
                 };
                 event_editor_card(draft, is_creating, &state.calendars)
@@ -47,28 +56,31 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
         };
         crate::ui::modal_overlay::modal_overlay(
             base,
-            card,
+            card.map(map),
             crate::ui::modal_overlay::ModalSurface::Modal,
-            CalendarMessage::Noop,
+            map(CalendarMessage::Noop),
         )
     } else if let Some(popover) = &state.active_popover {
         match popover {
-            CalendarPopover::EventDetail { event } => {
-                popover_stack(base.into(), event_detail_popover(event))
-            }
+            CalendarPopover::EventDetail { event } => popover_stack(
+                base,
+                event_detail_popover(event).map(map),
+                map(CalendarMessage::ClosePopover),
+            ),
         }
     } else {
-        base.into()
+        base
     }
 }
 
 /// Wrap a base layout with a lightweight popover (click-away backdrop, right-aligned).
-fn popover_stack<'a>(
-    base: Element<'a, CalendarMessage>,
-    card: Element<'a, CalendarMessage>,
-) -> Element<'a, CalendarMessage> {
+fn popover_stack<'a, M: Clone + 'a>(
+    base: Element<'a, M>,
+    card: Element<'a, M>,
+    on_close: M,
+) -> Element<'a, M> {
     let backdrop = mouse_area(container("").width(Length::Fill).height(Length::Fill))
-        .on_press(CalendarMessage::ClosePopover);
+        .on_press(on_close);
 
     let positioned = container(
         container(card)

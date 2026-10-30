@@ -57,6 +57,7 @@ pub enum CommandId {
 
     // View
     ViewToggleSidebar,
+    ViewToggleSidePanel,
     ViewSetThemeLight,
     ViewSetThemeDark,
     ViewSetThemeSystem,
@@ -146,6 +147,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::TaskTogglePanel, "task.togglePanel"),
     (CommandId::TaskViewAll, "task.viewAll"),
     (CommandId::ViewToggleSidebar, "view.toggleSidebar"),
+    (CommandId::ViewToggleSidePanel, "view.toggleSidePanel"),
     (CommandId::ViewSetThemeLight, "view.setThemeLight"),
     (CommandId::ViewSetThemeDark, "view.setThemeDark"),
     (CommandId::ViewSetThemeSystem, "view.setThemeSystem"),
@@ -249,6 +251,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::TaskTogglePanel,
     CommandId::TaskViewAll,
     CommandId::ViewToggleSidebar,
+    CommandId::ViewToggleSidePanel,
     CommandId::ViewSetThemeLight,
     CommandId::ViewSetThemeDark,
     CommandId::ViewSetThemeSystem,

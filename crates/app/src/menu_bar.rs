@@ -306,6 +306,7 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
     b.check(&theme, A::Theme("Light"), &tr("main.menu_bar.theme_light"));
     b.check(&theme, A::Theme("Dark"), &tr("main.menu_bar.theme_dark"));
     b.check(&theme, A::Theme("System"), &tr("main.menu_bar.theme_system"));
+    b.check(&view, A::Command(C::ViewToggleSidePanel), &tr("main.menu_bar.side_panel"));
     b.item(&view, A::CustomizeToolbar, &tr("main.menu_bar.customize_toolbar"), None);
     separator(&view);
     log_failure(view.append(&PredefinedMenuItem::fullscreen(Some(&tr(
@@ -572,6 +573,9 @@ impl ReadyApp {
                     .registry
                     .get(id)
                     .is_some_and(|command| (command.is_available)(&snapshot.commands));
+                if id == CommandId::ViewToggleSidePanel {
+                    state.checked = self.side_panel.open;
+                }
                 if id == CommandId::EmailMarkRead {
                     let key = if snapshot.commands.thread_is_read == Some(true) {
                         "main.row_menu.mark_unread"

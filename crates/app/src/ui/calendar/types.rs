@@ -353,7 +353,7 @@ fn first_day_of_month(year: i32, month: u32) -> Option<Date> {
     Date::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, 1).ok()
 }
 
-fn local_midnight_unix(date: Date) -> i64 {
+pub(crate) fn local_midnight_unix(date: Date) -> i64 {
     // jiff's compatible disambiguation covers the spring-forward-at-midnight
     // case the old `.single()` fallback existed for (no current IANA zone
     // springs forward at 00:00, but the API permits it): the gap is resolved

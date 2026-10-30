@@ -11,6 +11,7 @@ use crate::icon;
 use crate::message::Message;
 use crate::ui::anchored_overlay::{AnchorPosition, anchored_overlay};
 use crate::ui::layout::*;
+use crate::ui::side_panel::SidePanelMessage;
 use crate::ui::theme;
 use crate::ui::widgets;
 
@@ -58,6 +59,7 @@ pub fn toolbar<'a>(
     state: &'a Toolbar,
     registry: &CommandRegistry,
     ctx: &CommandContext,
+    side_panel_open: bool,
 ) -> Element<'a, Message> {
     let buttons = resolve(state, registry, ctx);
     let labels = state.layout.labels;
@@ -78,6 +80,7 @@ pub fn toolbar<'a>(
         ),
         Space::new().width(SPACE_XS),
         bar,
+        side_panel_toggle(side_panel_open),
     ]
     .spacing(SPACE_XXS)
     .align_y(Alignment::Center);
@@ -119,6 +122,22 @@ pub fn toolbar<'a>(
             .into(),
         None => ribbon.into(),
     }
+}
+
+/// The fixed button at the right end that opens and closes the side panel.
+fn side_panel_toggle<'a>(open: bool) -> Element<'a, Message> {
+    let (ico, tip) = if open {
+        (icon::panel_right_close(), t!("main.side_panel.hide"))
+    } else {
+        (icon::panel_right_open(), t!("main.side_panel.show"))
+    };
+    widgets::tip_icon_button_at(
+        ico,
+        tip,
+        open,
+        Message::SidePanel(SidePanelMessage::Toggle),
+        tooltip::Position::Left,
+    )
 }
 
 // ── Live bar ────────────────────────────────────────────

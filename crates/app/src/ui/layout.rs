@@ -185,7 +185,7 @@ pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
 
 pub const SIDEBAR_WIDTH: f32 = 180.0;
 pub const THREAD_LIST_WIDTH: f32 = 400.0;
-pub const RIGHT_SIDEBAR_WIDTH: f32 = 240.0;
+pub const SIDE_PANEL_WIDTH: f32 = 280.0;
 
 /// Label dot diameter on thread cards (line 3 indicators)
 pub const LABEL_DOT_SIZE: f32 = 6.0;
@@ -242,19 +242,20 @@ pub const INVITE_AGENDA_TIME_WIDTH: f32 = 96.0;
 /// Width of the day agenda beside an invite.
 pub const INVITE_AGENDA_WIDTH: f32 = 280.0;
 
-/// Right sidebar section header padding
-pub const PAD_RIGHT_SIDEBAR: Padding = Padding {
-    top: 12.0,
+/// Side panel header and module content.
+pub const PAD_SIDE_PANEL: Padding = Padding {
+    top: 8.0,
     right: 12.0,
-    bottom: 12.0,
+    bottom: 8.0,
     left: 12.0,
 };
+/// Time column of a My Day agenda row ("14:00" over "25 min").
+pub const MY_DAY_TIME_WIDTH: f32 = 52.0;
+/// Calendar color bar of a My Day agenda row.
+pub const MY_DAY_BAR_WIDTH: f32 = 3.0;
 
 /// Starred thread card warm background alpha
 pub const STARRED_BG_ALPHA: f32 = 0.25;
-
-/// Auto-collapse right sidebar when window width drops below this
-pub const RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH: f32 = 1200.0;
 
 // ── Per-pane minimum widths (for resize clamping) ──────
 

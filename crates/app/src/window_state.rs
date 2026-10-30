@@ -21,8 +21,10 @@ pub struct WindowState {
     pub sidebar_width: f32,
     #[serde(default = "default_thread_list_width")]
     pub thread_list_width: f32,
+    #[serde(default, alias = "right_sidebar_open")]
+    pub side_panel_open: bool,
     #[serde(default)]
-    pub right_sidebar_open: bool,
+    pub side_panel_module: crate::ui::side_panel::Module,
 }
 
 fn default_sidebar_width() -> f32 {
@@ -42,7 +44,8 @@ impl Default for WindowState {
             maximized: false,
             sidebar_width: default_sidebar_width(),
             thread_list_width: default_thread_list_width(),
-            right_sidebar_open: false,
+            side_panel_open: false,
+            side_panel_module: crate::ui::side_panel::Module::default(),
         }
     }
 }

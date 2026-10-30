@@ -91,6 +91,7 @@ _version: 1
 "cmd.View All": "Tout afficher"
 "cmd.View All Tasks": "Afficher toutes les tâches"
 "cmd.Toggle Sidebar": "Afficher/masquer la barre latérale"
+"cmd.Toggle Side Panel": "Afficher/masquer le volet de droite"
 "cmd.Light Theme": "Thème clair"
 "cmd.Dark Theme": "Thème sombre"
 "cmd.System Theme": "Thème du système"

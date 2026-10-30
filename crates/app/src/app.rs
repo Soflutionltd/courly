@@ -78,7 +78,7 @@ pub struct ReadyApp {
     pub(crate) thread_list_width: f32,
     pub(crate) dragging: Option<Divider>,
     pub(crate) hovered_divider: Option<Divider>,
-    pub(crate) right_sidebar_open: bool,
+    pub(crate) side_panel: crate::ui::side_panel::SidePanel,
     pub(crate) show_settings: bool,
     pub(crate) window: window_state::WindowState,
 
@@ -424,7 +424,10 @@ impl ReadyApp {
             thread_list_width: window.thread_list_width,
             dragging: None,
             hovered_divider: None,
-            right_sidebar_open: window.right_sidebar_open,
+            side_panel: crate::ui::side_panel::SidePanel::new(
+                window.side_panel_open,
+                window.side_panel_module,
+            ),
             show_settings: false,
             window,
             main_window_id,

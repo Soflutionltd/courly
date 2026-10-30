@@ -57,7 +57,7 @@
 // Settings (UI not rendered; the rest of the bootstrap snapshot loads
 // after Booting -> Ready):
 //   Settings(_) | ToggleSettings | SettingsCheckFocus | SetTheme | SetDateDisplay
-//   SetReadingPanePosition | ToggleSidebar | ToggleRightSidebar
+//   SetReadingPanePosition | ToggleSidebar | SidePanel(_)
 //                                                  - drop
 //
 // Data loading and component messages: all dropped while `Booting` since
@@ -215,7 +215,7 @@ pub enum Message {
     DividerUnhover,
     WindowResized(iced::window::Id, Size),
     WindowMoved(iced::window::Id, Point),
-    ToggleRightSidebar,
+    SidePanel(crate::ui::side_panel::SidePanelMessage),
     /// Run after each mouse press while settings is open: queries the widget
     /// tree to find which filter input (if any) currently owns focus, then
     /// updates `Settings.focused_filter` accordingly.

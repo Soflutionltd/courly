@@ -19,6 +19,17 @@ pub(super) fn register_view(out: &mut Vec<CommandDescriptor>) {
     ));
     out.push(with_docs(
         desc(
+            CommandId::ViewToggleSidePanel,
+            "Toggle Side Panel",
+            "View",
+            None,
+            always,
+        ),
+        "Toggle Side Panel",
+        "Show or hide the side panel with My Day.",
+    ));
+    out.push(with_docs(
+        desc(
             CommandId::ViewSetThemeLight,
             "Light Theme",
             "View",

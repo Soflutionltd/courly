@@ -6,7 +6,8 @@ use crate::pop_out::{self, PopOutWindow};
 use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
 use crate::ui::layout::{
-    APP_RAIL_WIDTH, PANE_GAP, READING_PANE_MIN_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
+    APP_RAIL_WIDTH, PANE_GAP, READING_PANE_MIN_WIDTH, SIDE_PANEL_WIDTH, SIDEBAR_MIN_WIDTH,
+    THREAD_LIST_MIN_WIDTH,
 };
 use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
@@ -210,6 +211,11 @@ impl ReadyApp {
                     ui::calendar::calendar_layout(&self.calendar)
                         .map(|m| Message::Calendar(Box::new(m))),
                 ),
+                AppMode::Mail if self.calendar_pop_out_id().is_none() => {
+                    ui::calendar::with_surfaces(self.view_mail_body(), &self.calendar, |message| {
+                        Message::Calendar(Box::new(message))
+                    })
+                }
                 AppMode::Mail => self.view_mail_body(),
             }
         };
@@ -239,7 +245,12 @@ impl ReadyApp {
     /// the chat timeline when a chat is open).
     fn view_mail_body(&self) -> Element<'_, Message> {
         let ctx = command_dispatch::build_context(self);
-        let ribbon = ui::toolbar::toolbar(&self.toolbar, &self.registry, &ctx);
+        let ribbon = ui::toolbar::toolbar(
+            &self.toolbar,
+            &self.registry,
+            &ctx,
+            self.side_panel.open,
+        );
         let sidebar = container(pane(self.sidebar.view().map(Message::Sidebar)))
             .width(self.sidebar_width)
             .height(Length::Fill);
@@ -273,21 +284,28 @@ impl ReadyApp {
                     &ctx,
                 )),
             };
-            let rs_data = ui::right_sidebar::RightSidebarData {
-                calendar: &self.calendar,
-                threads: &self.thread_list.threads,
-            };
-            let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
             row![
                 sidebar,
                 divider_sidebar,
                 thread_list,
                 divider_thread,
-                reading_pane,
-                right_sidebar
+                reading_pane
             ]
             .height(Length::Fill)
             .into()
+        };
+        let panes: Element<'_, Message> = if self.side_panel.open {
+            row![
+                panes,
+                Space::new().width(PANE_GAP),
+                container(ui::side_panel::view(&self.side_panel, self.calendar.week_start))
+                    .width(SIDE_PANEL_WIDTH)
+                    .height(Length::Fill),
+            ]
+            .height(Length::Fill)
+            .into()
+        } else {
+            panes
         };
 
         column![ribbon, panes]
@@ -315,18 +333,13 @@ impl ReadyApp {
         // Panes start right of the app rail and stop one gap short of the
         // window edge.
         let point = Point::new(point.x - APP_RAIL_WIDTH, point.y);
-        // Available width for the three main panels (excludes right sidebar
-        // when open, and both dividers).
-        let right_sidebar_used = if self.right_sidebar_open {
-            ui::layout::RIGHT_SIDEBAR_WIDTH
-        } else {
-            0.0
-        };
+        // Available width for the three main panels (excludes the side
+        // panel when open, and both dividers).
         let available = self.window.width
             - APP_RAIL_WIDTH
             - PANE_GAP
             - 2.0 * DIVIDER_WIDTH
-            - right_sidebar_used;
+            - self.side_panel_used();
 
         match self.dragging {
             Some(Divider::Sidebar) => {
@@ -354,16 +367,11 @@ impl ReadyApp {
     /// respect their minimums at the current window size.  Called after
     /// every main-window resize.
     pub(crate) fn clamp_panel_widths(&mut self) {
-        let right_sidebar_used = if self.right_sidebar_open {
-            ui::layout::RIGHT_SIDEBAR_WIDTH
-        } else {
-            0.0
-        };
         let available = self.window.width
             - APP_RAIL_WIDTH
             - PANE_GAP
             - 2.0 * DIVIDER_WIDTH
-            - right_sidebar_used;
+            - self.side_panel_used();
 
         // 1. Ensure sidebar doesn't exceed what leaves room for the other
         //    two panels at their minimums.
@@ -378,6 +386,15 @@ impl ReadyApp {
         self.thread_list_width = self
             .thread_list_width
             .clamp(THREAD_LIST_MIN_WIDTH, max_thread_list);
+    }
+
+    /// Width the open side panel and its gap take from the mail panes.
+    fn side_panel_used(&self) -> f32 {
+        if self.side_panel.open {
+            SIDE_PANEL_WIDTH + PANE_GAP
+        } else {
+            0.0
+        }
     }
 
     pub(crate) fn build_divider(&self, divider: Divider) -> Element<'_, Message> {

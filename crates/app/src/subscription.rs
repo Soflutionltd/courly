@@ -121,6 +121,15 @@ impl ReadyApp {
             );
         }
 
+        // My Day follows the clock past midnight while it shows.
+        if self.side_panel.shows_my_day() {
+            subs.push(iced::time::every(std::time::Duration::from_secs(60)).map(|_| {
+                Message::SidePanel(crate::ui::side_panel::SidePanelMessage::MyDay(
+                    crate::ui::side_panel::my_day::MyDayMessage::Tick,
+                ))
+            }));
+        }
+
         // Snooze resurface - check every 60 seconds for due threads.
         // The handler fires a `pending_ops.kick` that wakes the
         // Service-side worker; if the ServiceClient isn't attached

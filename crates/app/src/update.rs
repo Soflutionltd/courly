@@ -5,8 +5,7 @@ use crate::pop_out::PopOutWindow;
 use crate::pop_out::compose::ComposeMode;
 use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
-use crate::ui::calendar::CalendarMessage;
-use crate::ui::layout::RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH;
+use crate::ui::calendar::{CalendarMessage, CalendarWorkflow};
 use crate::{app::AppMode, handlers};
 use iced::Task;
 use rust_i18n::t;
@@ -105,10 +104,7 @@ impl ReadyApp {
                 }
                 Task::none()
             }
-            Message::ToggleRightSidebar => {
-                self.right_sidebar_open = !self.right_sidebar_open;
-                Task::none()
-            }
+            Message::SidePanel(message) => self.handle_side_panel(message),
             Message::SettingsCheckFocus => {
                 if !self.show_settings {
                     return Task::none();
@@ -132,9 +128,6 @@ impl ReadyApp {
             Message::WindowResized(id, size) => {
                 if id == self.main_window_id {
                     self.window.set_size(size);
-                    if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH && self.right_sidebar_open {
-                        self.right_sidebar_open = false;
-                    }
                     // Clamp panel widths so minimums are respected after
                     // the window shrinks.
                     self.clamp_panel_widths();
@@ -754,6 +747,11 @@ impl ReadyApp {
                     return Task::none();
                 }
                 self.app_mode = mode;
+                // An event glance belongs to the view it was opened from.
+                if matches!(self.calendar.workflow, CalendarWorkflow::ViewingEvent { .. }) {
+                    self.calendar.workflow = CalendarWorkflow::Idle;
+                    self.calendar.sync_surfaces();
+                }
                 if self.app_mode == AppMode::Calendar {
                     return self.reload_calendar_events();
                 }

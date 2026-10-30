@@ -231,6 +231,12 @@ pub fn bell<'a>() -> Text<'a> {
 pub fn calendar<'a>() -> Text<'a> {
     to_text('\u{e063}')
 }
+pub fn panel_right_open<'a>() -> Text<'a> {
+    to_text('\u{e434}')
+}
+pub fn panel_right_close<'a>() -> Text<'a> {
+    to_text('\u{e432}')
+}
 pub fn clock<'a>() -> Text<'a> {
     to_text('\u{e087}')
 }

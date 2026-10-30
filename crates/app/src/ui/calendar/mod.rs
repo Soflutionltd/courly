@@ -15,6 +15,6 @@ mod messages;
 mod sidebar;
 mod types;
 
-pub use layout::calendar_layout;
+pub use layout::{calendar_layout, with_surfaces};
 pub use messages::*;
 pub use types::*;

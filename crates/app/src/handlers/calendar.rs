@@ -59,7 +59,13 @@ impl ReadyApp {
                 let db = Arc::clone(&self.db);
                 let eid = event_id.clone();
                 // Also find the event in cached events for color/calendar_name.
-                let cached_event = self.calendar.events.iter().find(|e| e.id == eid).cloned();
+                let cached_event = self
+                    .calendar
+                    .events
+                    .iter()
+                    .chain(&self.side_panel.my_day.events)
+                    .find(|e| e.id == eid)
+                    .cloned();
                 Task::perform(
                     async move {
                         let ev = db.get_calendar_event(eid).await?;
@@ -786,7 +792,9 @@ impl ReadyApp {
         let db = Arc::clone(&self.db);
         let db2 = Arc::clone(&self.db);
         let (window_start, window_end) = self.calendar.current_view_window();
+        let my_day = self.reload_my_day();
         Task::batch([
+            my_day,
             Task::perform(
                 async move {
                     db.load_calendar_events_for_view(window_start, window_end)

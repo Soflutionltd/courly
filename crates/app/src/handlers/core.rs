@@ -1125,7 +1125,8 @@ impl ReadyApp {
             let data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
             self.window.sidebar_width = self.sidebar_width;
             self.window.thread_list_width = self.thread_list_width;
-            self.window.right_sidebar_open = self.right_sidebar_open;
+            self.window.side_panel_open = self.side_panel.open;
+            self.window.side_panel_module = self.side_panel.module;
             self.window.save(data_dir);
             self.save_session_state();
             // Save dirty compose drafts synchronously before destroying windows
