@@ -805,7 +805,7 @@ fn thread_header<'a>(
 
     let mut info_row = row![
         container(
-            text(format!("{} messages", messages.len()))
+            text(message_count_label(messages.len()))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -855,6 +855,14 @@ fn thread_header<'a>(
         ..PAD_CONTENT
     })
     .into()
+}
+
+fn message_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 message".to_string()
+    } else {
+        format!("{count} messages")
+    }
 }
 
 /// Check if a message's content matches any of the search terms (case-insensitive).
