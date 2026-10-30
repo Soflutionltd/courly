@@ -171,6 +171,14 @@ pub const TOOLBAR_SLOT_HEIGHT: f32 = 22.0;
 pub const TOOLBAR_SCROLLBAR_WIDTH: f32 = 3.0;
 /// Rounding headroom when deciding which buttons fit before "…".
 pub const TOOLBAR_MEASURE_SLACK: f32 = 2.0;
+/// Search scope menu under the title-bar pill.
+pub const SEARCH_SCOPE_MENU_WIDTH: f32 = 260.0;
+pub const PAD_SEARCH_SCOPE_PILL: Padding = Padding {
+    top: SPACE_XXXS,
+    right: SPACE_XS,
+    bottom: SPACE_XXXS,
+    left: SPACE_XS,
+};
 pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
 
 // ── Panel widths ────────────────────────────────────────

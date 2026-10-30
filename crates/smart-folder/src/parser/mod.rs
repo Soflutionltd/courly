@@ -125,6 +125,11 @@ pub struct ParsedQuery {
     // Date
     pub before: Option<DateBound>,
     pub after: Option<DateBound>,
+
+    /// Exact `folders.id` the caller restricts the search to, matched in
+    /// every account the scope allows. Set by the caller, never parsed
+    /// from the query text.
+    pub scope_folder_id: Option<String>,
 }
 
 impl ParsedQuery {
@@ -148,6 +153,7 @@ impl ParsedQuery {
             || self.is_tagged.is_some()
             || self.before.is_some()
             || self.after.is_some()
+            || self.scope_folder_id.is_some()
     }
 }
 

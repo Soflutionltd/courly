@@ -12,6 +12,7 @@ pub struct DbPinnedSearch {
     pub created_at: i64,
     pub updated_at: i64,
     pub scope_account_id: Option<String>,
+    pub scope_folder_id: Option<String>,
     pub thread_ids: Option<Vec<(String, String)>>,
 }
 
@@ -19,7 +20,7 @@ pub async fn db_list_pinned_searches(db: &ReadDbState) -> Result<Vec<DbPinnedSea
     db.with_read(|conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT id, query, created_at, updated_at, scope_account_id
+                "SELECT id, query, created_at, updated_at, scope_account_id, scope_folder_id
                  FROM pinned_searches
                  ORDER BY updated_at DESC",
             )
@@ -32,6 +33,7 @@ pub async fn db_list_pinned_searches(db: &ReadDbState) -> Result<Vec<DbPinnedSea
                 created_at: row.get("created_at")?,
                 updated_at: row.get("updated_at")?,
                 scope_account_id: row.get("scope_account_id")?,
+                scope_folder_id: row.get("scope_folder_id")?,
                 thread_ids: None,
             })
         })

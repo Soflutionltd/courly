@@ -200,6 +200,8 @@ pub struct ThreadList {
     pub mode: ThreadListMode,
     /// The search query string, set by App before view() is called.
     pub search_query: String,
+    /// The search already covers every mailbox, so the widen link is hidden.
+    pub search_covers_all: bool,
     /// `updated_at` of the active pinned search (unix seconds), when the
     /// thread list is showing a pinned-search snapshot. Drives the
     /// "Last updated …" indicator under the search bar. `None` means
@@ -230,6 +232,7 @@ impl ThreadList {
             scope_name: t!("main.thread_list.scope_all").into_owned(),
             mode: ThreadListMode::Scope,
             search_query: String::new(),
+            search_covers_all: true,
             pinned_search_updated_at: None,
             auto_advance_direction: AutoAdvanceDirection::Next,
             typeahead: TypeaheadState::default(),
@@ -695,6 +698,7 @@ impl Component for ThreadList {
             selection_count,
             &self.typeahead,
             self.pinned_search_updated_at,
+            self.search_covers_all,
         );
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
@@ -732,6 +736,7 @@ fn thread_list_header<'a>(
     selection_count: usize,
     typeahead: &'a TypeaheadState,
     pinned_search_updated_at: Option<i64>,
+    search_covers_all: bool,
 ) -> Element<'a, ThreadListMessage> {
     let staleness: Option<Element<'a, ThreadListMessage>> = pinned_search_updated_at.map(|ts| {
         text(t!(
@@ -783,18 +788,21 @@ fn thread_list_header<'a>(
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style());
 
-                let all_link = button(
-                    text(t!("main.search.widen_all"))
-                        .size(TEXT_SM)
-                        .style(theme::TextClass::Accent.style()),
-                )
-                .on_press(ThreadListMessage::WidenSearchScope)
-                .padding(0)
-                .style(theme::ButtonClass::Ghost.style());
-
-                row![results_text, Space::new().width(Length::Fill), all_link,]
-                    .align_y(iced::Alignment::Center)
-                    .into()
+                let mut header = row![results_text, Space::new().width(Length::Fill)]
+                    .align_y(iced::Alignment::Center);
+                if !search_covers_all {
+                    header = header.push(
+                        button(
+                            text(t!("main.search.widen_all"))
+                                .size(TEXT_SM)
+                                .style(theme::TextClass::Accent.style()),
+                        )
+                        .on_press(ThreadListMessage::WidenSearchScope)
+                        .padding(0)
+                        .style(theme::ButtonClass::Ghost.style()),
+                    );
+                }
+                header.into()
             }
         }
     };

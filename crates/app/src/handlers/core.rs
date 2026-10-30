@@ -182,11 +182,7 @@ impl ReadyApp {
                 Task::none()
             }
             ThreadListEvent::WidenSearchScope => {
-                // Widen search scope to all accounts
-                self.sidebar.selected_scope = ViewScope::AllAccounts;
-                let _ = self.nav_generation.next();
-                self.update_thread_list_context_from_sidebar();
-                self.update(Message::SearchExecute)
+                self.set_search_scope(crate::ui::search_scope::SearchScopeChoice::AllMailboxes)
             }
             ThreadListEvent::TypeaheadQuery { .. } => Task::none(),
             ThreadListEvent::TypeaheadSelected(idx) => self.handle_typeahead_select(idx),
@@ -1220,6 +1216,8 @@ impl ReadyApp {
             crate::ui::sidebar::order::SidebarLayouts::parse(ui_snap.sidebar_layout.as_deref());
         self.toolbar.layout =
             crate::ui::toolbar::ToolbarLayout::parse(ui_snap.toolbar_layout.as_deref());
+        self.search_scope.choice =
+            crate::ui::search_scope::SearchScopeChoice::parse(ui_snap.search_scope.as_deref());
         self.settings.persisted_preferences = Some(self.settings.committed_preferences.clone());
     }
 

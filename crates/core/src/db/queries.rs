@@ -143,6 +143,7 @@ pub struct UiBootstrapSnapshot {
     pub thread_date_groups: bool,
     pub sidebar_layout: Option<String>,
     pub toolbar_layout: Option<String>,
+    pub search_scope: Option<String>,
 }
 
 const SECURE_SETTING_KEYS: &[&str] = &[
@@ -339,6 +340,7 @@ pub fn get_ui_bootstrap_snapshot(
         thread_date_groups: get_bool("thread_date_groups", true),
         sidebar_layout: get("sidebar_layout"),
         toolbar_layout: get("toolbar_layout"),
+        search_scope: get("search_scope"),
     })
 }
 

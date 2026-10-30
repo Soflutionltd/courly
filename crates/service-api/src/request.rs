@@ -3887,6 +3887,7 @@ mod tests {
                 account_id: "acc-1".into(),
             }],
             scope_account_id: Some("acc-1".into()),
+            scope_folder_id: None,
         }
     }
 
@@ -3932,6 +3933,7 @@ mod tests {
                 account_id: "acc-1".into(),
             }],
             scope_account_id: None,
+            scope_folder_id: None,
         }
     }
 

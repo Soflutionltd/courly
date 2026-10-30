@@ -82,6 +82,7 @@ pub(crate) async fn handle_create_or_update(
                 &params.query,
                 &thread_ids,
                 params.scope_account_id.as_deref(),
+                params.scope_folder_id.as_deref(),
             )
         })
         .await
@@ -108,6 +109,7 @@ pub(crate) async fn handle_update(
                 &params.query,
                 &thread_ids,
                 params.scope_account_id.as_deref(),
+                params.scope_folder_id.as_deref(),
             )
         })
         .await

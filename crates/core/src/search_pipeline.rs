@@ -59,22 +59,25 @@ pub enum SearchResults {
 /// - Free text only (e.g. `meeting notes`) routes through Tantivy.
 /// - Both operators and free text intersects SQL candidates with Tantivy scores.
 ///
-/// `scope` is consulted by the degraded SQL fallback. Full-index paths keep
-/// the existing search behavior and let the caller apply the current view
-/// scope after row conversion.
+/// `scope` and `folder_id` narrow every path before ranking or limiting,
+/// so a scoped search never loses matches to other accounts or folders.
+/// An `account:` operator in the query overrides `scope`.
 pub fn search(
     query: &str,
     search_state: Option<&SearchReadState>,
     conn: &ReadConn<'_>,
     scope: &AccountScope,
+    folder_id: Option<&str>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<SearchResults, String> {
-    let parsed = parse_query(query);
+    let mut parsed = parse_query(query);
+    let has_query = !parsed.free_text.is_empty() || parsed.has_any_operator();
+    parsed.scope_folder_id = folder_id.map(str::to_owned);
 
     let has_free_text = !parsed.free_text.is_empty();
     let has_operators = parsed.has_any_operator();
 
-    if !has_free_text && !has_operators {
+    if !has_query {
         return Ok(SearchResults::FullIndex(Vec::new()));
     }
 
@@ -97,9 +100,9 @@ pub fn search(
 
     let result = match (has_free_text, has_operators) {
         (false, false) => unreachable!("empty search returned before routing"),
-        (false, true) => search_sql_only(&parsed, conn),
-        (true, false) => search_tantivy_only(&parsed, search_state, conn, body_read),
-        (true, true) => search_combined(&parsed, search_state, conn, body_read),
+        (false, true) => search_sql_only(&parsed, conn, scope),
+        (true, false) => search_tantivy_only(&parsed, search_state, conn, scope, body_read),
+        (true, true) => search_combined(&parsed, search_state, conn, scope, body_read),
     };
 
     match &result {
@@ -163,9 +166,9 @@ fn search_sql_fallback(
 fn search_sql_only(
     parsed: &ParsedQuery,
     conn: &ReadConn<'_>,
+    scope: &AccountScope,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
-    let scope = build_scope(parsed);
-    let threads = query_threads_read(conn, parsed, &scope, Some(200), Some(0))?;
+    let threads = query_threads_read(conn, parsed, scope, Some(200), Some(0))?;
     Ok(threads.into_iter().map(db_thread_to_unified).collect())
 }
 
@@ -176,9 +179,11 @@ fn search_tantivy_only(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
     conn: &ReadConn<'_>,
+    scope: &AccountScope,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
-    let params = build_tantivy_params(parsed);
+    let mut params = build_tantivy_params(parsed);
+    params.account_ids = scope_account_ids(scope);
     let mut results = search_state.search_with_filters(&params)?;
     enrich_with_attribution(
         &mut results,
@@ -217,6 +222,7 @@ fn search_combined(
     parsed: &ParsedQuery,
     search_state: &SearchReadState,
     conn: &ReadConn<'_>,
+    scope: &AccountScope,
     body_read: Option<&store::body_store::BodyStoreReadState>,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     // Step 1: SQL narrows the corpus by structured operators ONLY, returning
@@ -232,8 +238,7 @@ fn search_combined(
     // the actual best free-text match could be silently excluded.
     let mut sql_parsed = parsed.clone();
     sql_parsed.free_text.clear();
-    let scope = build_scope(parsed);
-    let candidate_pairs = query_thread_keys_read(conn, &sql_parsed, &scope)?;
+    let candidate_pairs = query_thread_keys_read(conn, &sql_parsed, scope)?;
     if candidate_pairs.is_empty() {
         return Ok(Vec::new());
     }
@@ -392,10 +397,13 @@ fn enrich_with_attribution(
 
 /// Determine the account scope from parsed query operators.
 ///
-/// Always returns `AccountScope::All` because account narrowing is handled
-/// internally by the SQL builder when `account:` operators are present.
-fn build_scope(_parsed: &ParsedQuery) -> AccountScope {
-    AccountScope::All
+/// The account ids a Tantivy search is limited to, `None` for every account.
+fn scope_account_ids(scope: &AccountScope) -> Option<Vec<String>> {
+    match scope {
+        AccountScope::All => None,
+        AccountScope::Single(id) => Some(vec![id.clone()]),
+        AccountScope::Multiple(ids) => Some(ids.clone()),
+    }
 }
 
 /// Build Tantivy `SearchParams` from a parsed query.
@@ -593,19 +601,23 @@ mod tests {
     // -- Scope building --
 
     #[test]
-    fn scope_is_all_when_no_account() {
-        let parsed = parse_query("is:unread");
-        let scope = build_scope(&parsed);
-        assert!(matches!(scope, AccountScope::All));
+    fn every_account_leaves_tantivy_unfiltered() {
+        assert!(scope_account_ids(&AccountScope::All).is_none());
     }
 
     #[test]
-    fn scope_is_all_when_account_present() {
-        // account: operators are handled by the SQL builder internally,
-        // so we always pass All.
-        let parsed = parse_query("account:work");
-        let scope = build_scope(&parsed);
-        assert!(matches!(scope, AccountScope::All));
+    fn a_scoped_account_filters_tantivy() {
+        assert_eq!(
+            scope_account_ids(&AccountScope::Single("acc1".to_owned())),
+            Some(vec!["acc1".to_owned()])
+        );
+        assert_eq!(
+            scope_account_ids(&AccountScope::Multiple(vec![
+                "acc1".to_owned(),
+                "acc2".to_owned()
+            ])),
+            Some(vec!["acc1".to_owned(), "acc2".to_owned()])
+        );
     }
 
     // -- Tantivy params building --

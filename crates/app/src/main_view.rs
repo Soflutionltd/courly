@@ -188,7 +188,11 @@ impl ReadyApp {
     /// rail, and the floating panes for the current mode.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn view_main_layout(&self) -> Element<'_, Message> {
-        let search = self.thread_list.search_bar().map(Message::ThreadList);
+        let search = ui::search_scope::search_field(
+            &self.search_scope,
+            &self.sidebar.accounts,
+            self.thread_list.search_bar().map(Message::ThreadList),
+        );
         let rail = ui::chrome::app_rail(self.app_mode, self.show_settings);
 
         let body: Element<'_, Message> = if self.show_settings {

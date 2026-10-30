@@ -77,6 +77,11 @@ static MIGRATIONS: &[Migration] = &[
         sql: "ALTER TABLE messages ADD COLUMN is_flag_complete INTEGER NOT NULL DEFAULT 0;
               ALTER TABLE threads ADD COLUMN is_flag_complete INTEGER NOT NULL DEFAULT 0;",
     },
+    Migration {
+        version: 103,
+        description: "Pinned search folder scope",
+        sql: "ALTER TABLE pinned_searches ADD COLUMN scope_folder_id TEXT;",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.

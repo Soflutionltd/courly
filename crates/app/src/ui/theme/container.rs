@@ -89,6 +89,8 @@ pub enum ContainerClass {
     DialogCard,
     /// Brand-colored strip across the top of the main window (search).
     TitleBar,
+    /// Title-bar search box holding the scope pill and the search input.
+    TitleSearchField,
     /// Window background the panes float on.
     Canvas,
     /// A main-window pane (folders, message list, reading pane) drawn as
@@ -138,6 +140,7 @@ impl ContainerClass {
             Self::RadioCircleUnselected => style_radio_circle_unselected,
             Self::RadioCircleInner => style_radio_circle_inner,
             Self::TitleBar => style_title_bar_container,
+            Self::TitleSearchField => style_title_search_field_container,
             Self::Canvas => style_canvas_container,
             Self::Pane => style_pane_container,
         }
@@ -153,6 +156,22 @@ fn style_title_bar_container(theme: &Theme) -> container::Style {
     };
     container::Style {
         background: Some(background.into()),
+        ..Default::default()
+    }
+}
+
+/// Same surface as the title search input, so the pill and the input read
+/// as one box.
+fn style_title_search_field_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    let background = if p.is_dark {
+        p.background.weak.color
+    } else {
+        Color::WHITE
+    };
+    container::Style {
+        background: Some(background.into()),
+        border: border::rounded(RADIUS_SM),
         ..Default::default()
     }
 }

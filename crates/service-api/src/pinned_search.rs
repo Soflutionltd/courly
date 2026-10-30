@@ -32,8 +32,8 @@ pub struct PinnedThreadRef {
 }
 
 /// `pinned_search.create_or_update` request body. Query-keyed UPSERT:
-/// if a row with this `query` already exists, its `updated_at` and
-/// `scope_account_id` advance and its `pinned_search_threads` are
+/// if a row with this `query` already exists, its `updated_at`,
+/// `scope_account_id` and `scope_folder_id` advance and its `pinned_search_threads` are
 /// replaced; otherwise a new row is inserted.
 ///
 /// The UI fires this when a search resolution carries
@@ -46,6 +46,9 @@ pub struct PinnedSearchCreateOrUpdateParams {
     pub thread_ids: Vec<PinnedThreadRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_account_id: Option<String>,
+    /// Exact folder the search was limited to; `None` for whole mailboxes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_folder_id: Option<String>,
 }
 
 /// `pinned_search.create_or_update` ack. Carries the row id so the UI
@@ -73,6 +76,9 @@ pub struct PinnedSearchUpdateParams {
     pub thread_ids: Vec<PinnedThreadRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_account_id: Option<String>,
+    /// Exact folder the search was limited to; `None` for whole mailboxes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_folder_id: Option<String>,
 }
 
 /// `pinned_search.update` ack. Empty - the id is already known to
@@ -126,6 +132,7 @@ mod tests {
                 },
             ],
             scope_account_id: Some("acc-1".into()),
+            scope_folder_id: Some("INBOX".into()),
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: PinnedSearchCreateOrUpdateParams =
@@ -139,6 +146,7 @@ mod tests {
             query: "x".into(),
             thread_ids: Vec::new(),
             scope_account_id: None,
+            scope_folder_id: None,
         };
         let json = serde_json::to_value(&p).expect("serialize");
         let obj = json.as_object().expect("object");
@@ -146,6 +154,10 @@ mod tests {
             !obj.contains_key("scope_account_id"),
             "scope_account_id=None must be omitted on the wire so an \
              AllAccounts snapshot serializes minimally"
+        );
+        assert!(
+            !obj.contains_key("scope_folder_id"),
+            "scope_folder_id=None must be omitted on the wire"
         );
     }
 
@@ -168,6 +180,7 @@ mod tests {
                 account_id: "acc-1".into(),
             }],
             scope_account_id: None,
+            scope_folder_id: None,
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: PinnedSearchUpdateParams =
@@ -218,6 +231,7 @@ mod tests {
             query: "label:nonsense".into(),
             thread_ids: Vec::new(),
             scope_account_id: None,
+            scope_folder_id: None,
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: PinnedSearchCreateOrUpdateParams =

@@ -178,6 +178,7 @@ fn build_message_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     build_date_clauses(ctx, parsed);
     build_folder_clause(ctx, parsed);
     build_in_folder_clauses(ctx, parsed);
+    build_scope_folder_clause(ctx, parsed);
     build_attachment_type_clause(ctx, parsed);
     build_has_contact_clause(ctx, parsed);
 }
@@ -382,6 +383,20 @@ fn build_in_folder_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
         })
         .collect();
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
+}
+
+/// Restrict to the caller's exact folder, by id rather than by name.
+fn build_scope_folder_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
+    let Some(folder_id) = &parsed.scope_folder_id else {
+        return;
+    };
+    let idx = ctx.push_param(Box::new(folder_id.clone()));
+    ctx.msg_clauses.push(format!(
+        "EXISTS (SELECT 1 FROM thread_folders tf \
+         WHERE tf.account_id = m.account_id \
+         AND tf.thread_id = m.thread_id \
+         AND tf.folder_id = ?{idx})"
+    ));
 }
 
 /// Build `has:<type>` / `type:` clause - filter by attachment MIME type.
@@ -946,6 +961,52 @@ mod tests {
         )
         .expect("query");
         assert_eq!(threads.len(), 2);
+    }
+
+    // -- caller folder scope --
+
+    #[test]
+    fn scope_folder_matches_the_exact_folder_in_the_scoped_account() {
+        let conn = setup_test_db();
+        let mut parsed = parse_query("");
+        parsed.scope_folder_id = Some("INBOX".to_owned());
+        let everywhere = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
+        assert_eq!(everywhere.len(), 2, "INBOX of every account");
+
+        let one_account = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::Single("acc2".to_owned()),
+            None,
+            None,
+        )
+        .expect("query");
+        assert_eq!(one_account.len(), 1);
+        assert_eq!(one_account[0].id, "t2");
+    }
+
+    #[test]
+    fn scope_folder_excludes_threads_outside_the_folder() {
+        let conn = setup_test_db();
+        let mut parsed = parse_query("from:carol");
+        parsed.scope_folder_id = Some("folder1".to_owned());
+        assert!(parsed.has_any_operator());
+        let threads = query_threads_read(
+            &ReadConn::from_raw(&conn),
+            &parsed,
+            &AccountScope::All,
+            None,
+            None,
+        )
+        .expect("query");
+        assert!(threads.is_empty(), "carol's thread is not in folder1");
     }
 
     #[test]

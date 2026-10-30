@@ -742,6 +742,7 @@ mod tests {
             thread_date_groups: true,
             sidebar_layout: None,
             toolbar_layout: None,
+            search_scope: None,
         }
     }
 

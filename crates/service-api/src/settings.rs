@@ -61,6 +61,8 @@ pub enum SettingValue {
     SidebarLayout(String),
     /// Toolbar buttons in order and label mode, as JSON.
     ToolbarLayout(String),
+    /// Where the title-bar search looks, as JSON.
+    SearchScope(String),
 }
 
 impl SettingValue {
@@ -83,6 +85,7 @@ impl SettingValue {
             Self::ThreadDateGroups(_) => "thread_date_groups",
             Self::SidebarLayout(_) => "sidebar_layout",
             Self::ToolbarLayout(_) => "toolbar_layout",
+            Self::SearchScope(_) => "search_scope",
         }
     }
 
@@ -112,7 +115,8 @@ impl SettingValue {
             | Self::OpenedFilesCleanupDays(s)
             | Self::EmailZoom(s)
             | Self::SidebarLayout(s)
-            | Self::ToolbarLayout(s) => s.clone(),
+            | Self::ToolbarLayout(s)
+            | Self::SearchScope(s) => s.clone(),
         }
     }
 }

@@ -5,6 +5,7 @@ use rust_i18n::t;
 use service_api::{PinnedSearchCreateOrUpdateParams, PinnedSearchUpdateParams, PinnedThreadRef};
 
 use crate::db::{self, Thread};
+use crate::ui::search_scope::{SearchScopeChoice, SearchScopeMessage};
 use crate::ui::sidebar::truncate_query;
 use crate::ui::thread_list::ThreadListMode;
 use crate::{Message, ReadyApp};
@@ -13,7 +14,11 @@ use rtsk::scope::ViewScope;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SearchIntent {
-    AdHoc { query: String, scope: ViewScope },
+    AdHoc {
+        query: String,
+        scope: ViewScope,
+        folder_id: Option<String>,
+    },
     SmartFolder { id: String, query: String },
     PinnedActivation { id: i64 },
     PinnedRefresh { id: i64 },
@@ -21,7 +26,6 @@ pub(crate) enum SearchIntent {
 
 #[derive(Debug, Clone)]
 struct UiSearchContext {
-    current_scope: ViewScope,
     editing_pinned_search: Option<i64>,
     entered_from_scope_view: bool,
     pinned_searches: Vec<db::PinnedSearch>,
@@ -35,7 +39,11 @@ pub(crate) enum SearchScope {
 
 #[derive(Debug, Clone)]
 pub(crate) enum SearchExecution {
-    Query { query: String, scope: SearchScope },
+    Query {
+        query: String,
+        scope: SearchScope,
+        folder_id: Option<String>,
+    },
     Snapshot { pinned_search_id: i64 },
 }
 
@@ -44,14 +52,17 @@ pub(crate) enum SearchPersistenceBehavior {
     None,
     CreatePinnedSnapshot {
         scope_account_id: Option<String>,
+        scope_folder_id: Option<String>,
     },
     UpdatePinnedSnapshot {
         id: i64,
         scope_account_id: Option<String>,
+        scope_folder_id: Option<String>,
     },
     RefreshPinnedSnapshot {
         id: i64,
         scope_account_id: Option<String>,
+        scope_folder_id: Option<String>,
     },
 }
 
@@ -122,13 +133,19 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
     };
 
     match intent.clone() {
-        SearchIntent::AdHoc { query, scope } => {
+        SearchIntent::AdHoc {
+            query,
+            scope,
+            folder_id,
+        } => {
             let scope_account_id = scope.account_id().map(ToOwned::to_owned);
+            let scope_folder_id = folder_id.clone();
             let (persistence, pinned_state) = if let Some(id) = ctx.editing_pinned_search {
                 (
                     SearchPersistenceBehavior::UpdatePinnedSnapshot {
                         id,
                         scope_account_id,
+                        scope_folder_id,
                     },
                     SearchPinnedStateBehavior::PinnedSearch {
                         active: PinnedSearchRef::Existing(id),
@@ -137,7 +154,10 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                 )
             } else {
                 (
-                    SearchPersistenceBehavior::CreatePinnedSnapshot { scope_account_id },
+                    SearchPersistenceBehavior::CreatePinnedSnapshot {
+                        scope_account_id,
+                        scope_folder_id,
+                    },
                     SearchPinnedStateBehavior::PinnedSearch {
                         active: PinnedSearchRef::FromPersistence,
                         editing: PinnedSearchRef::FromPersistence,
@@ -150,6 +170,7 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                 execution: SearchExecution::Query {
                     query,
                     scope: SearchScope::View(scope),
+                    folder_id,
                 },
                 completion: SearchCompletionBehavior {
                     persistence,
@@ -164,6 +185,7 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
             execution: SearchExecution::Query {
                 query,
                 scope: SearchScope::QueryIntrinsic,
+                folder_id: None,
             },
             completion: SearchCompletionBehavior {
                 persistence: SearchPersistenceBehavior::None,
@@ -210,11 +232,13 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                         AccountScope::Single(id) => SearchScope::View(ViewScope::Account(id)),
                         AccountScope::Multiple(_) => SearchScope::QueryIntrinsic,
                     },
+                    folder_id: ps.scope_folder_id.clone(),
                 },
                 completion: SearchCompletionBehavior {
                     persistence: SearchPersistenceBehavior::RefreshPinnedSnapshot {
                         id,
                         scope_account_id: ps.scope_account_id.clone(),
+                        scope_folder_id: ps.scope_folder_id.clone(),
                     },
                     pinned_state: SearchPinnedStateBehavior::PinnedSearch {
                         active: PinnedSearchRef::Existing(id),
@@ -251,7 +275,6 @@ impl ReadyApp {
 
     fn current_ui_search_context(&self) -> UiSearchContext {
         UiSearchContext {
-            current_scope: self.current_scope().clone(),
             editing_pinned_search: self.editing_pinned_search,
             entered_from_scope_view: self.thread_list.mode == ThreadListMode::Scope,
             pinned_searches: self.pinned_searches.clone(),
@@ -283,7 +306,11 @@ impl ReadyApp {
         self.apply_search_folder_restore(resolved.completion.folder_restore);
 
         match resolved.execution.clone() {
-            SearchExecution::Query { query, scope } => {
+            SearchExecution::Query {
+                query,
+                scope,
+                folder_id,
+            } => {
                 let generation = self.search_generation.next();
                 let db = Arc::clone(&self.db);
                 let ss = self.search_state.clone();
@@ -293,7 +320,8 @@ impl ReadyApp {
 
                 Task::perform(
                     async move {
-                        let result = execute_search(db, ss, body_store, query, scope).await;
+                        let result =
+                            execute_search(db, ss, body_store, query, scope, folder_id).await;
                         SearchExecutionResult {
                             resolved,
                             freshness: SearchFreshness::Query(generation),
@@ -360,6 +388,81 @@ impl ReadyApp {
         Task::none()
     }
 
+    /// Accounts and exact folder the title-bar search covers, from the
+    /// scope pill rather than from the sidebar account.
+    fn search_target(&self) -> (ViewScope, Option<String>) {
+        match self.search_scope.choice.effective(&self.sidebar.accounts) {
+            SearchScopeChoice::AllMailboxes => (ViewScope::AllAccounts, None),
+            SearchScopeChoice::Mailbox { account_id } => (ViewScope::Account(account_id), None),
+            SearchScopeChoice::ActiveFolder => {
+                let scope = self.current_scope().clone();
+                let folder_id = match scope {
+                    ViewScope::AllAccounts | ViewScope::Account(_) => {
+                        self.sidebar.selection.folder_id_for_thread_query()
+                    }
+                    ViewScope::SharedMailbox { .. } | ViewScope::PublicFolder { .. } => None,
+                };
+                (scope, folder_id)
+            }
+        }
+    }
+
+    pub(crate) fn handle_search_scope(&mut self, message: SearchScopeMessage) -> Task<Message> {
+        match message {
+            SearchScopeMessage::ToggleMenu => {
+                self.search_scope.menu_open = !self.search_scope.menu_open;
+                Task::none()
+            }
+            SearchScopeMessage::CloseMenu => {
+                self.search_scope.menu_open = false;
+                Task::none()
+            }
+            SearchScopeMessage::Select(choice) => {
+                self.search_scope.menu_open = false;
+                self.set_search_scope(choice)
+            }
+        }
+    }
+
+    /// Store the scope and rerun the search on screen under it.
+    pub(crate) fn set_search_scope(&mut self, choice: SearchScopeChoice) -> Task<Message> {
+        let persist = if self.search_scope.choice == choice {
+            Task::none()
+        } else {
+            self.search_scope.choice = choice;
+            self.persist_search_scope()
+        };
+        let rerun = if self.thread_list.mode == ThreadListMode::Search
+            && !self.search_query.text().trim().is_empty()
+        {
+            self.handle_search_execute()
+        } else {
+            Task::none()
+        };
+        Task::batch([persist, rerun])
+    }
+
+    fn persist_search_scope(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("settings.set: no ServiceClient yet; search scope not persisted");
+            return Task::none();
+        };
+        let json = self.search_scope.choice.to_json();
+        Task::perform(
+            async move {
+                client
+                    .set_settings(vec![service_api::SettingValue::SearchScope(json)])
+                    .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::warn!("settings.set search_scope failed: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
     pub(crate) fn handle_search_execute(&mut self) -> Task<Message> {
         self.search_debounce_deadline = None;
         let query = self.search_query.text().trim().to_string();
@@ -367,9 +470,11 @@ impl ReadyApp {
             return self.restore_folder_view();
         }
 
+        let (scope, folder_id) = self.search_target();
         let intent = SearchIntent::AdHoc {
             query,
-            scope: self.current_ui_search_context().current_scope.clone(),
+            scope,
+            folder_id,
         };
         let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
         self.dispatch_resolved_search(resolved)
@@ -390,6 +495,18 @@ impl ReadyApp {
         match result.results {
             Ok(threads) => {
                 self.thread_list.mode = ThreadListMode::Search;
+                self.thread_list.search_covers_all = match &result.resolved.execution {
+                    SearchExecution::Query {
+                        scope, folder_id, ..
+                    } => {
+                        folder_id.is_none()
+                            && matches!(
+                                execution_scope_to_account_scope(scope),
+                                AccountScope::All
+                            )
+                    }
+                    SearchExecution::Snapshot { .. } => true,
+                };
 
                 self.thread_list.set_threads(threads);
                 self.clear_thread_selection();
@@ -428,12 +545,16 @@ impl ReadyApp {
                 ) {
                     (SearchPersistenceBehavior::None, _) => Task::none(),
                     (
-                        SearchPersistenceBehavior::CreatePinnedSnapshot { scope_account_id },
+                        SearchPersistenceBehavior::CreatePinnedSnapshot {
+                            scope_account_id,
+                            scope_folder_id,
+                        },
                         SearchExecution::Query { query, .. },
                     ) => {
                         if let Some(client) = self.service_client.as_ref().cloned() {
                             let query = query.clone();
                             let scope_account_id = scope_account_id.clone();
+                            let scope_folder_id = scope_folder_id.clone();
                             let completion = result.resolved.completion.clone();
                             let params = PinnedSearchCreateOrUpdateParams {
                                 query,
@@ -445,6 +566,7 @@ impl ReadyApp {
                                     })
                                     .collect(),
                                 scope_account_id,
+                                scope_folder_id,
                             };
                             Task::perform(
                                 async move {
@@ -472,12 +594,14 @@ impl ReadyApp {
                         SearchPersistenceBehavior::UpdatePinnedSnapshot {
                             id,
                             scope_account_id,
+                            scope_folder_id,
                         },
                         SearchExecution::Query { query, .. },
                     ) => {
                         if let Some(client) = self.service_client.as_ref().cloned() {
                             let query = query.clone();
                             let scope_account_id = scope_account_id.clone();
+                            let scope_folder_id = scope_folder_id.clone();
                             let id = *id;
                             let completion = result.resolved.completion.clone();
                             let params = PinnedSearchUpdateParams {
@@ -491,6 +615,7 @@ impl ReadyApp {
                                     })
                                     .collect(),
                                 scope_account_id,
+                                scope_folder_id,
                             };
                             Task::perform(
                                 async move {
@@ -516,12 +641,14 @@ impl ReadyApp {
                         SearchPersistenceBehavior::RefreshPinnedSnapshot {
                             id,
                             scope_account_id,
+                            scope_folder_id,
                         },
                         SearchExecution::Query { query, .. },
                     ) => {
                         if let Some(client) = self.service_client.as_ref().cloned() {
                             let query = query.clone();
                             let scope_account_id = scope_account_id.clone();
+                            let scope_folder_id = scope_folder_id.clone();
                             let id = *id;
                             let completion = result.resolved.completion.clone();
                             let params = PinnedSearchUpdateParams {
@@ -535,6 +662,7 @@ impl ReadyApp {
                                     })
                                     .collect(),
                                 scope_account_id,
+                                scope_folder_id,
                             };
                             Task::perform(
                                 async move {
@@ -966,6 +1094,7 @@ pub(crate) async fn execute_search(
     body_store: Option<rtsk::body_store::BodyStoreReadState>,
     query: String,
     scope: rtsk::db::types::AccountScope,
+    folder_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
     db.with_read(move |conn| {
         // M2 fix: pass body_store so per-message attribution can score body
@@ -979,6 +1108,7 @@ pub(crate) async fn execute_search(
             search_state.as_deref(),
             conn,
             &scope,
+            folder_id.as_deref(),
             body_store.as_ref(),
         )?;
         let results = match results {

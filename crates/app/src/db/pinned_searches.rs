@@ -14,6 +14,7 @@ pub struct PinnedSearch {
     pub created_at: i64,
     pub updated_at: i64,
     pub scope_account_id: Option<String>,
+    pub scope_folder_id: Option<String>,
     #[allow(dead_code)]
     pub thread_ids: Option<Vec<(String, String)>>,
 }
@@ -25,6 +26,7 @@ fn db_pinned_search_to_app(ps: DbPinnedSearch) -> PinnedSearch {
         created_at: ps.created_at,
         updated_at: ps.updated_at,
         scope_account_id: ps.scope_account_id,
+        scope_folder_id: ps.scope_folder_id,
         thread_ids: ps.thread_ids,
     }
 }

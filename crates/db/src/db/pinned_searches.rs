@@ -12,6 +12,7 @@ pub struct DbPinnedSearch {
     pub created_at: i64,
     pub updated_at: i64,
     pub scope_account_id: Option<String>,
+    pub scope_folder_id: Option<String>,
     pub thread_ids: Option<Vec<(String, String)>>,
 }
 
@@ -26,6 +27,7 @@ pub fn db_create_or_update_pinned_search_sync(
     query: &str,
     thread_ids: &[(String, String)],
     scope_account_id: Option<&str>,
+    scope_folder_id: Option<&str>,
 ) -> Result<i64, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -40,17 +42,18 @@ pub fn db_create_or_update_pinned_search_sync(
     let pinned_id = if let Some(id) = existing_id {
         tx.execute(
             "UPDATE pinned_searches
-             SET updated_at = unixepoch(), scope_account_id = ?1
-             WHERE id = ?2",
-            params![scope_account_id, id],
+             SET updated_at = unixepoch(), scope_account_id = ?1, scope_folder_id = ?2
+             WHERE id = ?3",
+            params![scope_account_id, scope_folder_id, id],
         )
         .map_err(|e| e.to_string())?;
         id
     } else {
         tx.execute(
-            "INSERT INTO pinned_searches (query, created_at, updated_at, scope_account_id)
-             VALUES (?1, unixepoch(), unixepoch(), ?2)",
-            params![query, scope_account_id],
+            "INSERT INTO pinned_searches
+                 (query, created_at, updated_at, scope_account_id, scope_folder_id)
+             VALUES (?1, unixepoch(), unixepoch(), ?2, ?3)",
+            params![query, scope_account_id, scope_folder_id],
         )
         .map_err(|e| e.to_string())?;
         tx.last_insert_rowid()
@@ -94,6 +97,7 @@ pub fn db_update_pinned_search_sync(
     query: &str,
     thread_ids: &[(String, String)],
     scope_account_id: Option<&str>,
+    scope_folder_id: Option<&str>,
 ) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -111,9 +115,10 @@ pub fn db_update_pinned_search_sync(
 
     tx.execute(
         "UPDATE pinned_searches
-         SET query = ?1, updated_at = unixepoch(), scope_account_id = ?2
-         WHERE id = ?3",
-        params![query, scope_account_id, id],
+         SET query = ?1, updated_at = unixepoch(), scope_account_id = ?2,
+             scope_folder_id = ?3
+         WHERE id = ?4",
+        params![query, scope_account_id, scope_folder_id, id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -155,7 +160,7 @@ pub async fn db_list_pinned_searches(db: &WriterPool) -> Result<Vec<DbPinnedSear
     db.with_write(|conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT id, query, created_at, updated_at, scope_account_id
+                "SELECT id, query, created_at, updated_at, scope_account_id, scope_folder_id
                  FROM pinned_searches
                  ORDER BY updated_at DESC",
             )
@@ -168,6 +173,7 @@ pub async fn db_list_pinned_searches(db: &WriterPool) -> Result<Vec<DbPinnedSear
                 created_at: row.get("created_at")?,
                 updated_at: row.get("updated_at")?,
                 scope_account_id: row.get("scope_account_id")?,
+                scope_folder_id: row.get("scope_folder_id")?,
                 thread_ids: None,
             })
         })
