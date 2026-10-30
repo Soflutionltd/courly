@@ -59,7 +59,7 @@ fn group_for(date: Option<Date>, today: Date) -> DateGroup {
     let month_start = today.first_of_month();
     let last_month_start = month_start
         .checked_sub(1.day())
-        .map_or(Date::MIN, |d| d.first_of_month());
+        .map_or(Date::MIN, Date::first_of_month);
 
     if date >= today {
         DateGroup::Today
