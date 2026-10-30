@@ -50,7 +50,7 @@ pub fn section_break<'a, M: 'a>() -> Element<'a, M> {
 }
 
 pub fn collapsible_section<'a, M: Clone + 'a>(
-    title: &'a str,
+    title: impl text::IntoFragment<'a>,
     expanded: bool,
     on_toggle: M,
     children: Vec<Element<'a, M>>,
@@ -95,7 +95,10 @@ pub fn collapsible_section<'a, M: Clone + 'a>(
     col.into()
 }
 
-pub fn empty_placeholder<'a, M: 'a>(title: &'a str, subtitle: &'a str) -> Element<'a, M> {
+pub fn empty_placeholder<'a, M: 'a>(
+    title: impl text::IntoFragment<'a>,
+    subtitle: impl text::IntoFragment<'a>,
+) -> Element<'a, M> {
     container(
         column![
             text(title)

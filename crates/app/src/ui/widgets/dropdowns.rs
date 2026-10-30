@@ -44,7 +44,7 @@ impl DropdownIcon<'_> {
 /// One entry in a dropdown menu.
 pub struct DropdownEntry<'a, M> {
     pub icon: DropdownIcon<'a>,
-    pub label: &'a str,
+    pub label: std::borrow::Cow<'a, str>,
     pub selected: bool,
     pub on_press: M,
 }
@@ -53,7 +53,7 @@ pub struct DropdownEntry<'a, M> {
 /// Both trigger and items share the same two-slot layout.
 pub fn dropdown<'a, M: Clone + 'a>(
     trigger_icon: DropdownIcon<'a>,
-    trigger_label: &'a str,
+    trigger_label: impl text::IntoFragment<'a>,
     open: bool,
     on_toggle: M,
     items: Vec<DropdownEntry<'a, M>>,

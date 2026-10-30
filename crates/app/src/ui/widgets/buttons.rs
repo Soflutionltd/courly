@@ -2,6 +2,7 @@
 
 use iced::widget::{button, container, row, text};
 use iced::{Alignment, Element, Length, Theme};
+use rust_i18n::t;
 
 use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
@@ -117,8 +118,12 @@ pub fn compose_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
             row![
                 container(icon::pencil().size(ICON_LG).color(theme::ON_AVATAR))
                     .align_y(Alignment::Center),
-                container(text("Compose").size(TEXT_LG).color(theme::ON_AVATAR))
-                    .align_y(Alignment::Center),
+                container(
+                    text(t!("main.sidebar.compose"))
+                        .size(TEXT_LG)
+                        .color(theme::ON_AVATAR)
+                )
+                .align_y(Alignment::Center),
             ]
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center),
@@ -209,8 +214,12 @@ pub fn settings_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
             row![
                 container(icon::settings().size(ICON_LG).style(text::primary))
                     .align_y(Alignment::Center),
-                container(text("Settings").size(TEXT_LG).style(text::primary))
-                    .align_y(Alignment::Center),
+                container(
+                    text(t!("main.sidebar.settings"))
+                        .size(TEXT_LG)
+                        .style(text::primary)
+                )
+                .align_y(Alignment::Center),
             ]
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center),

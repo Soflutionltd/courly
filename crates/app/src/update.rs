@@ -9,6 +9,7 @@ use crate::ui::calendar::CalendarMessage;
 use crate::ui::layout::RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH;
 use crate::{app::AppMode, handlers};
 use iced::Task;
+use rust_i18n::t;
 use std::sync::Arc;
 
 impl ReadyApp {
@@ -317,7 +318,7 @@ impl ReadyApp {
                             }
                             service_api::SyncPauseReason::NeedsAttention => {
                                 ui::status_bar::WarningKind::ConnectionFailure {
-                                    message: "Account paused; attention required".to_string(),
+                                    message: t!("main.status.account_paused").into_owned(),
                                 }
                             }
                         };
@@ -836,10 +837,11 @@ impl ReadyApp {
                 result,
             } => {
                 let confirmation = match &result {
-                    Ok(()) if notified => "Response sent to the organizer".to_string(),
-                    Ok(()) => "Response saved".to_string(),
-                    Err(error) => format!("Response failed: {error}"),
-                };
+                    Ok(()) if notified => t!("main.status.invite_response_sent"),
+                    Ok(()) => t!("main.status.invite_response_saved"),
+                    Err(error) => t!("main.status.invite_response_failed", error = error),
+                }
+                .into_owned();
                 self.status_bar.show_confirmation(confirmation);
                 let succeeded = result.is_ok();
                 self.reading_pane
@@ -936,15 +938,15 @@ impl ReadyApp {
                     .iter()
                     .any(service_api::actions::ActionOutcome::is_failed);
                 if all_failed {
-                    self.status_bar
-                        .show_confirmation(format!("\u{26A0} Undo failed: {desc}"));
-                } else if any_failed {
                     self.status_bar.show_confirmation(
-                        "\u{26A0} Undo partially failed \u{2014} some changes may revert"
-                            .to_string(),
+                        t!("main.status.undo_failed", action = desc).into_owned(),
                     );
+                } else if any_failed {
+                    self.status_bar
+                        .show_confirmation(t!("main.status.undo_partially_failed").into_owned());
                 } else {
-                    self.status_bar.show_confirmation(format!("Undone: {desc}"));
+                    self.status_bar
+                        .show_confirmation(t!("main.status.undone", action = desc).into_owned());
                 }
                 {
                     let token = self.nav_generation.next();

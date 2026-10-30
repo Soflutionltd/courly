@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::layout::*;
@@ -62,7 +63,9 @@ pub(super) fn pinned_public_folders_section(sidebar: &Sidebar) -> Element<'_, Si
         })
         .collect();
 
-    let header = text("PUBLIC FOLDERS").size(TEXT_XS).style(text::secondary);
+    let header = text(t!("main.sidebar.public_folders"))
+        .size(TEXT_XS)
+        .style(text::secondary);
 
     let mut col = column![header].spacing(SPACE_XXXS);
     for item in items {

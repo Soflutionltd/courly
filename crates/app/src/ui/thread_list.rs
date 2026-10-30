@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length, Padding, Task};
+use rust_i18n::t;
 
 use crate::component::Component;
 use crate::db::Thread;
@@ -191,8 +192,8 @@ impl ThreadList {
             selected_thread: None,
             selected_threads: HashSet::new(),
             last_selected_anchor: None,
-            folder_name: "Inbox".to_string(),
-            scope_name: "All".to_string(),
+            folder_name: t!("main.folder.inbox").into_owned(),
+            scope_name: t!("main.thread_list.scope_all").into_owned(),
             mode: ThreadListMode::Scope,
             search_query: String::new(),
             pinned_search_updated_at: None,
@@ -207,7 +208,7 @@ impl ThreadList {
     /// in the list header. Keeps the `search-bar` id that focus commands
     /// target.
     pub fn search_bar(&self) -> Element<'_, ThreadListMessage> {
-        text_input("Search", &self.search_query)
+        text_input(t!("main.search.placeholder"), &self.search_query)
             .id("search-bar")
             .on_input(ThreadListMessage::SearchInput)
             .on_submit(ThreadListMessage::SearchSubmit)
@@ -544,8 +545,14 @@ impl Component for ThreadList {
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
             let (title, subtitle) = match self.mode {
-                ThreadListMode::Scope => ("No conversations", "This view is empty"),
-                ThreadListMode::Search => ("No results", "Try a different search"),
+                ThreadListMode::Scope => (
+                    t!("main.thread_list.empty_title"),
+                    t!("main.thread_list.empty_subtitle"),
+                ),
+                ThreadListMode::Search => (
+                    t!("main.search.no_results_title"),
+                    t!("main.search.no_results_subtitle"),
+                ),
             };
             widgets::empty_placeholder(title, subtitle)
         } else {
@@ -573,9 +580,9 @@ fn thread_list_header<'a>(
     pinned_search_updated_at: Option<i64>,
 ) -> Element<'a, ThreadListMessage> {
     let staleness: Option<Element<'a, ThreadListMessage>> = pinned_search_updated_at.map(|ts| {
-        text(format!(
-            "Last updated {}",
-            crate::ui::sidebar::format_relative_time(ts)
+        text(t!(
+            "main.search.last_updated",
+            time = crate::ui::sidebar::format_relative_time(ts)
         ))
         .size(TEXT_XS)
         .style(theme::TextClass::Tertiary.style())
@@ -584,12 +591,12 @@ fn thread_list_header<'a>(
 
     let context_row: Element<'a, ThreadListMessage> = if selection_count > 1 {
         // Multi-selection: show count and deselect link.
-        let count_text = text(format!("{selection_count} selected"))
+        let count_text = text(t!("main.thread_list.selected", count = selection_count))
             .size(TEXT_SM)
             .style(theme::TextClass::Accent.style());
 
         let deselect_link = button(
-            text("Deselect")
+            text(t!("main.thread_list.deselect"))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -614,12 +621,16 @@ fn thread_list_header<'a>(
             .align_y(iced::Alignment::Center)
             .into(),
             ThreadListMode::Search => {
-                let results_text = text(format!("{thread_count} results"))
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style());
+                let results_text = text(if thread_count == 1 {
+                    t!("main.search.results_one", count = thread_count)
+                } else {
+                    t!("main.search.results_other", count = thread_count)
+                })
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style());
 
                 let all_link = button(
-                    text("All")
+                    text(t!("main.search.widen_all"))
                         .size(TEXT_SM)
                         .style(theme::TextClass::Accent.style()),
                 )

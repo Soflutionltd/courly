@@ -1,5 +1,6 @@
 use iced::Element;
 use iced::widget::mouse_area;
+use rust_i18n::t;
 
 use crate::ui::label_paint::LabelPaint;
 use crate::ui::widgets;
@@ -58,7 +59,7 @@ pub(super) fn labels_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .collect();
 
     widgets::collapsible_section(
-        "LABELS",
+        t!("main.sidebar.labels"),
         sidebar.labels_expanded,
         SidebarMessage::ToggleLabelsSection,
         children,

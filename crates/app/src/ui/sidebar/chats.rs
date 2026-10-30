@@ -1,5 +1,6 @@
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -17,7 +18,7 @@ pub(super) fn chats_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .collect();
 
     widgets::collapsible_section(
-        "CHATS",
+        t!("main.sidebar.chats"),
         sidebar.chats_expanded,
         SidebarMessage::ToggleChatsSection,
         children,
@@ -117,12 +118,13 @@ fn format_relative_time_short(timestamp: i64) -> String {
     let delta = jiff::Timestamp::now().duration_since(dt);
 
     if delta.as_secs() < 60 {
-        "now".to_string()
+        t!("main.sidebar.chat_time.now")
     } else if delta.as_mins() < 60 {
-        format!("{}m", delta.as_mins())
+        t!("main.sidebar.chat_time.minutes", count = delta.as_mins())
     } else if delta.as_hours() < 24 {
-        format!("{}h", delta.as_hours())
+        t!("main.sidebar.chat_time.hours", count = delta.as_hours())
     } else {
-        format!("{}d", delta.as_hours() / 24)
+        t!("main.sidebar.chat_time.days", count = delta.as_hours() / 24)
     }
+    .into_owned()
 }

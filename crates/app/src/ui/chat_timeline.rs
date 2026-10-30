@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use iced::widget::{Space, button, column, container, image, row, scrollable, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::component::Component;
 use crate::ui::layout::*;
@@ -125,7 +126,7 @@ impl Component for ChatTimeline {
 
         if self.loading && self.messages.is_empty() {
             let loading = container(
-                text("Loading...")
+                text(t!("main.chat.loading"))
                     .size(TEXT_MD)
                     .style(theme::TextClass::Muted.style()),
             )
@@ -142,7 +143,7 @@ impl Component for ChatTimeline {
         // history to fetch.
         if !self.messages.is_empty() && self.has_more {
             let load_btn = iced::widget::button(
-                text("Load older messages")
+                text(t!("main.chat.load_older"))
                     .size(TEXT_MD)
                     .style(theme::TextClass::Accent.style()),
             )
@@ -212,7 +213,7 @@ fn chat_header<'a>(contact_email: &'a str, has_messages: bool) -> Element<'a, Ch
         .style(theme::TextClass::Default.style());
 
     let mut view_btn = iced::widget::button(
-        text("View as email")
+        text(t!("main.chat.view_as_email"))
             .size(TEXT_SM)
             .style(theme::TextClass::Muted.style()),
     )
@@ -268,15 +269,15 @@ fn chat_bubble<'a>(
     }
     .map(str::to_string)
     .or_else(|| msg.subject.clone())
-    .unwrap_or_else(|| "(no content)".to_string());
+    .unwrap_or_else(|| t!("main.chat.no_content").into_owned());
 
     let mut content = column![text(body).size(TEXT_MD)].spacing(SPACE_XXXS);
 
     if was_stripped {
         let toggle_label = if expanded {
-            "Show less"
+            t!("main.chat.show_less")
         } else {
-            "Show full message"
+            t!("main.chat.show_full_message")
         };
         let toggle = button(
             text(toggle_label)
@@ -405,11 +406,16 @@ fn format_date_label(timestamp: i64) -> String {
     let msg_date = local_date(timestamp);
 
     if msg_date == today {
-        "Today".to_string()
+        t!("date.today").into_owned()
     } else if msg_date == today.yesterday().unwrap_or(today) {
-        "Yesterday".to_string()
+        t!("date.yesterday").into_owned()
     } else {
-        msg_date.strftime("%B %e").to_string()
+        t!(
+            "main.chat.date_separator",
+            month = crate::i18n::month_name(msg_date.month()),
+            day = msg_date.day()
+        )
+        .into_owned()
     }
 }
 
