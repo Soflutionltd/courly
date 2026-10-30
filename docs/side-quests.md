@@ -39,7 +39,7 @@ conflate them.
 | Path | Role |
 | --- | --- |
 | `./research/bifrost`, `./research/saehrimnir` | In-tree working copies. The reading reference AND the staging area where side-quest edits are made. |
-| `../bifrost`, `../sæhrimnir` | The live dependency. What Cargo `path = "..."` resolves to, and what `cargo install` builds the mock from. |
+| `../bifrost`, `../saehrimnir` | The live dependency. What Cargo `path = "..."` resolves to, and what `cargo install` builds the mock from. |
 
 Keeping a copy in-tree is what lets agents read and edit dependency source
 without tripping up the harness. `./research/bifrost/reference/` holds per-crate
@@ -51,7 +51,7 @@ source.
 ## Reading is expected; writing is the prohibition
 
 Side-quest work is never delegated to an implement run. Codex and other
-implement agents must not EDIT `../bifrost`, `../sæhrimnir`, or the
+implement agents must not EDIT `../bifrost`, `../saehrimnir`, or the
 `./research/` copies - even when the spec names the side-quest surface as a
 required prerequisite - and every implement prompt that runs while a side-quest
 is pending states this prohibition explicitly.

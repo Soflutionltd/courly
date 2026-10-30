@@ -2,7 +2,7 @@
 
 Lua-driven test runtime for Service IO-boundary tests. Lives in courly's `app` crate; orchestrated from outside by brokkr. Remaining harness work is in the root `TODO.md`.
 
-The architecture is mirrored on the brokkr side as `notes/courly-service-harness.md` in the brokkr repository. Both documents stay in sync; this one is authoritative for the courly side.
+The architecture is mirrored on the brokkr side, in the brokkr repository's notes. Both documents stay in sync; this one is authoritative for the courly side.
 
 The target cohort is Service tests that start the Service behind an **OS-level IO boundary** - a subprocess - and then wait on boot, dispatch, drain, crash, or framing behaviour. The wall-clock-timeout and child-exit-race failure modes that motivate the harness only apply when there's a real child process to race against.
 
@@ -344,5 +344,5 @@ why the new number is correct - never to make a red gate green.
 - **Replacing `brokkr test`.** The cargo single-test runner stays. Service IO-boundary tests use the new harness; everything else uses `brokkr test`.
 - **Fixing the underlying Service bugs.** The harness exists to make bugs deterministic and diagnosable, not to hide them. The Service side owns the drain-ordering / class-aware emit / crashloop fixes.
 - **Migrating every existing tokio test.** The new harness coexists with libtest. Unit-style `#[tokio::test]` functions stay there. The migration target is the Service IO-boundary cohort.
-- **Owning the mock servers.** Sync-bench reuses the artefact / lockfile / history machinery and the harness binary, but protocol mocks live in `../sæhrimnir` and orchestration lives in brokkr. Courly owns only the test-only endpoint overrides, sync-trigger requests, and sync-harness scripts.
+- **Owning the mock servers.** Sync-bench reuses the artefact / lockfile / history machinery and the harness binary, but protocol mocks live in `../saehrimnir` and orchestration lives in brokkr. Courly owns only the test-only endpoint overrides, sync-trigger requests, and sync-harness scripts.
 - **CI-only features.** First user is a local developer root-causing a flake. CI integration follows once the local story works.

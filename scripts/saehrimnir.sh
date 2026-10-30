@@ -4,9 +4,9 @@
 #
 # The spec-loop edits saehrimnir ONLY in courly/research/saehrimnir - inside
 # the harness root, so Opus agents (and the orchestrator) can write there.
-# research/saehrimnir and ../sæhrimnir are two clones of the same repo
+# research/saehrimnir and ../saehrimnir are two clones of the same repo
 # (github.com/Soflutionltd/saehrimnir). This script pushes the staged commit from
-# research/saehrimnir, pulls it into ../sæhrimnir, then reinstalls the
+# research/saehrimnir, pulls it into ../saehrimnir, then reinstalls the
 # saehrimnir binary so brokkr's sync-harness picks up the change.
 #
 # Orchestrator-only. It round-trips through GitHub (network), so it can NEVER
@@ -23,10 +23,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/research/saehrimnir"
 git push
 
-cd "$ROOT/../sæhrimnir"
+cd "$ROOT/../saehrimnir"
 git pull
 
-cargo install --path "$ROOT/../sæhrimnir"
+cargo install --path "$ROOT/../saehrimnir"
 
 echo "saehrimnir reinstalled at:"
 git rev-parse HEAD

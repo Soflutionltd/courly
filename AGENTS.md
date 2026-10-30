@@ -33,7 +33,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 - Anything touching (email provider) folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync - `reference/glossary/folders-labels.md`.
 - Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface - `reference/glossary/overlay-surfaces.md`.
 - Service test harness, sync-harness scripts, harness Lua bindings, `app --test-harness`, `dellingr` VM, `brokkr service`/`sync`, gate baselines, or anything touching `crates/app/tests/service-harness/` or `crates/app/tests/sync-harness/` - `reference/glossary/harness.md`.
-- Any change to `bifrost` or `saehrimnir` (the sibling dependency repos), or any courly work blocked on one - `docs/side-quests.md`. Read it BEFORE editing anything under `./research/`, `../bifrost`, or `../sæhrimnir`.
+- Any change to `bifrost` or `saehrimnir` (the sibling dependency repos), or any courly work blocked on one - `docs/side-quests.md`. Read it BEFORE editing anything under `./research/`, `../bifrost`, or `../saehrimnir`.
 
 ## Rules
 
