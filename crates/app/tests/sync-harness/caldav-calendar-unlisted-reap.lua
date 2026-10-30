@@ -40,10 +40,10 @@ local function state(client, account_id, label)
     return value
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-local caldav_endpoint = harness.env("RATATOSKR_TEST_CALDAV_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+local caldav_endpoint = harness.env("COURLY_TEST_CALDAV_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-harness.assert(caldav_endpoint ~= nil, "RATATOSKR_TEST_CALDAV_ENDPOINT missing")
+harness.assert(caldav_endpoint ~= nil, "COURLY_TEST_CALDAV_ENDPOINT missing")
 
 local personal_url = harness.join_url(caldav_endpoint, "calendars/account-1/cal-personal/")
 local work_url = harness.join_url(caldav_endpoint, "calendars/account-1/cal-work/")

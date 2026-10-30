@@ -42,7 +42,7 @@ local function wait_for_action_completed(queue, plan_id, timeout)
 end
 
 -- Gmail is OAuth-only: mint a bearer for the fixture's primary account.
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 local token_url = harness.join_url(admin_endpoint, "oauth/token")
 local token_response = harness.http_json({

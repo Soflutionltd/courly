@@ -84,7 +84,7 @@ pub async fn probe(domain: &str, email: &str) -> Option<String> {
 
     // WebFinger is required to be served over HTTPS (RFC 7033 §4.2). The
     // shared client builder enforces `https_only(true)` in production and
-    // relaxes it only when `RATATOSKR_TEST_DISCOVERY_BASE` is set; the
+    // relaxes it only when `COURLY_TEST_DISCOVERY_BASE` is set; the
     // 3-hop redirect cap bounds redirect-walk attacks in both modes.
     let client = super::discovery_client()?;
 

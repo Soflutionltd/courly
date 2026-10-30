@@ -84,8 +84,8 @@ local function read_thread(client, account_id, thread_id, label)
     return state
 end
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local dir = harness.data_dir("sync_jmap_email_set_empty_mailboxids")
 local client, err = harness.spawn(dir)

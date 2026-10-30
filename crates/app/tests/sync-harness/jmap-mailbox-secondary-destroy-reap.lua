@@ -57,8 +57,8 @@ local function jmap_call(endpoint, method, args, call_id)
     return response.methodResponses[1][2]
 end
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local dir = harness.data_dir("sync_jmap_mailbox_secondary_destroy_reap")
 local client, err = harness.spawn(dir)

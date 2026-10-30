@@ -26,7 +26,7 @@ local function find_message(state, subject)
     return nil
 end
 
-local endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(endpoint ~= nil, "saehrimnir admin endpoint missing")
 local dir = harness.data_dir("imap_shared_folder_revoked")
 local client, err = harness.spawn(dir)

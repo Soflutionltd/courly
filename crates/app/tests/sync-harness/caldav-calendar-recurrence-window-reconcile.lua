@@ -48,10 +48,10 @@ local function assert_http_ok(response, label)
     harness.assert(response.ok, label .. " returned status " .. tostring(response.status))
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-local caldav_endpoint = harness.env("RATATOSKR_TEST_CALDAV_ENDPOINT")
-harness.assert(caldav_endpoint ~= nil, "RATATOSKR_TEST_CALDAV_ENDPOINT missing")
+local caldav_endpoint = harness.env("COURLY_TEST_CALDAV_ENDPOINT")
+harness.assert(caldav_endpoint ~= nil, "COURLY_TEST_CALDAV_ENDPOINT missing")
 harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("sync_caldav_calendar_recurrence_window_reconcile")

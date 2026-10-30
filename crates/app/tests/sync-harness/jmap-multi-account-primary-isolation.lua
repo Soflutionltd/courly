@@ -99,8 +99,8 @@ local function mutate_other_account(endpoint)
     harness.assert(body.newState ~= body.oldState, "secondary mutation did not advance state")
 end
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 harness.clear_mock_requests(jmap_endpoint)
 
 local dir = harness.data_dir("sync_jmap_multi_account_primary_isolation")

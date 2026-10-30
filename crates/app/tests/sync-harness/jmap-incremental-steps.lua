@@ -118,8 +118,8 @@ local function record_jmap_requests(requests)
         summary_email_query + harness.request_count(requests, "jmap", "Email/query")
 end
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local dir = harness.data_dir("sync_jmap_incremental_steps")
 local client, err = harness.spawn(dir)

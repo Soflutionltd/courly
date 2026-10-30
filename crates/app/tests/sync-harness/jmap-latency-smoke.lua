@@ -8,8 +8,8 @@ local function assert_latency_absent(snapshot, key)
     harness.assert(snapshot[key] == nil, "latency key still present: " .. key)
 end
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local initial_latency = harness.latency(jmap_endpoint)
 assert_latency_absent(initial_latency, "global")

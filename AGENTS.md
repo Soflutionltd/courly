@@ -46,7 +46,7 @@ Read the doc before starting work in its area. Subagents launched for these task
 ### Behavioral gates
 
 - A green `brokkr check` is necessary but NOT sufficient for anything touching sync, actions, calendar, or contacts. It proves the code compiles and unit tests pass, not that real provider sync still behaves. Changes in those areas name and run the relevant `brokkr service` / sync-harness scripts, plus `brokkr sync --bench` where performance is in scope. A change satisfiable by a compile-only replacement is under-gated.
-- No parallel hand-rolled dependency may survive alongside a bifrost equivalent. `scripts/b15-audit.sh` mechanically walks every crate's manifest and module tree for dependencies with a bifrost equivalent, modules claiming provider transport duty, and dead `RATATOSKR_TEST_*` consumers. Re-run it after any deletion or dependency work; every flag is either deleted or retained with a stated rationale.
+- No parallel hand-rolled dependency may survive alongside a bifrost equivalent. `scripts/b15-audit.sh` mechanically walks every crate's manifest and module tree for dependencies with a bifrost equivalent, modules claiming provider transport duty, and dead `COURLY_TEST_*` consumers. Re-run it after any deletion or dependency work; every flag is either deleted or retained with a stated rationale.
 
 ### Bash rules
 
@@ -112,7 +112,7 @@ Sync harness scripts live under `crates/app/tests/sync-harness/`.
 
 `saehrimnir` is the external mock-provider server used by sync harness
 scripts. Brokkr starts it, injects
-`RATATOSKR_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, and scripts
+`COURLY_TEST_{JMAP,IMAP,SMTP,GRAPH,GMAIL}_ENDPOINT`, and scripts
 exercise ratatoskr's real provider sync against those endpoints.
 
 ## Dev-Seed

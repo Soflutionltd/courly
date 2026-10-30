@@ -1614,7 +1614,7 @@ pub enum RequestParams {
     },
     /// Runs the discovery cascade for an email address and returns the
     /// full `DiscoveredConfig` for harness assertions. Driven against
-    /// saehrimnir via `RATATOSKR_TEST_DISCOVERY_BASE`.
+    /// saehrimnir via `COURLY_TEST_DISCOVERY_BASE`.
     TestRunDiscovery {
         params: TestRunDiscoveryParams,
     },

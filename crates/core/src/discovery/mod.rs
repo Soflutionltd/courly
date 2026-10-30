@@ -249,14 +249,14 @@ fn elapsed_ms(start: Instant) -> u64 {
 ///
 /// Saehrimnir mounts the discovery routes (WebFinger, OIDC, autoconfig)
 /// on its JMAP HTTP listener, so we reuse the existing
-/// `RATATOSKR_TEST_JMAP_ENDPOINT` plumbing rather than adding a new
+/// `COURLY_TEST_JMAP_ENDPOINT` plumbing rather than adding a new
 /// brokkr-side env-var slot. Functionally identical.
-const DISCOVERY_TEST_BASE_ENV: &str = "RATATOSKR_TEST_JMAP_ENDPOINT";
+const DISCOVERY_TEST_BASE_ENV: &str = "COURLY_TEST_JMAP_ENDPOINT";
 
 /// Build the shared reqwest client for discovery probes
 /// (`webfinger::probe`, `oidc::probe_issuer`, `dyn_registration::register`).
 ///
-/// `https_only` is relaxed when `RATATOSKR_TEST_DISCOVERY_BASE` is set so
+/// `https_only` is relaxed when `COURLY_TEST_DISCOVERY_BASE` is set so
 /// the probes can reach saehrimnir on plain HTTP localhost. The env var is
 /// the only gate; production builds where it is unset get the same
 /// `https_only(true)` posture they had before this helper existed.
@@ -288,7 +288,7 @@ pub(super) async fn read_capped_text(mut response: reqwest::Response) -> Option<
     String::from_utf8(body).ok()
 }
 
-/// If `RATATOSKR_TEST_DISCOVERY_BASE` is set, rewrite an `https://{host}/...`
+/// If `COURLY_TEST_DISCOVERY_BASE` is set, rewrite an `https://{host}/...`
 /// URL so the request lands on saehrimnir at `${BASE}/{host}/...`. Query and
 /// fragment are preserved. Plain HTTP URLs (which only appear in test mode
 /// for chained-issuer documents whose absolute href already points at the

@@ -87,7 +87,7 @@ end
 -- source gone / message gone). The flag-writeback gate covers UID STORE.
 
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 
 local dir = harness.data_dir("sync_imap_writeback_move_delete")

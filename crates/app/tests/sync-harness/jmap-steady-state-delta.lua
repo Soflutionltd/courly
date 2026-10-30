@@ -13,8 +13,8 @@ local function account_by_id(state, account_id)
     return nil
 end
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local dir = harness.data_dir("sync_jmap_steady_state_delta")
 local client, err = harness.spawn(dir)

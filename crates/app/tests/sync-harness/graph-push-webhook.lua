@@ -67,7 +67,7 @@ local function namespace(entry)
     return entry.namespace or entry.resource_class or entry.classification or entry.class
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 harness.clear_mock_requests(admin_endpoint)
 
@@ -75,12 +75,12 @@ local loopback = harness.free_tcp_addr()
 local notification_url = "http://" .. loopback .. "/graph/push"
 local dir = harness.data_dir("sync_graph_push_webhook")
 local client, err = harness.spawn(dir, nil, {
-    RATATOSKR_GRAPH_PUSH_LOOPBACK = loopback,
-    RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL = notification_url,
+    COURLY_GRAPH_PUSH_LOOPBACK = loopback,
+    COURLY_GRAPH_PUSH_NOTIFICATION_URL = notification_url,
     -- bifrost refuses to subscribe with a notification URL but no shared
     -- clientState secret (the receiver could not validate notifications),
     -- so the harness must provide one alongside the URL.
-    RATATOSKR_GRAPH_PUSH_CLIENT_STATE = "harness-graph-push-secret",
+    COURLY_GRAPH_PUSH_CLIENT_STATE = "harness-graph-push-secret",
 })
 harness.assert(err == nil, "spawn failed")
 

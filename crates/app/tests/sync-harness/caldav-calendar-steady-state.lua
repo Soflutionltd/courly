@@ -4,8 +4,8 @@
 -- protocol: caldav
 -- ceiling: 120s
 
-local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-local caldav = harness.env("RATATOSKR_TEST_CALDAV_ENDPOINT")
+local admin = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+local caldav = harness.env("COURLY_TEST_CALDAV_ENDPOINT")
 harness.assert(admin ~= nil and caldav ~= nil, "calendar mock endpoint missing")
 local dir = harness.data_dir("sync_caldav_calendar_steady_state")
 local client, err = harness.spawn(dir)

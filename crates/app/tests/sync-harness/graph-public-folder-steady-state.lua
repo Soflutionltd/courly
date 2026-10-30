@@ -14,7 +14,7 @@ local function account_by_id(state, account_id)
     return nil
 end
 
-local graph_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local graph_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(graph_endpoint ~= nil, "saehrimnir admin endpoint missing")
 
 local dir = harness.data_dir("sync_graph_public_folder_steady_state")

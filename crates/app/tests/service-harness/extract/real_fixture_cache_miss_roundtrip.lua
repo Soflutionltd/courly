@@ -127,7 +127,7 @@ local function fetch_cache_miss(client, account_id, row)
     return fetched
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 harness.clear_mock_requests(admin_endpoint)
 

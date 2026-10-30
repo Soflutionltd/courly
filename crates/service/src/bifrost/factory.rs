@@ -159,7 +159,7 @@ pub(crate) fn factory_from_decrypted(
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
     match provider {
         MailProviderKind::Gmail => {
-            let test_api_base = std::env::var("RATATOSKR_TEST_GMAIL_ENDPOINT")
+            let test_api_base = std::env::var("COURLY_TEST_GMAIL_ENDPOINT")
                 .ok()
                 .and_then(|endpoint| gmail_api_base_from_test_endpoint(&endpoint));
             let mut factory = if let Some(api_base) = test_api_base {
@@ -169,7 +169,7 @@ pub(crate) fn factory_from_decrypted(
                     access_token,
                     api_base,
                 )
-            } else if std::env::var("RATATOSKR_TEST_GCAL_ENDPOINT").is_ok() {
+            } else if std::env::var("COURLY_TEST_GCAL_ENDPOINT").is_ok() {
                 let access_token =
                     decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
                 bifrost_google::account::GoogleAccountFactory::from_access_token_with_api_base(
@@ -185,25 +185,31 @@ pub(crate) fn factory_from_decrypted(
             // host from Gmail mail, so it carries its own base override. The
             // harness redirects it to the saehrimnir People mock; bifrost's
             // default base ends in `/v1`, which the mock routes mirror.
-            if let Ok(people_endpoint) = std::env::var("RATATOSKR_TEST_PEOPLE_ENDPOINT") {
+            if let Ok(people_endpoint) = std::env::var("COURLY_TEST_PEOPLE_ENDPOINT") {
                 factory = factory
                     .with_people_api_base(format!("{}/v1", people_endpoint.trim_end_matches('/')));
             }
-            if let Ok(topic) = std::env::var("RATATOSKR_GMAIL_PUBSUB_TOPIC") {
+            if let Ok(gcal_endpoint) = std::env::var("COURLY_TEST_GCAL_ENDPOINT") {
+                factory = factory.with_calendar_api_base(format!(
+                    "{}/calendar/v3",
+                    gcal_endpoint.trim_end_matches('/')
+                ));
+            }
+            if let Ok(topic) = std::env::var("COURLY_GMAIL_PUBSUB_TOPIC") {
                 factory =
                     factory.with_pubsub_config(bifrost_google::account::PubSubConfig::new(topic));
             }
             Ok(Arc::new(factory))
         }
         MailProviderKind::Graph => {
-            let graph_base = std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT")
+            let graph_base = std::env::var("COURLY_TEST_GRAPH_ENDPOINT")
                 .ok()
                 .map(|base| format!("{}/v1.0", base.trim_end_matches('/')))
                 .unwrap_or_else(|| "https://graph.microsoft.com/v1.0".to_string());
             // GraphClient takes a single v1.0 api base now and derives the
             // sibling bases from it internally, so the separately-constructed
             // beta base this used to thread through is gone rather than moved.
-            let client = if std::env::var("RATATOSKR_TEST_GRAPH_ENDPOINT").is_ok() {
+            let client = if std::env::var("COURLY_TEST_GRAPH_ENDPOINT").is_ok() {
                 let access_token =
                     decrypted.required_plain("access_token", decrypted.access_token.as_deref())?;
                 GraphClient::with_api_base(graph_base, access_token)
@@ -219,15 +225,15 @@ pub(crate) fn factory_from_decrypted(
             // therefore a misconfiguration, not a degraded mode - the account
             // stays on delta polling (EWS streaming is never enabled here)
             // rather than subscribing with a secret nobody can check.
-            if let Ok(webhook_url) = std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL") {
-                match std::env::var("RATATOSKR_GRAPH_PUSH_CLIENT_STATE") {
+            if let Ok(webhook_url) = std::env::var("COURLY_GRAPH_PUSH_NOTIFICATION_URL") {
+                match std::env::var("COURLY_GRAPH_PUSH_CLIENT_STATE") {
                     Ok(client_state) if !client_state.is_empty() => {
                         factory =
                             factory.with_push_endpoint_client_state(webhook_url, client_state);
                     }
                     _ => log::warn!(
-                        "RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL is set without a non-empty \
-                         RATATOSKR_GRAPH_PUSH_CLIENT_STATE; Graph webhook subscriptions are \
+                        "COURLY_GRAPH_PUSH_NOTIFICATION_URL is set without a non-empty \
+                         COURLY_GRAPH_PUSH_CLIENT_STATE; Graph webhook subscriptions are \
                          disabled because the receiver could not validate them"
                     ),
                 }
@@ -318,7 +324,7 @@ pub async fn build_calendar_account_factory(
             decrypted.required_plain("caldav_password", decrypted.caldav_password.as_deref())?;
         return Ok(Some(Arc::new(CalDavAccountFactory::new(
             CalDavConfig::new(
-                std::env::var("RATATOSKR_TEST_CALDAV_ENDPOINT").unwrap_or(url),
+                std::env::var("COURLY_TEST_CALDAV_ENDPOINT").unwrap_or(url),
                 CalDavCredentials::Basic { username, password },
             ),
         ))));
@@ -338,7 +344,7 @@ fn build_jmap_factory(
     provider: MailProviderKind,
     token_mode: &TokenMode,
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
-    let url = match std::env::var("RATATOSKR_TEST_JMAP_ENDPOINT") {
+    let url = match std::env::var("COURLY_TEST_JMAP_ENDPOINT") {
         Ok(url) => url,
         Err(_) => account.required_plain("jmap_url", account.row.jmap_url.as_deref())?,
     };
@@ -365,11 +371,11 @@ fn build_imap_factory(
     token_mode: &TokenMode,
 ) -> Result<Arc<dyn AccountFactory>, BifrostBuildError> {
     let (imap_host, imap_port, imap_security, allow_cleartext_auth) =
-        if let Ok(endpoint) = std::env::var("RATATOSKR_TEST_IMAP_ENDPOINT") {
+        if let Ok(endpoint) = std::env::var("COURLY_TEST_IMAP_ENDPOINT") {
             let (host, port) =
                 parse_host_port(&endpoint).ok_or_else(|| BifrostBuildError::InvalidConfig {
                     account_id: account.row.id.clone(),
-                    detail: format!("invalid RATATOSKR_TEST_IMAP_ENDPOINT {endpoint}"),
+                    detail: format!("invalid COURLY_TEST_IMAP_ENDPOINT {endpoint}"),
                 })?;
             (host, Some(port), "none".to_string(), true)
         } else {
@@ -434,8 +440,8 @@ fn build_imap_factory(
     // credentials (the shared OAuth source or DAV basic credentials). This
     // deliberately leaves ordinary IMAP accounts Unsupported for contacts.
     if let Some(url) = account.row.caldav_url.as_deref() {
-        let endpoint = std::env::var("RATATOSKR_TEST_CARDDAV_ENDPOINT")
-            .or_else(|_| std::env::var("RATATOSKR_TEST_CALDAV_ENDPOINT"))
+        let endpoint = std::env::var("COURLY_TEST_CARDDAV_ENDPOINT")
+            .or_else(|_| std::env::var("COURLY_TEST_CALDAV_ENDPOINT"))
             .unwrap_or_else(|_| url.to_string());
         let carddav_credentials = match shared_source.clone() {
             Some(source) => Some(CardDavCredentials::bearer_source(source)),
@@ -757,22 +763,22 @@ impl DecryptedAccountCredentials {
         &self,
         oauth_source: Option<Arc<dyn TokenSource>>,
     ) -> Result<Option<SmtpSubmissionConfig>, BifrostBuildError> {
-        // Harness redirect: when RATATOSKR_TEST_SMTP_ENDPOINT is set, the SMTP
+        // Harness redirect: when COURLY_TEST_SMTP_ENDPOINT is set, the SMTP
         // submission transport must target the saehrimnir mock (host:port,
         // plaintext) instead of the persisted submission host, which under the
         // harness is a non-resolvable placeholder (e.g. smtp.example.test).
-        // This mirrors the RATATOSKR_TEST_IMAP_ENDPOINT override in
+        // This mirrors the COURLY_TEST_IMAP_ENDPOINT override in
         // `build_imap_factory`. Plaintext (not STARTTLS) is required: the mock's
         // self-signed cert would be rejected by `starttls_relay`'s native-tls
         // verifier, and the mock accepts cleartext AUTH.
-        let test_endpoint = std::env::var("RATATOSKR_TEST_SMTP_ENDPOINT")
+        let test_endpoint = std::env::var("COURLY_TEST_SMTP_ENDPOINT")
             .ok()
             .filter(|endpoint| !endpoint.is_empty());
         let (host, tls, port_override) = if let Some(endpoint) = &test_endpoint {
             let (host, port) =
                 parse_host_port(endpoint).ok_or_else(|| BifrostBuildError::InvalidConfig {
                     account_id: self.row.id.clone(),
-                    detail: format!("invalid RATATOSKR_TEST_SMTP_ENDPOINT {endpoint}"),
+                    detail: format!("invalid COURLY_TEST_SMTP_ENDPOINT {endpoint}"),
                 })?;
             (host, SubmissionTls::Plaintext, Some(port))
         } else {

@@ -29,10 +29,10 @@ local function graph_url(base, suffix)
     return harness.join_url(harness.join_url(base, "v1.0"), suffix)
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
-local graph_endpoint = harness.env("RATATOSKR_TEST_GRAPH_ENDPOINT")
-harness.assert(graph_endpoint ~= nil, "RATATOSKR_TEST_GRAPH_ENDPOINT missing")
+local graph_endpoint = harness.env("COURLY_TEST_GRAPH_ENDPOINT")
+harness.assert(graph_endpoint ~= nil, "COURLY_TEST_GRAPH_ENDPOINT missing")
 harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("sync_graph_calendar_remote_delta")

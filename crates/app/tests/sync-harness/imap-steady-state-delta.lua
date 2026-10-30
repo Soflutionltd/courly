@@ -30,7 +30,7 @@ local function body_fetch_count(requests)
 end
 
 -- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 
 local dir = harness.data_dir("sync_imap_steady_state_delta")

@@ -4,8 +4,8 @@
 -- protocol: jmap
 -- ceiling: 60s
 
-local endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local snapshot = harness.snapshot_state(endpoint)
 harness.assert_eq(snapshot.name, "jmap-calendar-oauth", "fixture name")

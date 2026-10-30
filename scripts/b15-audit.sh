@@ -34,9 +34,9 @@ if rg -n -i '(provider transport|legacy provider|imap client|jmap client|graph c
     flag 'provider-transport claim outside the Bifrost implementation'
 fi
 
-# (c) `RATATOSKR_TEST_*` consumers whose endpoint no longer exists.
-allowed_endpoints='RATATOSKR_TEST_(JMAP|IMAP|SMTP|GRAPH|GMAIL|CALDAV|CARDDAV|PEOPLE|GCAL)_ENDPOINT|RATATOSKR_TEST_DISCOVERY_BASE'
-if rg -n -o 'RATATOSKR_TEST_[A-Z_]+' crates --glob '*.rs' \
+# (c) `COURLY_TEST_*` consumers whose endpoint no longer exists.
+allowed_endpoints='COURLY_TEST_(JMAP|IMAP|SMTP|GRAPH|GMAIL|CALDAV|CARDDAV|PEOPLE|GCAL)_ENDPOINT|COURLY_TEST_DISCOVERY_BASE'
+if rg -n -o 'COURLY_TEST_[A-Z_]+' crates --glob '*.rs' \
     | awk -F: '{print $NF}' | sort -u | rg -v "^${allowed_endpoints}$"; then
     flag 'unknown or orphaned test endpoint consumer'
 fi

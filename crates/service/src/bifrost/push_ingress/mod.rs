@@ -30,11 +30,11 @@ impl PushIngressConfig {
     #[must_use]
     pub fn from_env() -> Self {
         Self {
-            gmail_pubsub_subscription: std::env::var("RATATOSKR_GMAIL_PUBSUB_SUBSCRIPTION").ok(),
-            graph_loopback_addr: std::env::var("RATATOSKR_GRAPH_PUSH_LOOPBACK").ok(),
-            graph_notification_url: std::env::var("RATATOSKR_GRAPH_PUSH_NOTIFICATION_URL").ok(),
-            gmail_pubsub_topic: std::env::var("RATATOSKR_GMAIL_PUBSUB_TOPIC").ok(),
-            gmail_pubsub_mock_endpoint: std::env::var("RATATOSKR_GMAIL_PUBSUB_MOCK_ENDPOINT").ok(),
+            gmail_pubsub_subscription: std::env::var("COURLY_GMAIL_PUBSUB_SUBSCRIPTION").ok(),
+            graph_loopback_addr: std::env::var("COURLY_GRAPH_PUSH_LOOPBACK").ok(),
+            graph_notification_url: std::env::var("COURLY_GRAPH_PUSH_NOTIFICATION_URL").ok(),
+            gmail_pubsub_topic: std::env::var("COURLY_GMAIL_PUBSUB_TOPIC").ok(),
+            gmail_pubsub_mock_endpoint: std::env::var("COURLY_GMAIL_PUBSUB_MOCK_ENDPOINT").ok(),
         }
     }
 }

@@ -6,8 +6,8 @@
 
 -- Saehrimnir mounts discovery on its JMAP listener; ratatoskr reuses the
 -- JMAP endpoint env var as the discovery base.
-local discovery_base = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(discovery_base ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local discovery_base = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(discovery_base ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local dir = harness.data_dir("discovery_webfinger")
 local client, err = harness.spawn(dir)

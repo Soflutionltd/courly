@@ -5,7 +5,7 @@
 -- ceiling: 120s
 -- The resident policy is deterministic and unit-pinned; this sync --bench keeps
 -- the provider-facing account-wide route measurable in the harness.
-local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin ~= nil, "saehrimnir admin endpoint missing")
 
 -- Google resolves its account from the bearer, so mint a token bound to

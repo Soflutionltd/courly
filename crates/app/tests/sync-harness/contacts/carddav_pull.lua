@@ -4,8 +4,8 @@
 -- protocol: carddav
 -- ceiling: 120s
 
-local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-local carddav = harness.env("RATATOSKR_TEST_CARDDAV_ENDPOINT") or harness.env("RATATOSKR_TEST_CALDAV_ENDPOINT")
+local admin = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+local carddav = harness.env("COURLY_TEST_CARDDAV_ENDPOINT") or harness.env("COURLY_TEST_CALDAV_ENDPOINT")
 harness.assert(carddav ~= nil, "CardDAV endpoint missing")
 
 local client, spawn_err = harness.spawn(harness.data_dir("b8_carddav_pull"))

@@ -4,8 +4,8 @@
 -- protocol: discovery
 -- ceiling: 30s
 
-local discovery_base = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(discovery_base ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local discovery_base = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(discovery_base ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 
 local dir = harness.data_dir("discovery_autoconfig")
 local client, err = harness.spawn(dir)

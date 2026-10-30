@@ -14,8 +14,8 @@
 -- submission FROM the account TO the original sender.
 
 local function smtp_log_url()
-    local base = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-    harness.assert(base ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+    local base = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+    harness.assert(base ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
     if string.sub(base, -1) == "/" then
         return base .. "test/smtp/submissions"
     end

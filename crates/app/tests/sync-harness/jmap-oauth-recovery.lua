@@ -4,8 +4,8 @@
 -- protocol: jmap
 -- ceiling: 120s
 
-local jmap_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
-harness.assert(jmap_endpoint ~= nil, "RATATOSKR_TEST_JMAP_ENDPOINT missing")
+local jmap_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(jmap_endpoint ~= nil, "COURLY_TEST_JMAP_ENDPOINT missing")
 local token_url = harness.join_url(jmap_endpoint, "oauth/token")
 
 local dir = harness.data_dir("sync_jmap_oauth_recovery")

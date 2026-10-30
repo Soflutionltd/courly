@@ -8,7 +8,7 @@ local function by_email(rows, email)
     for _, row in ipairs(rows) do if row.email == email then return row end end
 end
 
-local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin ~= nil, "saehrimnir admin endpoint missing")
 
 local client, spawn_err = harness.spawn(harness.data_dir("b8_jmap_pull"))

@@ -61,7 +61,7 @@ harness.assert_eq(account.email, "test@example.com", "owner row is keyed on acco
 -- the eventual data-correctness fix show up as a gate change, not silent drift.
 -- saehrimnir serves ONE admin surface, on the JMAP listener, whatever protocol
 -- the fixture speaks - hence the JMAP endpoint var in a Graph gate.
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 -- `expect` names the change-script step and 409s on a cursor mismatch, so an
 -- out-of-phase step fails loudly instead of silently applying the wrong one.

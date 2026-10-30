@@ -145,7 +145,7 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
 
     // OIDC discovery is required to be HTTPS end-to-end. The shared client
     // builder enforces `https_only(true)` in production and relaxes it only
-    // when `RATATOSKR_TEST_DISCOVERY_BASE` is set; the 3-hop redirect cap
+    // when `COURLY_TEST_DISCOVERY_BASE` is set; the 3-hop redirect cap
     // bounds redirect-walk attacks in both modes.
     let client = super::discovery_client()?;
 

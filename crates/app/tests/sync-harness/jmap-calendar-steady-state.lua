@@ -4,7 +4,7 @@
 -- protocol: jmap
 -- ceiling: 120s
 
-local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin ~= nil, "saehrimnir admin endpoint missing")
 local dir = harness.data_dir("sync_jmap_calendar_steady_state")
 local client, err = harness.spawn(dir)

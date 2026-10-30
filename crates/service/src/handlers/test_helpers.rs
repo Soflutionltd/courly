@@ -1794,7 +1794,7 @@ pub(super) async fn query_blob_tombstone_state_handle(
 
 /// Harness probe: runs `rtsk::discovery::discover` for the given email
 /// and returns the full `DiscoveredConfig` as JSON. Wired against
-/// saehrimnir via `RATATOSKR_TEST_DISCOVERY_BASE`; the cascade's reqwest
+/// saehrimnir via `COURLY_TEST_DISCOVERY_BASE`; the cascade's reqwest
 /// clients pick the env var up and route to the local listener.
 pub(super) async fn run_discovery_handle(
     params: TestRunDiscoveryParams,

@@ -4,7 +4,7 @@
 -- protocol: graph
 -- ceiling: 120s
 
-local admin = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 
 local client, spawn_err = harness.spawn(harness.data_dir("b8_writeback_graph"))
 harness.assert(spawn_err == nil, "spawn failed")

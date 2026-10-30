@@ -164,20 +164,20 @@ Test-only flags are intentional and unconditionally compiled in (ratatoskr is pr
 Provider mock endpoints are env vars consulted on every provider boot; unset in normal use, set by the harness to redirect traffic to `saehrimnir`-hosted mocks:
 
 ```
-RATATOSKR_TEST_JMAP_ENDPOINT
-RATATOSKR_TEST_IMAP_ENDPOINT
-RATATOSKR_TEST_SMTP_ENDPOINT
-RATATOSKR_TEST_GRAPH_ENDPOINT
-RATATOSKR_TEST_GMAIL_ENDPOINT
-RATATOSKR_TEST_CALDAV_ENDPOINT
-RATATOSKR_TEST_CARDDAV_ENDPOINT
-RATATOSKR_TEST_PEOPLE_ENDPOINT
-RATATOSKR_TEST_GCAL_ENDPOINT
+COURLY_TEST_JMAP_ENDPOINT
+COURLY_TEST_IMAP_ENDPOINT
+COURLY_TEST_SMTP_ENDPOINT
+COURLY_TEST_GRAPH_ENDPOINT
+COURLY_TEST_GMAIL_ENDPOINT
+COURLY_TEST_CALDAV_ENDPOINT
+COURLY_TEST_CARDDAV_ENDPOINT
+COURLY_TEST_PEOPLE_ENDPOINT
+COURLY_TEST_GCAL_ENDPOINT
 ```
 
 JMAP endpoints are passed as base URLs and the JMAP client discovers `/.well-known/jmap`; Graph origins map to `/v1.0` and `/beta`; Gmail origins map to `/gmail/v1/users/me`; IMAP and SMTP expect host:port. This lets brokkr pass per-run mock ports without changing persisted account config.
 
-`RATATOSKR_TEST_GRAPH_ENDPOINT` also carries Autodiscover and EWS traffic: `saehrimnir` mounts the POX `/autodiscover/autodiscover.xml` and SOAP `autodiscover.svc` / EWS routes on the same Graph listener in addition to its dedicated EWS listener, and bifrost's Autodiscover / EWS base derives from the Graph api-base override when set, mirroring the existing Gmail / GCAL / People harness-redirect seams. There is no separate EWS env var; a script that needs delegate discovery or public-folder sync reaches both surfaces through the one Graph endpoint.
+`COURLY_TEST_GRAPH_ENDPOINT` also carries Autodiscover and EWS traffic: `saehrimnir` mounts the POX `/autodiscover/autodiscover.xml` and SOAP `autodiscover.svc` / EWS routes on the same Graph listener in addition to its dedicated EWS listener, and bifrost's Autodiscover / EWS base derives from the Graph api-base override when set, mirroring the existing Gmail / GCAL / People harness-redirect seams. There is no separate EWS env var; a script that needs delegate discovery or public-folder sync reaches both surfaces through the one Graph endpoint.
 
 The sync-harness request surface includes `test.start_sync` / `TestStartSync` (kicks the real Service sync runtime - initial when `accounts.initial_sync_completed = 0`, then delta), `test.query_db_state` / `TestQueryDbState` (returns account, label, thread, message, attachment, calendar, contact, contact-group, credential, and bounded small-row snapshots for assertions), and the calendar-action counterparts. Lua scripts that need the terminal sync result call `client:start_sync({ account_id = ... })`, which routes through `ServiceClient::start_sync` and consumes raw `sync.completed` frames in the waiter map (they are not delivered to `client:notifications()`).
 

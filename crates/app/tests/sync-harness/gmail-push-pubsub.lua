@@ -69,7 +69,7 @@ local function apply_step(endpoint, step_id)
     return response
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 local token_url = harness.join_url(admin_endpoint, "oauth/token")
 local access_token = mint_token(token_url)
@@ -77,9 +77,9 @@ harness.clear_mock_requests(admin_endpoint)
 
 local dir = harness.data_dir("sync_gmail_push_pubsub")
 local client, err = harness.spawn(dir, nil, {
-    RATATOSKR_GMAIL_PUBSUB_TOPIC = "projects/saehrimnir/topics/mock",
-    RATATOSKR_GMAIL_PUBSUB_SUBSCRIPTION = "projects/saehrimnir/subscriptions/mock",
-    RATATOSKR_GMAIL_PUBSUB_MOCK_ENDPOINT = admin_endpoint,
+    COURLY_GMAIL_PUBSUB_TOPIC = "projects/saehrimnir/topics/mock",
+    COURLY_GMAIL_PUBSUB_SUBSCRIPTION = "projects/saehrimnir/subscriptions/mock",
+    COURLY_GMAIL_PUBSUB_MOCK_ENDPOINT = admin_endpoint,
 })
 harness.assert(err == nil, "spawn failed")
 

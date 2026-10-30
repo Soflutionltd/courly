@@ -66,7 +66,7 @@ local function wait_for_content_hashes(client, account_id, filenames, timeout_s)
     return nil
 end
 
-local admin_endpoint = harness.env("RATATOSKR_TEST_JMAP_ENDPOINT")
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
 harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
 local token_url = harness.join_url(admin_endpoint, "oauth/token")
 harness.clear_mock_requests(admin_endpoint)
