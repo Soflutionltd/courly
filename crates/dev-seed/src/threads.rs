@@ -257,6 +257,10 @@ pub fn generate_threads(
         };
         let is_important = rng.random::<f64>() < 0.05;
         let is_muted = rng.random::<f64>() < 0.01;
+        // Derived from the id, not drawn from `rng`, so every value seeded
+        // after this point stays the same as before the column existed.
+        let is_flag_complete =
+            !is_starred && thread_id.bytes().map(u32::from).sum::<u32>() % 25 == 0;
 
         // ~8% of multi-message threads end with a forward, so the ↪ glyph
         // and the "Fwd: …" subject derivation get exercised in dev. Picked
@@ -280,8 +284,8 @@ pub fn generate_threads(
         conn.execute(
             "INSERT INTO threads (id, account_id, subject, snippet, last_message_at,
              message_count, is_read, is_starred, has_attachments,
-             is_important, is_pinned, is_snoozed, snooze_until, is_muted)
-             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12)",
+             is_important, is_pinned, is_snoozed, snooze_until, is_muted, is_flag_complete)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 thread_id,
                 acc.id,
@@ -295,6 +299,7 @@ pub fn generate_threads(
                 is_snoozed as i32,
                 snooze_until,
                 is_muted as i32,
+                is_flag_complete as i32,
             ],
         )
         .map_err(|e| format!("insert thread: {e}"))?;
