@@ -187,6 +187,8 @@ pub struct ThreadMessage {
     pub is_replied: bool,
     pub is_forwarded: bool,
     pub has_meeting_invite: bool,
+    /// iMIP `method=` token (`REQUEST`, `REPLY`, `CANCEL`), when present.
+    pub meeting_invite_method: Option<String>,
     pub meeting_invite_uid: Option<String>,
     /// Whether this message was sent by the account owner.
     pub is_own_message: bool,

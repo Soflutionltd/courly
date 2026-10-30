@@ -6,7 +6,6 @@ use crate::message::Message;
 use crate::pop_out::{self, PopOutWindow, compose::ComposeMode};
 use crate::ui;
 use crate::ui::add_account::AddAccountMessage;
-use crate::ui::calendar::CalendarMessage;
 use crate::ui::reading_pane::{ReadingPaneEvent, ReadingPaneMessage};
 use crate::ui::settings::{SettingsEvent, SettingsMessage};
 use crate::ui::sidebar::{SidebarEvent, SidebarMessage};
@@ -280,56 +279,73 @@ impl ReadyApp {
                 self.create_event_from_email(message_index)
             }
             ReadingPaneEvent::RespondToMeetingInvite {
-                message_index,
+                message_id,
+                account_id,
+                event_id,
                 response,
-            } => self.respond_to_meeting_invite(message_index, response),
+                reply,
+            } => self.respond_to_meeting_invite(message_id, account_id, event_id, response, reply),
             ReadingPaneEvent::ToggleStar => {
                 self.update(Message::ExecuteCommand(CommandId::EmailStar))
             }
         }
     }
 
-    /// Resolve a reading-pane iMIP invite against the locally synced calendar
-    /// cache, then use the normal calendar-action pipeline. Ambiguous and
-    /// unsynced UIDs intentionally do not compose a standalone iMIP reply.
+    /// Resolve each open meeting request against the synced calendar so
+    /// its card can show the slot, the day's conflicts and RSVP controls.
+    pub(crate) fn load_meeting_invites(&mut self) -> Task<Message> {
+        let accounts = &self.sidebar.accounts;
+        let lookups = self.reading_pane.pending_invite_lookups(|account_id| {
+            accounts
+                .iter()
+                .any(|account| account.id == account_id && account.provider == "graph")
+        });
+        Task::batch(lookups.into_iter().map(|(message_id, account_id, uid)| {
+            let db = Arc::clone(&self.db);
+            Task::perform(
+                async move { db.load_meeting_invite(account_id, uid).await },
+                move |result| {
+                    Message::ReadingPane(ReadingPaneMessage::InviteLoaded(
+                        message_id.clone(),
+                        result,
+                    ))
+                },
+            )
+        }))
+    }
+
+    /// Send an invite response through the calendar-action pipeline.
     fn respond_to_meeting_invite(
         &mut self,
-        message_index: usize,
+        message_id: String,
+        account_id: String,
+        event_id: String,
         response: service_api::RsvpResponse,
+        reply: service_api::WireRsvpReply,
     ) -> Task<Message> {
-        let Some(message) = self.reading_pane.thread_messages.get(message_index) else {
-            return Task::none();
-        };
-        let Some(uid) = message.meeting_invite_uid.clone() else {
-            self.status_bar
-                .show_confirmation("Sync this calendar to respond".to_string());
-            return Task::none();
-        };
         let Some(client) = self.service_client.as_ref().cloned() else {
-            self.status_bar
-                .show_confirmation("Cannot respond: service not connected".to_string());
+            self.reading_pane.finish_invite_response(
+                &message_id,
+                Err("Cannot respond: service not connected".to_string()),
+            );
             return Task::none();
         };
-        let account_id = message.account_id.clone();
-        let db = Arc::clone(&self.db);
+        let notified = reply.send_response;
+        let plan = service_api::CalendarActionPlan {
+            plan_id: service_api::PlanId::new_v7(),
+            operations: vec![service_api::CalendarActionWireOperation {
+                operation_id: service_api::OperationId(0),
+                account_id,
+                operation: service_api::WireCalendarOperation::RsvpEvent {
+                    event_id,
+                    response,
+                    reply,
+                },
+            }],
+        };
+        let plan_id = plan.plan_id;
         Task::perform(
             async move {
-                let event_id = db
-                    .resolve_meeting_invite_event(account_id.clone(), uid)
-                    .await?
-                    .ok_or_else(|| "Sync this calendar to respond".to_string())?;
-                let plan = service_api::CalendarActionPlan {
-                    plan_id: service_api::PlanId::new_v7(),
-                    operations: vec![service_api::CalendarActionWireOperation {
-                        operation_id: service_api::OperationId(0),
-                        account_id,
-                        operation: service_api::WireCalendarOperation::RsvpEvent {
-                            event_id,
-                            response,
-                        },
-                    }],
-                };
-                let plan_id = plan.plan_id;
                 client
                     .execute_calendar_plan(plan)
                     .await
@@ -340,7 +356,11 @@ impl ReadyApp {
                     .map_err(|e| e.to_string())?;
                 crate::handlers::calendar::completion_to_result(&completed)
             },
-            |result| Message::Calendar(Box::new(CalendarMessage::RsvpCompleted(result))),
+            move |result| Message::MeetingInviteResponded {
+                message_id: message_id.clone(),
+                notified,
+                result,
+            },
         )
     }
 

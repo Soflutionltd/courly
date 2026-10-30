@@ -20,6 +20,34 @@ impl Db {
             .await
     }
 
+    /// Resolve an invite UID to its synced event and every event on that
+    /// event's local day. `None` when no single synced event matches.
+    pub async fn load_meeting_invite(
+        &self,
+        account_id: String,
+        uid: String,
+    ) -> Result<Option<crate::ui::invite_card::InviteDetails>, String> {
+        let Some(event_id) = self.resolve_meeting_invite_event(account_id, uid).await? else {
+            return Ok(None);
+        };
+        let Some(event) = self.get_calendar_event(event_id).await? else {
+            return Ok(None);
+        };
+        let (day_start, day_end) = crate::ui::invite_card::local_day_window(
+            event.start_time,
+            &jiff::tz::TimeZone::system(),
+        )?;
+        let mut day_events = self
+            .load_calendar_events_for_view(day_start, day_end)
+            .await?;
+        day_events.retain(|ev| ev.start_time < day_end && ev.end_time > day_start);
+        day_events.sort_by_key(|ev| (!ev.all_day, ev.start_time));
+        Ok(Some(crate::ui::invite_card::InviteDetails {
+            event,
+            day_events,
+        }))
+    }
+
     /// Load a single calendar event by its DB id.
     pub async fn get_calendar_event(
         &self,

@@ -182,6 +182,18 @@ pub const PAD_THREAD_SEPARATOR: Padding = Padding {
     bottom: 0.0,
     left: 12.0,
 };
+/// Label column of the meeting invite card ("When", "Organizer", ...).
+pub const INVITE_LABEL_WIDTH: f32 = 84.0;
+/// Accept / Tentative / Decline buttons on the meeting invite card.
+pub const INVITE_RESPONSE_BUTTON_WIDTH: f32 = 128.0;
+/// Date field of the propose-new-time row (YYYY-MM-DD).
+pub const INVITE_DATE_INPUT_WIDTH: f32 = 120.0;
+/// Time fields of the propose-new-time row (HH:MM).
+pub const INVITE_TIME_INPUT_WIDTH: f32 = 72.0;
+/// Time column of the day agenda beside an invite.
+pub const INVITE_AGENDA_TIME_WIDTH: f32 = 96.0;
+/// Width of the day agenda beside an invite.
+pub const INVITE_AGENDA_WIDTH: f32 = 280.0;
 
 /// Right sidebar section header padding
 pub const PAD_RIGHT_SIDEBAR: Padding = Padding {

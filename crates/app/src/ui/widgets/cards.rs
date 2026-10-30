@@ -280,6 +280,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     date_display: DateDisplay,
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
+    invite: Option<Element<'a, M>>,
     html_body: Option<Element<'a, M>>,
     on_link: impl Fn(String) -> M + 'a,
     on_toggle: impl Fn(usize) -> M,
@@ -289,7 +290,6 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_forward: impl Fn(usize) -> M,
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
-    on_rsvp: impl Fn(usize, service_api::RsvpResponse) -> M,
 ) -> Element<'a, M> {
     let sender_name = msg
         .from_name
@@ -424,43 +424,11 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .style(theme::ContainerClass::EmailBody.style())
         .into();
 
-    let rsvp_actions: Option<Element<'_, M>> = msg.has_meeting_invite.then(|| {
-        let respond = |label, response| {
-            let button = button(text(label).size(TEXT_SM).style(text::secondary))
-                .padding(PAD_ICON_BTN)
-                .style(theme::ButtonClass::Ghost.style());
-            if msg.meeting_invite_uid.is_some() {
-                button.on_press(on_rsvp(index, response))
-            } else {
-                button
-            }
-        };
-        let controls = row![
-            text("Meeting invite").size(TEXT_SM).style(text::secondary),
-            respond("Accept", service_api::RsvpResponse::Accepted),
-            respond("Decline", service_api::RsvpResponse::Declined),
-            respond("Tentative", service_api::RsvpResponse::Tentative),
-        ]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center);
-        if msg.meeting_invite_uid.is_some() {
-            controls.into()
-        } else {
-            column![
-                controls,
-                text("Sync this calendar to respond")
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Muted.style())
-            ]
-            .spacing(SPACE_XXXS)
-            .into()
-        }
-    });
-
-    let mut card_content = column![header, body].spacing(SPACE_XS);
-    if let Some(rsvp_actions) = rsvp_actions {
-        card_content = card_content.push(rsvp_actions);
+    let mut card_content = column![header].spacing(SPACE_XS);
+    if let Some(invite) = invite {
+        card_content = card_content.push(invite);
     }
+    card_content = card_content.push(body);
 
     container(card_content)
         .padding(PAD_CARD)

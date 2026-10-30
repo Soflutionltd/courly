@@ -373,6 +373,12 @@ pub enum Message {
         GenerationToken<ThreadDetail>,
         Result<db::AppThreadDetail, String>,
     ),
+    /// The service answered a reading-pane invite response.
+    MeetingInviteResponded {
+        message_id: String,
+        notified: bool,
+        result: Result<(), String>,
+    },
     // Chat
     ChatTimeline(crate::ui::chat_timeline::ChatTimelineMessage),
     ChatTimelineLoaded(

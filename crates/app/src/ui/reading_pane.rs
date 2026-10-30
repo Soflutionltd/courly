@@ -48,13 +48,13 @@ pub enum ReadingPaneMessage {
     EditContact(String),
     /// Create a calendar event from this message (calendar button).
     CreateEventFromEmail(usize),
-    /// Respond to a meeting invite after resolving its iMIP UID in the local
-    /// calendar cache. Unsynced invites deliberately have no standalone iMIP
-    /// mail-reply path here.
-    RsvpInvite {
-        message_index: usize,
-        response: service_api::RsvpResponse,
-    },
+    /// Edit or answer the invite card of the message with this id.
+    Invite(String, super::invite_card::InviteMessage),
+    /// The invite of the message with this id resolved against the calendar.
+    InviteLoaded(
+        String,
+        Result<Option<super::invite_card::InviteDetails>, String>,
+    ),
     /// Navigate to the next message in the thread (expand it).
     NextMessage,
     /// Navigate to the previous message in the thread (expand it).
@@ -106,9 +106,14 @@ pub enum ReadingPaneEvent {
     CreateEventFromEmail {
         message_index: usize,
     },
+    /// Answer a synced meeting invite. Unsynced invites deliberately have
+    /// no standalone iMIP mail-reply path.
     RespondToMeetingInvite {
-        message_index: usize,
+        message_id: String,
+        account_id: String,
+        event_id: String,
         response: service_api::RsvpResponse,
+        reply: service_api::WireRsvpReply,
     },
     /// User toggled the star on the thread.
     ToggleStar,
@@ -150,6 +155,8 @@ pub struct ReadingPane {
     html_bodies: Vec<super::mail_body::HtmlBodyState>,
     /// Inline images for CID resolution in HTML bodies, keyed by Content-ID.
     inline_image_bytes: HashMap<String, mail_html::Bytes>,
+    /// Meeting request cards, keyed by message id.
+    invites: HashMap<String, super::invite_card::InviteCard>,
 }
 
 /// Minimal reference to the currently selected thread for display purposes.
@@ -266,6 +273,7 @@ impl ReadingPane {
             expanded_attachment_versions: std::collections::HashSet::new(),
             html_bodies: Vec::new(),
             inline_image_bytes: HashMap::new(),
+            invites: HashMap::new(),
         }
     }
 
@@ -286,6 +294,7 @@ impl ReadingPane {
         self.expanded_attachment_versions.clear();
         self.html_bodies.clear();
         self.inline_image_bytes.clear();
+        self.invites.clear();
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
             .map(|t| {
@@ -366,11 +375,49 @@ impl ReadingPane {
             .map(|_| super::mail_body::HtmlBodyState::default())
             .collect();
 
+        self.invites = detail
+            .messages
+            .iter()
+            .filter(|msg| {
+                super::invite_card::InviteKind::of(msg)
+                    == Some(super::invite_card::InviteKind::Request)
+            })
+            .map(|msg| (msg.id.clone(), super::invite_card::InviteCard::new(msg)))
+            .collect();
         self.thread_messages = detail.messages;
         self.thread_attachments = detail.attachments;
         self.thread_labels = detail.labels;
         self.inline_image_bytes = super::mail_body::inline_image_bytes(&detail.inline_images);
         self.recompute_deduped_attachments();
+    }
+
+    /// Invites still waiting for their calendar lookup, as
+    /// `(message_id, account_id, uid)`. `rich_reply` says which accounts
+    /// take comments and proposed times with a response.
+    pub fn pending_invite_lookups(
+        &mut self,
+        rich_reply: impl Fn(&str) -> bool,
+    ) -> Vec<(String, String, String)> {
+        let mut lookups = Vec::new();
+        for msg in &self.thread_messages {
+            let Some(card) = self.invites.get_mut(&msg.id) else {
+                continue;
+            };
+            card.rich_reply = rich_reply(&msg.account_id);
+            if let (super::invite_card::InviteLookup::Loading, Some(uid)) =
+                (&card.lookup, msg.meeting_invite_uid.as_ref())
+            {
+                lookups.push((msg.id.clone(), msg.account_id.clone(), uid.clone()));
+            }
+        }
+        lookups
+    }
+
+    /// Settle the in-flight response of an invite card.
+    pub fn finish_invite_response(&mut self, message_id: &str, result: Result<(), String>) {
+        if let Some(card) = self.invites.get_mut(message_id) {
+            card.finish(result);
+        }
     }
 
     /// Recompute the deduplicated attachment list from `thread_attachments`.
@@ -552,16 +599,56 @@ impl Component for ReadingPane {
                     message_index: index,
                 }),
             ),
-            ReadingPaneMessage::RsvpInvite {
-                message_index,
-                response,
-            } => (
-                Task::none(),
-                Some(ReadingPaneEvent::RespondToMeetingInvite {
-                    message_index,
-                    response,
-                }),
-            ),
+            ReadingPaneMessage::Invite(message_id, invite_message) => {
+                let Some(card) = self.invites.get_mut(&message_id) else {
+                    return (Task::none(), None);
+                };
+                let tz = jiff::tz::TimeZone::system();
+                match card.update(invite_message, &tz) {
+                    Some(super::invite_card::InviteAction::Open(url)) => {
+                        open_url_in_browser(&url);
+                        (Task::none(), None)
+                    }
+                    Some(super::invite_card::InviteAction::Respond {
+                        event_id,
+                        response,
+                        reply,
+                    }) => {
+                        let account_id = self
+                            .thread_messages
+                            .iter()
+                            .find(|msg| msg.id == message_id)
+                            .map(|msg| msg.account_id.clone());
+                        let Some(account_id) = account_id else {
+                            card.finish(Err("The message is no longer open".to_string()));
+                            return (Task::none(), None);
+                        };
+                        (
+                            Task::none(),
+                            Some(ReadingPaneEvent::RespondToMeetingInvite {
+                                message_id,
+                                account_id,
+                                event_id,
+                                response,
+                                reply,
+                            }),
+                        )
+                    }
+                    None => (Task::none(), None),
+                }
+            }
+            ReadingPaneMessage::InviteLoaded(message_id, result) => {
+                if let Some(card) = self.invites.get_mut(&message_id) {
+                    card.set_lookup(match result {
+                        Ok(Some(details)) => {
+                            super::invite_card::InviteLookup::Found(Box::new(details))
+                        }
+                        Ok(None) => super::invite_card::InviteLookup::Unsynced,
+                        Err(error) => super::invite_card::InviteLookup::Failed(error),
+                    });
+                }
+                (Task::none(), None)
+            }
             ReadingPaneMessage::NextMessage => {
                 let len = self.thread_messages.len();
                 if len == 0 {
@@ -911,12 +998,17 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                     ReadingPaneMessage::ShowRemoteImages(i),
                 )
             });
+            let message_id = msg.id.clone();
+            let invite = super::invite_card::view(msg, pane.invites.get(&msg.id), move |m| {
+                ReadingPaneMessage::Invite(message_id.clone(), m)
+            });
             msg_col = msg_col.push(widgets::expanded_message_card(
                 msg,
                 i,
                 pane.date_display,
                 first_message_date,
                 &pane.search_highlight_terms,
+                invite,
                 html_body,
                 ReadingPaneMessage::LinkClicked,
                 ReadingPaneMessage::ToggleMessageExpanded,
@@ -926,10 +1018,6 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 ReadingPaneMessage::Forward,
                 ReadingPaneMessage::EditContact,
                 ReadingPaneMessage::CreateEventFromEmail,
-                |message_index, response| ReadingPaneMessage::RsvpInvite {
-                    message_index,
-                    response,
-                },
             ));
         } else {
             msg_col = msg_col.push(widgets::collapsed_message_row(

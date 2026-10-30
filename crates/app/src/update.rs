@@ -828,7 +828,27 @@ impl ReadyApp {
             }
             Message::ThreadDetailLoaded(_, Ok(detail)) => {
                 self.reading_pane.load_thread_detail(detail);
-                Task::none()
+                self.load_meeting_invites()
+            }
+            Message::MeetingInviteResponded {
+                message_id,
+                notified,
+                result,
+            } => {
+                let confirmation = match &result {
+                    Ok(()) if notified => "Response sent to the organizer".to_string(),
+                    Ok(()) => "Response saved".to_string(),
+                    Err(error) => format!("Response failed: {error}"),
+                };
+                self.status_bar.show_confirmation(confirmation);
+                let succeeded = result.is_ok();
+                self.reading_pane
+                    .finish_invite_response(&message_id, result);
+                if succeeded {
+                    self.reload_calendar_events()
+                } else {
+                    Task::none()
+                }
             }
             Message::ThreadDetailLoaded(_, Err(e)) => {
                 log::error!("ThreadDetailLoaded error: {e}");

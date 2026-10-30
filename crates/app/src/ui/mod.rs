@@ -8,6 +8,7 @@ pub mod chat_timeline;
 pub mod chrome;
 pub mod dialog;
 pub mod emoji_picker;
+pub mod invite_card;
 pub mod label_paint;
 pub mod layout;
 pub mod mail_body;
