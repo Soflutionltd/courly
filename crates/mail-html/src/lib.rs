@@ -146,43 +146,43 @@ struct MailNetProvider {
     pending: Arc<AtomicUsize>,
 }
 
+/// Every request is answered, with empty bytes when the resource is skipped,
+/// blocked or fails. Blitz holds back all layout while a `<head>` stylesheet
+/// is unanswered, so a blocked `<link rel=stylesheet>` (web fonts, mostly)
+/// would otherwise leave the whole email blank.
 impl NetProvider for MailNetProvider {
     fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
         let url = request.url;
-        match url.scheme() {
+        let bytes = match url.scheme() {
             "cid" => {
                 let cid = url.path().trim_start_matches('<').trim_end_matches('>');
-                if let Some(bytes) = self.inline_images.get(cid) {
-                    handler.bytes(url.to_string(), bytes.clone());
-                }
+                self.inline_images.get(cid).cloned()
             }
-            "data" => {
-                let decoded = data_url::DataUrl::process(url.as_str())
-                    .ok()
-                    .and_then(|data| data.decode_to_vec().ok());
-                if let Some((body, _)) = decoded {
-                    handler.bytes(url.to_string(), Bytes::from(body));
-                }
-            }
-            "http" | "https" if url.host_str() == Some(BASE_HOST) => {}
+            "data" => data_url::DataUrl::process(url.as_str())
+                .ok()
+                .and_then(|data| data.decode_to_vec().ok())
+                .map(|(body, _)| Bytes::from(body)),
+            "http" | "https" if url.host_str() == Some(BASE_HOST) => None,
             "http" | "https" => match &self.remote {
                 Some(fetch) => {
                     let fetch = Arc::clone(fetch);
                     let pending = Arc::clone(&self.pending);
                     pending.fetch_add(1, Ordering::SeqCst);
                     std::thread::spawn(move || {
-                        if let Some(bytes) = fetch(&url) {
-                            handler.bytes(url.to_string(), bytes);
-                        }
+                        let bytes = fetch(&url).unwrap_or_default();
+                        handler.bytes(url.to_string(), bytes);
                         pending.fetch_sub(1, Ordering::SeqCst);
                     });
+                    return;
                 }
                 None => {
                     self.blocked.fetch_add(1, Ordering::Relaxed);
+                    None
                 }
             },
-            _ => {}
-        }
+            _ => None,
+        };
+        handler.bytes(url.to_string(), bytes.unwrap_or_default());
     }
 }
 
@@ -395,6 +395,22 @@ mod tests {
     fn script_links_are_ignored() {
         let mail = render_html(r#"<a href="javascript:alert(1)">x</a>"#);
         assert!(mail.links.is_empty());
+    }
+
+    #[test]
+    fn blocked_head_stylesheets_do_not_blank_the_email() {
+        let html = r#"<html><head><link href="//fonts.example/css" rel="stylesheet"></head>
+            <body><p style="height:300px">Security alert</p></body></html>"#;
+        let mail = render_html(html);
+        assert!(mail.height >= 300.0, "height was {}", mail.height);
+    }
+
+    #[test]
+    fn relative_head_stylesheets_do_not_blank_the_email() {
+        let html = r#"<html><head><link href="style.css" rel="stylesheet"></head>
+            <body><p style="height:300px">Receipt</p></body></html>"#;
+        let mail = render_html(html);
+        assert!(mail.height >= 300.0, "height was {}", mail.height);
     }
 
     fn first_link_x(html: &str) -> f32 {
