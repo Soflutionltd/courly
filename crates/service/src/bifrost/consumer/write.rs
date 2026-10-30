@@ -278,6 +278,20 @@ pub async fn persist_in_namespace(
                             insert_attachments(&tx, &row.attachments).map_err(|error| {
                                 format!("insert {} attachments: {error}", provider.as_str())
                             })?;
+                            if provider == BifrostProviderKind::Graph {
+                                tx.execute(
+                                    "UPDATE messages SET is_pinned = ?3 \
+                                     WHERE account_id = ?1 AND id = ?2",
+                                    rusqlite::params![
+                                        row.message.account_id,
+                                        row.message.id,
+                                        row.is_pinned
+                                    ],
+                                )
+                                .map_err(|error| {
+                                    format!("write pin state for {}: {error}", row.message.id)
+                                })?;
+                            }
                             if provider == BifrostProviderKind::Gmail {
                                 insert_gmail_reaction(&tx, &account_id, row)?;
                             }
@@ -373,6 +387,9 @@ pub async fn persist_in_namespace(
                             namespace_id.as_deref(),
                         )
                         .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
+                        if provider == BifrostProviderKind::Graph {
+                            sync_thread_pin_from_messages(&tx, account_id, thread_id)?;
+                        }
                         if matches!(
                             provider,
                             BifrostProviderKind::Jmap
@@ -560,6 +577,25 @@ fn resolve_imap_deleted_ids(
         .map(|ids| ids.into_iter().flatten().collect())
 }
 
+/// Outlook pins messages, the list pins threads: a thread is pinned while any
+/// of its messages carries the pin.
+fn sync_thread_pin_from_messages(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE threads SET is_pinned = EXISTS (
+             SELECT 1 FROM messages
+             WHERE account_id = ?1 AND thread_id = ?2 AND is_pinned = 1
+         )
+         WHERE account_id = ?1 AND id = ?2",
+        rusqlite::params![account_id, thread_id],
+    )
+    .map(|_| ())
+    .map_err(|error| format!("sync thread pin {thread_id}: {error}"))
+}
+
 fn existing_thread_is_important(
     tx: &db::db::WriteTxn<'_>,
     account_id: &str,
@@ -718,6 +754,77 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    fn offline_rows(
+        provider: BifrostProviderKind,
+        changes: &[Change],
+    ) -> Vec<super::super::hydrate::ConsumerMessageRow> {
+        changes
+            .iter()
+            .map(|change| {
+                match hydrate_change_to_message_insert_row_offline("acc", provider, change) {
+                    super::super::hydrate::HydratedChange::Message(row, _) => *row,
+                    other => panic!("unexpected result {other:?}"),
+                }
+            })
+            .collect()
+    }
+
+    const THREAD_PINNED: &str =
+        "SELECT is_pinned FROM threads WHERE account_id = 'acc' AND id = ?1";
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_outlook_pin_on_any_message_pins_the_thread_until_none_is_left() {
+        let (state, tmp) = state();
+        let stores = stores(state.clone(), &tmp);
+        let graph = BifrostProviderKind::Graph;
+
+        let rows = offline_rows(
+            graph,
+            &[
+                synthetic_change("m1", "t1", &["INBOX"], &[], &["$pinned"]),
+                synthetic_change("m2", "t1", &["INBOX"], &[], &[]),
+            ],
+        );
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, THREAD_PINNED, "t1").await, 1);
+
+        let rows = offline_rows(graph, &[synthetic_change("m2", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(
+            count(&state, THREAD_PINNED, "t1").await,
+            1,
+            "m1 is still pinned in Outlook"
+        );
+
+        let rows = offline_rows(graph, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, THREAD_PINNED, "t1").await, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_provider_without_pins_keeps_the_local_thread_pin() {
+        let (state, tmp) = state();
+        let stores = stores(state.clone(), &tmp);
+        let jmap = BifrostProviderKind::Jmap;
+
+        let rows = offline_rows(jmap, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", jmap, &rows, &[]).await.unwrap();
+        state
+            .with_write(|conn| {
+                conn.execute(
+                    "UPDATE threads SET is_pinned = 1 WHERE account_id = 'acc' AND id = 't1'",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap();
+
+        persist(&stores, "acc", jmap, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, THREAD_PINNED, "t1").await, 1);
     }
 
     /// Spec 6.1 `consumer_membership_baseline`: a multi-message thread with

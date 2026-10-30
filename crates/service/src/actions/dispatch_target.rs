@@ -505,6 +505,24 @@ async fn dispatch_flags(
         .map_err(engine_error_to_action_error)
 }
 
+/// Outlook's pin rides the flag PATCH as bifrost Graph's `$pinned` flag,
+/// which it projects onto the MAPI pin properties.
+pub(crate) async fn dispatch_pin(
+    action_account: &ResidentActionAccount,
+    account_id: &str,
+    ids: Vec<ObjectId>,
+    pinned: bool,
+) -> Result<(), ActionError> {
+    dispatch_flags(
+        action_account,
+        &AccountId(account_id.to_string()),
+        ids,
+        "$pinned",
+        pinned,
+    )
+    .await
+}
+
 /// Hard-delete dispatch. Always routes through `bulk_destroy`: the engine
 /// exposes no single-object hard-delete primitive (`delete_thread` is
 /// `ThreadId`-typed, which B4 deliberately avoids - spec 2.2.3), and the

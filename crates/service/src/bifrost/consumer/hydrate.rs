@@ -89,6 +89,9 @@ pub struct ConsumerMessageRow {
     /// thread's messages to set `threads.is_important`, matching the legacy
     /// JMAP path that derived it from the IMPORTANT label.
     pub is_important: bool,
+    /// Outlook's pin (the `$pinned` engine flag). Only Graph carries a
+    /// provider pin; every other provider leaves the thread pin local.
+    pub is_pinned: bool,
     pub reaction_emoji: Option<String>,
 }
 
@@ -299,6 +302,7 @@ pub async fn hydrate_change_to_message_insert_row(
                         inline_images: Vec::new(),
                         search_document: minimal_search_document(&account_id.0, &object.id.0),
                         is_important: false,
+                        is_pinned: false,
                         reaction_emoji: None,
                     }),
                     outcome,
@@ -404,6 +408,7 @@ pub fn hydrate_change_to_message_insert_row_offline(
                     inline_images: Vec::new(),
                     search_document: minimal_search_document(account_id, &object.id.0),
                     is_important: false,
+                    is_pinned: false,
                     reaction_emoji: None,
                 }),
                 outcome,
@@ -827,6 +832,7 @@ pub(crate) fn build_consumer_row(
         search_document,
         is_important: matches!(message.importance, Importance::High)
             || flags.contains("$important"),
+        is_pinned: provider == BifrostProviderKind::Graph && flags.contains("$pinned"),
         reaction_emoji,
     }
 }
@@ -1324,6 +1330,11 @@ fn synthetic_to_row(
         .keywords
         .iter()
         .any(|keyword| keyword == "$important");
+    let is_pinned = provider == BifrostProviderKind::Graph
+        && synthetic
+            .keywords
+            .iter()
+            .any(|keyword| keyword == "$pinned");
     HydratedChange::Message(
         Box::new(ConsumerMessageRow {
             message,
@@ -1336,6 +1347,7 @@ fn synthetic_to_row(
             inline_images,
             search_document,
             is_important,
+            is_pinned,
             reaction_emoji: synthetic.reaction_emoji,
         }),
         outcome,

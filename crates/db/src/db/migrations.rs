@@ -63,11 +63,21 @@ const SCHEMA_V100: &str = concat!(
 // (`--features dev-seed`), so there are no databases in the wild whose state
 // would be skipped. After the first release, the next change becomes v101 with
 // its own ALTER/CREATE statements appended to MIGRATIONS.
-static MIGRATIONS: &[Migration] = &[Migration {
-    version: 100,
-    description: "Initial schema",
-    sql: SCHEMA_V100,
-}];
+//
+// Releases have shipped since, so v100 is now frozen: every change below is
+// an incremental migration that existing databases can apply in place.
+static MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 100,
+        description: "Initial schema",
+        sql: SCHEMA_V100,
+    },
+    Migration {
+        version: 101,
+        description: "Per-message provider pin state",
+        sql: "ALTER TABLE messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;",
+    },
+];
 
 /// Run all pending migrations. Called once at startup.
 ///
@@ -256,6 +266,34 @@ mod tests {
     }
 
     #[test]
+    fn a_released_v100_database_upgrades_in_place() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        conn.execute_batch(SCHEMA_V100).expect("v100 schema");
+        conn.execute_batch(
+            "CREATE TABLE _migrations (
+               version INTEGER PRIMARY KEY,
+               description TEXT,
+               applied_at INTEGER DEFAULT (unixepoch())
+             );
+             INSERT INTO _migrations (version, description) VALUES (100, 'Initial schema');",
+        )
+        .expect("mark v100 applied");
+
+        let applied = run_all(&conn).expect("upgrade from v100");
+        assert_eq!(applied, 1, "only v101 runs on a v100 database");
+        let pinned_column: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'is_pinned'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(pinned_column, 1);
+    }
+
+    #[test]
     fn sync_cursors_table_exists() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
@@ -312,8 +350,8 @@ mod tests {
     /// Locks in the per-migration progress contract: each migration produces
     /// exactly two callback invocations - one BEFORE the transaction begins
     /// (current=index, 0-based) and one AFTER the commit completes
-    /// (current=index+1, 1-based). Phase 1.5 ships with a single v100
-    /// migration so a fresh DB sees `(0, 1)` then `(1, 1)`.
+    /// (current=index+1, 1-based). A fresh DB with v100 and v101 sees
+    /// `(0, 2) (1, 2)` then `(1, 2) (2, 2)`.
     #[test]
     fn run_all_with_progress_emits_before_and_after_commit() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
@@ -326,12 +364,14 @@ mod tests {
         })
         .expect("migrations should succeed");
 
-        // One migration applied, so total == 1.
-        assert_eq!(applied, 1);
+        let total = u32::try_from(MIGRATIONS.len()).expect("migration count fits u32");
+        assert_eq!(applied, total);
+        let expected: Vec<(u32, u32)> = (0..total)
+            .flat_map(|index| [(index, total), (index + 1, total)])
+            .collect();
         assert_eq!(
-            frames,
-            vec![(0, 1), (1, 1)],
-            "expected one before-COMMIT (0/1) and one after-COMMIT (1/1) frame, got {frames:?}"
+            frames, expected,
+            "expected a before-COMMIT and an after-COMMIT frame per migration, got {frames:?}"
         );
     }
 

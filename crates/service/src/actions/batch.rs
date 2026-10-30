@@ -105,6 +105,21 @@ async fn execute_account_group(
     let all_local_only = thread_ops.iter().all(|(_, _, op)| is_local_only(op));
 
     if all_local_only {
+        let pins = thread_ops
+            .iter()
+            .any(|(_, _, op)| matches!(op, MailOperation::SetPinned { .. }));
+        let action_account = match sync_runtime {
+            Some(sync_runtime) if pins => {
+                match sync_runtime.resident_action_account(account_id).await {
+                    Ok(account) => Some(account),
+                    Err(error) => {
+                        log::warn!("pin stays local for {account_id}: {error}");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
         for (idx, thread_id, op) in thread_ops {
             let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
                 Some(g) => g,
@@ -120,7 +135,9 @@ async fn execute_account_group(
                     continue;
                 }
             };
-            let outcome = dispatch_local_only(ctx, &op, account_id, &thread_id).await;
+            let outcome =
+                dispatch_local_only(ctx, action_account.as_ref(), &op, account_id, &thread_id)
+                    .await;
             results.push((idx, outcome));
         }
         return results;
@@ -174,7 +191,8 @@ async fn execute_account_group(
         }
 
         if is_local_only(&op) {
-            let outcome = dispatch_local_only(ctx, &op, account_id, &thread_id).await;
+            let outcome =
+                dispatch_local_only(ctx, Some(&action_account), &op, account_id, &thread_id).await;
             results.push((idx, outcome));
             continue;
         }
@@ -492,7 +510,7 @@ async fn dispatch_with_engine(
     thread_id: &str,
 ) -> ActionOutcome {
     if is_local_only(op) {
-        return dispatch_local_only(ctx, op, account_id, thread_id).await;
+        return dispatch_local_only(ctx, Some(action_account), op, account_id, thread_id).await;
     }
     let namespace = match namespace_preflight(ctx, account_id, thread_id, op).await {
         Ok(namespace) => namespace,
@@ -823,8 +841,9 @@ fn validate_namespace_action(
     rights: SharedFolderRights,
     op: &MailOperation,
 ) -> Result<(), ActionError> {
-    // Pin / mute / snooze never reach a provider, so no namespace, rights, or
-    // capability gap can make them unsupported. Refusing them would make a
+    // Pin / mute / snooze are decided locally (Outlook's pin is a best-effort
+    // mirror after the fact), so no namespace, rights, or capability gap can
+    // make them unsupported. Refusing them would make a
     // read-only shared folder or a public folder unusable for purely local
     // organisation, which is not what obstacles K, L, and W are about.
     if is_local_only(op) {
@@ -895,12 +914,21 @@ fn permitted_by(rights: SharedFolderRights, op: &MailOperation) -> bool {
 /// so a lookup would only cost a query.
 async fn dispatch_local_only(
     ctx: &ActionContext,
+    action_account: Option<&crate::bifrost::resident::ResidentActionAccount>,
     op: &MailOperation,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
     match op {
-        MailOperation::SetPinned { to } => pin::pin(ctx, account_id, thread_id, *to).await,
+        MailOperation::SetPinned { to } => {
+            let outcome = pin::pin(ctx, account_id, thread_id, *to).await;
+            if outcome.is_success()
+                && let Some(action_account) = action_account
+            {
+                pin::push_pin_to_provider(ctx, action_account, account_id, thread_id, *to).await;
+            }
+            outcome
+        }
         MailOperation::SetMuted { to } => mute::mute(ctx, account_id, thread_id, *to).await,
         MailOperation::Snooze { until } => snooze::snooze(ctx, account_id, thread_id, *until).await,
         MailOperation::Unsnooze => snooze::unsnooze(ctx, account_id, thread_id).await,

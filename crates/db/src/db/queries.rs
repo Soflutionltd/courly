@@ -286,6 +286,19 @@ pub fn set_thread_pinned(
     set_thread_bool_field(conn, account_id, thread_id, "is_pinned", is_pinned)
 }
 
+pub fn set_thread_messages_pinned(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    thread_id: &str,
+    is_pinned: bool,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE messages SET is_pinned = ?1 WHERE account_id = ?2 AND thread_id = ?3",
+        params![is_pinned, account_id, thread_id],
+    )
+    .map_err(|e| format!("update message pin flags: {e}"))
+}
+
 pub fn set_thread_muted(
     conn: &impl WriteTarget,
     account_id: &str,
