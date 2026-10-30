@@ -1,10 +1,12 @@
 use iced::time::Instant;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
+use rust_i18n::t;
 
 use crate::icon;
 use crate::ui::dialog::{DialogAction, alert_dialog};
 use crate::ui::layout::*;
+use crate::ui::settings::row_widgets::tr;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -85,7 +87,7 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
                     row![
                         container(icon::arrow_left().size(ICON_XL).style(text::base))
                             .align_y(Alignment::Center),
-                        text("Back")
+                        text(t!("settings.common.back"))
                             .size(TEXT_LG)
                             .style(text::base)
                             .font(iced::Font {
@@ -164,14 +166,17 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
 
 fn discard_changes_dialog<'a>() -> Element<'a, SettingsMessage> {
     alert_dialog(
-        "Discard unsaved changes?",
-        "Your edits to this item will be lost.",
+        t!("settings.common.discard_title"),
+        t!("settings.common.discard_body"),
         vec![
             DialogAction::default_action(
-                "Keep editing",
+                t!("settings.common.keep_editing"),
                 SettingsMessage::CancelDiscardEditorChanges,
             ),
-            DialogAction::destructive("Discard", SettingsMessage::ConfirmDiscardEditorChanges),
+            DialogAction::destructive(
+                t!("settings.common.discard"),
+                SettingsMessage::ConfirmDiscardEditorChanges,
+            ),
         ],
         None,
     )
@@ -179,12 +184,15 @@ fn discard_changes_dialog<'a>() -> Element<'a, SettingsMessage> {
 
 fn delete_account_dialog(account_id: &str) -> Element<'_, SettingsMessage> {
     alert_dialog(
-        "Delete account?",
-        "All cached email, attachments, calendar entries and contacts for this account will be permanently removed from this device. This cannot be undone.",
+        t!("settings.common.delete_account_title"),
+        t!("settings.common.delete_account_body"),
         vec![
-            DialogAction::default_action("Cancel", SettingsMessage::DeleteAccountCancelled),
+            DialogAction::default_action(
+                t!("settings.common.cancel"),
+                SettingsMessage::DeleteAccountCancelled,
+            ),
             DialogAction::destructive(
-                "Delete",
+                t!("settings.common.delete"),
                 SettingsMessage::DeleteAccountConfirmed(account_id.to_string()),
             ),
         ],
@@ -197,7 +205,7 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
 
     col = col.push(widgets::nav_button(
         Some(icon::arrow_left()),
-        "Settings",
+        tr(t!("settings.common.settings")),
         false,
         widgets::NavSize::Regular,
         None,
