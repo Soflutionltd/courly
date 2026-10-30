@@ -54,7 +54,7 @@ pub enum ReadingPaneMessage {
     /// The invite of the message with this id resolved against the calendar.
     InviteLoaded(
         String,
-        Result<Option<super::invite_card::InviteDetails>, String>,
+        Result<Option<Box<super::invite_card::InviteDetails>>, String>,
     ),
     /// Navigate to the next message in the thread (expand it).
     NextMessage,
@@ -641,9 +641,7 @@ impl Component for ReadingPane {
             ReadingPaneMessage::InviteLoaded(message_id, result) => {
                 if let Some(card) = self.invites.get_mut(&message_id) {
                     card.set_lookup(match result {
-                        Ok(Some(details)) => {
-                            super::invite_card::InviteLookup::Found(Box::new(details))
-                        }
+                        Ok(Some(details)) => super::invite_card::InviteLookup::Found(details),
                         Ok(None) => super::invite_card::InviteLookup::Unsynced,
                         Err(error) => super::invite_card::InviteLookup::Failed(error),
                     });

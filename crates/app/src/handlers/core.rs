@@ -308,7 +308,7 @@ impl ReadyApp {
                 move |result| {
                     Message::ReadingPane(ReadingPaneMessage::InviteLoaded(
                         message_id.clone(),
-                        result,
+                        result.map(|details| details.map(Box::new)),
                     ))
                 },
             )
