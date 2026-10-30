@@ -219,8 +219,10 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .width(Length::Fill),
         )
         .width(Length::Fill),
-        actions,
     ]
+    // Selecting a local draft opens it in a compose window, so its row
+    // carries no actions that would select it first.
+    .push((!thread.is_local_draft).then_some(actions))
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
