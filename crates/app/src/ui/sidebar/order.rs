@@ -79,9 +79,21 @@ const OUTBOX_NAMES: &[&str] = &[
     "posta in uscita",
     "caixa de saída",
     "postvak uit",
+    "utkorgen",
+    "udbakke",
+    "utboks",
+    "lähtevät",
+    "skrzynka nadawcza",
+    "pošta k odeslání",
+    "giden kutusu",
+    "исходящие",
+    "送信トレイ",
+    "发件箱",
+    "寄件匣",
+    "보낼 편지함",
 ];
 
-fn is_outbox_name(name: &str) -> bool {
+pub(crate) fn is_outbox_name(name: &str) -> bool {
     let name = name.trim().to_lowercase().replace('\u{2019}', "'");
     OUTBOX_NAMES.contains(&name.as_str())
 }

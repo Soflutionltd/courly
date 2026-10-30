@@ -28,6 +28,9 @@ pub fn mail<'a>() -> Text<'a> {
 pub fn inbox<'a>() -> Text<'a> {
     to_text(INBOX_CODEPOINT)
 }
+pub fn outbox<'a>() -> Text<'a> {
+    to_text('\u{e4e6}')
+}
 pub fn send<'a>() -> Text<'a> {
     to_text('\u{e152}')
 }

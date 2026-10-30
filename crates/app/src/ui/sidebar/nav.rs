@@ -121,12 +121,22 @@ pub(super) fn nav_items<'a>(
                     ));
                 } else if let Some(root) = forest.roots.iter().find(|r| r.folder.id == *id) {
                     let active = is_folder_active(sidebar, scope, root.folder);
-                    let content = folder_row_content(
-                        root.folder,
-                        0.0,
-                        forest.root_tree_state(sidebar, root),
-                        active,
-                    );
+                    let content = if super::order::is_outbox_name(&root.folder.name) {
+                        widgets::nav_button_content(
+                            Some(icon::outbox()),
+                            folder_display_name(root.folder),
+                            active,
+                            widgets::NavSize::Compact,
+                            Some(widgets::NavBadge::General(root.folder.unread_count())),
+                        )
+                    } else {
+                        folder_row_content(
+                            root.folder,
+                            0.0,
+                            forest.root_tree_state(sidebar, root),
+                            active,
+                        )
+                    };
                     col = col.push(reorderable_row(
                         sidebar,
                         (scope, index),

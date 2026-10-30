@@ -724,6 +724,9 @@ pub fn truncate_query(query: &str, max_chars: usize) -> String {
 /// names are shown as the server sends them.
 pub(crate) fn folder_display_name(folder: &NavigationFolder) -> Cow<'_, str> {
     if !matches!(folder.folder_kind, FolderKind::Universal) {
+        if order::is_outbox_name(&folder.name) {
+            return t!("main.folder.outbox");
+        }
         return Cow::Borrowed(&folder.name);
     }
     match folder.id.as_str() {
@@ -786,6 +789,14 @@ mod tests {
             "query": null,
         }))
         .expect("valid navigation folder")
+    }
+
+    #[test]
+    fn the_exchange_outbox_shows_in_the_app_language() {
+        let outbox = folder("g-out", "Postausgang", "AccountFolder");
+        assert_eq!(folder_display_name(&outbox), t!("main.folder.outbox"));
+        let hotel = folder("g-hotel", "Hotel", "AccountFolder");
+        assert_eq!(folder_display_name(&hotel), "Hotel");
     }
 
     fn sidebar() -> Sidebar {
