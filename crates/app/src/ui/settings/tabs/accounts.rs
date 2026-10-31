@@ -124,7 +124,7 @@ fn account_card<'a>(
         .unwrap_or(&account.email);
 
     let provider_label = format_provider_label(&account.provider);
-    let sync_label = format_last_sync(account.last_sync_at);
+    let sync_label = format_last_sync(account.last_sync_at, account.health);
 
     let grip_slot = mouse_area(
         container(
@@ -230,9 +230,12 @@ fn format_provider_label(provider: &str) -> String {
     }
 }
 
-fn format_last_sync(last_sync_at: Option<i64>) -> String {
+fn format_last_sync(last_sync_at: Option<i64>, health: AccountHealth) -> String {
     match last_sync_at {
-        None => t!("settings.accounts.never_synced").into_owned(),
+        None if matches!(health, AccountHealth::Error | AccountHealth::Disabled) => {
+            t!("settings.accounts.never_synced").into_owned()
+        }
+        None => t!("settings.accounts.first_sync_running").into_owned(),
         Some(ts) => {
             let Ok(dt) = jiff::Timestamp::from_second(ts) else {
                 return t!("settings.accounts.sync_unknown").into_owned();

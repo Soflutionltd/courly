@@ -2,6 +2,7 @@ _version: 1
 settings.accounts.title: "Accounts"
 settings.accounts.add: "Add Account"
 settings.accounts.never_synced: "Never synced"
+settings.accounts.first_sync_running: "First sync in progress…"
 settings.accounts.sync_unknown: "Unknown"
 settings.accounts.synced_just_now: "Just now"
 settings.accounts.synced_minutes_ago: "%{count} min ago"

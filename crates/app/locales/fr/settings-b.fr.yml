@@ -2,6 +2,7 @@ _version: 1
 settings.accounts.title: "Comptes"
 settings.accounts.add: "Ajouter un compte"
 settings.accounts.never_synced: "Jamais synchronisé"
+settings.accounts.first_sync_running: "Première synchronisation en cours…"
 settings.accounts.sync_unknown: "Inconnue"
 settings.accounts.synced_just_now: "À l'instant"
 settings.accounts.synced_minutes_ago: "Il y a %{count} min"
