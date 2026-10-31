@@ -206,6 +206,7 @@ pub enum Message {
     SearchStateReady(Result<std::sync::Arc<rtsk::search::SearchReadState>, String>),
     ServiceNotification(service_api::Notification),
     ServiceShutdownComplete(Result<(), String>),
+    AccountResyncComplete(Result<(), String>),
     ToggleSettings,
     AppearanceChanged(appearance::Mode),
     DividerDragStart(Divider),

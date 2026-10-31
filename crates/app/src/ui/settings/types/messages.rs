@@ -105,6 +105,7 @@ pub enum SettingsMessage {
     CaldavUsernameChanged(String),
     CaldavPasswordChanged(String),
     ReauthenticateAccount(String),
+    ResyncAccount(String),
     DeleteAccountRequested(String),
     DeleteAccountConfirmed(String),
     DeleteAccountCancelled,
@@ -315,6 +316,8 @@ pub enum SettingsEvent {
     },
     /// Request the App to open the re-auth wizard for an account.
     ReauthenticateAccount(String),
+    /// Request the App to walk every folder of an account again.
+    ResyncAccount(String),
 }
 
 /// Settings pages that slide in from the right, covering the settings content.

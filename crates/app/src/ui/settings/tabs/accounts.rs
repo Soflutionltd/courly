@@ -321,6 +321,17 @@ pub(super) fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
         )],
     ));
 
+    col = col.push(section(
+        tr(t!("settings.accounts.sync")),
+        vec![action_row(
+            tr(t!("settings.accounts.resync")),
+            Some(tr(t!("settings.accounts.resync_description"))),
+            None,
+            ActionKind::InApp,
+            SettingsMessage::ResyncAccount(editor.account_id.clone()),
+        )],
+    ));
+
     col = col.push(account_editor_delete_section(editor));
 
     // Always render the Save button so the layout doesn't shift when the

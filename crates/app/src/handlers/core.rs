@@ -780,7 +780,28 @@ impl ReadyApp {
             SettingsEvent::ReauthenticateAccount(account_id) => {
                 self.handle_open_reauth_wizard(account_id)
             }
+            SettingsEvent::ResyncAccount(account_id) => self.handle_resync_account(account_id),
         }
+    }
+
+    fn handle_resync_account(&mut self, account_id: String) -> Task<Message> {
+        let Some(service_client) = self.service_client.clone() else {
+            self.status_bar
+                .show_confirmation(t!("settings.labels.service_not_connected").into_owned());
+            return Task::none();
+        };
+        self.status_bar
+            .show_confirmation(t!("settings.accounts.resync_started").into_owned());
+        Task::perform(
+            async move {
+                service_client
+                    .resync_sync_account(account_id)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            },
+            Message::AccountResyncComplete,
+        )
     }
 
     pub(crate) fn handle_add_account(&mut self, msg: AddAccountMessage) -> Task<Message> {

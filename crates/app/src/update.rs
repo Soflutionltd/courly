@@ -508,6 +508,17 @@ impl ReadyApp {
                 }
                 iced::exit()
             }
+            Message::AccountResyncComplete(result) => {
+                let confirmation = match result {
+                    Ok(()) => t!("settings.accounts.resync_running").into_owned(),
+                    Err(error) => {
+                        log::warn!("Account resync failed: {error}");
+                        t!("settings.accounts.resync_failed", error = error).into_owned()
+                    }
+                };
+                self.status_bar.show_confirmation(confirmation);
+                Task::none()
+            }
 
             // Command system
             Message::KeyEvent(msg) => self.handle_key_event(msg),

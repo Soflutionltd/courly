@@ -113,6 +113,9 @@ impl Component for Settings {
             SettingsMessage::ReauthenticateAccount(id) => {
                 return (Task::none(), Some(SettingsEvent::ReauthenticateAccount(id)));
             }
+            SettingsMessage::ResyncAccount(id) => {
+                return (Task::none(), Some(SettingsEvent::ResyncAccount(id)));
+            }
             SettingsMessage::SignatureEditorSave => {
                 return self.handle_signature_save();
             }

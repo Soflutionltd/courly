@@ -1310,6 +1310,16 @@ impl ServiceClient {
         .await
     }
 
+    pub async fn resync_sync_account(
+        &self,
+        account_id: String,
+    ) -> Result<service_api::SyncResyncAck, ClientError> {
+        self.request(RequestParams::SyncResyncAccount {
+            params: service_api::SyncResyncAccountParams { account_id },
+        })
+        .await
+    }
+
     pub async fn resume_sync_account(
         &self,
         account_id: String,
