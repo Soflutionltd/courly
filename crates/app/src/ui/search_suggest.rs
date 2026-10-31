@@ -1,38 +1,33 @@
-//! Suggestions under the title-bar search field, the way Outlook shows
-//! them while typing: people, then the best matching messages, then a row
-//! that fills the list with every result. Search operators (`from:`,
-//! `in:`…) list their values instead.
+//! Suggestions under the title-bar search field while typing: matching
+//! people, then a row that saves the search. The list itself already shows
+//! the messages live. Search operators (`from:`, `in:`…) list their values
+//! instead.
 
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use rust_i18n::t;
 
-use crate::db::Thread;
 use crate::icon;
 use crate::message::Message;
 use crate::ui::layout::*;
 use crate::ui::thread_list::{TypeaheadDirection, TypeaheadItem, TypeaheadState};
 use crate::ui::{theme, widgets};
 
-/// People shown above the messages.
+/// People shown in the menu.
 pub const MAX_CONTACTS: usize = 4;
-/// Messages shown under the people.
-pub const MAX_MESSAGES: usize = 5;
 
 #[derive(Debug, Clone)]
 pub enum SearchSuggestMessage {
-    /// The typing pause: look up people and messages for the query.
+    /// The typing pause: look up people for the query.
     Refresh,
     Loaded {
         query: String,
         contacts: Vec<TypeaheadItem>,
-        messages: Vec<Thread>,
     },
     Navigate(TypeaheadDirection),
     /// Enter in the search field: the highlighted row, or every result.
     Activate,
     PickContact(usize),
-    PickMessage(usize),
     ShowAll,
     Close,
     /// The cross on the sender pill.
@@ -43,31 +38,25 @@ pub enum SearchSuggestMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuggestRow {
     Contact(usize),
-    Message(usize),
     ShowAll,
 }
 
 #[derive(Debug, Default)]
 pub struct SearchSuggest {
     pub open: bool,
-    /// The query the people and messages were found for.
+    /// The query the people were found for.
     query: String,
     contacts: Vec<TypeaheadItem>,
-    messages: Vec<Thread>,
     /// Highlighted row; none until an arrow key moves into the menu, so
     /// Enter alone searches for what was typed.
     selected: Option<usize>,
 }
 
 impl SearchSuggest {
-    /// Show what was found, unless the query changed since it was asked.
-    pub fn load(
-        &mut self,
-        query: String,
-        current: &str,
-        contacts: Vec<TypeaheadItem>,
-        messages: Vec<Thread>,
-    ) {
+    /// Show the people found, unless the query changed since it was asked.
+    /// With nobody to show the menu stays closed so the live list is not
+    /// covered.
+    pub fn load(&mut self, query: String, current: &str, contacts: Vec<TypeaheadItem>) {
         if query != current.trim() {
             return;
         }
@@ -77,10 +66,9 @@ impl SearchSuggest {
             .filter(|contact| seen.insert(contact.insert_value.to_lowercase()))
             .take(MAX_CONTACTS)
             .collect();
-        self.messages = messages.into_iter().take(MAX_MESSAGES).collect();
         self.query = query;
         self.selected = None;
-        self.open = true;
+        self.open = !self.contacts.is_empty();
     }
 
     pub fn close(&mut self) {
@@ -91,7 +79,6 @@ impl SearchSuggest {
     pub fn rows(&self) -> Vec<SuggestRow> {
         (0..self.contacts.len())
             .map(SuggestRow::Contact)
-            .chain((0..self.messages.len()).map(SuggestRow::Message))
             .chain(std::iter::once(SuggestRow::ShowAll))
             .collect()
     }
@@ -112,10 +99,6 @@ impl SearchSuggest {
 
     pub fn contact(&self, index: usize) -> Option<&TypeaheadItem> {
         self.contacts.get(index)
-    }
-
-    pub fn message(&self, index: usize) -> Option<&Thread> {
-        self.messages.get(index)
     }
 }
 
@@ -143,22 +126,7 @@ pub fn view<'a>(
             ));
         }
     }
-    if !suggest.messages.is_empty() {
-        if !suggest.contacts.is_empty() {
-            list = list.push(widgets::divider());
-        }
-        list = list.push(section_title(t!("main.search.suggest.messages")));
-        for (i, thread) in suggest.messages.iter().enumerate() {
-            list = list.push(message_row(
-                thread,
-                i,
-                selected == Some(SuggestRow::Message(i)),
-            ));
-        }
-    }
-    if !suggest.contacts.is_empty() || !suggest.messages.is_empty() {
-        list = list.push(widgets::divider());
-    }
+    list = list.push(widgets::divider());
     list = list.push(show_all_row(
         &suggest.query,
         selected == Some(SuggestRow::ShowAll),
@@ -217,48 +185,6 @@ fn contact_row(contact: &TypeaheadItem, index: usize, selected: bool) -> Element
         );
     }
     suggestion_button(line, SearchSuggestMessage::PickContact(index), selected)
-}
-
-fn message_row(thread: &Thread, index: usize, selected: bool) -> Element<'_, Message> {
-    let subject = thread
-        .subject
-        .as_deref()
-        .filter(|subject| !subject.trim().is_empty())
-        .map_or_else(|| t!("main.no_subject"), std::borrow::Cow::Borrowed);
-    let sender = thread
-        .from_name
-        .as_deref()
-        .or(thread.from_address.as_deref())
-        .map_or_else(|| t!("main.unknown_sender"), std::borrow::Cow::Borrowed);
-    let date = thread
-        .last_message_at
-        .and_then(widgets::local_dt)
-        .map(|dt| widgets::short_date(&dt));
-    let detail = match date {
-        Some(date) => format!("{sender} · {date}"),
-        None => sender.into_owned(),
-    };
-    let line = row![
-        container(icon::mail().size(ICON_MD).style(text::secondary))
-            .width(AVATAR_DROPDOWN_TRIGGER)
-            .align_x(Alignment::Center),
-        column![
-            text(subject)
-                .size(TEXT_MD)
-                .style(text::base)
-                .wrapping(text::Wrapping::None)
-                .ellipsis(text::Ellipsis::End),
-            text(detail)
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style())
-                .wrapping(text::Wrapping::None)
-                .ellipsis(text::Ellipsis::End),
-        ]
-        .width(Length::Fill),
-    ]
-    .spacing(SPACE_XS)
-    .align_y(Alignment::Center);
-    suggestion_button(line, SearchSuggestMessage::PickMessage(index), selected)
 }
 
 fn show_all_row(query: &str, selected: bool) -> Element<'_, Message> {
@@ -335,14 +261,9 @@ mod tests {
     #[test]
     fn results_for_an_older_query_are_dropped() {
         let mut suggest = SearchSuggest::default();
-        suggest.load("jul".into(), "julie", vec![contact("a@x.fr")], Vec::new());
+        suggest.load("jul".into(), "julie", vec![contact("a@x.fr")]);
         assert!(!suggest.open);
-        suggest.load(
-            "julie".into(),
-            " julie ",
-            vec![contact("a@x.fr")],
-            Vec::new(),
-        );
+        suggest.load("julie".into(), " julie ", vec![contact("a@x.fr")]);
         assert!(suggest.open);
         assert_eq!(
             suggest.rows(),
@@ -356,7 +277,7 @@ mod tests {
         let people = ["a@x.fr", "A@x.fr", "b@x.fr", "c@x.fr", "d@x.fr", "e@x.fr"]
             .map(contact)
             .to_vec();
-        suggest.load("x".into(), "x", people, Vec::new());
+        suggest.load("x".into(), "x", people);
         let emails: Vec<&str> = suggest
             .contacts
             .iter()
@@ -368,7 +289,7 @@ mod tests {
     #[test]
     fn arrows_walk_the_rows_and_up_from_the_top_leaves_the_menu() {
         let mut suggest = SearchSuggest::default();
-        suggest.load("x".into(), "x", vec![contact("a@x.fr")], Vec::new());
+        suggest.load("x".into(), "x", vec![contact("a@x.fr")]);
         assert_eq!(suggest.selected_row(), None);
         suggest.navigate(TypeaheadDirection::Down);
         assert_eq!(suggest.selected_row(), Some(SuggestRow::Contact(0)));
@@ -378,5 +299,12 @@ mod tests {
         suggest.navigate(TypeaheadDirection::Up);
         suggest.navigate(TypeaheadDirection::Up);
         assert_eq!(suggest.selected_row(), None);
+    }
+
+    #[test]
+    fn nobody_found_keeps_the_menu_closed() {
+        let mut suggest = SearchSuggest::default();
+        suggest.load("zzz".into(), "zzz", Vec::new());
+        assert!(!suggest.open);
     }
 }

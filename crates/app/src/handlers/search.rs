@@ -487,7 +487,6 @@ impl ReadyApp {
 
     pub(crate) fn handle_search_execute(&mut self) -> Task<Message> {
         self.search_debounce_deadline = None;
-        self.pending_search_select = None;
         self.close_search_menus();
         let query = self.effective_search_query();
         if query.is_empty() {
@@ -530,7 +529,7 @@ impl ReadyApp {
                 };
 
                 self.thread_list.set_threads(threads);
-                let picked = self.select_picked_search_result();
+                self.clear_thread_selection();
 
                 match &result.resolved.intent {
                     SearchIntent::PinnedActivation { id } | SearchIntent::PinnedRefresh { id } => {
@@ -716,37 +715,13 @@ impl ReadyApp {
                     self.apply_search_pinned_state(&result.resolved.completion.pinned_state, None);
                     let post =
                         self.apply_search_post_success(result.resolved.completion.post_success);
-                    return Task::batch([picked, post]);
+                    return post;
                 }
 
-                Task::batch([persistence_task, picked])
+                persistence_task
             }
             Err(e) => {
-                self.pending_search_select = None;
                 self.status = format!("Search error: {e}");
-                Task::none()
-            }
-        }
-    }
-
-    /// Open the message picked in the search menu once the results are
-    /// listed; any other search starts with nothing selected.
-    fn select_picked_search_result(&mut self) -> Task<Message> {
-        let picked = self
-            .pending_search_select
-            .take()
-            .and_then(|(account_id, id)| {
-                self.thread_list
-                    .threads
-                    .iter()
-                    .position(|t| t.account_id == account_id && t.id == id)
-            });
-        match picked {
-            Some(index) => self.handle_thread_list(
-                crate::ui::thread_list::ThreadListMessage::SelectThread(index),
-            ),
-            None => {
-                self.clear_thread_selection();
                 Task::none()
             }
         }
@@ -755,15 +730,10 @@ impl ReadyApp {
     pub(crate) fn handle_search_suggest(&mut self, message: SearchSuggestMessage) -> Task<Message> {
         match message {
             SearchSuggestMessage::Refresh => self.refresh_search_suggestions(),
-            SearchSuggestMessage::Loaded {
-                query,
-                contacts,
-                messages,
-            } => {
+            SearchSuggestMessage::Loaded { query, contacts } => {
                 let current = self.search_query.text().to_string();
                 if !self.thread_list.typeahead.visible {
-                    self.search_suggest
-                        .load(query, &current, contacts, messages);
+                    self.search_suggest.load(query, &current, contacts);
                 }
                 Task::none()
             }
@@ -779,12 +749,10 @@ impl ReadyApp {
                 };
                 match row {
                     Some(SuggestRow::Contact(index)) => self.pick_suggested_contact(index),
-                    Some(SuggestRow::Message(index)) => self.pick_suggested_message(index),
                     Some(SuggestRow::ShowAll) | None => self.handle_search_execute(),
                 }
             }
             SearchSuggestMessage::PickContact(index) => self.pick_suggested_contact(index),
-            SearchSuggestMessage::PickMessage(index) => self.pick_suggested_message(index),
             SearchSuggestMessage::ShowAll => self.handle_search_execute(),
             SearchSuggestMessage::Close => {
                 self.close_search_menus();
@@ -803,8 +771,8 @@ impl ReadyApp {
     }
 
     /// Runs on each typing pause: the list shows the results at once, and
-    /// people and the best messages show under the search field. Nothing is
-    /// saved as a pinned search until Enter or a pick.
+    /// matching people show under the search field. Nothing is saved as a
+    /// pinned search until Enter or a pick.
     fn refresh_search_suggestions(&mut self) -> Task<Message> {
         self.search_debounce_deadline = None;
         let query = self.search_query.text().trim().to_string();
@@ -813,47 +781,18 @@ impl ReadyApp {
             return Task::none();
         }
         let live = self.run_live_search();
-        let message_query = self.effective_search_query();
-        let (scope, folder_id) = self.search_target();
-        let scope = execution_scope_to_account_scope(&SearchScope::View(scope));
         let db = Arc::clone(&self.db);
-        let search_state = self.search_state.clone();
-        let body_store = self.body_store.clone();
-        // Before the index is open the pipeline would fall back to SQL;
-        // people still show, messages come with the next pause.
-        let with_messages = !self.search_state_pending;
         let suggestions = Task::perform(
             async move {
                 let contacts = db.search_contacts_for_typeahead(query.clone()).await;
-                let messages = if with_messages {
-                    execute_search(
-                        db,
-                        search_state,
-                        body_store,
-                        message_query,
-                        scope,
-                        folder_id,
-                    )
-                    .await
-                } else {
-                    Ok(Vec::new())
-                };
-                (query, contacts, messages)
+                (query, contacts)
             },
-            |(query, contacts, messages)| {
+            |(query, contacts)| {
                 let contacts = contacts.unwrap_or_else(|e| {
                     log::warn!("search suggestions: people lookup failed: {e}");
                     Vec::new()
                 });
-                let messages = messages.unwrap_or_else(|e| {
-                    log::warn!("search suggestions: message lookup failed: {e}");
-                    Vec::new()
-                });
-                Message::SearchSuggest(SearchSuggestMessage::Loaded {
-                    query,
-                    contacts,
-                    messages,
-                })
+                Message::SearchSuggest(SearchSuggestMessage::Loaded { query, contacts })
             },
         );
         Task::batch([live, suggestions])
@@ -902,16 +841,6 @@ impl ReadyApp {
     }
 
     /// A message from the menu: list every result and open that one.
-    fn pick_suggested_message(&mut self, index: usize) -> Task<Message> {
-        let Some(thread) = self.search_suggest.message(index) else {
-            return Task::none();
-        };
-        let picked = (thread.account_id.clone(), thread.id.clone());
-        let task = self.handle_search_execute();
-        self.pending_search_select = Some(picked);
-        task
-    }
-
     fn apply_search_pinned_state(
         &mut self,
         behavior: &SearchPinnedStateBehavior,
