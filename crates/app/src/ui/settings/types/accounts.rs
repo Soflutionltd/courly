@@ -46,7 +46,9 @@ pub fn compute_health(
         if expires < now && no_recent_sync {
             return AccountHealth::Error;
         }
-        if expires < now + 86400 {
+        // Access tokens last an hour and are refreshed on their own, so only
+        // one left expired means the refresh is failing.
+        if expires < now {
             return AccountHealth::Warning;
         }
     }
@@ -76,4 +78,35 @@ pub struct AccountDragState {
     pub start_y: f32,
     /// Whether the mouse has moved far enough to count as a real drag.
     pub is_dragging: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_token_refreshed_on_schedule_reads_healthy() {
+        let now = jiff::Timestamp::now().as_second();
+        assert_eq!(
+            compute_health(Some(now - 60), Some(now + 3000), true),
+            AccountHealth::Healthy
+        );
+        assert_eq!(
+            compute_health(None, Some(now + 3000), true),
+            AccountHealth::Healthy
+        );
+    }
+
+    #[test]
+    fn an_expired_token_warns_then_errors_once_sync_stalls() {
+        let now = jiff::Timestamp::now().as_second();
+        assert_eq!(
+            compute_health(Some(now - 60), Some(now - 10), true),
+            AccountHealth::Warning
+        );
+        assert_eq!(
+            compute_health(Some(now - 7200), Some(now - 10), true),
+            AccountHealth::Error
+        );
+    }
 }
