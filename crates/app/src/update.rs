@@ -545,6 +545,7 @@ impl ReadyApp {
                     return Task::none();
                 }
                 if !self.search_query.text().is_empty()
+                    || self.search_sender.is_some()
                     || self.sidebar.active_pinned_search.is_some()
                 {
                     self.sidebar.active_pinned_search = None;

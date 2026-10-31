@@ -11,6 +11,7 @@ use crate::db::Account;
 use crate::icon;
 use crate::message::Message;
 use crate::ui::anchored_overlay::anchored_overlay;
+use crate::ui::search_suggest::SearchSuggestMessage;
 use crate::ui::layout::{
     ICON_MD, ICON_SM, PAD_DROPDOWN, PAD_NAV_ITEM, PAD_SEARCH_SCOPE_PILL, SEARCH_SCOPE_MENU_WIDTH,
     SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_SM,
@@ -94,10 +95,11 @@ fn choice_label(choice: &SearchScopeChoice, accounts: &[Account]) -> String {
     }
 }
 
-/// The search box: scope pill, then `input`.
+/// The search box: scope pill, the picked sender if any, then `input`.
 pub fn search_field<'a>(
     state: &SearchScopeState,
     accounts: &'a [Account],
+    sender: Option<&'a str>,
     input: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let current = state.choice.effective(accounts);
@@ -123,10 +125,26 @@ pub fn search_field<'a>(
         pill.into()
     };
 
+    // The slot is always present so the field keeps its place in the
+    // widget tree, and with it the keyboard focus.
+    let sender: Element<'a, Message> = match sender {
+        Some(email) => container(
+            button(
+                row![text(email).size(TEXT_SM), icon::x().size(ICON_SM)]
+                    .spacing(SPACE_XXS)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(Message::SearchSuggest(SearchSuggestMessage::ClearSender))
+            .padding(PAD_SEARCH_SCOPE_PILL)
+            .style(theme::ButtonClass::Chip { active: true }.style()),
+        )
+        .padding(iced::Padding::from([0.0, SPACE_XXS]))
+        .into(),
+        None => Space::new().width(SPACE_XXS).into(),
+    };
+
     container(
-        row![pill, container(input).width(Length::Fill)]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center),
+        row![pill, sender, container(input).width(Length::Fill)].align_y(Alignment::Center),
     )
     .padding(iced::Padding::from([0.0, SPACE_XXS]))
     .align_y(Alignment::Center)

@@ -35,6 +35,8 @@ pub enum SearchSuggestMessage {
     PickMessage(usize),
     ShowAll,
     Close,
+    /// The cross on the sender pill.
+    ClearSender,
 }
 
 /// One line of the menu, in display order.

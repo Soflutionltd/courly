@@ -354,12 +354,20 @@ impl ReadyApp {
         }
     }
 
+    /// What the search runs: the typed text, narrowed to the sender pill.
+    pub(crate) fn effective_search_query(&self) -> String {
+        sender_query(self.search_sender.as_deref(), self.search_query.text())
+    }
+
     pub(crate) fn handle_search_query_changed(&mut self, query: String) -> Task<Message> {
         self.search_query.set_text(query);
         self.thread_list.search_query = self.search_query.text().to_string();
         if self.search_query.text().trim().is_empty() {
             self.search_debounce_deadline = None;
             self.close_search_menus();
+            if self.search_sender.is_some() {
+                return self.handle_search_execute();
+            }
             if self.thread_list.mode == ThreadListMode::Search {
                 let _ = self.nav_generation.next();
                 let _ = self.search_generation.next();
@@ -434,7 +442,7 @@ impl ReadyApp {
             self.persist_search_scope()
         };
         let rerun = if self.thread_list.mode == ThreadListMode::Search
-            && !self.search_query.text().trim().is_empty()
+            && !self.effective_search_query().is_empty()
         {
             self.handle_search_execute()
         } else {
@@ -468,7 +476,7 @@ impl ReadyApp {
         self.search_debounce_deadline = None;
         self.pending_search_select = None;
         self.close_search_menus();
-        let query = self.search_query.text().trim().to_string();
+        let query = self.effective_search_query();
         if query.is_empty() {
             return self.restore_folder_view();
         }
@@ -518,6 +526,7 @@ impl ReadyApp {
                     SearchIntent::PinnedActivation { id } | SearchIntent::PinnedRefresh { id } => {
                         if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == *id) {
                             let label = truncate_query(&ps.query, 30);
+                            self.search_sender = None;
                             self.search_query.reset(ps.query.clone());
                             self.thread_list.search_query.clone_from(&ps.query);
                             self.thread_list.set_context(
@@ -766,6 +775,10 @@ impl ReadyApp {
                 self.close_search_menus();
                 Task::none()
             }
+            SearchSuggestMessage::ClearSender => {
+                self.search_sender = None;
+                Task::batch([self.handle_search_execute(), self.handle_focus_search_bar()])
+            }
         }
     }
 
@@ -783,6 +796,7 @@ impl ReadyApp {
             self.search_suggest.close();
             return Task::none();
         }
+        let message_query = self.effective_search_query();
         let (scope, folder_id) = self.search_target();
         let scope = execution_scope_to_account_scope(&SearchScope::View(scope));
         let db = Arc::clone(&self.db);
@@ -795,7 +809,7 @@ impl ReadyApp {
             async move {
                 let contacts = db.search_contacts_for_typeahead(query.clone()).await;
                 let messages = if with_messages {
-                    execute_search(db, search_state, body_store, query.clone(), scope, folder_id)
+                    execute_search(db, search_state, body_store, message_query, scope, folder_id)
                         .await
                 } else {
                     Ok(Vec::new())
@@ -820,15 +834,16 @@ impl ReadyApp {
         )
     }
 
-    /// A person from the menu: every message they sent.
+    /// A person from the menu: every message they sent, with the person
+    /// as a pill and the field emptied for more words.
     fn pick_suggested_contact(&mut self, index: usize) -> Task<Message> {
         let Some(contact) = self.search_suggest.contact(index) else {
             return Task::none();
         };
-        let query = format!("from:{}", contact.insert_value);
-        self.search_query.set_text(query.clone());
-        self.thread_list.search_query = query;
-        self.handle_search_execute()
+        self.search_sender = Some(contact.insert_value.clone());
+        self.search_query.set_text(String::new());
+        self.thread_list.search_query.clear();
+        Task::batch([self.handle_search_execute(), self.handle_focus_search_bar()])
     }
 
     /// A message from the menu: list every result and open that one.
@@ -907,6 +922,7 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_search_clear(&mut self) -> Task<Message> {
+        self.search_sender = None;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
@@ -926,6 +942,7 @@ impl ReadyApp {
         query: String,
     ) -> Task<Message> {
         self.clear_pinned_search_context();
+        self.search_sender = None;
         self.search_query.set_text(query.clone());
         self.thread_list.search_query = query;
         let intent = SearchIntent::SmartFolder {
@@ -1193,6 +1210,7 @@ impl ReadyApp {
 
     /// Clear all search-related state without restoring pre-search threads.
     pub(crate) fn clear_search_state(&mut self) {
+        self.search_sender = None;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
@@ -1209,6 +1227,7 @@ impl ReadyApp {
     /// thread list reflects any changes that happened during the search.
     pub(crate) fn restore_folder_view(&mut self) -> Task<Message> {
         self.thread_list.mode = ThreadListMode::Scope;
+        self.search_sender = None;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.clear_pinned_search_context();
@@ -1268,6 +1287,15 @@ pub(crate) async fn execute_search(
     .await
 }
 
+fn sender_query(sender: Option<&str>, text: &str) -> String {
+    let text = text.trim();
+    match sender {
+        Some(email) if text.is_empty() => format!("from:{email}"),
+        Some(email) => format!("from:{email} {text}"),
+        None => text.to_string(),
+    }
+}
+
 fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {
     match scope {
         AccountScope::All => true,
@@ -1310,6 +1338,7 @@ impl ReadyApp {
 
     pub(crate) fn handle_search_here(&mut self, query_prefix: String) -> Task<Message> {
         self.record_search_restore_origin();
+        self.search_sender = None;
         self.search_query.reset(query_prefix.clone());
         self.thread_list.search_query = query_prefix;
         self.clear_pinned_search_context();
@@ -1317,7 +1346,7 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_save_as_smart_folder(&mut self, name: String) -> Task<Message> {
-        let query = self.search_query.text().trim().to_string();
+        let query = self.effective_search_query();
         if query.is_empty() {
             return Task::none();
         }
@@ -1383,5 +1412,17 @@ impl ReadyApp {
                 Task::none()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sender_query;
+
+    #[test]
+    fn the_sender_pill_narrows_the_typed_words() {
+        assert_eq!(sender_query(None, "  colis "), "colis");
+        assert_eq!(sender_query(Some("a@x.fr"), " "), "from:a@x.fr");
+        assert_eq!(sender_query(Some("a@x.fr"), "colis"), "from:a@x.fr colis");
     }
 }

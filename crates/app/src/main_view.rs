@@ -199,6 +199,7 @@ impl ReadyApp {
         let search = ui::search_scope::search_field(
             &self.search_scope,
             &self.sidebar.accounts,
+            self.search_sender.as_deref(),
             self.thread_list.search_bar().map(Message::ThreadList),
         );
         // The field stays wrapped whether or not the menu shows: changing the

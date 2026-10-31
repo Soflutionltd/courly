@@ -114,11 +114,7 @@ pub fn build_context(app: &ReadyApp) -> CommandContext {
     let (active_account_id, provider_kind) = active_account_info(app);
     let thread_state = selected_thread_state(app);
 
-    let search_query = if app.search_query.text().trim().is_empty() {
-        None
-    } else {
-        Some(app.search_query.text().to_string())
-    };
+    let search_query = Some(app.effective_search_query()).filter(|query| !query.is_empty());
 
     let (may_remove_items, may_set_seen, may_set_keywords, may_submit) =
         current_mailbox_rights(app);
