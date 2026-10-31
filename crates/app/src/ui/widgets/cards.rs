@@ -192,7 +192,8 @@ pub fn thread_card<'a, M: Clone + 'a>(
             sender_font,
             text::base,
         ))
-        .width(Length::Fill),
+        .width(Length::Fill)
+        .clip(true),
         container(
             text(date_str)
                 .size(TEXT_XS)
@@ -233,7 +234,8 @@ pub fn thread_card<'a, M: Clone + 'a>(
             font::text(),
             subject_style,
         ))
-        .width(Length::Fill),
+        .width(Length::Fill)
+        .clip(true),
     ]
     // Selecting a local draft opens it in the compose, so its row carries
     // no actions that would select it first.
@@ -264,6 +266,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .align_y(Alignment::Center),
             )
             .width(Length::Fill)
+            .clip(true)
             .into()
         } else {
             container(highlighted_line(
@@ -274,6 +277,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 text::secondary,
             ))
             .width(Length::Fill)
+            .clip(true)
             .into()
         };
 
