@@ -159,7 +159,7 @@ Courly builds against its sibling repositories, which must sit next to it:
 mkdir courly-workspace && cd courly-workspace
 git clone https://github.com/Soflutionltd/courly.git
 git clone --branch ratatoskr https://github.com/Soflutionltd/bifrost.git
-git clone https://github.com/Soflutionltd/sluggrs.git
+git clone --branch courly https://github.com/Soflutionltd/sluggrs.git
 git clone --branch sluggrs https://github.com/Soflutionltd/iced.git sluggrs/repos/iced
 
 cd courly
