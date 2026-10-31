@@ -61,6 +61,8 @@ struct ResidentEngineInner {
     slots: Mutex<HashMap<String, Arc<ResidentSlot>>>,
     attach_guards: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     shutting_down: AtomicBool,
+    /// Base cadence of `hot_poll_loop`, from the user's mail check setting.
+    hot_poll_interval: watch::Sender<Duration>,
 }
 
 struct ResidentSlot {
@@ -166,8 +168,19 @@ impl ResidentEngine {
                 slots: Mutex::new(HashMap::new()),
                 attach_guards: Mutex::new(HashMap::new()),
                 shutting_down: AtomicBool::new(false),
+                hot_poll_interval: watch::Sender::new(DEFAULT_HOT_POLL_INTERVAL),
             }),
         }
+    }
+
+    /// Re-pace every running hot poll loop. A loop asleep on the previous
+    /// cadence wakes and re-arms on the new one.
+    pub fn set_hot_poll_interval(&self, interval: Duration) {
+        self.inner.hot_poll_interval.send_if_modified(|current| {
+            let changed = *current != interval;
+            *current = interval;
+            changed
+        });
     }
 
     pub async fn start_ingress(&self) {
@@ -332,7 +345,8 @@ impl ResidentEngine {
                 return Err(error);
             }
         };
-        self.subscribe_push(account_id, &account, provider, containers.as_ref())
+        let push_live = self
+            .subscribe_push(account_id, &account, provider, containers.as_ref())
             .await;
         self.register_routing_keys(account_id, provider, containers.as_ref())
             .await;
@@ -396,12 +410,14 @@ impl ResidentEngine {
             account_id.to_string(),
             Arc::clone(&slot.mutation_signal),
         ));
-        if provider == BifrostProviderKind::Graph {
+        if needs_hot_poll(provider, push_live) {
             tokio::spawn(hot_poll_loop(
                 Arc::clone(&self.inner),
                 Arc::clone(&slot),
                 account_id.to_string(),
             ));
+        }
+        if provider == BifrostProviderKind::Graph {
             tokio::spawn(category_refresh_loop(
                 Arc::clone(&self.inner),
                 Arc::clone(&slot),
@@ -612,7 +628,7 @@ impl ResidentEngine {
         account: &AccountId,
         provider: BifrostProviderKind,
         containers: &ContainerIndex,
-    ) {
+    ) -> bool {
         let scopes = push_subscribe_scopes(provider, containers);
         match self
             .inner
@@ -621,11 +637,16 @@ impl ResidentEngine {
             .subscribe_push(account, &scopes)
             .await
         {
-            Ok(_) => log::debug!("resident push subscribed for {account_id}"),
+            Ok(subscription) => {
+                log::debug!("resident push subscribed for {account_id}");
+                !subscription.outcomes.succeeded().is_empty()
+                    && subscription.outcomes.failed().is_empty()
+            }
             Err(error) => {
                 log::debug!(
                     "resident push unavailable for {account_id}; falling back to poll: {error:?}"
                 );
+                false
             }
         }
     }
@@ -1138,10 +1159,85 @@ fn repush_full_reconcile(inner: &ResidentEngineInner, account_id: &str) {
 /// Outlook's limit (10,000 requests per 10 minutes) is per app and mailbox,
 /// so every machine sharing the mailbox draws from it: four machines at
 /// 2 s for two hot folders plus 6 s for the five others make about 4,400.
-const HOT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+///
+/// Gmail and JMAP accounts whose push could not be set up are re-read the
+/// same way, one account-wide delta per tick (Gmail `history.list` costs 2
+/// of the 6,000 quota units a user may spend per minute).
+pub const DEFAULT_HOT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Accepted range for the user's mail check setting, in seconds.
+const HOT_POLL_SETTING_RANGE: std::ops::RangeInclusive<u64> = 2..=300;
 
 /// The other system folders are re-read every this many hot ticks.
 const COLD_FOLDER_TICKS: u32 = 3;
+
+/// Longest gap the cadence stretches to while the provider keeps throttling.
+const HOT_POLL_BACKOFF_CAP: Duration = Duration::from_secs(120);
+
+/// Unthrottled ticks at a stretched cadence before it halves back.
+const HOT_POLL_CALM_TICKS: u32 = 10;
+
+/// Cadence for the stored `mail_check_interval` value (seconds), or the
+/// default when it is missing or out of range.
+#[must_use]
+pub fn hot_poll_interval_from_setting(value: Option<&str>) -> Duration {
+    value
+        .and_then(|seconds| seconds.trim().parse::<u64>().ok())
+        .filter(|seconds| HOT_POLL_SETTING_RANGE.contains(seconds))
+        .map_or(DEFAULT_HOT_POLL_INTERVAL, Duration::from_secs)
+}
+
+/// Whether an account needs `hot_poll_loop`: Graph has no push a desktop
+/// client can receive, Gmail and JMAP only when their push did not come up,
+/// IMAP never (IDLE covers it).
+fn needs_hot_poll(provider: BifrostProviderKind, push_live: bool) -> bool {
+    match provider {
+        BifrostProviderKind::Graph => true,
+        BifrostProviderKind::Gmail | BifrostProviderKind::Jmap => !push_live,
+        BifrostProviderKind::Imap => false,
+    }
+}
+
+/// Stretch of the hot cadence. Each tick that finds the account throttled
+/// doubles it, up to `HOT_POLL_BACKOFF_CAP`; every `HOT_POLL_CALM_TICKS`
+/// calm ticks halve it again.
+#[derive(Debug)]
+struct HotPollBackoff {
+    factor: u32,
+    calm_ticks: u32,
+}
+
+impl HotPollBackoff {
+    fn new() -> Self {
+        Self {
+            factor: 1,
+            calm_ticks: 0,
+        }
+    }
+
+    fn interval(&self, base: Duration) -> Duration {
+        base.saturating_mul(self.factor)
+            .min(HOT_POLL_BACKOFF_CAP.max(base))
+    }
+
+    fn throttled(&mut self, base: Duration) {
+        self.calm_ticks = 0;
+        if self.interval(base) < HOT_POLL_BACKOFF_CAP {
+            self.factor = self.factor.saturating_mul(2);
+        }
+    }
+
+    fn calm(&mut self) {
+        if self.factor == 1 {
+            return;
+        }
+        self.calm_ticks += 1;
+        if self.calm_ticks >= HOT_POLL_CALM_TICKS {
+            self.factor /= 2;
+            self.calm_ticks = 0;
+        }
+    }
+}
 
 async fn hot_poll_loop(
     inner: Arc<ResidentEngineInner>,
@@ -1149,6 +1245,9 @@ async fn hot_poll_loop(
     account_id: String,
 ) {
     let account = AccountId(account_id);
+    let mut interval_rx = inner.hot_poll_interval.subscribe();
+    let mut backoff = HotPollBackoff::new();
+    let per_folder = slot.provider == BifrostProviderKind::Graph;
     let inbox = slot
         .containers
         .role_target(&NamespaceAttribution::Personal, FolderRole::Inbox)
@@ -1161,9 +1260,34 @@ async fn hot_poll_loop(
         .collect();
     let mut tick: u32 = 0;
     loop {
+        let base = *interval_rx.borrow_and_update();
         tokio::select! {
             () = slot.cancel.cancelled() => return,
-            () = tokio::time::sleep(HOT_POLL_INTERVAL) => {}
+            changed = interval_rx.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                continue;
+            }
+            () = tokio::time::sleep(backoff.interval(base)) => {}
+        }
+        if let Some(wait) = inner.engine.engine().account_throttle_wait(&account) {
+            backoff.throttled(base);
+            log::info!(
+                "hot poll for account {} throttled; next check in {:?}",
+                account.0,
+                wait.max(backoff.interval(base))
+            );
+            tokio::select! {
+                () = slot.cancel.cancelled() => return,
+                () = tokio::time::sleep(wait) => {}
+            }
+            continue;
+        }
+        backoff.calm();
+        if !per_folder {
+            invalidate_account(&inner, &account, account_mail_scope(slot.provider));
+            continue;
         }
         tick = tick.wrapping_add(1);
         let focused = slot
@@ -1177,7 +1301,12 @@ async fn hot_poll_loop(
             .iter()
             .filter(|native| cold_due && Some(*native) != focused.as_ref())
             .cloned();
-        for native in inbox.iter().chain(focused.iter()).cloned().chain(cold_folders) {
+        for native in inbox
+            .iter()
+            .chain(focused.iter())
+            .cloned()
+            .chain(cold_folders)
+        {
             invalidate_folder(&inner, &account, native);
         }
     }
@@ -1227,6 +1356,30 @@ fn invalidate_folder(inner: &ResidentEngineInner, account: &AccountId, native: S
                     folder: FolderId(native),
                     ty: ObjectType::Email,
                 }),
+            },
+        },
+    );
+}
+
+/// Cursor that carries an account's whole mail delta: Gmail keeps one
+/// history id for the account, JMAP one `Email` state.
+fn account_mail_scope(provider: BifrostProviderKind) -> CursorScope {
+    match provider {
+        BifrostProviderKind::Jmap => CursorScope::Type(ObjectType::Email),
+        BifrostProviderKind::Gmail | BifrostProviderKind::Graph | BifrostProviderKind::Imap => {
+            CursorScope::Account
+        }
+    }
+}
+
+/// Ask the engine's reconciler for one account-wide mail delta now.
+fn invalidate_account(inner: &ResidentEngineInner, account: &AccountId, scope: CursorScope) {
+    inner.engine.engine().invalidation_sink().push(
+        account.clone(),
+        WatchEvent::Invalidated {
+            hint: InvalidationHint {
+                source: PushSource::Coalesced,
+                payload: HintPayload::SpecificCursorScope(scope),
             },
         },
     );
@@ -1448,7 +1601,11 @@ async fn read_initial_sync_completed(
 
 #[cfg(test)]
 mod tests {
-    use super::{BifrostProviderKind, CursorScope, FolderId, ObjectType};
+    use super::{
+        BifrostProviderKind, CursorScope, DEFAULT_HOT_POLL_INTERVAL, Duration, FolderId,
+        HOT_POLL_BACKOFF_CAP, HOT_POLL_CALM_TICKS, HotPollBackoff, ObjectType, account_mail_scope,
+        hot_poll_interval_from_setting, needs_hot_poll,
+    };
     fn index_after(source: &str, needle: &str, after: usize) -> usize {
         source[after..]
             .find(needle)
@@ -1606,5 +1763,88 @@ mod tests {
             assert!(!should_rebuild_slot_on_kick(provider, Some(true)));
             assert!(!should_rebuild_slot_on_kick(provider, None));
         }
+    }
+
+    #[test]
+    fn mail_check_setting_falls_back_to_the_default_outside_its_range() {
+        assert_eq!(
+            hot_poll_interval_from_setting(Some("15")),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            hot_poll_interval_from_setting(Some(" 60 ")),
+            Duration::from_secs(60)
+        );
+        for stored in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("1"),
+            Some("301"),
+            Some("fast"),
+        ] {
+            assert_eq!(
+                hot_poll_interval_from_setting(stored),
+                DEFAULT_HOT_POLL_INTERVAL,
+                "{stored:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hot_poll_runs_where_no_push_reaches_the_app() {
+        assert!(needs_hot_poll(BifrostProviderKind::Graph, true));
+        assert!(needs_hot_poll(BifrostProviderKind::Graph, false));
+        for provider in [BifrostProviderKind::Gmail, BifrostProviderKind::Jmap] {
+            assert!(needs_hot_poll(provider, false));
+            assert!(!needs_hot_poll(provider, true));
+        }
+        assert!(!needs_hot_poll(BifrostProviderKind::Imap, false));
+    }
+
+    #[test]
+    fn account_wide_polls_target_the_cursor_holding_the_mail_delta() {
+        assert_eq!(
+            account_mail_scope(BifrostProviderKind::Gmail),
+            CursorScope::Account
+        );
+        assert_eq!(
+            account_mail_scope(BifrostProviderKind::Jmap),
+            CursorScope::Type(ObjectType::Email)
+        );
+    }
+
+    #[test]
+    fn throttling_stretches_the_cadence_to_the_cap_then_calm_restores_it() {
+        let base = Duration::from_secs(2);
+        let mut backoff = HotPollBackoff::new();
+        assert_eq!(backoff.interval(base), base);
+
+        let mut stretched = Vec::new();
+        for _ in 0..8 {
+            backoff.throttled(base);
+            stretched.push(backoff.interval(base).as_secs());
+        }
+        assert_eq!(stretched, [4, 8, 16, 32, 64, 120, 120, 120]);
+
+        for _ in 0..HOT_POLL_CALM_TICKS - 1 {
+            backoff.calm();
+        }
+        assert_eq!(backoff.interval(base), HOT_POLL_BACKOFF_CAP);
+        backoff.calm();
+        assert_eq!(backoff.interval(base), Duration::from_secs(64));
+
+        for _ in 0..HOT_POLL_CALM_TICKS * 10 {
+            backoff.calm();
+        }
+        assert_eq!(backoff.interval(base), base);
+    }
+
+    #[test]
+    fn a_slow_base_cadence_is_never_shortened_by_the_cap() {
+        let base = Duration::from_secs(300);
+        let mut backoff = HotPollBackoff::new();
+        backoff.throttled(base);
+        assert_eq!(backoff.interval(base), base);
     }
 }

@@ -203,6 +203,10 @@ impl SyncRuntime {
         }
     }
 
+    pub(crate) fn set_hot_poll_interval(&self, interval: std::time::Duration) {
+        self.inner.resident_engine.set_hot_poll_interval(interval);
+    }
+
     pub async fn start_resident_ingress(&self) {
         self.inner.resident_engine.start_ingress().await;
     }

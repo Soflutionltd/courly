@@ -63,6 +63,9 @@ pub enum SettingValue {
     ToolbarLayout(String),
     /// Where the title-bar search looks, as JSON.
     SearchScope(String),
+    /// Seconds between two checks for new mail on accounts without push
+    /// (Outlook, and Gmail or JMAP when push is unavailable).
+    MailCheckInterval(String),
 }
 
 impl SettingValue {
@@ -86,6 +89,7 @@ impl SettingValue {
             Self::SidebarLayout(_) => "sidebar_layout",
             Self::ToolbarLayout(_) => "toolbar_layout",
             Self::SearchScope(_) => "search_scope",
+            Self::MailCheckInterval(_) => "mail_check_interval",
         }
     }
 
@@ -116,7 +120,8 @@ impl SettingValue {
             | Self::EmailZoom(s)
             | Self::SidebarLayout(s)
             | Self::ToolbarLayout(s)
-            | Self::SearchScope(s) => s.clone(),
+            | Self::SearchScope(s)
+            | Self::MailCheckInterval(s) => s.clone(),
         }
     }
 }
@@ -178,6 +183,7 @@ mod tests {
             SettingValue::Theme("light".to_string()),
             SettingValue::FontSize("medium".to_string()),
             SettingValue::ReadingPanePosition("right".to_string()),
+            SettingValue::MailCheckInterval("2".to_string()),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();

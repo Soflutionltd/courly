@@ -49,6 +49,13 @@ pub(crate) async fn handle_set(
         )
     });
 
+    let mail_check_interval = params.values.iter().find_map(|value| match value {
+        SettingValue::MailCheckInterval(seconds) => Some(
+            crate::bifrost::hot_poll_interval_from_setting(Some(seconds)),
+        ),
+        _ => None,
+    });
+
     let write_db = boot_state.write_db_state()?;
     let old_window_days: Option<i64> = if touches_sync_period {
         write_db
@@ -81,6 +88,12 @@ pub(crate) async fn handle_set(
         })
         .await
         .map_err(ServiceError::Internal)?;
+
+    if let Some(interval) = mail_check_interval
+        && let Some(runtime) = boot_state.sync_runtime()
+    {
+        runtime.set_hot_poll_interval(interval);
+    }
 
     if touches_compress_pref {
         log::warn!(

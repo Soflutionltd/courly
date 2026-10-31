@@ -1465,6 +1465,18 @@ async fn run_boot_sequence_inner(
         db_read.clone(),
         Arc::clone(&state),
     ));
+    let mail_check_interval = db_write
+        .with_read_sync(|conn| {
+            rtsk::db::queries::get_setting(conn, "mail_check_interval")
+                .map_err(|e| format!("read mail_check_interval: {e}"))
+        })
+        .map_err(|e| {
+            log::error!("mail check interval load failed: {e}");
+            BootFailure::MigrationFailure
+        })?;
+    runtime.set_hot_poll_interval(crate::bifrost::hot_poll_interval_from_setting(
+        mail_check_interval.as_deref(),
+    ));
     state.install_sync_runtime(runtime);
 
     Ok(BootContext {
