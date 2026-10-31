@@ -136,7 +136,7 @@ pie showData
 | --- | --- | --- |
 | Interface | `app`, `rte`, `mail-html`, `cmdk`, `iced-drop` | iced, wgpu, Blitz |
 | Service | `service`, `sync`, `core`, `calendar`, `smart-folder`, `ai` | Tokio |
-| Storage | `db`, `db-read`, `stores`, `seen` | SQLite (rusqlite), LZ4 |
+| Storage | `db`, `db-read`, `stores`, `seen` | SQLite (rusqlite), zlib (flate2) |
 | Search | `search` | tantivy |
 | Attachments | `squeeze`, `import` | mozjpeg, oxipng, lopdf |
 | Security | `crypto-key`, `common` | AES-256-GCM, ammonia |
