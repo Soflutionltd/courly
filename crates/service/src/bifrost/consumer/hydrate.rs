@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
     AccountErrorKind, AccountId, AttachmentSource, BlobHandle, Change, HydrationProjection,
-    Importance, Message, MessageAttachment, ObjectChangeKind, ObjectId, ScopeChangeKind, SyncEvent,
+    Importance, Message, MessageAttachment, ObjectChangeKind, ObjectId, ResourceKind,
+    ScopeChangeKind, SyncEvent,
 };
 use common::rfc822::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use common::types::{
@@ -345,7 +346,10 @@ pub async fn hydrate_change_to_message_insert_row(
                 // Deleted or moved (Graph mints a new id on move) between the
                 // change being listed and read: the server no longer holds it.
                 Err(bifrost_sync::Error::Account(error))
-                    if matches!(error.kind(), AccountErrorKind::NotFound(_)) =>
+                    if matches!(
+                        error.kind(),
+                        AccountErrorKind::NotFound(ResourceKind::Message)
+                    ) =>
                 {
                     return Ok(HydratedChange::Message(
                         Box::new(placeholder_row(&account_id.0, &object.id.0)),
