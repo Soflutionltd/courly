@@ -8,7 +8,8 @@ use crate::ui::layout::{
     MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
     MESSAGE_VIEW_MIN_WIDTH,
 };
-use crate::{Message, ReadyApp};
+use crate::ui::thread_list::ThreadListMessage;
+use crate::{AppMode, Message, ReadyApp};
 
 impl ReadyApp {
     /// Open a message view pop-out for the message at `message_index` in the
@@ -141,19 +142,14 @@ impl ReadyApp {
         mut state: ComposeState,
         mode: ComposeMode,
     ) -> Task<Message> {
-        if let Some(existing) = self.existing_compose_for_thread(&state) {
-            return existing;
-        }
-        if let Some(previous) = self.inline_compose {
-            let has_content = matches!(
-                self.pop_out_windows.get(&previous),
-                Some(PopOutWindow::Compose(s)) if s.has_user_content()
-            );
-            if has_content && !self.save_compose_draft_sync(previous) {
-                log::warn!("Inline compose draft save failed, keeping it open");
+        if let Some(existing) = self.compose_for_thread(&state) {
+            if self.inline_compose == Some(existing) {
                 return Task::none();
             }
-            self.pop_out_windows.remove(&previous);
+            return self.dock_compose_window(existing);
+        }
+        if !self.release_inline_compose() {
+            return Task::none();
         }
         self.prepare_compose_state(&mut state, mode);
         state.inline = true;
@@ -162,6 +158,41 @@ impl ReadyApp {
             .insert(id, PopOutWindow::Compose(Box::new(state)));
         self.inline_compose = Some(id);
         self.resolve_compose_signature(id)
+    }
+
+    /// Make room for a new inline compose: the current one is saved as a
+    /// draft when it has content. False when that save fails, so the
+    /// current one stays open.
+    fn release_inline_compose(&mut self) -> bool {
+        let Some(previous) = self.inline_compose else {
+            return true;
+        };
+        let has_content = matches!(
+            self.pop_out_windows.get(&previous),
+            Some(PopOutWindow::Compose(s)) if s.has_user_content()
+        );
+        if has_content && !self.save_compose_draft_sync(previous) {
+            log::warn!("Inline compose draft save failed, keeping it open");
+            return false;
+        }
+        self.pop_out_windows.remove(&previous);
+        self.inline_compose = None;
+        true
+    }
+
+    /// Bring a detached compose back into the main window and close its
+    /// window. A programmatic close sends no close request, so the state
+    /// kept under the same id is not discarded.
+    fn dock_compose_window(&mut self, id: iced::window::Id) -> Task<Message> {
+        if !self.release_inline_compose() {
+            return Task::none();
+        }
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&id) else {
+            return Task::none();
+        };
+        state.inline = true;
+        self.inline_compose = Some(id);
+        iced::window::close(id)
     }
 
     /// Move the inline compose into its own window.
@@ -188,12 +219,20 @@ impl ReadyApp {
         iced::window::close(id)
     }
 
+    /// The compose already open for the same conversation, if any.
+    fn compose_for_thread(&self, state: &ComposeState) -> Option<iced::window::Id> {
+        let tid = state.reply_thread_id.as_deref()?;
+        self.pop_out_windows
+            .iter()
+            .find(|(_, w)| {
+                matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
+            })
+            .map(|(&id, _)| id)
+    }
+
     /// Focus the compose already open for the same conversation, if any.
     fn existing_compose_for_thread(&self, state: &ComposeState) -> Option<Task<Message>> {
-        let tid = state.reply_thread_id.as_deref()?;
-        let (&existing_id, _) = self.pop_out_windows.iter().find(|(_, w)| {
-            matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
-        })?;
+        let existing_id = self.compose_for_thread(state)?;
         if self.inline_compose == Some(existing_id) {
             return Some(Task::none());
         }
@@ -291,8 +330,38 @@ impl ReadyApp {
             message_id_header: mv.message_id_header.as_deref(),
         };
         let state = ComposeState::new_reply(&self.sidebar.accounts, &mode, &source);
+        let thread_id = mv.thread_id.clone();
 
-        self.open_compose_window_with_state(state, mode)
+        let show = self.show_thread_in_main_window(&thread_id);
+        let compose = self.open_inline_compose(state, mode);
+        Task::batch([show, compose, iced::window::gain_focus(self.main_window_id)])
+    }
+
+    /// Put the main window on a conversation so its inline compose shows.
+    /// A conversation missing from the list leaves nothing selected, and the
+    /// reading pane then shows the compose on its own.
+    fn show_thread_in_main_window(&mut self, thread_id: &str) -> Task<Message> {
+        if self.show_settings {
+            self.close_settings();
+        }
+        let mode = if self.app_mode == AppMode::Mail {
+            Task::none()
+        } else {
+            self.update(Message::SetAppMode(AppMode::Mail))
+        };
+        let select = match self
+            .thread_list
+            .threads
+            .iter()
+            .position(|thread| thread.id == thread_id)
+        {
+            Some(idx) => self.handle_thread_list(ThreadListMessage::SelectThread(idx)),
+            None => {
+                self.clear_thread_selection();
+                Task::none()
+            }
+        };
+        Task::batch([mode, select])
     }
 
     /// Handle compose actions from command dispatch (Reply/ReplyAll/Forward

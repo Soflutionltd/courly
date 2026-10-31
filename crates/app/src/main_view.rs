@@ -314,7 +314,8 @@ impl ReadyApp {
             .into()
     }
 
-    /// The inline compose, when it belongs to the conversation on screen.
+    /// The inline compose, when it belongs to the conversation on screen or
+    /// when no conversation is selected.
     pub(crate) fn inline_compose_for_selected_thread(
         &self,
     ) -> Option<(iced::window::Id, &pop_out::compose::ComposeState)> {
@@ -322,10 +323,13 @@ impl ReadyApp {
         let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get(&id) else {
             return None;
         };
-        let selected = self
+        let Some(selected) = self
             .thread_list
             .selected_thread
-            .and_then(|idx| self.thread_list.threads.get(idx))?;
+            .and_then(|idx| self.thread_list.threads.get(idx))
+        else {
+            return Some((id, &**state));
+        };
         (state.reply_thread_id.as_deref() == Some(selected.id.as_str())).then_some((id, &**state))
     }
 
