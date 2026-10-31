@@ -2,7 +2,7 @@
 //! folder, one added mailbox, or every mailbox. The choice is persisted
 //! and never follows sidebar navigation.
 
-use iced::widget::{Space, button, column, container, row, text};
+use iced::widget::{Space, button, column, container, row, rule, text};
 use iced::{Alignment, Element, Length};
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
@@ -152,21 +152,34 @@ pub fn search_field<'a>(
     .into()
 }
 
+/// The mailboxes, then below a rule the two choices that stay put however
+/// many mailboxes there are.
 fn menu<'a>(current: &SearchScopeChoice, accounts: &'a [Account]) -> Element<'a, Message> {
-    let mut entries = vec![entry(
+    let mut entries: Vec<Element<'a, Message>> = accounts
+        .iter()
+        .filter(|account| !account.is_deleting)
+        .map(|account| {
+            entry(
+                mailbox_label(account).to_owned(),
+                SearchScopeChoice::Mailbox {
+                    account_id: account.id.clone(),
+                },
+                current,
+            )
+        })
+        .collect();
+    if !entries.is_empty() {
+        entries.push(
+            container(rule::horizontal(1).style(theme::RuleClass::Subtle.style()))
+                .padding(iced::Padding::from([SPACE_XXS, 0.0]))
+                .into(),
+        );
+    }
+    entries.push(entry(
         t!("main.search.scope_active_folder").into_owned(),
         SearchScopeChoice::ActiveFolder,
         current,
-    )];
-    entries.extend(accounts.iter().filter(|account| !account.is_deleting).map(|account| {
-        entry(
-            mailbox_label(account).to_owned(),
-            SearchScopeChoice::Mailbox {
-                account_id: account.id.clone(),
-            },
-            current,
-        )
-    }));
+    ));
     entries.push(entry(
         t!("main.search.scope_all_mailboxes").into_owned(),
         SearchScopeChoice::AllMailboxes,
