@@ -1308,7 +1308,10 @@ mod tests {
         let auth_lost = super::forced_account_error(super::ForcedRecoveryClass::AuthLost);
 
         assert!(!super::terminates_account(&folder, &cursor_invalid));
-        assert!(super::terminates_account(&CursorScope::Account, &cursor_invalid));
+        assert!(super::terminates_account(
+            &CursorScope::Account,
+            &cursor_invalid
+        ));
         assert!(super::terminates_account(&folder, &auth_lost));
     }
 
