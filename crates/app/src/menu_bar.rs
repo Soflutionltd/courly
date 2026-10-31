@@ -896,13 +896,13 @@ impl ReadyApp {
         let folder = self.sidebar.selected_folder();
         match action {
             MenuAction::Command(command) => self.update(Message::ExecuteCommand(command)),
-            MenuAction::Settings(tab) => {
-                self.open_settings(tab);
-                Task::none()
-            }
+            MenuAction::Settings(tab) => self.open_settings(tab),
             MenuAction::CheckForUpdates => {
-                self.open_settings(Tab::About);
-                self.update(Message::Updater(UpdaterMessage::CheckRequestedByUser))
+                let refresh = self.open_settings(Tab::About);
+                Task::batch([
+                    refresh,
+                    self.update(Message::Updater(UpdaterMessage::CheckRequestedByUser)),
+                ])
             }
             MenuAction::NewFolder => {
                 let ViewScope::Account(account_id) = self.sidebar.selected_scope.clone() else {
@@ -922,8 +922,11 @@ impl ReadyApp {
                 }
             }
             MenuAction::ImportContacts => {
-                self.open_settings(Tab::People);
-                self.update(Message::Settings(SettingsMessage::ImportContactsOpen))
+                let refresh = self.open_settings(Tab::People);
+                Task::batch([
+                    refresh,
+                    self.update(Message::Settings(SettingsMessage::ImportContactsOpen)),
+                ])
             }
             MenuAction::CustomizeToolbar => {
                 self.update(Message::Toolbar(ToolbarMessage::Customize))

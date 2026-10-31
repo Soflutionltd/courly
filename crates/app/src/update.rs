@@ -99,7 +99,7 @@ impl ReadyApp {
                 if self.show_settings {
                     self.close_settings();
                 } else {
-                    self.open_settings(crate::ui::settings::Tab::General);
+                    return self.open_settings(crate::ui::settings::Tab::General);
                 }
                 Task::none()
             }
@@ -517,6 +517,14 @@ impl ReadyApp {
                     }
                 };
                 self.status_bar.show_confirmation(confirmation);
+                self.refresh_managed_accounts()
+            }
+            Message::ManagedAccountsRefreshed(Ok(accounts)) => {
+                self.handle_managed_accounts_refreshed(&accounts);
+                Task::none()
+            }
+            Message::ManagedAccountsRefreshed(Err(e)) => {
+                log::warn!("Refreshing the settings account list failed: {e}");
                 Task::none()
             }
 
@@ -594,10 +602,7 @@ impl ReadyApp {
             }
             Message::ToggleSidebar => Task::none(),
             Message::FocusSearch => self.update(Message::FocusSearchBar),
-            Message::ShowHelp => {
-                self.open_settings(crate::ui::settings::Tab::Shortcuts);
-                Task::none()
-            }
+            Message::ShowHelp => self.open_settings(crate::ui::settings::Tab::Shortcuts),
             Message::SyncCurrentFolder => {
                 // Manual "sync now" bypasses staleness gates: explicit
                 // request fan-out for both email and calendar.

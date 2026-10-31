@@ -207,6 +207,9 @@ pub enum Message {
     ServiceNotification(service_api::Notification),
     ServiceShutdownComplete(Result<(), String>),
     AccountResyncComplete(Result<(), String>),
+    /// Fresh account rows for the settings list only, so sync times and
+    /// health are current without disturbing navigation.
+    ManagedAccountsRefreshed(Result<Vec<db::Account>, String>),
     ToggleSettings,
     AppearanceChanged(appearance::Mode),
     DividerDragStart(Divider),

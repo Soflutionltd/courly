@@ -459,8 +459,9 @@ impl ReadyApp {
 
     /// Open settings to a specific tab. Handles the full protocol:
     /// dismiss conflicting overlays, show_settings, sheet reset, animation
-    /// reset, tab, begin_editing.
-    pub(crate) fn open_settings(&mut self, tab: crate::ui::settings::Tab) {
+    /// reset, tab, begin_editing. The returned task refreshes the account
+    /// list, whose sync times are otherwise only read at launch.
+    pub(crate) fn open_settings(&mut self, tab: crate::ui::settings::Tab) -> Task<Message> {
         self.dismiss_overlays();
         self.show_settings = true;
         self.settings.active_sheet = None;
@@ -469,6 +470,19 @@ impl ReadyApp {
             .go_mut(false, iced::time::Instant::now());
         self.settings.active_tab = tab;
         self.settings.begin_editing();
+        self.refresh_managed_accounts()
+    }
+
+    pub(crate) fn handle_managed_accounts_refreshed(&mut self, accounts: &[db::Account]) {
+        self.settings.managed_accounts = accounts.iter().map(managed_account).collect();
+    }
+
+    pub(crate) fn refresh_managed_accounts(&self) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            crate::helpers::load_accounts(db),
+            Message::ManagedAccountsRefreshed,
+        )
     }
 
     /// Write the committed preferences when they differ from what was last
@@ -569,7 +583,7 @@ impl ReadyApp {
     /// Navigates to Settings > People and opens the editor, creating a
     /// new local contact if none exists for that email.
     pub(crate) fn open_contact_editor_for_email(&mut self, email: String) -> Task<Message> {
-        self.open_settings(crate::ui::settings::types::Tab::People);
+        let refresh = self.open_settings(crate::ui::settings::types::Tab::People);
 
         // Look up existing contact or create new editor state
         let found = self
@@ -590,7 +604,10 @@ impl ReadyApp {
         }
 
         // Load contacts for the settings view
-        self.handle_load_contacts(self.settings.contact_filter.clone())
+        Task::batch([
+            refresh,
+            self.handle_load_contacts(self.settings.contact_filter.clone()),
+        ])
     }
 
     /// Get the subject of the currently selected thread.
@@ -1328,25 +1345,8 @@ impl ReadyApp {
             return Task::none();
         }
         self.no_accounts = false;
-        self.settings.managed_accounts = self
-            .sidebar
-            .accounts
-            .iter()
-            .map(|a| ui::settings::ManagedAccount {
-                id: a.id.clone(),
-                email: a.email.clone(),
-                provider: a.provider.clone(),
-                account_name: a.account_name.clone(),
-                account_color: a.account_color.clone(),
-                display_name: a.display_name.clone(),
-                last_sync_at: a.last_sync_at,
-                health: ui::settings::compute_health(
-                    a.last_sync_at,
-                    a.token_expires_at,
-                    a.is_active,
-                ),
-            })
-            .collect();
+        self.settings.managed_accounts =
+            self.sidebar.accounts.iter().map(managed_account).collect();
         let scope_still_exists = match &self.sidebar.selected_scope {
             ViewScope::Account(id)
             | ViewScope::SharedMailbox { account_id: id, .. }
@@ -1437,5 +1437,22 @@ impl ReadyApp {
                 .to_string(),
         };
         self.thread_list.set_context(folder_name, scope_name);
+    }
+}
+
+fn managed_account(account: &db::Account) -> ui::settings::ManagedAccount {
+    ui::settings::ManagedAccount {
+        id: account.id.clone(),
+        email: account.email.clone(),
+        provider: account.provider.clone(),
+        account_name: account.account_name.clone(),
+        account_color: account.account_color.clone(),
+        display_name: account.display_name.clone(),
+        last_sync_at: account.last_sync_at,
+        health: ui::settings::compute_health(
+            account.last_sync_at,
+            account.token_expires_at,
+            account.is_active,
+        ),
     }
 }
