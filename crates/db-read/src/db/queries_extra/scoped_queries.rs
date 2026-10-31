@@ -78,6 +78,39 @@ fn broad_inbox_exclusion_clause(base_idx: usize) -> (String, Vec<Box<dyn rusqlit
     (clause, params)
 }
 
+/// Columns of a thread row in a folder view. Sender, date and snippet come
+/// from the thread's latest message in the folder (`fm`), like Outlook, so
+/// the user's own reply sitting in Sent does not stand for an inbox thread.
+/// Threads with no message in the folder yet (a local move the server has
+/// not applied) fall back to the thread-wide latest message (`m`).
+const FOLDER_THREAD_COLUMNS: &str = "\
+t.id, t.account_id, t.subject,
+COALESCE(fm.snippet, t.snippet) AS snippet,
+COALESCE(fm.date, t.last_message_at) AS last_message_at,
+t.message_count, t.is_read, t.is_starred, t.is_important, t.has_attachments,
+t.is_snoozed, t.snooze_until, t.is_pinned, t.is_muted, t.is_flag_complete,
+CASE WHEN fm.id IS NULL THEN m.from_name ELSE fm.from_name END AS from_name,
+CASE WHEN fm.id IS NULL THEN m.from_address ELSE fm.from_address END AS from_address";
+
+/// Latest message per thread among those the server files in the folder
+/// bound to `?{folder_idx}`.
+fn folder_latest_message_subquery(folder_idx: usize) -> String {
+    format!(
+        "SELECT id, account_id, thread_id, from_name, from_address, snippet, date FROM (
+           SELECT msg.id, msg.account_id, msg.thread_id, msg.from_name, msg.from_address,
+                  msg.snippet, msg.date,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY msg.account_id, msg.thread_id
+                    ORDER BY msg.date DESC, msg.id DESC
+                  ) AS rn
+           FROM messages msg
+           JOIN message_folders mf
+             ON mf.account_id = msg.account_id AND mf.message_id = msg.id
+           WHERE mf.folder_id = ?{folder_idx}
+         ) WHERE rn = 1"
+    )
+}
+
 /// Like `get_threads` but accepts an `AccountScope` to query across accounts.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_scoped(
@@ -98,19 +131,24 @@ pub fn get_threads_scoped(
 
     if is_all_accounts_inbox(scope, label_id) {
         let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
-        let limit_idx = next_idx + excl_params.len();
+        let folder_idx = next_idx + excl_params.len();
+        let limit_idx = folder_idx + 1;
         let sql = format!(
-            "SELECT t.*, m.from_name, m.from_address FROM threads t
+            "SELECT {FOLDER_THREAD_COLUMNS} FROM threads t
+             LEFT JOIN ({folder_latest}
+             ) fm ON fm.account_id = t.account_id AND fm.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
                AND {excl_clause}
-             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             ORDER BY t.is_pinned DESC, last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
+            folder_latest = folder_latest_message_subquery(folder_idx),
             offset_idx = limit_idx + 1,
         );
         let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
         all_params.extend(excl_params);
+        all_params.push(Box::new("INBOX".to_owned()));
         all_params.push(Box::new(lim));
         all_params.push(Box::new(off));
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -125,15 +163,18 @@ pub fn get_threads_scoped(
 
     let result = if let Some(lid) = label_id {
         let sql = format!(
-            "SELECT t.*, m.from_name, m.from_address FROM threads t
+            "SELECT {FOLDER_THREAD_COLUMNS} FROM threads t
              INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
+             LEFT JOIN ({folder_latest}
+             ) fm ON fm.account_id = t.account_id AND fm.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND tf.folder_id = ?{next_idx}
                AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
-             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             ORDER BY t.is_pinned DESC, last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
+            folder_latest = folder_latest_message_subquery(next_idx),
             limit_idx = next_idx + 1,
             offset_idx = next_idx + 2,
         );
@@ -1081,4 +1122,69 @@ pub fn get_threads_for_namespace(
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folder_view_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "
+            CREATE TABLE threads (
+                id TEXT, account_id TEXT, subject TEXT, snippet TEXT, last_message_at INTEGER,
+                message_count INTEGER, is_read INTEGER, is_starred INTEGER, is_important INTEGER,
+                has_attachments INTEGER, is_snoozed INTEGER, snooze_until INTEGER,
+                is_pinned INTEGER, is_muted INTEGER, is_flag_complete INTEGER,
+                namespace_kind TEXT, is_chat_thread INTEGER);
+            CREATE TABLE thread_folders (account_id TEXT, thread_id TEXT, folder_id TEXT);
+            CREATE TABLE messages (
+                id TEXT, account_id TEXT, thread_id TEXT, from_name TEXT, from_address TEXT,
+                snippet TEXT, date INTEGER);
+            CREATE TABLE message_folders (account_id TEXT, message_id TEXT, folder_id TEXT);
+            INSERT INTO threads VALUES
+                ('replied', 'a', 'Re: order', 'my reply', 300, 2, 1, 0, 0, 0, 0, NULL, 0, 0, 0,
+                 NULL, 0),
+                ('fresh', 'a', 'News', 'news', 200, 1, 1, 0, 0, 0, 0, NULL, 0, 0, 0, NULL, 0),
+                ('moved', 'a', 'Moved', 'moved', 50, 1, 1, 0, 0, 0, 0, NULL, 0, 0, 0, NULL, 0);
+            INSERT INTO thread_folders VALUES
+                ('a', 'replied', 'INBOX'), ('a', 'fresh', 'INBOX'), ('a', 'moved', 'INBOX');
+            INSERT INTO messages VALUES
+                ('in', 'a', 'replied', 'Shop', 'shop@example.com', 'your order', 100),
+                ('out', 'a', 'replied', 'Me', 'me@example.com', 'my reply', 300),
+                ('news', 'a', 'fresh', 'News', 'news@example.com', 'news', 200),
+                ('moved', 'a', 'moved', 'Old', 'old@example.com', 'moved', 50);
+            INSERT INTO message_folders VALUES
+                ('a', 'in', 'INBOX'), ('a', 'out', 'SENT'), ('a', 'news', 'INBOX'),
+                ('a', 'moved', 'archive');
+            ",
+        )
+        .expect("fixtures");
+        conn
+    }
+
+    #[test]
+    fn folder_rows_show_the_latest_message_filed_in_that_folder() {
+        let conn = folder_view_db();
+        let read = ReadConn::from_raw(&conn);
+        let threads = get_threads_scoped(
+            &read,
+            &AccountScope::Single("a".to_owned()),
+            Some("INBOX"),
+            None,
+            None,
+        )
+        .expect("inbox threads");
+
+        let order: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+        assert_eq!(order, ["fresh", "replied", "moved"]);
+        let replied = &threads[1];
+        assert_eq!(replied.from_address.as_deref(), Some("shop@example.com"));
+        assert_eq!(replied.snippet.as_deref(), Some("your order"));
+        assert_eq!(replied.last_message_at, Some(100));
+        let moved = &threads[2];
+        assert_eq!(moved.from_address.as_deref(), Some("old@example.com"));
+        assert_eq!(moved.last_message_at, Some(50));
+    }
 }
