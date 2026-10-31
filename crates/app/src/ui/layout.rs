@@ -667,10 +667,12 @@ pub const PEOPLE_PILL_SPACING: f32 = 8.0;
 
 /// HTML email body padding. Horizontal is zero: emails carry their own
 /// margins, and the card padding already separates them from the border.
+/// Vertical matches the body sheet's corner radius so the square rendered
+/// page never cuts into a rounded corner.
 pub const PAD_HTML_BODY: Padding = Padding {
-    top: 4.0,
+    top: RADIUS_MD,
     right: 0.0,
-    bottom: 4.0,
+    bottom: RADIUS_MD,
     left: 0.0,
 };
 
