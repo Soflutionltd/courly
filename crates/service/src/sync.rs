@@ -722,8 +722,30 @@ async fn run_sync(
         });
     }
 
+    if matches!(sync_result, SyncResult::Completed) {
+        record_last_sync(&inner, &account_id).await;
+    }
     update_marker_status(&inner.app_data_dir, &account_id, marker_status).await;
     emit_completed(&inner, &account_id, run_id, sync_result).await;
+}
+
+async fn record_last_sync(inner: &SyncRuntimeInner, account_id: &str) {
+    let aid = account_id.to_owned();
+    let now = jiff::Timestamp::now().as_second();
+    if let Err(e) = inner
+        .db
+        .with_write(move |conn| {
+            conn.execute(
+                "UPDATE accounts SET last_sync_at = ?1 WHERE id = ?2",
+                rusqlite::params![now, aid],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        })
+        .await
+    {
+        log::warn!("record last_sync_at for {account_id}: {e}");
+    }
 }
 
 async fn update_marker_status(app_data_dir: &Path, account_id: &str, status: MarkerStatus) {
