@@ -1,5 +1,6 @@
 [package]
 name = "store"
+publish = false
 description = "Content stores for Courly: email bodies, inline images, attachment cache"
 version.workspace = true
 edition.workspace = true

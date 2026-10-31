@@ -1,5 +1,6 @@
 [package]
 name = "cal"
+publish = false
 description = "Calendar sync (Google Calendar + CalDAV) for Courly"
 version.workspace = true
 edition.workspace = true

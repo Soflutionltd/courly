@@ -1,5 +1,6 @@
 [package]
 name = "coverage"
+publish = false
 description = "Contract coverage catalog parser for Courly"
 version.workspace = true
 edition.workspace = true

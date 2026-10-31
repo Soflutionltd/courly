@@ -1,5 +1,6 @@
 [package]
 name = "import"
+publish = false
 description = "Contact import from CSV, XLSX, and vCard files"
 version.workspace = true
 edition.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "rtsk"
+publish = false
 description = "Framework-agnostic core logic for Courly"
 version.workspace = true
 edition.workspace = true

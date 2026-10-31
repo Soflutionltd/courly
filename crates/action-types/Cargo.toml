@@ -1,5 +1,6 @@
 [package]
 name = "action-types"
+publish = false
 description = "Shared type contract for the email/calendar action service. Lives below the service/cal crate split so both can depend on the same ActionContext / ActionError / ActionOutcome / MutationLog types without forming a dependency cycle."
 version.workspace = true
 edition.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "llm"
+publish = false
 description = "AI completion and orchestration for Courly"
 version.workspace = true
 edition.workspace = true

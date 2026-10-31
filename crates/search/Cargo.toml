@@ -1,5 +1,6 @@
 [package]
 name = "search"
+publish = false
 description = "Tantivy-based full-text search for Courly"
 version.workspace = true
 edition.workspace = true

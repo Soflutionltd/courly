@@ -1,5 +1,6 @@
 [package]
 name = "crypto-key"
+publish = false
 description = "Encryption key file loader for Courly - shared between common and service"
 version.workspace = true
 edition.workspace = true

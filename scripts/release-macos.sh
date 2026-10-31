@@ -71,7 +71,7 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
-cp LICENSE "$APP/Contents/Resources/LICENSE"
+for notice in LICENSE LICENSE-APACHE NOTICE; do cp "$notice" "$APP/Contents/Resources/$notice"; done
 cargo about generate --manifest-path crates/runner/Cargo.toml --locked about.hbs \
   -o "$APP/Contents/Resources/THIRD-PARTY-LICENSES.html"
 mkdir -p "$APP/Contents/Resources/fonts"

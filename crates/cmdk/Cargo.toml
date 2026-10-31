@@ -1,5 +1,6 @@
 [package]
 name = "cmdk"
+publish = false
 description = "Command palette engine for Courly"
 version.workspace = true
 edition.workspace = true

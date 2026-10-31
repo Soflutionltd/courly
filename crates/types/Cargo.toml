@@ -1,5 +1,6 @@
 [package]
 name = "types"
+publish = false
 description = "Shared lightweight types for Courly workspace"
 version.workspace = true
 edition.workspace = true

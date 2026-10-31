@@ -112,13 +112,13 @@ pub(super) fn about_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         tr(t!("settings.reference.license")),
         vec![static_row(
             container(column![
-                text("Apache License 2.0").size(TEXT_LG).style(text::base),
+                text("PolyForm Shield 1.0.0").size(TEXT_LG).style(text::base),
                 Space::new().height(SPACE_XS),
                 text(t!("settings.reference.license_body"))
                     .size(TEXT_SM)
                     .style(theme::TextClass::Tertiary.style()),
                 Space::new().height(SPACE_XXS),
-                text("https://www.apache.org/licenses/LICENSE-2.0")
+                text("https://polyformproject.org/licenses/shield/1.0.0")
                     .size(TEXT_SM)
                     .style(text::primary),
                 Space::new().height(SPACE_SM),

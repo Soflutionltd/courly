@@ -1,5 +1,6 @@
 [package]
 name = "mail-html"
+publish = false
 description = "Native HTML email rendering for Courly, built on the Blitz engine"
 version.workspace = true
 edition.workspace = true

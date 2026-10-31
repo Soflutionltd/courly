@@ -1,5 +1,6 @@
 [package]
 name = "seen"
+publish = false
 description = "Address observation tracking and autocomplete for Courly"
 version.workspace = true
 edition.workspace = true

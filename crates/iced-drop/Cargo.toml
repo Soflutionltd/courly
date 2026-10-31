@@ -1,5 +1,6 @@
 [package]
 name = "iced-drop"
+publish = false
 description = "Vendored drag-and-drop widget for iced (from jhannyj/iced_drop)"
 version.workspace = true
 edition.workspace = true

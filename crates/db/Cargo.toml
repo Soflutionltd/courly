@@ -1,5 +1,6 @@
 [package]
 name = "db"
+publish = false
 description = "Shared database types, state, and migrations for Courly"
 version.workspace = true
 edition.workspace = true

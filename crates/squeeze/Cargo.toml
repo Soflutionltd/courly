@@ -1,5 +1,6 @@
 [package]
 name = "squeeze"
+publish = false
 description = "Transparent email attachment compression"
 version.workspace = true
 edition.workspace = true

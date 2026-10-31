@@ -44,7 +44,7 @@ exclude = [
 version = "0.2.6"
 edition = "2024"
 authors = ["Soflution Ltd"]
-license = "Apache-2.0"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
 rust-version = "1.97"
 
 [workspace.lints.clippy]

@@ -1,0 +1,20 @@
+Courly
+Copyright 2026 Soflution Ltd
+
+Courly is licensed under the PolyForm Shield License 1.0.0 (see LICENSE).
+
+Courly is derived from Ratatoskr (https://github.com/folknor/ratatoskr),
+Copyright its authors, licensed under the Apache License 2.0 (see
+LICENSE-APACHE). The code as published there remains available under the
+Apache License 2.0. Every change and addition made by Soflution Ltd from
+29 October 2026 onward is licensed under the PolyForm Shield License 1.0.0.
+
+Courly builds on two more projects by the same authors, published by
+Soflution Ltd with their changes:
+  - bifrost (https://github.com/Soflutionltd/bifrost), the mail, calendar
+    and contacts protocols, under the same terms;
+  - sluggrs and its iced fork (https://github.com/Soflutionltd/sluggrs,
+    https://github.com/Soflutionltd/iced), under their original licenses.
+
+Third-party libraries keep their own licenses, listed in
+THIRD-PARTY-LICENSES.html inside the application.

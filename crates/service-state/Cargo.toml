@@ -1,5 +1,6 @@
 [package]
 name = "service-state"
+publish = false
 description = "Service-only writer-half state types. The `app` crate does NOT depend on this crate, so `WriteDbState` and friends are unreachable from UI code at the dependency-graph level."
 version.workspace = true
 edition.workspace = true

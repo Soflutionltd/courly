@@ -19,6 +19,7 @@ targets = ["aarch64-apple-darwin"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 no-clearly-defined = true
+private = { ignore = true }
 
 [caldata.clarify]
 license = "Apache-2.0"

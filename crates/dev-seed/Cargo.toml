@@ -1,5 +1,6 @@
 [package]
 name = "dev-seed"
+publish = false
 description = "Ephemeral dev database seeder for Courly"
 version.workspace = true
 edition.workspace = true

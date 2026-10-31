@@ -1,5 +1,6 @@
 [package]
 name = "common"
+publish = false
 description = "Shared provider utilities for Courly email providers"
 version.workspace = true
 edition.workspace = true

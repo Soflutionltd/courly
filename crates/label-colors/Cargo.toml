@@ -1,5 +1,6 @@
 [package]
 name = "label-colors"
+publish = false
 description = "Deterministic label color resolution for Courly"
 version.workspace = true
 edition.workspace = true

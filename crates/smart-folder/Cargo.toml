@@ -1,5 +1,6 @@
 [package]
 name = "smart-folder"
+publish = false
 description = "Smart folder query engine for Courly"
 version.workspace = true
 edition.workspace = true
