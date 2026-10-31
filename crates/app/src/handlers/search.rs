@@ -840,7 +840,6 @@ impl ReadyApp {
         Task::batch([self.handle_search_execute(), self.handle_focus_search_bar()])
     }
 
-    /// A message from the menu: list every result and open that one.
     fn apply_search_pinned_state(
         &mut self,
         behavior: &SearchPinnedStateBehavior,
