@@ -50,8 +50,8 @@ use bifrost_sync::{Error, PublicationId, SyncEngine};
 use bifrost_types::{
     AccountErrorBuilder, AccountErrorKind, AccountId, AttemptCause, AuthCause, AuthErrorKind,
     BackfillCheckpoint, BackfillProgress, Cause, Checkpoint, CursorScope, DiagnosticText,
-    ObjectType, Partition, Protocol, ProtocolErrorKind, ServerCause, ServerErrorKind, SyncEvent,
-    TransmissionState, WireCause,
+    ObjectType, Partition, Protocol, ProtocolErrorKind, RecoveryClass, ServerCause,
+    ServerErrorKind, SyncEvent, TransmissionState, WireCause,
 };
 use common::types::FolderKind;
 use service_api::OperationResult;
@@ -820,6 +820,17 @@ impl ChangeStreamConsumer {
                     }
                 }
             }
+            SyncEvent::Terminated(error) if !terminates_account(&event.scope, error) => {
+                log::warn!(
+                    "bifrost scope {:?} stopped for account {}, siblings keep syncing: {}",
+                    event.scope,
+                    self.account_id.0,
+                    error
+                );
+                // A scope that never re-establishes never completes its
+                // backfill, which would hold back the caught-up edge forever.
+                self.observed_scopes.remove(&event.scope);
+            }
             SyncEvent::Terminated(error) => {
                 log::warn!(
                     "bifrost consumer stream terminated for account {}: {}",
@@ -1198,6 +1209,20 @@ fn is_email_scope(scope: &CursorScope) -> bool {
     )
 }
 
+/// The engine reports a single folder whose cursor it gave up on with a
+/// scoped `Terminated` and keeps driving the other folders. Only the
+/// account-wide scope, or a credential or tenant failure that every folder
+/// shares, stops the whole account.
+fn terminates_account(scope: &CursorScope, error: &bifrost_types::AccountError) -> bool {
+    matches!(scope, CursorScope::Account)
+        || matches!(
+            error.recovery(),
+            RecoveryClass::AuthLost
+                | RecoveryClass::NeedsAdminConsent { .. }
+                | RecoveryClass::NeedsPolicyChange
+        )
+}
+
 async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
     match hook {
         ConsumerHook::StallConsumer { after_ms } => {
@@ -1261,6 +1286,30 @@ mod tests {
         assert_eq!(BifrostProviderKind::Graph.as_str(), "graph");
         assert_eq!(BifrostProviderKind::Imap.as_str(), "imap");
         assert_eq!(BifrostProviderKind::Jmap.as_str(), "jmap");
+    }
+
+    #[test]
+    fn only_an_account_wide_or_credential_failure_stops_the_account() {
+        use bifrost_types::{
+            AccountErrorBuilder, AccountErrorKind, Cause, ErrorScope, ObjectType, StateCause,
+            SyncStateErrorKind,
+        };
+        let folder = CursorScope::FolderType {
+            folder: FolderId("deleted-folder".to_string()),
+            ty: ObjectType::Email,
+        };
+        let cursor_invalid = AccountErrorBuilder::new(
+            AccountErrorKind::SyncState(SyncStateErrorKind::CursorInvalid),
+            Cause::State(StateCause::CursorInvalid),
+        )
+        .scope(ErrorScope::Cursor(folder.clone()))
+        .try_build()
+        .expect("cursor-invalid error");
+        let auth_lost = super::forced_account_error(super::ForcedRecoveryClass::AuthLost);
+
+        assert!(!super::terminates_account(&folder, &cursor_invalid));
+        assert!(super::terminates_account(&CursorScope::Account, &cursor_invalid));
+        assert!(super::terminates_account(&folder, &auth_lost));
     }
 
     #[test]
