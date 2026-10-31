@@ -362,6 +362,7 @@ impl ReadingPane {
             .collect();
         self.thread_messages = detail.messages;
         self.thread_attachments = detail.attachments;
+        self.attachment_menu = None;
         self.thread_labels = detail.labels;
         self.inline_image_bytes = super::mail_body::inline_image_bytes(&detail.inline_images);
     }
