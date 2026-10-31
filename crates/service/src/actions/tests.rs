@@ -238,6 +238,73 @@ async fn trash_local_removes_inbox_adds_trash() {
     assert!(has_thread_folder(&ctx, "acc1", "t1", "TRASH"));
 }
 
+#[tokio::test]
+async fn a_rejected_trash_puts_the_thread_back() {
+    use super::local_snapshot::{capture, settle_remote_failure};
+    use super::operation::MailOperation;
+
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
+
+    let snapshot = capture(&ctx, &MailOperation::Trash, "acc1", "t1")
+        .await
+        .expect("snapshot");
+    super::trash::trash_local(&ctx, "acc1", "t1")
+        .await
+        .expect("trash locally");
+    super::star::star_local(&ctx, "acc1", "t1", true)
+        .await
+        .expect("star locally");
+
+    let outcome = settle_remote_failure(
+        &ctx,
+        snapshot,
+        ActionOutcome::LocalOnly {
+            retryable: false,
+            reason: ActionError::remote_with_kind(RemoteFailureKind::Permanent, "HTTP 400"),
+        },
+    )
+    .await;
+
+    assert!(outcome.is_failed());
+    assert!(has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
+    assert!(!has_thread_folder(&ctx, "acc1", "t1", "TRASH"));
+    assert!(!get_thread_starred(&ctx, "acc1", "t1"));
+}
+
+#[tokio::test]
+async fn a_retryable_failure_keeps_the_local_change() {
+    use super::local_snapshot::{capture, settle_remote_failure};
+    use super::operation::MailOperation;
+
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
+
+    let snapshot = capture(&ctx, &MailOperation::Trash, "acc1", "t1")
+        .await
+        .expect("snapshot");
+    super::trash::trash_local(&ctx, "acc1", "t1")
+        .await
+        .expect("trash locally");
+
+    let outcome = settle_remote_failure(
+        &ctx,
+        snapshot,
+        ActionOutcome::LocalOnly {
+            retryable: true,
+            reason: ActionError::remote_with_kind(RemoteFailureKind::Transient, "timeout"),
+        },
+    )
+    .await;
+
+    assert!(outcome.is_local_only());
+    assert!(has_thread_folder(&ctx, "acc1", "t1", "TRASH"));
+}
+
 // ── Public action tests (no provider → LocalOnly) ───────────────────
 
 #[tokio::test]

@@ -15,6 +15,7 @@ mod folder;
 mod folder_contents;
 mod label;
 mod label_group;
+mod local_snapshot;
 mod log;
 mod mark_read;
 mod mdn_send;

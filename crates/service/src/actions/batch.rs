@@ -20,7 +20,7 @@ use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::{
     archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
-    spam, star, trash,
+    local_snapshot, spam, star, trash,
 };
 use crate::sync::SyncRuntime;
 
@@ -217,6 +217,7 @@ async fn execute_account_group(
                             thread_id,
                             op,
                             targets,
+                            snapshot: None,
                         });
                 }
                 Err(error) => {
@@ -240,6 +241,13 @@ async fn execute_account_group(
             None
         };
 
+        let snapshot = match local_snapshot::capture(ctx, &op, account_id, &thread_id).await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                results.push((idx, ActionOutcome::Failed { error }));
+                continue;
+            }
+        };
         let changed = match op_local(ctx, &op, account_id, &thread_id).await {
             Ok(changed) => changed,
             Err(error) => {
@@ -273,6 +281,7 @@ async fn execute_account_group(
                         &params_json,
                     )
                     .await;
+                    let outcome = local_snapshot::settle_remote_failure(ctx, snapshot, outcome).await;
                     results.push((idx, outcome));
                     continue;
                 }
@@ -286,6 +295,7 @@ async fn execute_account_group(
                 thread_id,
                 op,
                 targets,
+                snapshot,
             });
     }
 
@@ -342,6 +352,8 @@ async fn execute_account_group(
                         &params_json,
                     )
                     .await;
+                    let outcome =
+                        local_snapshot::settle_remote_failure(ctx, entry.snapshot, outcome).await;
                     results.push((entry.idx, outcome));
                 }
             }
@@ -356,6 +368,7 @@ struct PendingRemote {
     thread_id: String,
     op: MailOperation,
     targets: Vec<ObjectId>,
+    snapshot: Option<local_snapshot::LocalSnapshot>,
 }
 
 /// Degraded fallback when the resident engine handle is unavailable.
@@ -613,6 +626,14 @@ async fn dispatch_with_engine(
     } else {
         None
     };
+    let snapshot = match local_snapshot::capture(ctx, op, account_id, thread_id).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            let outcome = ActionOutcome::Failed { error };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
     let changed = match op_local(ctx, op, account_id, thread_id).await {
         Ok(changed) => changed,
         Err(error) => {
@@ -639,6 +660,7 @@ async fn dispatch_with_engine(
                 let (op_type, params_json) = enqueue_params(op);
                 enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json)
                     .await;
+                let outcome = local_snapshot::settle_remote_failure(ctx, snapshot, outcome).await;
                 mlog.emit(&outcome);
                 return outcome;
             }
@@ -647,6 +669,15 @@ async fn dispatch_with_engine(
     let outcome = outcome_from_remote_result(
         dispatch_mutation(action_account, account_id, op, targets, &namespace).await,
     );
+    let outcome = if outcome.is_success() {
+        outcome
+    } else {
+        let (op_type, params_json) = enqueue_params(op);
+        enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;
+        let outcome = local_snapshot::settle_remote_failure(ctx, snapshot, outcome).await;
+        mlog.emit(&outcome);
+        return outcome;
+    };
     if outcome.is_success() && matches!(op, MailOperation::SetRead { to: true }) {
         super::mdn_send::send_mdn_for_read(ctx, action_account, account_id, thread_id).await;
     }
