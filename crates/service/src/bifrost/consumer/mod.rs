@@ -260,6 +260,11 @@ pub struct ChangeStreamConsumer {
     /// engine can tell the UI to reload. `Notify` keeps at most one permit,
     /// which coalesces a burst of batches into one wake-up.
     mutation_signal: Option<Arc<tokio::sync::Notify>>,
+    /// Set after the previous receiver lagged: the batches it lost were
+    /// published with their cursors already installed in the engine, so the
+    /// live scopes go back to their acknowledged cursors once the new
+    /// receiver is subscribed.
+    rewind_after_subscribe: bool,
 }
 
 #[derive(Default)]
@@ -338,12 +343,19 @@ impl ChangeStreamConsumer {
             imap_seen_by_scope: HashMap::new(),
             crash_before_drive_end_threading: false,
             mutation_signal: None,
+            rewind_after_subscribe: false,
         }
     }
 
     #[must_use]
     pub fn with_mutation_signal(mut self, signal: Arc<tokio::sync::Notify>) -> Self {
         self.mutation_signal = Some(signal);
+        self
+    }
+
+    #[must_use]
+    pub fn with_rewind_after_subscribe(mut self, rewind: bool) -> Self {
+        self.rewind_after_subscribe = rewind;
         self
     }
 
@@ -392,12 +404,27 @@ impl ChangeStreamConsumer {
         F: FnMut(ConsumerDriveReport) -> Fut,
         Fut: Future<Output = ()>,
     {
-        self.drive_resident_loop(
-            ChangeStream::Engine(self.engine.account_changes_stream(&self.account_id)?),
-            &mut on_caught_up,
-            None,
-        )
-        .await
+        let rx = self.engine.account_changes_stream(&self.account_id)?;
+        if self.rewind_after_subscribe {
+            let rewound = self.engine.rewind_to_acknowledged(&self.account_id).await?;
+            if rewound > 0 {
+                log::info!(
+                    "rewound {rewound} scope(s) of {} to their acknowledged cursor after a lag",
+                    self.account_id.0
+                );
+                self.engine.invalidation_sink().push(
+                    self.account_id.clone(),
+                    bifrost_types::WatchEvent::Invalidated {
+                        hint: bifrost_types::InvalidationHint {
+                            source: bifrost_types::PushSource::Coalesced,
+                            payload: bifrost_types::HintPayload::Unknown,
+                        },
+                    },
+                );
+            }
+        }
+        self.drive_resident_loop(ChangeStream::Engine(rx), &mut on_caught_up, None)
+            .await
     }
 
     pub async fn drive_resident_injected_stream<F, Fut>(

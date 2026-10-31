@@ -966,6 +966,7 @@ async fn resident_consumer_loop(
     containers: ContainerIndex,
 ) {
     let account = AccountId(account_id.clone());
+    let mut lagged = false;
     loop {
         if slot.cancel.is_cancelled() {
             return;
@@ -979,7 +980,9 @@ async fn resident_consumer_loop(
         .with_containers(containers.clone())
         .with_checkpoint_store(inner.engine.checkpoints())
         .with_hooks(crate::handlers::test_helpers::bifrost_hooks())
-        .with_mutation_signal(Arc::clone(&slot.mutation_signal));
+        .with_mutation_signal(Arc::clone(&slot.mutation_signal))
+        .with_rewind_after_subscribe(lagged);
+        lagged = false;
         let result = tokio::select! {
             result = consumer.drive_resident({
                 let inner = Arc::clone(&inner);
@@ -1084,6 +1087,7 @@ async fn resident_consumer_loop(
                     slot.redrive_attempt.store(0, Ordering::SeqCst);
                 }
                 if report.lagged {
+                    lagged = true;
                     repush_full_reconcile(&inner, &account_id);
                 }
                 perform_redrive_backoff(&slot, &account_id).await;
