@@ -41,7 +41,7 @@ use super::hydrate::{
 };
 use super::{BifrostConsumerStores, BifrostProviderKind, ChangeStreamConsumer};
 
-fn state() -> (WriteDbState, tempfile::TempDir) {
+pub(crate) fn state() -> (WriteDbState, tempfile::TempDir) {
     let tmp = tempfile::TempDir::new().unwrap();
     let pool = db::db::open_writer_pool(tmp.path()).unwrap();
     pool.with_write_sync(|conn| {
@@ -56,7 +56,7 @@ fn state() -> (WriteDbState, tempfile::TempDir) {
     (WriteDbState::from_pool(pool), tmp)
 }
 
-fn stores(state: WriteDbState, tmp: &tempfile::TempDir) -> BifrostConsumerStores {
+pub(crate) fn stores(state: WriteDbState, tmp: &tempfile::TempDir) -> BifrostConsumerStores {
     // The drive calls `search.flush_now()`, which sends a `FlushNow` command
     // and awaits its ack oneshot - so the test needs a live writer task that
     // answers commands, not a dropped receiver. A minimal drain-and-ack loop
@@ -101,7 +101,7 @@ fn synthetic(id: &str, thread: &str, folders: &[&str]) -> SyntheticMessage {
 
 /// Build the persisted-row representation of a synthetic Graph message in the
 /// given folders (the offline hydration the consumer's pure merge produces).
-fn synthetic_row(id: &str, thread: &str, folders: &[&str]) -> ConsumerMessageRow {
+pub(crate) fn synthetic_row(id: &str, thread: &str, folders: &[&str]) -> ConsumerMessageRow {
     let change = Change::ObjectChange(ObjectChange {
         id: ObjectId(encode_synthetic_message(&synthetic(id, thread, folders)).unwrap()),
         kind: ObjectChangeKind::Created,

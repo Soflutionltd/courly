@@ -36,7 +36,7 @@ pub mod write;
 mod golden_test;
 
 #[cfg(test)]
-mod move_purge_test;
+pub(crate) mod move_purge_test;
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;

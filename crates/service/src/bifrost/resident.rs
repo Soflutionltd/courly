@@ -49,6 +49,11 @@ const TERMINAL_RETRY_BACKOFF_CAP: Duration = Duration::from_secs(15 * 60);
 /// driven by the app's 5-minute `SyncTick` (`app::subscription`).
 const RESIDENT_AUX_INITIAL_DELAY: Duration = Duration::from_secs(5);
 const RESIDENT_AUX_CADENCE: Duration = Duration::from_secs(300);
+/// Graph mailbox reconcile: first on the aux tick after this delay, so the
+/// attach drive lands first, then at this cadence. Each run lists every
+/// personal mail folder, so it stays rare.
+const RESIDENT_RECONCILE_INITIAL_DELAY: Duration = Duration::from_secs(120);
+const RESIDENT_RECONCILE_CADENCE: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Clone)]
 pub struct ResidentEngine {
@@ -1486,6 +1491,7 @@ async fn resident_aux_loop(
         .await
         .unwrap_or(false);
     let mut delay = RESIDENT_AUX_INITIAL_DELAY;
+    let mut next_reconcile = tokio::time::Instant::now() + RESIDENT_RECONCILE_INITIAL_DELAY;
     loop {
         tokio::select! {
             () = cancel.cancelled() => return,
@@ -1494,6 +1500,10 @@ async fn resident_aux_loop(
         delay = RESIDENT_AUX_CADENCE;
         if cancel.is_cancelled() {
             return;
+        }
+        if provider == BifrostProviderKind::Graph && tokio::time::Instant::now() >= next_reconcile {
+            next_reconcile = tokio::time::Instant::now() + RESIDENT_RECONCILE_CADENCE;
+            run_reconcile_pass(&inner, &account_id).await;
         }
         run_aux_pass(
             ResidentEngine {
@@ -1505,6 +1515,33 @@ async fn resident_aux_loop(
         )
         .await;
         initial_sync_completed = true;
+    }
+}
+
+async fn run_reconcile_pass(inner: &ResidentEngineInner, account_id: &str) {
+    let Some(slot) = inner.slots.lock().await.get(account_id).cloned() else {
+        return;
+    };
+    match super::reconcile::reconcile_graph_mail(
+        &inner.engine.engine(),
+        &inner.stores,
+        account_id,
+        &slot.containers,
+    )
+    .await
+    {
+        Ok(report) => {
+            log::info!(
+                "reconcile {account_id}: removed {} message(s) gone from the server, \
+                 {} server message(s) not held locally",
+                report.removed,
+                report.missing
+            );
+            if report.removed > 0 {
+                slot.mutation_signal.notify_one();
+            }
+        }
+        Err(error) => log::warn!("reconcile {account_id} skipped: {error}"),
     }
 }
 
@@ -1650,10 +1687,22 @@ mod tests {
 
     #[test]
     fn terminal_failures_retry_with_a_capped_doubling_delay() {
-        assert_eq!(terminal_retry_backoff_for_attempt(0), Duration::from_secs(30));
-        assert_eq!(terminal_retry_backoff_for_attempt(1), Duration::from_secs(60));
-        assert_eq!(terminal_retry_backoff_for_attempt(5), Duration::from_secs(15 * 60));
-        assert_eq!(terminal_retry_backoff_for_attempt(40), Duration::from_secs(15 * 60));
+        assert_eq!(
+            terminal_retry_backoff_for_attempt(0),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            terminal_retry_backoff_for_attempt(1),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            terminal_retry_backoff_for_attempt(5),
+            Duration::from_secs(15 * 60)
+        );
+        assert_eq!(
+            terminal_retry_backoff_for_attempt(40),
+            Duration::from_secs(15 * 60)
+        );
     }
 
     fn index_after(source: &str, needle: &str, after: usize) -> usize {

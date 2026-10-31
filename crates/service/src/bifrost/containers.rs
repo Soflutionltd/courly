@@ -183,6 +183,19 @@ impl ContainerIndex {
         })
     }
 
+    /// `(native id, storage id)` of every personal mail folder, sorted by
+    /// native id.
+    pub fn personal_mail_folders(&self) -> Vec<(String, String)> {
+        let mut folders: Vec<(String, String)> = self
+            .storage_ids
+            .iter()
+            .filter(|(native, _)| self.is_personal(native) && self.is_mail_container(native))
+            .map(|(native, storage)| (native.clone(), storage.clone()))
+            .collect();
+        folders.sort();
+        folders
+    }
+
     pub fn is_mail_container(&self, native: &str) -> bool {
         self.mail_containers.get(native).copied().unwrap_or(true)
     }
