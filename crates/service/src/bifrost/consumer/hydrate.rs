@@ -98,6 +98,11 @@ pub struct ConsumerMessageRow {
     pub reaction_emoji: Option<String>,
 }
 
+/// Messages of one batch hydrated at once, results kept in batch order.
+/// Each hydration is a few sequential requests (message, raw RFC822, inline
+/// images); Outlook allows four concurrent requests per app and mailbox.
+const HYDRATE_CONCURRENCY: usize = 4;
+
 impl HydrateBatch {
     /// Storage identity is account-local, while provider ids are only unique
     /// inside an owner namespace. Qualify every locally persisted identity at
@@ -146,19 +151,29 @@ impl HydrateBatch {
         changes: &[Change],
     ) -> Result<Self, bifrost_sync::Error> {
         let mut batch = Self::default();
+        // Record live/removed membership BEFORE hydration. The Graph
+        // move-vs-purge reconcile is per-DRIVE, not per-batch: a move's
+        // source `Removed` and destination `Added`/`Updated` land in
+        // different per-folder scope batches, so the consumer accumulates
+        // `removed_ids`/`live_ids` across the whole drive and only deletes
+        // the unreconciled remainder at drive end (finding A).
         for change in changes {
-            // Record live/removed membership BEFORE hydration. The Graph
-            // move-vs-purge reconcile is per-DRIVE, not per-batch: a move's
-            // source `Removed` and destination `Added`/`Updated` land in
-            // different per-folder scope batches, so the consumer accumulates
-            // `removed_ids`/`live_ids` across the whole drive and only deletes
-            // the unreconciled remainder at drive end (finding A).
             record_change_membership(&mut batch, provider, change);
-            match hydrate_change_to_message_insert_row(
-                engine, account_id, provider, folder_map, change,
-            )
-            .await?
-            {
+        }
+        let hydrations = changes
+            .iter()
+            .map(|change| {
+                hydrate_change_to_message_insert_row(
+                    engine, account_id, provider, folder_map, change,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut hydrated = futures::stream::iter(hydrations).buffered(HYDRATE_CONCURRENCY);
+        for change in changes {
+            let Some(hydrated) = hydrated.next().await else {
+                break;
+            };
+            match hydrated? {
                 HydratedChange::Message(row, outcome) => match outcome {
                     HydrationOutcome::Succeeded | HydrationOutcome::SucceededWithDegradedBody => {
                         batch.rows.push(*row);
