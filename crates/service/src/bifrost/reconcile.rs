@@ -11,10 +11,8 @@ use std::collections::HashSet;
 
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
-    AccountErrorKind, AccountId, CursorScope, FolderId, HydrationProjection, InventoryEvent,
-    ObjectId, ObjectType,
+    AccountErrorKind, AccountId, FolderId, HydrationProjection, ObjectId, ResourceKind,
 };
-use futures_util::StreamExt;
 
 use super::consumer::write;
 use super::containers::ContainerIndex;
@@ -25,6 +23,9 @@ use super::{BifrostConsumerStores, BifrostProviderKind};
 /// most of a mailbox points at a fault, not at the user's deletions.
 const UNCHECKED_REMOVAL_FLOOR: usize = 50;
 const MAX_REMOVAL_SHARE_PERCENT: usize = 10;
+/// One server read per candidate: the rest waits for the next pass rather
+/// than burst into the provider's throttling budget.
+const MAX_CONFIRMATIONS_PER_PASS: usize = 500;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ReconcileReport {
@@ -71,35 +72,12 @@ struct GraphMailbox<'a> {
 
 impl MailboxServer for GraphMailbox<'_> {
     async fn list_folder(&self, native: &str) -> Result<HashSet<String>, String> {
-        let scope = CursorScope::FolderType {
-            folder: FolderId(native.to_string()),
-            ty: ObjectType::Email,
-        };
-        let mut stream = self
+        let ids = self
             .engine
-            .inventory_stream(&self.account, scope)
-            .map_err(|error| format!("inventory {native}: {error}"))?;
-        let mut ids = HashSet::new();
-        while let Some(event) = stream.next().await {
-            match event {
-                InventoryEvent::Batch(batch) => {
-                    ids.extend(batch.items.into_iter().map(|entry| entry.id.0));
-                }
-                InventoryEvent::Done(completion) if completion.coverage.is_complete() => {
-                    return Ok(ids);
-                }
-                InventoryEvent::Done(_) => {
-                    return Err(format!("inventory {native}: listing incomplete"));
-                }
-                InventoryEvent::Terminated(error) => {
-                    return Err(format!("inventory {native}: {error}"));
-                }
-                _ => {}
-            }
-        }
-        Err(format!(
-            "inventory {native}: listing ended without completion"
-        ))
+            .folder_message_ids(&self.account, FolderId(native.to_string()))
+            .await
+            .map_err(|error| format!("list {native}: {error}"))?;
+        Ok(ids.into_iter().map(|id| id.0).collect())
     }
 
     async fn is_gone(&self, id: &str) -> Result<bool, String> {
@@ -114,7 +92,10 @@ impl MailboxServer for GraphMailbox<'_> {
         {
             Ok(_) => Ok(false),
             Err(bifrost_sync::Error::Account(error))
-                if matches!(error.kind(), AccountErrorKind::NotFound(_)) =>
+                if matches!(
+                    error.kind(),
+                    AccountErrorKind::NotFound(ResourceKind::Message)
+                ) =>
             {
                 Ok(true)
             }
@@ -159,12 +140,15 @@ async fn reconcile_mail(
     }
 
     let mut gone = Vec::new();
-    for id in candidates {
+    for id in candidates.into_iter().take(MAX_CONFIRMATIONS_PER_PASS) {
         match server.is_gone(id).await {
             Ok(true) => gone.push(id.clone()),
             Ok(false) => {}
+            // Most likely throttling: the remaining candidates wait for the
+            // next pass, the confirmed ones are still removed.
             Err(error) => {
                 log::warn!("reconcile {account_id}: could not confirm {id} is gone: {error}");
+                break;
             }
         }
     }
@@ -187,7 +171,7 @@ async fn local_message_ids(
     let account_id = account_id.to_string();
     stores
         .db
-        .with_write(move |conn| {
+        .with_read(move |conn| {
             let mut statement = conn
                 .prepare(
                     "SELECT DISTINCT message_id FROM message_folders
@@ -226,6 +210,8 @@ mod tests {
     struct FakeServer {
         folders: HashMap<String, Result<HashSet<String>, String>>,
         gone: HashSet<String>,
+        unreachable: HashSet<String>,
+        confirmations: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeServer {
@@ -245,6 +231,11 @@ mod tests {
             self.gone = ids.iter().map(|id| (*id).to_string()).collect();
             self
         }
+
+        fn unreachable(mut self, ids: &[&str]) -> Self {
+            self.unreachable = ids.iter().map(|id| (*id).to_string()).collect();
+            self
+        }
     }
 
     impl MailboxServer for FakeServer {
@@ -256,6 +247,11 @@ mod tests {
         }
 
         async fn is_gone(&self, id: &str) -> Result<bool, String> {
+            self.confirmations
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.unreachable.contains(id) {
+                return Err("throttled".to_string());
+            }
             Ok(self.gone.contains(id))
         }
     }
@@ -360,6 +356,59 @@ mod tests {
                 .is_err()
         );
         assert_eq!(message_ids(&stores).await?.len(), 60);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_failed_confirmation_ends_the_pass_but_keeps_what_was_confirmed() -> Result<(), String>
+    {
+        let (stores, _tmp) = seeded(&[
+            ("a-gone", "INBOX"),
+            ("b-busy", "INBOX"),
+            ("c-gone", "INBOX"),
+        ])
+        .await?;
+        let server = FakeServer::default()
+            .folder("mbx-inbox", &[])
+            .folder("mbx-trash", &[])
+            .gone(&["a-gone", "c-gone"])
+            .unreachable(&["b-busy"]);
+
+        let report = reconcile_mail(&server, &stores, "acc", folders()).await?;
+
+        assert_eq!(report.removed, 1);
+        assert_eq!(message_ids(&stores).await?, vec!["b-busy", "c-gone"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn confirmations_stop_at_the_per_pass_budget() -> Result<(), String> {
+        let vanished_count = MAX_CONFIRMATIONS_PER_PASS + 10;
+        let total = vanished_count * 10;
+        let names: Vec<String> = (0..total).map(|n| format!("m{n:05}")).collect();
+        let seeds: Vec<(&str, &str)> = names.iter().map(|id| (id.as_str(), "INBOX")).collect();
+        let (stores, _tmp) = seeded(&seeds).await?;
+        let (vanished, kept) = names.split_at(vanished_count);
+        let kept: Vec<&str> = kept.iter().map(String::as_str).collect();
+        let vanished: Vec<&str> = vanished.iter().map(String::as_str).collect();
+        let server = FakeServer::default()
+            .folder("mbx-inbox", &kept)
+            .folder("mbx-trash", &[])
+            .gone(&vanished);
+
+        let report = reconcile_mail(&server, &stores, "acc", folders()).await?;
+
+        assert_eq!(report.removed, MAX_CONFIRMATIONS_PER_PASS);
+        assert_eq!(
+            server
+                .confirmations
+                .load(std::sync::atomic::Ordering::SeqCst),
+            MAX_CONFIRMATIONS_PER_PASS
+        );
+        assert_eq!(
+            message_ids(&stores).await?.len(),
+            total - MAX_CONFIRMATIONS_PER_PASS
+        );
         Ok(())
     }
 
