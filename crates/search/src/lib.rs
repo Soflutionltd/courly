@@ -722,7 +722,7 @@ impl SearchReadState {
         if let Some(ref text) = params.free_text
             && !text.is_empty()
         {
-            let qp = QueryParser::for_index(
+            let qp = word_prefix_parser(
                 searcher.index(),
                 vec![
                     self.fields.subject,
@@ -1142,6 +1142,16 @@ impl SearchReadState {
     }
 }
 
+/// Free text matches every word as the start of a word, as it is typed:
+/// "nath" finds "Nathalie". Quoted phrases keep their exact meaning.
+fn word_prefix_parser(index: &tantivy::Index, fields: Vec<Field>) -> QueryParser {
+    let mut parser = QueryParser::for_index(index, fields.clone());
+    for field in fields {
+        parser.set_field_fuzzy(field, true, 0, false);
+    }
+    parser
+}
+
 /// Build a per-field SnippetGenerator. Returns `None` on parse failure
 /// (the caller logs and skips that field for affected results).
 fn build_field_snippet_gen(
@@ -1353,6 +1363,24 @@ mod tests {
             thread_filter: None,
             limit: Some(10),
         }
+    }
+
+    #[test]
+    fn a_word_matches_from_its_first_letters() {
+        let read = build_date_boundary_test_index();
+        let search = |text: &str| {
+            read.search_with_filters(&SearchParams {
+                free_text: Some(text.into()),
+                ..date_boundary_params(None, None)
+            })
+            .expect("search")
+            .len()
+        };
+
+        assert_eq!(search("boun"), 3);
+        assert_eq!(search("ALI"), 3);
+        assert_eq!(search("boundaryx"), 0);
+        assert_eq!(search("oundary"), 0);
     }
 
     #[test]
