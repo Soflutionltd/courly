@@ -66,6 +66,9 @@ bytes.workspace = true
 jiff.workspace = true
 fs2 = "0.4"
 log = "0.4"
+# bifrost reports through `tracing`; with no subscriber installed, the `log`
+# feature forwards its events to the service log file.
+tracing = { version = "0.1", default-features = false, features = ["log"] }
 dirs = "7"
 sha2 = "0.11"
 blake3 = "1"
