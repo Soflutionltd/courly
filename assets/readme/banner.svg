@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 440" width="1280" height="440">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E8F8C"/>
+      <stop offset="0.55" stop-color="#16B3B0"/>
+      <stop offset="1" stop-color="#22C97A"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.1" r="0.7">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16B3B0"/>
+      <stop offset="1" stop-color="#22C97A"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#06403B" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="frame"><rect width="1280" height="440" rx="28"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="440" fill="url(#bg)"/>
+    <rect width="1280" height="440" fill="url(#glow)"/>
+    <circle cx="1180" cy="470" r="260" fill="#FFFFFF" opacity="0.06"/>
+    <circle cx="80" cy="-60" r="200" fill="#FFFFFF" opacity="0.05"/>
+
+    <!-- Logo -->
+    <g transform="translate(73.4 89.4) scale(0.1456)" filter="url(#shadow)">
+      <rect x="100" y="100" width="824" height="824" rx="185" fill="#FFFFFF"/>
+      <path d="M 655 335 A 235 235 0 1 0 655 689" fill="none" stroke="url(#tile)" stroke-width="100" stroke-linecap="round"/>
+      <rect x="452" y="430" width="300" height="200" rx="34" fill="url(#tile)"/>
+      <path d="M 478 458 L 602 548 L 726 458" fill="none" stroke="#FFFFFF" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- Name and tagline -->
+    <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#FFFFFF">
+      <text x="230" y="186" font-size="92" font-weight="800" letter-spacing="-2">Courly</text>
+      <text x="90" y="276" font-size="27" font-weight="600">Mail, calendar and contacts.</text>
+      <text x="90" y="312" font-size="27" font-weight="500" opacity="0.9">One fast, native app for every account.</text>
+    </g>
+    <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#FFFFFF">
+      <rect x="90" y="340" width="74" height="30" rx="15" fill="#FFFFFF" fill-opacity="0.18"/>
+      <text x="127" y="360" text-anchor="middle">Gmail</text>
+      <rect x="172" y="340" width="168" height="30" rx="15" fill="#FFFFFF" fill-opacity="0.18"/>
+      <text x="256" y="360" text-anchor="middle">Outlook &amp; Exchange</text>
+      <rect x="348" y="340" width="66" height="30" rx="15" fill="#FFFFFF" fill-opacity="0.18"/>
+      <text x="381" y="360" text-anchor="middle">IMAP</text>
+      <rect x="422" y="340" width="66" height="30" rx="15" fill="#FFFFFF" fill-opacity="0.18"/>
+      <text x="455" y="360" text-anchor="middle">JMAP</text>
+      <rect x="496" y="340" width="150" height="30" rx="15" fill="#FFFFFF" fill-opacity="0.18"/>
+      <text x="571" y="360" text-anchor="middle">CalDAV &amp; CardDAV</text>
+    </g>
+
+    <!-- Stylised app window -->
+    <g transform="translate(700 70)" filter="url(#shadow)">
+      <rect width="500" height="320" rx="18" fill="#FFFFFF"/>
+      <rect width="500" height="40" rx="18" fill="#0E8F8C"/>
+      <rect y="22" width="500" height="18" fill="#0E8F8C"/>
+      <circle cx="22" cy="20" r="6" fill="#FFFFFF" opacity="0.55"/>
+      <circle cx="42" cy="20" r="6" fill="#FFFFFF" opacity="0.55"/>
+      <circle cx="62" cy="20" r="6" fill="#FFFFFF" opacity="0.55"/>
+      <rect x="150" y="11" width="220" height="18" rx="9" fill="#FFFFFF" opacity="0.9"/>
+
+      <!-- Sidebar -->
+      <rect x="0" y="40" width="110" height="280" fill="#F1F7F6"/>
+      <rect x="0" y="300" width="18" height="20" fill="#F1F7F6"/>
+      <rect x="14" y="58" width="82" height="16" rx="8" fill="#16B3B0"/>
+      <rect x="14" y="88" width="66" height="10" rx="5" fill="#C9DCDA"/>
+      <rect x="14" y="110" width="74" height="10" rx="5" fill="#C9DCDA"/>
+      <rect x="14" y="132" width="58" height="10" rx="5" fill="#C9DCDA"/>
+      <rect x="14" y="154" width="70" height="10" rx="5" fill="#C9DCDA"/>
+      <rect x="14" y="190" width="50" height="10" rx="5" fill="#9DBFBB"/>
+      <rect x="14" y="212" width="72" height="10" rx="5" fill="#C9DCDA"/>
+      <rect x="14" y="234" width="62" height="10" rx="5" fill="#C9DCDA"/>
+
+      <!-- Message list -->
+      <g>
+        <rect x="122" y="54" width="160" height="56" rx="10" fill="#E3F6F1"/>
+        <circle cx="142" cy="74" r="11" fill="#22C97A"/>
+        <rect x="160" y="66" width="80" height="8" rx="4" fill="#2B3A39"/>
+        <rect x="160" y="82" width="108" height="7" rx="3.5" fill="#9AAEAC"/>
+        <rect x="160" y="95" width="92" height="7" rx="3.5" fill="#C3D1CF"/>
+
+        <circle cx="142" cy="136" r="11" fill="#F2A33A"/>
+        <rect x="160" y="128" width="70" height="8" rx="4" fill="#2B3A39"/>
+        <rect x="160" y="144" width="104" height="7" rx="3.5" fill="#9AAEAC"/>
+        <rect x="160" y="157" width="84" height="7" rx="3.5" fill="#C3D1CF"/>
+
+        <circle cx="142" cy="196" r="11" fill="#6C7BF2"/>
+        <rect x="160" y="188" width="88" height="8" rx="4" fill="#2B3A39"/>
+        <rect x="160" y="204" width="98" height="7" rx="3.5" fill="#9AAEAC"/>
+        <rect x="160" y="217" width="76" height="7" rx="3.5" fill="#C3D1CF"/>
+
+        <circle cx="142" cy="256" r="11" fill="#E0567A"/>
+        <rect x="160" y="248" width="64" height="8" rx="4" fill="#2B3A39"/>
+        <rect x="160" y="264" width="106" height="7" rx="3.5" fill="#9AAEAC"/>
+        <rect x="160" y="277" width="80" height="7" rx="3.5" fill="#C3D1CF"/>
+      </g>
+
+      <!-- Reading pane -->
+      <rect x="296" y="54" width="190" height="252" rx="10" fill="#F7FAFA"/>
+      <rect x="312" y="72" width="132" height="12" rx="6" fill="#2B3A39"/>
+      <rect x="312" y="94" width="90" height="8" rx="4" fill="#9AAEAC"/>
+      <rect x="312" y="124" width="158" height="7" rx="3.5" fill="#C3D1CF"/>
+      <rect x="312" y="140" width="150" height="7" rx="3.5" fill="#C3D1CF"/>
+      <rect x="312" y="156" width="160" height="7" rx="3.5" fill="#C3D1CF"/>
+      <rect x="312" y="172" width="112" height="7" rx="3.5" fill="#C3D1CF"/>
+      <rect x="312" y="200" width="154" height="7" rx="3.5" fill="#C3D1CF"/>
+      <rect x="312" y="216" width="138" height="7" rx="3.5" fill="#C3D1CF"/>
+      <rect x="312" y="258" width="86" height="28" rx="14" fill="#16B3B0"/>
+    </g>
+  </g>
+</svg>
