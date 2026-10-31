@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
-    AccountId, AttachmentSource, BlobHandle, Change, HydrationProjection, Importance, Message,
-    MessageAttachment, ObjectChangeKind, ObjectId, ScopeChangeKind, SyncEvent,
+    AccountErrorKind, AccountId, AttachmentSource, BlobHandle, Change, HydrationProjection,
+    Importance, Message, MessageAttachment, ObjectChangeKind, ObjectId, ScopeChangeKind, SyncEvent,
 };
 use common::rfc822::{Rfc822Parsed, parse_rfc822, snippet_from_body};
 use common::types::{
@@ -261,6 +261,26 @@ pub enum HydratedChange {
     ScopeOnly,
 }
 
+/// The row carried by an outcome that persists nothing: a deletion or an
+/// uncertain change only needs the id.
+fn placeholder_row(account_id: &str, id: &str) -> ConsumerMessageRow {
+    ConsumerMessageRow {
+        message: minimal_message_row(account_id, id),
+        folders: Vec::new(),
+        labels: Vec::new(),
+        keywords: Vec::new(),
+        attachments: Vec::new(),
+        body_html: None,
+        body_text: None,
+        inline_images: Vec::new(),
+        search_document: minimal_search_document(account_id, id),
+        is_important: false,
+        is_pinned: false,
+        is_flag_complete: false,
+        reaction_emoji: None,
+    }
+}
+
 pub async fn hydrate_change_to_message_insert_row(
     engine: &SyncEngine,
     account_id: &AccountId,
@@ -293,21 +313,7 @@ pub async fn hydrate_change_to_message_insert_row(
                 HydrationOutcome::Deleted | HydrationOutcome::Uncertain
             ) {
                 return Ok(HydratedChange::Message(
-                    Box::new(ConsumerMessageRow {
-                        message: minimal_message_row(&account_id.0, &object.id.0),
-                        folders: Vec::new(),
-                        labels: Vec::new(),
-                        keywords: Vec::new(),
-                        attachments: Vec::new(),
-                        body_html: None,
-                        body_text: None,
-                        inline_images: Vec::new(),
-                        search_document: minimal_search_document(&account_id.0, &object.id.0),
-                        is_important: false,
-                        is_pinned: false,
-                        is_flag_complete: false,
-                        reaction_emoji: None,
-                    }),
+                    Box::new(placeholder_row(&account_id.0, &object.id.0)),
                     outcome,
                 ));
             }
@@ -331,9 +337,23 @@ pub async fn hydrate_change_to_message_insert_row(
             } else {
                 HydrationProjection::Full
             };
-            let message = engine
+            let message = match engine
                 .message_hydrate(account_id, ObjectId(object.id.0.clone()), projection)
-                .await?;
+                .await
+            {
+                Ok(message) => message,
+                // Deleted or moved (Graph mints a new id on move) between the
+                // change being listed and read: the server no longer holds it.
+                Err(bifrost_sync::Error::Account(error))
+                    if matches!(error.kind(), AccountErrorKind::NotFound(_)) =>
+                {
+                    return Ok(HydratedChange::Message(
+                        Box::new(placeholder_row(&account_id.0, &object.id.0)),
+                        HydrationOutcome::Deleted,
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
             Ok(HydratedChange::Message(
                 Box::new(
                     message_to_consumer_row(
