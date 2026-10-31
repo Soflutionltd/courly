@@ -144,6 +144,7 @@ pub struct UiBootstrapSnapshot {
     pub sidebar_layout: Option<String>,
     pub toolbar_layout: Option<String>,
     pub search_scope: Option<String>,
+    pub mail_check_interval: Option<String>,
 }
 
 const SECURE_SETTING_KEYS: &[&str] = &[
@@ -346,6 +347,7 @@ pub fn get_ui_bootstrap_snapshot(
         sidebar_layout: get("sidebar_layout"),
         toolbar_layout: get("toolbar_layout"),
         search_scope: get("search_scope"),
+        mail_check_interval: get("mail_check_interval"),
     })
 }
 

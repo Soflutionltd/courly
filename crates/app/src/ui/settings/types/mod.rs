@@ -329,6 +329,7 @@ pub struct Settings {
     pub email_body_background: EmailBodyBackground,
     pub email_zoom: String,
     pub thread_date_groups: bool,
+    pub mail_check_interval: String,
     // Composing
     pub undo_delay: String,
     pub mark_as_read: String,
@@ -468,6 +469,11 @@ impl Settings {
             self.email_zoom = zoom.into();
         }
         self.thread_date_groups = ui.thread_date_groups;
+        if let Some(seconds) = ui.mail_check_interval.as_deref()
+            && MAIL_CHECK_INTERVALS.contains(&seconds)
+        {
+            self.mail_check_interval = seconds.into();
+        }
         if let Some(zoom) = email_zoom_factor(&self.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
         }
@@ -524,6 +530,7 @@ impl Settings {
             email_body_background: self.email_body_background,
             email_zoom: self.email_zoom.clone(),
             thread_date_groups: self.thread_date_groups,
+            mail_check_interval: self.mail_check_interval.clone(),
         }
     }
 
@@ -545,6 +552,7 @@ impl Settings {
         crate::ui::theme::set_email_body_background(prefs.email_body_background);
         self.email_zoom = prefs.email_zoom.clone();
         self.thread_date_groups = prefs.thread_date_groups;
+        self.mail_check_interval = prefs.mail_check_interval.clone();
         if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
         }
@@ -569,6 +577,7 @@ impl Default for Settings {
             email_body_background: EmailBodyBackground::default(),
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
+            mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
         };
         Self {
             active_tab: Tab::General,
@@ -594,6 +603,7 @@ impl Default for Settings {
             email_body_background: EmailBodyBackground::default(),
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
+            mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
             undo_delay: "5 seconds".into(),
             mark_as_read: "After 2 Seconds".into(),
             notifications_enabled: true,
@@ -758,6 +768,7 @@ mod tests {
             sidebar_layout: None,
             toolbar_layout: None,
             search_scope: None,
+            mail_check_interval: None,
         }
     }
 

@@ -28,6 +28,7 @@ pub enum SettingsMessage {
     EmailBodyBgChanged(String),
     EmailZoomChanged(String),
     ToggleThreadDateGroups(bool),
+    MailCheckIntervalChanged(String),
     ToggleSelect(SelectField),
     // About
     CheckForUpdates,
@@ -364,4 +365,5 @@ pub enum SelectField {
     DateDisplay,
     EmailBodyBg,
     EmailZoom,
+    MailCheckInterval,
 }

@@ -33,6 +33,9 @@ fn option_label(value: &str) -> Option<&'static str> {
         "Instantly" => t!("settings.general.option.instantly"),
         "After 2 Seconds" => t!("settings.general.option.after_2_seconds"),
         "Manually" => t!("settings.general.option.manually"),
+        "2" => t!("settings.general.option.mail_check_realtime"),
+        "15" => t!("settings.general.option.mail_check_15_seconds"),
+        "60" => t!("settings.general.option.mail_check_minute"),
         _ => return None,
     }))
 }
@@ -173,6 +176,19 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                     SettingsMessage::MarkAsReadChanged,
                 ),
                 SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
+            ),
+            setting_row_with_description(
+                tr(t!("settings.general.mail_check")),
+                Some(tr(t!("settings.general.mail_check_description"))),
+                translated_select(
+                    MAIL_CHECK_INTERVALS,
+                    &state.mail_check_interval,
+                    option_label,
+                    state.open_select == Some(SelectField::MailCheckInterval),
+                    SettingsMessage::ToggleSelect(SelectField::MailCheckInterval),
+                    SettingsMessage::MailCheckIntervalChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::MailCheckInterval),
             ),
         ],
     ));

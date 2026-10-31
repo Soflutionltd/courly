@@ -547,6 +547,13 @@ impl Settings {
                 }
                 self.open_select = None;
             }
+            SettingsMessage::MailCheckIntervalChanged(v) => {
+                self.mail_check_interval = v.clone();
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.mail_check_interval = v;
+                }
+                self.open_select = None;
+            }
             SettingsMessage::ThemeSelected(i) => {
                 self.selected_theme = Some(i);
                 self.theme = "Theme".into();

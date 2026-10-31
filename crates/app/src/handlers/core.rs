@@ -530,6 +530,7 @@ impl ReadyApp {
             SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
             SettingValue::EmailZoom(prefs.email_zoom.clone()),
             SettingValue::ThreadDateGroups(prefs.thread_date_groups),
+            SettingValue::MailCheckInterval(prefs.mail_check_interval.clone()),
         ];
         Task::perform(async move { client.set_settings(values).await }, |result| {
             if let Err(e) = result {

@@ -39,6 +39,11 @@ pub const DEFAULT_EMAIL_ZOOM: &str = "90%";
 /// Zoom restored by "Actual Size" (Cmd+0).
 pub const ACTUAL_SIZE_EMAIL_ZOOM: &str = "100%";
 
+/// New-mail check choices, in seconds, as stored under `mail_check_interval`
+/// and parsed by the Service's hot poll loop.
+pub const MAIL_CHECK_INTERVALS: &[&str] = &["2", "15", "60"];
+pub const DEFAULT_MAIL_CHECK_INTERVAL: &str = "2";
+
 /// A keyboard zoom request (Cmd +, Cmd -, Cmd 0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmailZoomStep {
@@ -92,6 +97,8 @@ pub struct PreferencesState {
     pub email_body_background: EmailBodyBackground,
     pub email_zoom: String,
     pub thread_date_groups: bool,
+    /// Seconds between new-mail checks, one of `MAIL_CHECK_INTERVALS`.
+    pub mail_check_interval: String,
 }
 
 #[cfg(test)]
