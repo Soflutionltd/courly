@@ -169,7 +169,9 @@ impl ReadyApp {
             ThreadListEvent::SearchQueryChanged(query) => {
                 self.update(Message::SearchQueryChanged(query))
             }
-            ThreadListEvent::SearchExecute => self.update(Message::SearchExecute),
+            ThreadListEvent::SearchExecute => self.update(Message::SearchSuggest(
+                crate::ui::search_suggest::SearchSuggestMessage::Activate,
+            )),
             ThreadListEvent::SearchUndo => {
                 if let Some(text) = self.search_query.undo() {
                     let query = text.to_owned();

@@ -236,6 +236,7 @@ pub enum Message {
     FolderDialog(crate::ui::folder_dialog::FolderDialogMessage),
     MoveMenu(crate::ui::move_menu::MoveMenuMessage),
     ThreadDrag(crate::handlers::thread_drag::ThreadDragMessage),
+    SearchSuggest(crate::ui::search_suggest::SearchSuggestMessage),
     /// "Mark All as Read" on a folder finished: messages marked, or the
     /// accounts that failed.
     FolderMarkedRead(Result<usize, String>),

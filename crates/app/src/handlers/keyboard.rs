@@ -207,6 +207,26 @@ impl ReadyApp {
             }
         }
 
+        // 2b. The search suggestions under the title-bar field.
+        if self.search_suggest.open {
+            use crate::ui::search_suggest::SearchSuggestMessage;
+            let message = match key {
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                    Some(SearchSuggestMessage::Navigate(TypeaheadDirection::Up))
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                    Some(SearchSuggestMessage::Navigate(TypeaheadDirection::Down))
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                    Some(SearchSuggestMessage::Close)
+                }
+                _ => None,
+            };
+            if let Some(message) = message {
+                return self.update(Message::SearchSuggest(message));
+            }
+        }
+
         // 2b. If a text input or other widget captured the event, skip
         //     (unless it's a modifier-chord like Ctrl+K)
         if status == iced::event::Status::Captured

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
-use iced::{Element, Length, Padding, Task};
+use iced::{Element, Length, Task};
 use rust_i18n::t;
 
 use crate::component::Component;
@@ -729,7 +729,6 @@ impl Component for ThreadList {
             &self.mode,
             self.threads.len(),
             selection_count,
-            &self.typeahead,
             self.pinned_search_updated_at,
             self.search_covers_all,
         );
@@ -760,14 +759,12 @@ impl Component for ThreadList {
 
 // ── View helpers ────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 fn thread_list_header<'a>(
     folder_name: &'a str,
     scope_name: &'a str,
     mode: &ThreadListMode,
     thread_count: usize,
     selection_count: usize,
-    typeahead: &'a TypeaheadState,
     pinned_search_updated_at: Option<i64>,
     search_covers_all: bool,
 ) -> Element<'a, ThreadListMessage> {
@@ -845,45 +842,6 @@ fn thread_list_header<'a>(
         header_col = header_col.push(label);
     }
     header_col = header_col.push(context_row);
-
-    // Typeahead popup
-    if typeahead.visible && !typeahead.items.is_empty() {
-        let mut list = column![].spacing(0);
-        for (i, item) in typeahead.items.iter().enumerate() {
-            let is_selected = i == typeahead.selected;
-            let style = if is_selected {
-                theme::ButtonClass::Nav { active: true }
-            } else {
-                theme::ButtonClass::Action
-            };
-            let mut item_row = row![text(&item.label).size(TEXT_SM),]
-                .spacing(SPACE_XS)
-                .align_y(iced::Alignment::Center);
-            if let Some(ref detail) = item.detail {
-                item_row = item_row.push(
-                    text(detail)
-                        .size(TEXT_XS)
-                        .style(theme::TextClass::Tertiary.style()),
-                );
-            }
-            list = list.push(
-                button(
-                    container(item_row)
-                        .padding(Padding::from([SPACE_XXS, SPACE_SM]))
-                        .width(Length::Fill),
-                )
-                .on_press(ThreadListMessage::TypeaheadSelect(i))
-                .padding(0)
-                .style(style.style())
-                .width(Length::Fill),
-            );
-        }
-        header_col = header_col.push(
-            container(list)
-                .style(theme::ContainerClass::Elevated.style())
-                .width(Length::Fill),
-        );
-    }
 
     container(header_col).padding(PAD_PANEL_HEADER).into()
 }

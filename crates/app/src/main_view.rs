@@ -201,6 +201,16 @@ impl ReadyApp {
             &self.sidebar.accounts,
             self.thread_list.search_bar().map(Message::ThreadList),
         );
+        let search: Element<'_, Message> =
+            match ui::search_suggest::view(&self.search_suggest, &self.thread_list.typeahead) {
+                Some(menu) => ui::anchored_overlay::anchored_overlay(search)
+                    .popup(menu)
+                    .on_dismiss(Message::SearchSuggest(
+                        ui::search_suggest::SearchSuggestMessage::Close,
+                    ))
+                    .into(),
+                None => search,
+            };
         let rail = ui::chrome::app_rail(self.app_mode, self.show_settings);
 
         let body: Element<'_, Message> = if self.show_settings {

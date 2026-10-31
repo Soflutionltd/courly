@@ -111,7 +111,9 @@ impl ReadyApp {
                     .with(deadline)
                     .map(|(_, deadline)| {
                         if iced::time::Instant::now() >= deadline {
-                            Message::SearchExecute
+                            Message::SearchSuggest(
+                                crate::ui::search_suggest::SearchSuggestMessage::Refresh,
+                            )
                         } else {
                             Message::Noop
                         }

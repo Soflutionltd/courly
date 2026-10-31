@@ -114,6 +114,11 @@ pub struct ReadyApp {
     pub(crate) move_menu: Option<crate::ui::move_menu::MoveMenu>,
     /// A press on a message row, followed for a drag onto a folder.
     pub(crate) thread_drag: Option<crate::handlers::thread_drag::ThreadDrag>,
+    /// People and messages suggested under the search field.
+    pub(crate) search_suggest: crate::ui::search_suggest::SearchSuggest,
+    /// A suggested message picked from the search menu, by account id and
+    /// thread id: selected once the full results are on screen.
+    pub(crate) pending_search_select: Option<(String, String)>,
     /// Row menu action that needs the conversation's messages, held until
     /// the reading pane has loaded that thread (account id, thread id).
     pub(crate) pending_row_action: Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
@@ -456,6 +461,8 @@ impl ReadyApp {
             folder_dialog: None,
             move_menu: None,
             thread_drag: None,
+            search_suggest: crate::ui::search_suggest::SearchSuggest::default(),
+            pending_search_select: None,
             pending_row_action: None,
             toolbar: crate::ui::toolbar::Toolbar::default(),
             search_scope: crate::ui::search_scope::SearchScopeState::default(),
