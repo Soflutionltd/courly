@@ -667,7 +667,11 @@ impl ReadyApp {
                     return self.enter_chat_view(&email);
                 }
                 let _ = self.nav_generation.next();
-                let nav_task = self.load_navigation_and_threads();
+                let chat_token = self.chat_list_generation.next();
+                let nav_task = Task::batch([
+                    self.reload_after_server_change(),
+                    self.fire_chat_contacts_load(chat_token),
+                ]);
                 let auto_reply_task = self.check_auto_reply_status();
                 Task::batch([nav_task, auto_reply_task])
             }
