@@ -10,7 +10,7 @@ use rtsk::scope::ViewScope;
 
 use super::nav::nav_items;
 use super::order::scope_key;
-use super::{Sidebar, SidebarMessage};
+use super::{Sidebar, SidebarMessage, SidebarTextSize};
 
 /// Outlook-style folders: the unified section, then one section per
 /// account in account order. Dragging an account header moves the whole
@@ -30,11 +30,15 @@ fn all_accounts_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let scope = ViewScope::AllAccounts;
     let key = scope_key(&scope);
     let expanded = !sidebar.collapsed_sections.contains(&key);
-    let header = button(title_row(expanded, t!("main.sidebar.all_accounts")))
-        .on_press(SidebarMessage::ToggleSection(key))
-        .padding(PAD_SIDEBAR_SECTION_TITLE)
-        .style(theme::ButtonClass::Ghost.style())
-        .width(Length::Fill);
+    let header = button(title_row(
+        expanded,
+        t!("main.sidebar.all_accounts"),
+        sidebar.text_size,
+    ))
+    .on_press(SidebarMessage::ToggleSection(key))
+    .padding(PAD_SIDEBAR_SECTION_TITLE)
+    .style(theme::ButtonClass::Ghost.style())
+    .width(Length::Fill);
     let mut section = column![header].spacing(SPACE_XXS);
     if expanded {
         section = section.push(nav_items(sidebar, &scope));
@@ -52,13 +56,13 @@ fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(&account.email);
 
-    let mut title = column![title_row(expanded, label)].spacing(SPACE_XXXS);
+    let mut title = column![title_row(expanded, label, sidebar.text_size)].spacing(SPACE_XXXS);
     if label != account.email {
         title = title.push(
             row![
                 Space::new().width(SIDEBAR_SECTION_CHEVRON_SLOT),
                 text(&account.email)
-                    .size(TEXT_SM)
+                    .size(sidebar.text_size.scale(TEXT_SM))
                     .style(theme::TextClass::Muted.style()),
             ]
             .align_y(Alignment::Center),
@@ -103,6 +107,7 @@ fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a
 fn title_row<'a>(
     expanded: bool,
     label: impl text::IntoFragment<'a>,
+    text_size: SidebarTextSize,
 ) -> Element<'a, SidebarMessage> {
     let chevron = if expanded {
         icon::chevron_down()
@@ -118,7 +123,7 @@ fn title_row<'a>(
         .width(SIDEBAR_SECTION_CHEVRON_SLOT)
         .align_x(Alignment::Center),
         text(label)
-            .size(TEXT_LG)
+            .size(text_size.scale(TEXT_LG))
             .font(crate::font::text_bold())
             .style(text::base),
     ]

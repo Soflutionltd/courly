@@ -104,7 +104,7 @@ pub(super) fn nav_items<'a>(
                         Some(universal_folder_icon(&folder.id)),
                         folder_display_name(folder),
                         active,
-                        widgets::NavSize::Compact,
+                        sidebar.text_size.nav(),
                         folder
                             .universal_unread_count()
                             .map(widgets::NavBadge::Universal),
@@ -137,7 +137,7 @@ pub(super) fn nav_items<'a>(
                             Some(icon::outbox()),
                             folder_display_name(root.folder),
                             active,
-                            widgets::NavSize::Compact,
+                            sidebar.text_size.nav(),
                             Some(widgets::NavBadge::General(root.folder.unread_count())),
                         )
                     } else {
@@ -146,6 +146,7 @@ pub(super) fn nav_items<'a>(
                             0.0,
                             forest.root_tree_state(sidebar, root),
                             active,
+                            sidebar.text_size,
                         )
                     };
                     col = col.push(reorderable_row(

@@ -35,7 +35,7 @@ pub(super) fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                 None,
                 &f.name,
                 is_active,
-                widgets::NavSize::Compact,
+                sidebar.text_size.nav(),
                 Some(widgets::NavBadge::General(f.unread_count())),
                 on_press,
             )

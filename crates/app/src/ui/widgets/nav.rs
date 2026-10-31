@@ -14,12 +14,14 @@ use crate::ui::theme;
 use super::avatars::label_color_dot;
 use super::layout::count_badge;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NavSize {
     /// Sidebar folder list - compact padding
     Compact,
     /// Settings tabs - more spacious padding
     Regular,
+    /// Sidebar rows at the user's text size, compact padding
+    Sized { text: f32, icon: f32 },
 }
 
 /// Count to render alongside a `nav_button`. Universal sidebar entries
@@ -84,16 +86,18 @@ pub fn nav_button_content<'a, M: 'a>(
         theme::TextClass::Muted.style()
     };
     let pad = match size {
-        NavSize::Compact => PAD_NAV_ITEM,
+        NavSize::Compact | NavSize::Sized { .. } => PAD_NAV_ITEM,
         NavSize::Regular => PAD_SETTINGS_ROW,
     };
     let icon_size = match size {
         NavSize::Compact => ICON_MD,
         NavSize::Regular => ICON_XL,
+        NavSize::Sized { icon, .. } => icon,
     };
     let text_size = match size {
         NavSize::Compact => TEXT_MD,
         NavSize::Regular => TEXT_LG,
+        NavSize::Sized { text, .. } => text,
     };
 
     let mut content = row![].spacing(SPACE_XS).align_y(Alignment::Center);

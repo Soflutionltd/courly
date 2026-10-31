@@ -729,7 +729,7 @@ fn canonical_theme(value: &str) -> Option<&'static str> {
 }
 
 fn canonical_font_size(value: &str) -> Option<&'static str> {
-    canonical_match(value, &["Small", "Default", "Large", "XLarge"])
+    canonical_match(value, &["XSmall", "Small", "Default", "Large", "XLarge"])
 }
 
 fn canonical_reading_pane(value: &str) -> Option<&'static str> {

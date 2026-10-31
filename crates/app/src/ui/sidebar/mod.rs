@@ -292,6 +292,40 @@ pub struct Sidebar {
     /// The folder row under the pointer: a drag can reach the sidebar
     /// before it starts, when the pointer moves fast.
     hovered_folder: Option<DropFolder>,
+    /// Text size chosen in settings, copied by the App after each message.
+    pub text_size: SidebarTextSize,
+}
+
+/// The sidebar's text size setting, as an offset from the default sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SidebarTextSize {
+    offset: f32,
+}
+
+impl SidebarTextSize {
+    pub fn from_setting(value: &str) -> Self {
+        let offset = match value {
+            "XSmall" => -2.0,
+            "Small" => -1.0,
+            "Large" => 1.0,
+            "XLarge" => 2.0,
+            _ => 0.0,
+        };
+        Self { offset }
+    }
+
+    /// `base` resized by the setting.
+    pub fn scale(self, base: f32) -> f32 {
+        base + self.offset
+    }
+
+    /// Folder rows, as `nav_button_content` draws them.
+    pub fn nav(self) -> widgets::NavSize {
+        widgets::NavSize::Sized {
+            text: self.scale(TEXT_MD),
+            icon: self.scale(ICON_MD),
+        }
+    }
 }
 
 /// System folders messages can be dropped on.
@@ -355,6 +389,7 @@ impl Sidebar {
             row_menu: None,
             message_drop: None,
             hovered_folder: None,
+            text_size: SidebarTextSize::default(),
         }
     }
 
@@ -1008,6 +1043,30 @@ mod tests {
     use super::*;
     use rtsk::db::queries_extra::navigation::NavigationFolder;
     use rtsk::db::types::AccountScope;
+
+    #[test]
+    fn text_size_setting_shifts_every_sidebar_size() {
+        assert_eq!(
+            SidebarTextSize::from_setting("XSmall").scale(TEXT_MD),
+            TEXT_MD - 2.0
+        );
+        assert_eq!(
+            SidebarTextSize::from_setting("Small").scale(TEXT_LG),
+            TEXT_LG - 1.0
+        );
+        assert_eq!(
+            SidebarTextSize::from_setting("Default").scale(TEXT_MD),
+            TEXT_MD
+        );
+        assert_eq!(
+            SidebarTextSize::from_setting("XLarge").scale(ICON_MD),
+            ICON_MD + 2.0
+        );
+        assert_eq!(
+            SidebarTextSize::from_setting("unknown"),
+            SidebarTextSize::default()
+        );
+    }
 
     fn folder(id: &str, name: &str, kind: &str) -> NavigationFolder {
         let unread = if kind == "Universal" {

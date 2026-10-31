@@ -18,6 +18,7 @@ fn option_label(value: &str) -> Option<&'static str> {
         "Compact" => t!("settings.general.option.compact"),
         "Default" => t!("settings.general.option.default"),
         "Spacious" => t!("settings.general.option.spacious"),
+        "XSmall" => t!("settings.general.option.xsmall"),
         "Small" => t!("settings.general.option.small"),
         "Large" => t!("settings.general.option.large"),
         "XLarge" => t!("settings.general.option.xlarge"),
@@ -75,7 +76,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
             setting_row(
                 tr(t!("settings.general.font_size")),
                 translated_select(
-                    &["Small", "Default", "Large", "XLarge"],
+                    &["XSmall", "Small", "Default", "Large", "XLarge"],
                     &state.font_size,
                     option_label,
                     state.open_select == Some(SelectField::FontSize),

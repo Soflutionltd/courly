@@ -14,7 +14,7 @@ use types::{FolderId, SidebarSelection};
 
 use super::nav::{FolderMenu, MenuFolder};
 use super::search_here::build_search_here_user_folder_prefix;
-use super::{MoveTarget, RowMenuAnchor, Sidebar, SidebarMessage};
+use super::{MoveTarget, RowMenuAnchor, Sidebar, SidebarMessage, SidebarTextSize};
 
 /// A node in the depth-first tree traversal.
 struct TreeNode<'a> {
@@ -209,13 +209,14 @@ fn is_hidden_by_collapsed_ancestor(
 }
 
 /// Padded content of one folder row: optional indent / chevron, the folder
-/// name, and the unread badge. Matches the visual weight of
+/// icon and name, and the unread badge. Matches the visual weight of
 /// `widgets::nav_button` in the surrounding section.
 pub(super) fn folder_row_content<'a>(
     folder: &'a NavigationFolder,
     indent: f32,
     tree_state: Option<(bool, bool)>,
     active: bool,
+    text_size: SidebarTextSize,
 ) -> Element<'a, SidebarMessage> {
     let mut item_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
 
@@ -248,7 +249,17 @@ pub(super) fn folder_row_content<'a>(
     } else {
         theme::TextClass::Muted.style()
     };
-    item_row = item_row.push(text(&folder.name).size(TEXT_MD).style(lbl_style));
+    item_row = item_row
+        .push(
+            icon::folder()
+                .size(text_size.scale(ICON_MD))
+                .style(lbl_style),
+        )
+        .push(
+            text(&folder.name)
+                .size(text_size.scale(TEXT_MD))
+                .style(lbl_style),
+        );
 
     if folder.unread_count() > 0 {
         item_row = item_row
@@ -272,16 +283,21 @@ fn folder_row<'a>(
     tree_state: Option<(bool, bool)>,
 ) -> Element<'a, SidebarMessage> {
     let active = is_folder_active(sidebar, scope, folder);
-    let label_btn: Element<'_, SidebarMessage> =
-        button(folder_row_content(folder, indent, tree_state, active))
-            .on_press(SidebarMessage::SelectIn(
-                scope.clone(),
-                SidebarSelection::ProviderFolder(FolderId::from(folder.id.clone())),
-            ))
-            .padding(0)
-            .style(theme::ButtonClass::Nav { active }.style())
-            .width(Length::Fill)
-            .into();
+    let label_btn: Element<'_, SidebarMessage> = button(folder_row_content(
+        folder,
+        indent,
+        tree_state,
+        active,
+        sidebar.text_size,
+    ))
+    .on_press(SidebarMessage::SelectIn(
+        scope.clone(),
+        SidebarSelection::ProviderFolder(FolderId::from(folder.id.clone())),
+    ))
+    .padding(0)
+    .style(theme::ButtonClass::Nav { active }.style())
+    .width(Length::Fill)
+    .into();
 
     let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar, scope);
     let mut row_el: Element<'a, SidebarMessage> = mouse_area(label_btn)

@@ -1035,6 +1035,8 @@ impl App {
             App::Ready(ready) => {
                 let task = ready.update(message);
                 ready.thread_list.date_groups = ready.settings.thread_date_groups;
+                ready.sidebar.text_size =
+                    crate::ui::sidebar::SidebarTextSize::from_setting(&ready.settings.font_size);
                 #[cfg(target_os = "macos")]
                 ready.refresh_menu_bar();
                 Task::batch([
