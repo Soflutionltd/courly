@@ -432,7 +432,7 @@ fn build_grid_rows<'a, M: Clone + 'a>(
         .map(|chunk| {
             let btns: Vec<Element<'a, M>> = chunk
                 .iter()
-                .map(|(emoji, name)| {
+                .map(|(emoji, _)| {
                     let map_msg = map_msg.clone();
                     let emoji_owned = emoji.clone();
                     let emoji_display = emoji.clone();
@@ -452,18 +452,7 @@ fn build_grid_rows<'a, M: Clone + 'a>(
                     .padding(0.0)
                     .style(theme::ButtonClass::Ghost.style());
 
-                    let el: Element<'a, M> = if name.is_empty() {
-                        btn.into()
-                    } else {
-                        iced::widget::tooltip(
-                            btn,
-                            text(*name).size(TEXT_XS),
-                            iced::widget::tooltip::Position::Bottom,
-                        )
-                        .gap(SPACE_XXXS)
-                        .style(theme::ContainerClass::Floating.style())
-                        .into()
-                    };
+                    let el: Element<'a, M> = btn.into();
 
                     el
                 })

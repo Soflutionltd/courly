@@ -1,7 +1,6 @@
 use cmdk::{CommandContext, CommandRegistry};
 use iced::widget::{
     Space, button, checkbox, column, container, mouse_area, responsive, row, scrollable, text,
-    tooltip,
 };
 use iced::{Alignment, Element, Length, Padding, Size, Vector, mouse};
 use rust_i18n::t;
@@ -126,18 +125,12 @@ pub fn toolbar<'a>(
 
 /// The fixed button at the right end that opens and closes the side panel.
 fn side_panel_toggle<'a>(open: bool) -> Element<'a, Message> {
-    let (ico, tip) = if open {
-        (icon::panel_right_close(), t!("main.side_panel.hide"))
+    let ico = if open {
+        icon::panel_right_close()
     } else {
-        (icon::panel_right_open(), t!("main.side_panel.show"))
+        icon::panel_right_open()
     };
-    widgets::tip_icon_button_at(
-        ico,
-        tip,
-        open,
-        Message::SidePanel(SidePanelMessage::Toggle),
-        tooltip::Position::Left,
-    )
+    widgets::nav_icon_button(ico, open, Message::SidePanel(SidePanelMessage::Toggle))
 }
 
 // ── Live bar ────────────────────────────────────────────
@@ -185,19 +178,7 @@ fn bar_button<'a>(
     if resolved.available {
         face = face.on_press(Message::ExecuteCommand(resolved.item.command()));
     }
-    let face: Element<'a, Message> = match labels {
-        LabelMode::Always => face.into(),
-        LabelMode::Never => tooltip(
-            face,
-            text(resolved.label.clone())
-                .size(TEXT_XS)
-                .style(theme::TextClass::OnPrimary.style()),
-            tooltip::Position::Bottom,
-        )
-        .gap(SPACE_XXS)
-        .style(theme::ContainerClass::Floating.style())
-        .into(),
-    };
+    let face: Element<'a, Message> = face.into();
 
     let index = resolved.index;
     let mut slot = anchored_overlay(face).on_right_press_offset(move |offset| {

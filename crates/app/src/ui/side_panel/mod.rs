@@ -7,7 +7,6 @@ pub mod templates;
 use iced::widget::{Space, column, container, row, scrollable};
 use iced::{Alignment, Element, Length};
 use jiff::civil::Weekday;
-use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::Message;
@@ -31,13 +30,6 @@ impl Module {
         match self {
             Self::MyDay => icon::calendar(),
             Self::Templates => icon::layout_template(),
-        }
-    }
-
-    fn name(self) -> std::borrow::Cow<'static, str> {
-        match self {
-            Self::MyDay => t!("main.side_panel.module.my_day"),
-            Self::Templates => t!("main.side_panel.module.templates"),
         }
     }
 }
@@ -86,9 +78,8 @@ fn panel_message(message: SidePanelMessage) -> Message {
 pub fn view(panel: &SidePanel, week_start: Weekday) -> Element<'_, Message> {
     let mut tabs = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     for module in Module::ALL {
-        tabs = tabs.push(widgets::tip_icon_button(
+        tabs = tabs.push(widgets::nav_icon_button(
             module.icon(),
-            module.name(),
             module == panel.module,
             panel_message(SidePanelMessage::Show(module)),
         ));
@@ -97,12 +88,10 @@ pub fn view(panel: &SidePanel, week_start: Weekday) -> Element<'_, Message> {
         row![
             tabs,
             Space::new().width(Length::Fill),
-            widgets::tip_icon_button_at(
+            widgets::nav_icon_button(
                 icon::panel_right_close(),
-                t!("main.side_panel.close"),
                 false,
                 panel_message(SidePanelMessage::Close),
-                iced::widget::tooltip::Position::Left,
             ),
         ]
         .align_y(Alignment::Center),

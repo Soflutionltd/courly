@@ -417,26 +417,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .style(theme::ButtonClass::Ghost.style());
 
     let message_actions = row![
-        header_icon_button(
-            icon::reply(),
-            t!("main.reading_pane.reply"),
-            on_reply(index)
-        ),
-        header_icon_button(
-            icon::reply_all(),
-            t!("main.reading_pane.reply_all"),
-            on_reply_all(index)
-        ),
-        header_icon_button(
-            icon::forward(),
-            t!("main.reading_pane.forward"),
-            on_forward(index)
-        ),
-        header_icon_button(
-            icon::calendar(),
-            t!("main.reading_pane.create_event"),
-            on_create_event(index)
-        ),
+        header_icon_button(icon::reply(), on_reply(index)),
+        header_icon_button(icon::reply_all(), on_reply_all(index)),
+        header_icon_button(icon::forward(), on_forward(index)),
+        header_icon_button(icon::calendar(), on_create_event(index)),
     ]
     .spacing(SPACE_XXXS)
     .align_y(Alignment::Center);
@@ -543,25 +527,16 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .into()
 }
 
-/// Icon-only action in a message header, named by its tooltip.
+/// Icon-only action in a message header.
 fn header_icon_button<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    tip: Cow<'a, str>,
     on_press: M,
 ) -> Element<'a, M> {
-    iced::widget::tooltip(
-        button(ico.size(ICON_SM).style(text::secondary))
-            .on_press(on_press)
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::Ghost.style()),
-        text(tip)
-            .size(TEXT_XS)
-            .style(theme::TextClass::OnPrimary.style()),
-        iced::widget::tooltip::Position::Bottom,
-    )
-    .gap(SPACE_XXS)
-    .style(theme::ContainerClass::Floating.style())
-    .into()
+    button(ico.size(ICON_SM).style(text::secondary))
+        .on_press(on_press)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style())
+        .into()
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]

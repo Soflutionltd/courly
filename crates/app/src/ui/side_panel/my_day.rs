@@ -238,15 +238,13 @@ fn mini_calendar(state: &MyDay, week_start: Weekday) -> Element<'_, MyDayMessage
     .align_y(Alignment::Center);
     if state.unfolded {
         header = header
-            .push(widgets::tip_icon_button(
+            .push(widgets::nav_icon_button(
                 icon::chevron_left(),
-                t!("calendar.my_day.previous_month"),
                 false,
                 MyDayMessage::PrevMonth,
             ))
-            .push(widgets::tip_icon_button(
+            .push(widgets::nav_icon_button(
                 icon::chevron_right(),
-                t!("calendar.my_day.next_month"),
                 false,
                 MyDayMessage::NextMonth,
             ));
@@ -263,9 +261,8 @@ fn mini_calendar(state: &MyDay, week_start: Weekday) -> Element<'_, MyDayMessage
             .style(theme::ButtonClass::Action.style()),
         );
     }
-    header = header.push(widgets::tip_icon_button(
+    header = header.push(widgets::nav_icon_button(
         icon::plus(),
-        t!("calendar.my_day.new_event"),
         false,
         MyDayMessage::NewEvent,
     ));
@@ -299,14 +296,13 @@ fn mini_calendar(state: &MyDay, week_start: Weekday) -> Element<'_, MyDayMessage
         },
     };
 
-    let (fold_icon, fold_tip) = if state.unfolded {
-        (icon::chevron_up(), t!("calendar.my_day.hide_month"))
+    let fold_icon = if state.unfolded {
+        icon::chevron_up()
     } else {
-        (icon::chevron_down(), t!("calendar.my_day.show_month"))
+        icon::chevron_down()
     };
-    let fold = container(widgets::tip_icon_button(
+    let fold = container(widgets::nav_icon_button(
         fold_icon,
-        fold_tip,
         false,
         MyDayMessage::ToggleMonth,
     ))

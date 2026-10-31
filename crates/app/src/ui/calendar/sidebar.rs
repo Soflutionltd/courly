@@ -146,35 +146,27 @@ pub(super) fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMes
     .height(SIDEBAR_HEADER_HEIGHT)
     .width(Length::Fill);
 
-    let pop_out_btn = iced::widget::tooltip(
-        button(
-            container(
-                row![
-                    container(icon::external_link().size(ICON_LG).style(text::primary))
-                        .align_y(Alignment::Center),
-                    container(
-                        text(t!("calendar.sidebar.pop_out"))
-                            .size(TEXT_LG)
-                            .style(text::primary)
-                    )
+    let pop_out_btn = button(
+        container(
+            row![
+                container(icon::external_link().size(ICON_LG).style(text::primary))
                     .align_y(Alignment::Center),
-                ]
-                .spacing(SPACE_XXS)
+                container(
+                    text(t!("calendar.sidebar.pop_out"))
+                        .size(TEXT_LG)
+                        .style(text::primary)
+                )
                 .align_y(Alignment::Center),
-            )
-            .center_x(Length::Fill),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
         )
-        .on_press(CalendarMessage::PopOutCalendar)
-        .style(theme::ButtonClass::Experiment { variant: 10 }.style())
-        .padding(PAD_BUTTON)
-        .width(Length::Fill),
-        text(t!("calendar.sidebar.pop_out_tooltip"))
-            .size(TEXT_XS)
-            .style(theme::TextClass::OnPrimary.style()),
-        iced::widget::tooltip::Position::Top,
+        .center_x(Length::Fill),
     )
-    .gap(SPACE_XXS)
-    .style(theme::ContainerClass::Floating.style());
+    .on_press(CalendarMessage::PopOutCalendar)
+    .style(theme::ButtonClass::Experiment { variant: 10 }.style())
+    .padding(PAD_BUTTON)
+    .width(Length::Fill);
 
     let content = column![
         header,

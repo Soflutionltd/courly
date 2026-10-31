@@ -10,7 +10,7 @@ use crate::Message;
 use crate::icon;
 use crate::ui::layout::{
     ICON_LG, ICON_MD, ICON_RAIL, ICON_XL, PAD_BUTTON, PAD_DROPDOWN, PAD_ICON_BTN, RAIL_BUTTON_SIZE,
-    SPACE_XS, SPACE_XXS, TEXT_LG, TEXT_SM, TEXT_XS,
+    SPACE_XS, SPACE_XXS, TEXT_LG, TEXT_SM,
 };
 use crate::ui::theme;
 
@@ -190,44 +190,23 @@ pub fn rail_button<'a, M: Clone + 'a>(
     .into()
 }
 
-/// Icon-only button named by a tooltip below it; `active` marks the
-/// current choice among sibling buttons.
-pub fn tip_icon_button<'a, M: Clone + 'a>(
+/// Icon-only button; `active` marks the current choice among sibling
+/// buttons.
+pub fn nav_icon_button<'a, M: Clone + 'a>(
     ico: iced::widget::Text<'a>,
-    tip: impl text::IntoFragment<'a>,
     active: bool,
     on_press: M,
-) -> Element<'a, M> {
-    tip_icon_button_at(ico, tip, active, on_press, iced::widget::tooltip::Position::Bottom)
-}
-
-/// [`tip_icon_button`] with its tooltip on another side, for buttons at
-/// the window's right edge.
-pub fn tip_icon_button_at<'a, M: Clone + 'a>(
-    ico: iced::widget::Text<'a>,
-    tip: impl text::IntoFragment<'a>,
-    active: bool,
-    on_press: M,
-    position: iced::widget::tooltip::Position,
 ) -> Element<'a, M> {
     let icon_style: fn(&Theme) -> text::Style = if active {
         theme::TextClass::Accent.style()
     } else {
         text::secondary
     };
-    iced::widget::tooltip(
-        button(ico.size(ICON_XL).style(icon_style))
-            .on_press(on_press)
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::Nav { active }.style()),
-        text(tip)
-            .size(TEXT_XS)
-            .style(theme::TextClass::OnPrimary.style()),
-        position,
-    )
-    .gap(SPACE_XXS)
-    .style(theme::ContainerClass::Floating.style())
-    .into()
+    button(ico.size(ICON_XL).style(icon_style))
+        .on_press(on_press)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Nav { active }.style())
+        .into()
 }
 
 /// Icon-only "+" with the same vertical padding as the compose button,

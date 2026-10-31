@@ -143,12 +143,7 @@ fn list_view(state: &Templates) -> Element<'_, TemplatesMessage> {
         .size(TEXT_SM);
     let header = row![
         search,
-        widgets::tip_icon_button(
-            icon::plus(),
-            t!("main.side_panel.templates.new"),
-            false,
-            TemplatesMessage::New,
-        ),
+        widgets::nav_icon_button(icon::plus(), false, TemplatesMessage::New),
     ]
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
@@ -222,15 +217,13 @@ fn template_row(template: &Template) -> Element<'_, TemplatesMessage> {
         .width(Length::Fill);
     row![
         insert,
-        widgets::tip_icon_button(
+        widgets::nav_icon_button(
             icon::pencil(),
-            t!("main.side_panel.templates.edit"),
             false,
             TemplatesMessage::Edit(template.id.clone()),
         ),
-        widgets::tip_icon_button(
+        widgets::nav_icon_button(
             icon::trash(),
-            t!("main.side_panel.templates.delete"),
             false,
             TemplatesMessage::Delete(template.id.clone()),
         ),
@@ -353,33 +346,19 @@ fn field<'a>(
 }
 
 fn formatting_bar<'a>() -> Element<'a, TemplatesMessage> {
-    let style_button = |ico: iced::widget::Text<'a>, tip, style: InlineStyle| {
-        widgets::tip_icon_button(
+    let style_button = |ico: iced::widget::Text<'a>, style: InlineStyle| {
+        widgets::nav_icon_button(
             ico,
-            tip,
             false,
             TemplatesMessage::Body(RteAction::Edit(EditAction::ToggleInlineStyle(style))),
         )
     };
     row![
-        style_button(
-            icon::bold(),
-            t!("main.side_panel.templates.bold"),
-            InlineStyle::BOLD
-        ),
-        style_button(
-            icon::italic(),
-            t!("main.side_panel.templates.italic"),
-            InlineStyle::ITALIC
-        ),
-        style_button(
-            icon::underline(),
-            t!("main.side_panel.templates.underline"),
-            InlineStyle::UNDERLINE
-        ),
-        widgets::tip_icon_button(
+        style_button(icon::bold(), InlineStyle::BOLD),
+        style_button(icon::italic(), InlineStyle::ITALIC),
+        style_button(icon::underline(), InlineStyle::UNDERLINE),
+        widgets::nav_icon_button(
             icon::list(),
-            t!("main.side_panel.templates.bullets"),
             false,
             TemplatesMessage::Body(RteAction::Edit(EditAction::SetBlockType(
                 BlockKind::ListItem { ordered: false }
