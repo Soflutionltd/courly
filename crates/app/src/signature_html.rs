@@ -38,7 +38,7 @@ fn decode(bytes: &[u8]) -> String {
         let end = rest
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
             .unwrap_or(rest.len());
-        encoding_rs::Encoding::for_label(rest[..end].as_bytes())
+        encoding_rs::Encoding::for_label(&rest.as_bytes()[..end])
     });
     declared
         .unwrap_or(encoding_rs::UTF_8)
