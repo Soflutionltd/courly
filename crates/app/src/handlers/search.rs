@@ -25,9 +25,16 @@ pub(crate) enum SearchIntent {
         scope: ViewScope,
         folder_id: Option<String>,
     },
-    SmartFolder { id: String, query: String },
-    PinnedActivation { id: i64 },
-    PinnedRefresh { id: i64 },
+    SmartFolder {
+        id: String,
+        query: String,
+    },
+    PinnedActivation {
+        id: i64,
+    },
+    PinnedRefresh {
+        id: i64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +57,9 @@ pub(crate) enum SearchExecution {
         scope: SearchScope,
         folder_id: Option<String>,
     },
-    Snapshot { pinned_search_id: i64 },
+    Snapshot {
+        pinned_search_id: i64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -379,8 +388,7 @@ impl ReadyApp {
                 return self.restore_folder_view();
             }
         } else {
-            self.search_debounce_deadline =
-                Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
+            self.search_debounce_deadline = Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
         }
 
         // Trigger typeahead based on cursor context (assume cursor at end)
@@ -516,10 +524,7 @@ impl ReadyApp {
                         scope, folder_id, ..
                     } => {
                         folder_id.is_none()
-                            && matches!(
-                                execution_scope_to_account_scope(scope),
-                                AccountScope::All
-                            )
+                            && matches!(execution_scope_to_account_scope(scope), AccountScope::All)
                     }
                     SearchExecution::Snapshot { .. } => true,
                 };
@@ -709,7 +714,8 @@ impl ReadyApp {
                     SearchPersistenceBehavior::None
                 ) {
                     self.apply_search_pinned_state(&result.resolved.completion.pinned_state, None);
-                    let post = self.apply_search_post_success(result.resolved.completion.post_success);
+                    let post =
+                        self.apply_search_post_success(result.resolved.completion.post_success);
                     return Task::batch([picked, post]);
                 }
 
@@ -726,12 +732,15 @@ impl ReadyApp {
     /// Open the message picked in the search menu once the results are
     /// listed; any other search starts with nothing selected.
     fn select_picked_search_result(&mut self) -> Task<Message> {
-        let picked = self.pending_search_select.take().and_then(|(account_id, id)| {
-            self.thread_list
-                .threads
-                .iter()
-                .position(|t| t.account_id == account_id && t.id == id)
-        });
+        let picked = self
+            .pending_search_select
+            .take()
+            .and_then(|(account_id, id)| {
+                self.thread_list
+                    .threads
+                    .iter()
+                    .position(|t| t.account_id == account_id && t.id == id)
+            });
         match picked {
             Some(index) => self.handle_thread_list(
                 crate::ui::thread_list::ThreadListMessage::SelectThread(index),
@@ -753,7 +762,8 @@ impl ReadyApp {
             } => {
                 let current = self.search_query.text().to_string();
                 if !self.thread_list.typeahead.visible {
-                    self.search_suggest.load(query, &current, contacts, messages);
+                    self.search_suggest
+                        .load(query, &current, contacts, messages);
                 }
                 Task::none()
             }
@@ -816,8 +826,15 @@ impl ReadyApp {
             async move {
                 let contacts = db.search_contacts_for_typeahead(query.clone()).await;
                 let messages = if with_messages {
-                    execute_search(db, search_state, body_store, message_query, scope, folder_id)
-                        .await
+                    execute_search(
+                        db,
+                        search_state,
+                        body_store,
+                        message_query,
+                        scope,
+                        folder_id,
+                    )
+                    .await
                 } else {
                     Ok(Vec::new())
                 };
@@ -953,8 +970,7 @@ impl ReadyApp {
         if self.search_query.text().trim().is_empty() {
             self.search_debounce_deadline = None;
         } else {
-            self.search_debounce_deadline =
-                Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
+            self.search_debounce_deadline = Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
         }
         Task::none()
     }

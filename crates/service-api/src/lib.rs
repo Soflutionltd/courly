@@ -75,6 +75,10 @@ pub use extract::{
     IndexRebuildCompleted, IndexRebuildParams, IndexRebuildProgress, PrefetchCompleted,
     PrefetchProgress, RebuildPolicy,
 };
+pub use folder::{
+    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
+    FolderMoveParams, FolderRenameParams, FolderWriteAck,
+};
 pub use framing::{
     BoundedLineReader, FrameError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse,
     ParsedClientMessage, ParsedServiceMessage, RequestParseError, ServiceResponse, encode_message,
@@ -84,13 +88,9 @@ pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
-pub use folder::{
-    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
-    FolderMoveParams, FolderRenameParams, FolderWriteAck,
-};
 pub use label::{
-    LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams,
-    LabelSaveAck, LabelSaveParams,
+    LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams, LabelSaveAck,
+    LabelSaveParams,
 };
 pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
@@ -136,12 +136,12 @@ pub use signature::{
     SignatureReorderAck, SignatureReorderParams, SignatureUpdateAck, SignatureUpdateParams,
 };
 pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
-pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams};
 pub use sync::{
     AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCancelAccountParams,
     SyncCancelAck, SyncCompleted, SyncFocusFolderAck, SyncFocusFolderParams, SyncPauseReason,
     SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncResyncAccountParams, SyncResyncAck,
     SyncRunId, SyncStartAccountParams, SyncStartAck,
 };
+pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams};
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use version::{MAX_FRAME_BYTES, PROTOCOL_VERSION};

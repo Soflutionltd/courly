@@ -22,11 +22,11 @@ mod palette;
 pub(crate) mod pop_out;
 pub(crate) mod provider;
 pub(crate) mod row_menu;
+pub(crate) mod search;
 mod side_panel;
+pub mod signatures;
 pub(crate) mod thread_drag;
 mod toolbar;
-pub(crate) mod search;
-pub mod signatures;
 mod updater;
 
 use crate::ui::settings::SignatureEntry;

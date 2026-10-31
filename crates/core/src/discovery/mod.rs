@@ -546,9 +546,7 @@ mod tests {
                 .await;
             let _ = stream.write_all(&vec![b'a'; len]).await;
         });
-        let response = reqwest::get(format!("http://{addr}/"))
-            .await
-            .expect("get");
+        let response = reqwest::get(format!("http://{addr}/")).await.expect("get");
         let body = read_capped_text(response).await;
         server.abort();
         body

@@ -267,7 +267,11 @@ pub fn join_url(sources: &[Option<&str>]) -> Option<String> {
             .split(|c: char| {
                 c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']')
             })
-            .map(|token| token.trim_end_matches(['.', ',', ';']).replace("&amp;", "&"))
+            .map(|token| {
+                token
+                    .trim_end_matches(['.', ',', ';'])
+                    .replace("&amp;", "&")
+            })
             .find(|token| is_meeting_link(token))
     })
 }

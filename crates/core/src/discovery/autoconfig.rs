@@ -270,7 +270,10 @@ mod tests {
     fn only_an_explicit_plain_socket_type_is_unencrypted() {
         assert!(matches!(parse_security("plain", 25), Security::None));
         assert!(matches!(parse_security("SSL", 993), Security::Tls));
-        assert!(matches!(parse_security("starttls", 587), Security::StartTls));
+        assert!(matches!(
+            parse_security("starttls", 587),
+            Security::StartTls
+        ));
     }
 
     #[test]

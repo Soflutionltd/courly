@@ -188,10 +188,7 @@ mod tests {
     fn local_midnight_decides_the_day_not_utc() {
         // 00:30 in Paris is still the previous day in UTC.
         let rows = [key(at(TODAY, 0, 30))];
-        assert_eq!(
-            headers_for(&rows),
-            vec![Some(DateGroup::Today)]
-        );
+        assert_eq!(headers_for(&rows), vec![Some(DateGroup::Today)]);
     }
 
     #[test]

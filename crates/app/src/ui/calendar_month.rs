@@ -3,8 +3,8 @@
 //! Provides data types, grid builder, and view functions for rendering
 //! a full month grid and a compact mini-month navigation widget.
 
-use jiff::civil::{Date as NaiveDate, Weekday};
 use jiff::Span;
+use jiff::civil::{Date as NaiveDate, Weekday};
 use rust_i18n::t;
 
 /// Days from Monday, in the `i64` this module's week arithmetic wants. jiff

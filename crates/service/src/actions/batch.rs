@@ -19,8 +19,8 @@ use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::{
-    archive, label, label_group, mark_read, move_to_folder, mute, permanent_delete, pin, snooze,
-    local_snapshot, spam, star, trash,
+    archive, label, label_group, local_snapshot, mark_read, move_to_folder, mute, permanent_delete,
+    pin, snooze, spam, star, trash,
 };
 use crate::sync::SyncRuntime;
 
@@ -281,7 +281,8 @@ async fn execute_account_group(
                         &params_json,
                     )
                     .await;
-                    let outcome = local_snapshot::settle_remote_failure(ctx, snapshot, outcome).await;
+                    let outcome =
+                        local_snapshot::settle_remote_failure(ctx, snapshot, outcome).await;
                     results.push((idx, outcome));
                     continue;
                 }

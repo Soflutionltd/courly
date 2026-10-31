@@ -22,9 +22,13 @@ pub(super) fn folders_toggle<'a>(expanded: bool) -> Element<'a, SidebarMessage> 
         icon::chevron_right()
     };
     button(
-        container(chevron.size(ICON_SM).style(theme::TextClass::Tertiary.style()))
-            .width(SIDEBAR_SECTION_CHEVRON_SLOT)
-            .align_x(Alignment::Center),
+        container(
+            chevron
+                .size(ICON_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .width(SIDEBAR_SECTION_CHEVRON_SLOT)
+        .align_x(Alignment::Center),
     )
     .on_press(SidebarMessage::ToggleFolders)
     .padding(PAD_DROPDOWN)

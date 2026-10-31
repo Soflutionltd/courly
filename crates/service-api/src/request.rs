@@ -18,12 +18,12 @@ use crate::contacts::{
     ContactDeleteParams, ContactGroupDeleteParams, ContactGroupSaveParams, ContactSaveParams,
 };
 use crate::extract::{ExtractStatusParams, IndexRebuildParams};
-use crate::internal::{
-    DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
-};
 use crate::folder::{
     FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderMoveParams,
     FolderRenameParams,
+};
+use crate::internal::{
+    DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
 use crate::label::{LabelDeleteParams, LabelGroupReorderParams, LabelSaveParams};
 use crate::oauth::OauthExchangeCodeParams;
@@ -36,11 +36,11 @@ use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
 use crate::smart_folder::SmartFolderCreateParams;
-use crate::template::{TemplateDeleteParams, TemplateSaveParams};
 use crate::sync::{
     SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams,
     SyncResyncAccountParams, SyncStartAccountParams,
 };
+use crate::template::{TemplateDeleteParams, TemplateSaveParams};
 use crate::thread_ui_state::ThreadUiStateSetParams;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1826,9 +1826,7 @@ impl RequestParams {
             | Self::FolderCreate { .. }
             | Self::FolderRename { .. }
             | Self::FolderMove { .. }
-            | Self::FolderDelete { .. } => {
-                RequestTimeoutKind::Finite(Duration::from_secs(30))
-            }
+            | Self::FolderDelete { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
             // Handler budget: validate + per-attachment SHA-256 verify
             // + atomic rename to vault + journal + ack. SMTP is on the
             // worker. 30 s comfortably covers the verify step for
@@ -3841,7 +3839,12 @@ mod tests {
 
     #[test]
     fn folder_write_methods_are_dotted_mutating_and_thirty_seconds() {
-        let methods = ["folder.create", "folder.rename", "folder.move", "folder.delete"];
+        let methods = [
+            "folder.create",
+            "folder.rename",
+            "folder.move",
+            "folder.delete",
+        ];
         for (request, method) in sample_folder_writes().into_iter().zip(methods) {
             assert_eq!(request.method_name(), method);
             assert_eq!(request.idempotency(), Idempotency::Mutating);
@@ -3864,16 +3867,21 @@ mod tests {
             },
             RequestParams::FolderEmpty { params },
         ];
-        for (request, method) in requests.into_iter().zip(["folder.mark_all_read", "folder.empty"]) {
+        for (request, method) in requests
+            .into_iter()
+            .zip(["folder.mark_all_read", "folder.empty"])
+        {
             assert_eq!(request.method_name(), method);
             assert_eq!(request.idempotency(), Idempotency::Mutating);
             assert_eq!(
                 request.timeout(),
                 RequestTimeoutKind::Finite(Duration::from_secs(300)),
             );
-            let parsed =
-                RequestParams::from_method_params(request.method_name(), Some(request.params_value()))
-                    .expect("parse");
+            let parsed = RequestParams::from_method_params(
+                request.method_name(),
+                Some(request.params_value()),
+            )
+            .expect("parse");
             assert_eq!(parsed, request);
         }
     }

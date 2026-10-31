@@ -90,7 +90,10 @@ impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
     /// Like [`Self::on_right_press`], with the click measured from the
     /// base's top-left corner, for [`Self::anchor_offset`]. Works inside a
     /// scrollable, where window coordinates go stale as the content moves.
-    pub fn on_right_press_offset(mut self, on_right_press: impl Fn(Vector) -> Message + 'a) -> Self {
+    pub fn on_right_press_offset(
+        mut self,
+        on_right_press: impl Fn(Vector) -> Message + 'a,
+    ) -> Self {
         self.on_right_press_offset = Some(Box::new(on_right_press));
         self
     }

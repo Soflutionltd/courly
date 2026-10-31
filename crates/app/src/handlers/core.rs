@@ -902,9 +902,10 @@ impl ReadyApp {
         color: Option<(String, String)>,
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
-            return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(
-                t!("settings.labels.service_not_connected").into_owned(),
-            ))));
+            return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(t!(
+                "settings.labels.service_not_connected"
+            )
+            .into_owned()))));
         };
         let account_names: Vec<String> = account_ids
             .iter()
@@ -946,9 +947,10 @@ impl ReadyApp {
         label_id: String,
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
-            return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(
-                t!("settings.labels.service_not_connected").into_owned(),
-            ))));
+            return Task::done(Message::LabelOp(handlers::LabelOp::WriteAck(Err(t!(
+                "settings.labels.service_not_connected"
+            )
+            .into_owned()))));
         };
         Task::perform(
             async move {

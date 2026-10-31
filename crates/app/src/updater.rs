@@ -194,7 +194,9 @@ pub async fn check() -> Result<Option<UpdateInfo>, String> {
         return Ok(None);
     };
     if !is_release_archive_url(&entry.url) {
-        return Err(format!("manifest: archive URL outside {RELEASE_DOWNLOAD_PREFIX}"));
+        return Err(format!(
+            "manifest: archive URL outside {RELEASE_DOWNLOAD_PREFIX}"
+        ));
     }
     Ok(Some(UpdateInfo {
         version: manifest.version,

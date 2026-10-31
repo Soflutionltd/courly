@@ -8,9 +8,8 @@ use crate::icon;
 use crate::ui::anchored_overlay::anchored_overlay;
 use crate::ui::layout::{
     ATTACHMENT_CHIP_HEIGHT, ATTACHMENT_CHIP_NAME_MAX_CHARS, ATTACHMENT_CHIP_NAME_MAX_WIDTH,
-    ATTACHMENT_MENU_WIDTH,
-    DROPDOWN_ITEM_HEIGHT, ICON_MD, ICON_SM, ICON_XS, PAD_DROPDOWN, PAD_NAV_ITEM, SLOT_DROPDOWN,
-    SPACE_XS, SPACE_XXS, TEXT_MD, TEXT_SM, TEXT_XS,
+    ATTACHMENT_MENU_WIDTH, DROPDOWN_ITEM_HEIGHT, ICON_MD, ICON_SM, ICON_XS, PAD_DROPDOWN,
+    PAD_NAV_ITEM, SLOT_DROPDOWN, SPACE_XS, SPACE_XXS, TEXT_MD, TEXT_SM, TEXT_XS,
 };
 use crate::ui::theme;
 
@@ -103,7 +102,11 @@ pub fn attachment_chip<'a, M: 'a + Clone>(
     if menu_open {
         let menu = container(
             iced::widget::column![
-                menu_item(icon::eye(), t!("main.attachments.preview"), actions.on_preview),
+                menu_item(
+                    icon::eye(),
+                    t!("main.attachments.preview"),
+                    actions.on_preview
+                ),
                 menu_item(
                     icon::external_link(),
                     t!("main.attachments.open"),

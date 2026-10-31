@@ -74,11 +74,7 @@ pub fn toolbar<'a>(
     .height(Length::Shrink);
 
     let content = row![
-        widgets::primary_icon_button(
-            icon::pencil(),
-            t!("main.ribbon.new_mail"),
-            Message::Compose
-        ),
+        widgets::primary_icon_button(icon::pencil(), t!("main.ribbon.new_mail"), Message::Compose),
         Space::new().width(SPACE_XS),
         bar,
         side_panel_toggle(side_panel_open),
@@ -109,13 +105,17 @@ pub fn toolbar<'a>(
             .on_dismiss(toolbar_message(ToolbarMessage::CloseMenu));
     }
 
-    let dragged = state.drag.as_ref().filter(|drag| drag.moved).and_then(|drag| {
-        let item = match drag.source {
-            DragSource::Bar(index) => state.layout.items.get(index).copied()?,
-            DragSource::Catalog(item) => item,
-        };
-        Some((item, drag.cursor?))
-    });
+    let dragged = state
+        .drag
+        .as_ref()
+        .filter(|drag| drag.moved)
+        .and_then(|drag| {
+            let item = match drag.source {
+                DragSource::Bar(index) => state.layout.items.get(index).copied()?,
+                DragSource::Catalog(item) => item,
+            };
+            Some((item, drag.cursor?))
+        });
     match dragged {
         Some((item, cursor)) => anchored_overlay(ribbon)
             .popup(drag_ghost(item, &catalog_label(registry, item), labels))
@@ -203,7 +203,10 @@ fn bar_button<'a>(
     let mut slot = anchored_overlay(face).on_right_press_offset(move |offset| {
         toolbar_message(ToolbarMessage::OpenItemMenu { index, offset })
     });
-    if let Some(ToolbarMenu::Item { index: open, offset }) = state.menu
+    if let Some(ToolbarMenu::Item {
+        index: open,
+        offset,
+    }) = state.menu
         && open == index
     {
         slot = slot
@@ -247,9 +250,9 @@ fn more_button<'a>(
             menu_row(
                 resolved.item.icon(),
                 resolved.label.clone(),
-                resolved
-                    .available
-                    .then(|| toolbar_message(ToolbarMessage::RunFromOverflow(resolved.item.command()))),
+                resolved.available.then(|| {
+                    toolbar_message(ToolbarMessage::RunFromOverflow(resolved.item.command()))
+                }),
             )
         })
         .collect();
@@ -295,9 +298,11 @@ fn editable_bar<'a>(
         if let Some(class) = class {
             face = face.style(class.style());
         }
-        bar = bar.push(drop_slot(face, DropTarget::Before(index)).on_press(
-            toolbar_message(ToolbarMessage::DragStart(DragSource::Bar(index))),
-        ));
+        bar = bar.push(
+            drop_slot(face, DropTarget::Before(index)).on_press(toolbar_message(
+                ToolbarMessage::DragStart(DragSource::Bar(index)),
+            )),
+        );
     }
 
     let overflows = total + TOOLBAR_END_SLOT_WIDTH > size.width;
@@ -419,7 +424,9 @@ fn catalog_tile<'a>(item: ToolbarItem, label: String) -> Element<'a, Message> {
         .padding(PAD_NAV_ITEM)
         .width(Length::Fill),
     )
-    .on_press(toolbar_message(ToolbarMessage::DragStart(DragSource::Catalog(item))))
+    .on_press(toolbar_message(ToolbarMessage::DragStart(
+        DragSource::Catalog(item),
+    )))
     .on_release(toolbar_message(ToolbarMessage::DragEnd))
     .interaction(mouse::Interaction::Grab)
     .into()

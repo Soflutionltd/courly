@@ -177,7 +177,13 @@ pub(crate) async fn resolve_thread_messages(
 
     rows.into_iter()
         .map(|(message_id, imap_folder, imap_uid, imap_uidvalidity)| {
-            message_object_id(provider, message_id, imap_folder, imap_uid, imap_uidvalidity)
+            message_object_id(
+                provider,
+                message_id,
+                imap_folder,
+                imap_uid,
+                imap_uidvalidity,
+            )
         })
         .collect()
 }

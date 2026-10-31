@@ -233,62 +233,158 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
         &tr("main.menu_bar.settings"),
         shortcut("cmd+,"),
     );
-    b.item(&app, A::CheckForUpdates, &tr("main.menu_bar.check_updates"), None);
+    b.item(
+        &app,
+        A::CheckForUpdates,
+        &tr("main.menu_bar.check_updates"),
+        None,
+    );
     separator(&app);
-    log_failure(app.append(&PredefinedMenuItem::services(Some(&tr("main.menu_bar.services")))));
+    log_failure(app.append(&PredefinedMenuItem::services(Some(&tr(
+        "main.menu_bar.services",
+    )))));
     separator(&app);
     log_failure(app.append(&PredefinedMenuItem::hide(Some(&tr("main.menu_bar.hide")))));
     log_failure(app.append(&PredefinedMenuItem::hide_others(Some(&tr(
         "main.menu_bar.hide_others",
     )))));
-    log_failure(app.append(&PredefinedMenuItem::show_all(Some(&tr("main.menu_bar.show_all")))));
+    log_failure(app.append(&PredefinedMenuItem::show_all(Some(&tr(
+        "main.menu_bar.show_all",
+    )))));
     separator(&app);
     log_failure(app.append(&PredefinedMenuItem::quit(Some(&tr("main.menu_bar.quit")))));
 
     // Fichier
     let file = Submenu::new(tr("main.menu_bar.file"), true);
     let new = submenu(&file, &tr("main.menu_bar.new"));
-    b.item(&new, A::Command(C::ComposeNew), &tr("main.menu_bar.new_message"), shortcut("cmd+n"));
-    b.item(&new, A::Command(C::CalendarCreateEvent), &tr("main.menu_bar.new_event"), None);
-    b.item(&new, A::NewFolder, &tr("main.menu_bar.new_folder"), shortcut("cmd+shift+n"));
-    log_failure(file.append(&PredefinedMenuItem::close_window(Some(&tr("main.menu_bar.close")))));
+    b.item(
+        &new,
+        A::Command(C::ComposeNew),
+        &tr("main.menu_bar.new_message"),
+        shortcut("cmd+n"),
+    );
+    b.item(
+        &new,
+        A::Command(C::CalendarCreateEvent),
+        &tr("main.menu_bar.new_event"),
+        None,
+    );
+    b.item(
+        &new,
+        A::NewFolder,
+        &tr("main.menu_bar.new_folder"),
+        shortcut("cmd+shift+n"),
+    );
+    log_failure(file.append(&PredefinedMenuItem::close_window(Some(&tr(
+        "main.menu_bar.close",
+    )))));
     separator(&file);
     let folder = submenu(&file, &tr("main.menu_bar.folder"));
-    b.item(&folder, A::RenameFolder, &tr("main.sidebar.rename_folder"), None);
-    b.item(&folder, A::MoveFolder, &tr("main.sidebar.move_folder"), None);
-    b.item(&folder, A::DeleteFolder, &tr("main.sidebar.delete_folder"), None);
+    b.item(
+        &folder,
+        A::RenameFolder,
+        &tr("main.sidebar.rename_folder"),
+        None,
+    );
+    b.item(
+        &folder,
+        A::MoveFolder,
+        &tr("main.sidebar.move_folder"),
+        None,
+    );
+    b.item(
+        &folder,
+        A::DeleteFolder,
+        &tr("main.sidebar.delete_folder"),
+        None,
+    );
     separator(&folder);
-    b.item(&folder, A::MarkFolderRead, &tr("main.sidebar.mark_all_read"), None);
-    b.item(&folder, A::EmptyFolder, &tr("main.sidebar.empty_folder"), None);
+    b.item(
+        &folder,
+        A::MarkFolderRead,
+        &tr("main.sidebar.mark_all_read"),
+        None,
+    );
+    b.item(
+        &folder,
+        A::EmptyFolder,
+        &tr("main.sidebar.empty_folder"),
+        None,
+    );
     separator(&file);
     let import = submenu(&file, &tr("main.menu_bar.import"));
-    b.item(&import, A::ImportContacts, &tr("main.menu_bar.import_contacts"), None);
+    b.item(
+        &import,
+        A::ImportContacts,
+        &tr("main.menu_bar.import_contacts"),
+        None,
+    );
 
     // Modifier
     let edit = Submenu::new(tr("main.menu_bar.edit"), true);
     b.item(&edit, A::Command(C::Undo), &tr("main.menu_bar.undo"), None);
     separator(&edit);
-    b.item(&edit, A::Command(C::EmailSelectAll), &tr("main.menu_bar.select_all"), None);
+    b.item(
+        &edit,
+        A::Command(C::EmailSelectAll),
+        &tr("main.menu_bar.select_all"),
+        None,
+    );
     separator(&edit);
-    b.item(&edit, A::Command(C::EmailTrash), &tr("main.menu_bar.delete"), None);
+    b.item(
+        &edit,
+        A::Command(C::EmailTrash),
+        &tr("main.menu_bar.delete"),
+        None,
+    );
     b.item(
         &edit,
         A::Command(C::EmailPermanentDelete),
         &tr("main.menu_bar.delete_permanently"),
         None,
     );
-    b.item(&edit, A::EmptyFolder, &tr("main.sidebar.empty_folder"), None);
+    b.item(
+        &edit,
+        A::EmptyFolder,
+        &tr("main.sidebar.empty_folder"),
+        None,
+    );
     separator(&edit);
-    b.item(&edit, A::Command(C::AppSearch), &tr("main.menu_bar.search"), shortcut("cmd+alt+f"));
+    b.item(
+        &edit,
+        A::Command(C::AppSearch),
+        &tr("main.menu_bar.search"),
+        shortcut("cmd+alt+f"),
+    );
 
     // Affichage
     let view = Submenu::new(tr("main.menu_bar.view"), true);
-    b.item(&view, A::Command(C::NavPrev), &tr("main.menu_bar.previous"), None);
-    b.item(&view, A::Command(C::NavNext), &tr("main.menu_bar.next"), None);
+    b.item(
+        &view,
+        A::Command(C::NavPrev),
+        &tr("main.menu_bar.previous"),
+        None,
+    );
+    b.item(
+        &view,
+        A::Command(C::NavNext),
+        &tr("main.menu_bar.next"),
+        None,
+    );
     separator(&view);
     let go = submenu(&view, &tr("main.menu_bar.go_to"));
-    b.item(&go, A::Command(C::SwitchToMail), &tr("main.menu_bar.mail"), shortcut("cmd+1"));
-    b.item(&go, A::Command(C::SwitchToCalendar), &tr("main.menu_bar.calendar"), shortcut("cmd+2"));
+    b.item(
+        &go,
+        A::Command(C::SwitchToMail),
+        &tr("main.menu_bar.mail"),
+        shortcut("cmd+1"),
+    );
+    b.item(
+        &go,
+        A::Command(C::SwitchToCalendar),
+        &tr("main.menu_bar.calendar"),
+        shortcut("cmd+2"),
+    );
     separator(&go);
     for (command, key) in [
         (C::NavGoInbox, "main.folder.inbox"),
@@ -305,9 +401,22 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
     let theme = submenu(&view, &tr("main.menu_bar.theme"));
     b.check(&theme, A::Theme("Light"), &tr("main.menu_bar.theme_light"));
     b.check(&theme, A::Theme("Dark"), &tr("main.menu_bar.theme_dark"));
-    b.check(&theme, A::Theme("System"), &tr("main.menu_bar.theme_system"));
-    b.check(&view, A::Command(C::ViewToggleSidePanel), &tr("main.menu_bar.side_panel"));
-    b.item(&view, A::CustomizeToolbar, &tr("main.menu_bar.customize_toolbar"), None);
+    b.check(
+        &theme,
+        A::Theme("System"),
+        &tr("main.menu_bar.theme_system"),
+    );
+    b.check(
+        &view,
+        A::Command(C::ViewToggleSidePanel),
+        &tr("main.menu_bar.side_panel"),
+    );
+    b.item(
+        &view,
+        A::CustomizeToolbar,
+        &tr("main.menu_bar.customize_toolbar"),
+        None,
+    );
     separator(&view);
     log_failure(view.append(&PredefinedMenuItem::fullscreen(Some(&tr(
         "main.menu_bar.fullscreen",
@@ -315,14 +424,24 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
 
     // Message
     let message = Submenu::new(tr("main.menu_bar.message"), true);
-    b.item(&message, A::Command(C::ComposeReply), &tr("main.row_menu.reply"), shortcut("cmd+r"));
+    b.item(
+        &message,
+        A::Command(C::ComposeReply),
+        &tr("main.row_menu.reply"),
+        shortcut("cmd+r"),
+    );
     b.item(
         &message,
         A::Command(C::ComposeReplyAll),
         &tr("main.row_menu.reply_all"),
         shortcut("cmd+shift+r"),
     );
-    b.item(&message, A::Command(C::ComposeForward), &tr("main.row_menu.forward"), shortcut("cmd+j"));
+    b.item(
+        &message,
+        A::Command(C::ComposeForward),
+        &tr("main.row_menu.forward"),
+        shortcut("cmd+j"),
+    );
     separator(&message);
     b.item(
         &message,
@@ -330,18 +449,63 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
         &tr("main.row_menu.mark_read"),
         shortcut("cmd+shift+t"),
     );
-    b.item(&message, A::MarkFolderRead, &tr("main.sidebar.mark_all_read"), shortcut("cmd+alt+t"));
+    b.item(
+        &message,
+        A::MarkFolderRead,
+        &tr("main.sidebar.mark_all_read"),
+        shortcut("cmd+alt+t"),
+    );
     separator(&message);
-    b.item(&message, A::Command(C::EmailSnooze), &tr("main.row_menu.snooze"), None);
-    b.item(&message, A::Command(C::EmailStar), &tr("main.row_menu.flag"), None);
-    b.item(&message, A::Command(C::EmailPin), &tr("main.row_menu.pin"), shortcut("ctrl+p"));
-    b.item(&message, A::Command(C::EmailAddLabel), &tr("main.row_menu.categorize"), None);
+    b.item(
+        &message,
+        A::Command(C::EmailSnooze),
+        &tr("main.row_menu.snooze"),
+        None,
+    );
+    b.item(
+        &message,
+        A::Command(C::EmailStar),
+        &tr("main.row_menu.flag"),
+        None,
+    );
+    b.item(
+        &message,
+        A::Command(C::EmailPin),
+        &tr("main.row_menu.pin"),
+        shortcut("ctrl+p"),
+    );
+    b.item(
+        &message,
+        A::Command(C::EmailAddLabel),
+        &tr("main.row_menu.categorize"),
+        None,
+    );
     separator(&message);
-    b.item(&message, A::Command(C::EmailSpam), &tr("main.row_menu.junk"), None);
-    b.item(&message, A::Command(C::EmailUnsubscribe), &tr("main.menu_bar.unsubscribe"), None);
-    b.item(&message, A::Command(C::EmailMute), &tr("main.row_menu.mute"), None);
+    b.item(
+        &message,
+        A::Command(C::EmailSpam),
+        &tr("main.row_menu.junk"),
+        None,
+    );
+    b.item(
+        &message,
+        A::Command(C::EmailUnsubscribe),
+        &tr("main.menu_bar.unsubscribe"),
+        None,
+    );
+    b.item(
+        &message,
+        A::Command(C::EmailMute),
+        &tr("main.row_menu.mute"),
+        None,
+    );
     separator(&message);
-    b.item(&message, A::Command(C::EmailArchive), &tr("main.row_menu.archive"), shortcut("ctrl+e"));
+    b.item(
+        &message,
+        A::Command(C::EmailArchive),
+        &tr("main.row_menu.archive"),
+        shortcut("ctrl+e"),
+    );
     b.item(
         &message,
         A::Command(C::EmailMoveToFolder),
@@ -351,20 +515,75 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
 
     // Format
     let format = Submenu::new(tr("main.menu_bar.format"), true);
-    b.item(&format, A::Format(Format::Bold), &tr("main.menu_bar.bold"), shortcut("cmd+b"));
-    b.item(&format, A::Format(Format::Italic), &tr("main.menu_bar.italic"), shortcut("cmd+i"));
-    b.item(&format, A::Format(Format::Underline), &tr("main.menu_bar.underline"), shortcut("cmd+u"));
-    b.item(&format, A::Format(Format::Strikethrough), &tr("main.menu_bar.strikethrough"), None);
+    b.item(
+        &format,
+        A::Format(Format::Bold),
+        &tr("main.menu_bar.bold"),
+        shortcut("cmd+b"),
+    );
+    b.item(
+        &format,
+        A::Format(Format::Italic),
+        &tr("main.menu_bar.italic"),
+        shortcut("cmd+i"),
+    );
+    b.item(
+        &format,
+        A::Format(Format::Underline),
+        &tr("main.menu_bar.underline"),
+        shortcut("cmd+u"),
+    );
+    b.item(
+        &format,
+        A::Format(Format::Strikethrough),
+        &tr("main.menu_bar.strikethrough"),
+        None,
+    );
     separator(&format);
-    b.item(&format, A::Format(Format::BulletList), &tr("main.menu_bar.bullet_list"), None);
-    b.item(&format, A::Format(Format::NumberedList), &tr("main.menu_bar.numbered_list"), None);
+    b.item(
+        &format,
+        A::Format(Format::BulletList),
+        &tr("main.menu_bar.bullet_list"),
+        None,
+    );
+    b.item(
+        &format,
+        A::Format(Format::NumberedList),
+        &tr("main.menu_bar.numbered_list"),
+        None,
+    );
     separator(&format);
-    b.item(&format, A::Format(Format::Link), &tr("main.menu_bar.link"), shortcut("cmd+k"));
-    b.item(&format, A::Format(Format::Emoji), &tr("main.menu_bar.emoji"), None);
-    b.item(&format, A::Format(Format::Attach), &tr("main.menu_bar.attach"), None);
+    b.item(
+        &format,
+        A::Format(Format::Link),
+        &tr("main.menu_bar.link"),
+        shortcut("cmd+k"),
+    );
+    b.item(
+        &format,
+        A::Format(Format::Emoji),
+        &tr("main.menu_bar.emoji"),
+        None,
+    );
+    b.item(
+        &format,
+        A::Format(Format::Attach),
+        &tr("main.menu_bar.attach"),
+        None,
+    );
     separator(&format);
-    b.item(&format, A::Command(C::ViewEmailZoomIn), &tr("main.menu_bar.zoom_in"), shortcut("cmd+="));
-    b.item(&format, A::Command(C::ViewEmailZoomOut), &tr("main.menu_bar.zoom_out"), shortcut("cmd+-"));
+    b.item(
+        &format,
+        A::Command(C::ViewEmailZoomIn),
+        &tr("main.menu_bar.zoom_in"),
+        shortcut("cmd+="),
+    );
+    b.item(
+        &format,
+        A::Command(C::ViewEmailZoomOut),
+        &tr("main.menu_bar.zoom_out"),
+        shortcut("cmd+-"),
+    );
     b.item(
         &format,
         A::Command(C::ViewEmailZoomActualSize),
@@ -374,7 +593,11 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
 
     // Profils
     let profiles_menu = Submenu::new(tr("main.menu_bar.profiles"), true);
-    b.check(&profiles_menu, A::AllAccounts, &tr("main.sidebar.all_accounts"));
+    b.check(
+        &profiles_menu,
+        A::AllAccounts,
+        &tr("main.sidebar.all_accounts"),
+    );
     separator(&profiles_menu);
     for (index, label) in profiles {
         b.check(&profiles_menu, A::Account(*index), label);
@@ -389,16 +612,46 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
 
     // Outils
     let tools = Submenu::new(tr("main.menu_bar.tools"), true);
-    b.item(&tools, A::Command(C::AppSyncFolder), &tr("main.menu_bar.sync"), shortcut("ctrl+cmd+k"));
+    b.item(
+        &tools,
+        A::Command(C::AppSyncFolder),
+        &tr("main.menu_bar.sync"),
+        shortcut("ctrl+cmd+k"),
+    );
     separator(&tools);
-    b.item(&tools, A::Settings(Tab::Filters), &tr("main.menu_bar.rules"), None);
-    b.item(&tools, A::Settings(Tab::Labels), &tr("main.menu_bar.categories"), None);
-    b.item(&tools, A::Settings(Tab::Accounts), &tr("main.menu_bar.accounts"), None);
-    b.item(&tools, A::Settings(Tab::Shortcuts), &tr("main.menu_bar.shortcuts"), shortcut("cmd+;"));
+    b.item(
+        &tools,
+        A::Settings(Tab::Filters),
+        &tr("main.menu_bar.rules"),
+        None,
+    );
+    b.item(
+        &tools,
+        A::Settings(Tab::Labels),
+        &tr("main.menu_bar.categories"),
+        None,
+    );
+    b.item(
+        &tools,
+        A::Settings(Tab::Accounts),
+        &tr("main.menu_bar.accounts"),
+        None,
+    );
+    b.item(
+        &tools,
+        A::Settings(Tab::Shortcuts),
+        &tr("main.menu_bar.shortcuts"),
+        shortcut("cmd+;"),
+    );
     separator(&tools);
     // ⌘K stays with Hyperlink; while that is greyed out the key reaches
     // iced, which opens the palette.
-    b.item(&tools, A::Command(C::AppOpenPalette), &tr("main.menu_bar.palette"), None);
+    b.item(
+        &tools,
+        A::Command(C::AppOpenPalette),
+        &tr("main.menu_bar.palette"),
+        None,
+    );
     b.item(
         &tools,
         A::Command(C::AppRebuildSearchIndex),
@@ -408,8 +661,12 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
 
     // Fenêtre
     let window = Submenu::new(tr("main.menu_bar.window"), true);
-    log_failure(window.append(&PredefinedMenuItem::minimize(Some(&tr("main.menu_bar.minimize")))));
-    log_failure(window.append(&PredefinedMenuItem::maximize(Some(&tr("main.menu_bar.zoom")))));
+    log_failure(window.append(&PredefinedMenuItem::minimize(Some(&tr(
+        "main.menu_bar.minimize",
+    )))));
+    log_failure(window.append(&PredefinedMenuItem::maximize(Some(&tr(
+        "main.menu_bar.zoom",
+    )))));
     separator(&window);
     b.item(
         &window,
@@ -418,14 +675,26 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
         None,
     );
     separator(&window);
-    log_failure(window.append(&PredefinedMenuItem::bring_all_to_front(Some(&tr(
-        "main.menu_bar.bring_all_to_front",
-    )))));
+    log_failure(
+        window.append(&PredefinedMenuItem::bring_all_to_front(Some(&tr(
+            "main.menu_bar.bring_all_to_front",
+        )))),
+    );
 
     // Aide
     let help = Submenu::new(tr("main.menu_bar.help"), true);
-    b.item(&help, A::Settings(Tab::Shortcuts), &tr("main.menu_bar.shortcuts"), None);
-    b.item(&help, A::CheckForUpdates, &tr("main.menu_bar.check_updates"), None);
+    b.item(
+        &help,
+        A::Settings(Tab::Shortcuts),
+        &tr("main.menu_bar.shortcuts"),
+        None,
+    );
+    b.item(
+        &help,
+        A::CheckForUpdates,
+        &tr("main.menu_bar.check_updates"),
+        None,
+    );
 
     for top in [
         &app,
@@ -639,9 +908,7 @@ impl ReadyApp {
                 let ViewScope::Account(account_id) = self.sidebar.selected_scope.clone() else {
                     return Task::none();
                 };
-                let parent = folder
-                    .filter(|f| f.own)
-                    .map(|f| (f.folder_id, f.name));
+                let parent = folder.filter(|f| f.own).map(|f| (f.folder_id, f.name));
                 self.handle_folder_command(FolderCommand::Create { account_id, parent })
             }
             MenuAction::RenameFolder
@@ -658,7 +925,9 @@ impl ReadyApp {
                 self.open_settings(Tab::People);
                 self.update(Message::Settings(SettingsMessage::ImportContactsOpen))
             }
-            MenuAction::CustomizeToolbar => self.update(Message::Toolbar(ToolbarMessage::Customize)),
+            MenuAction::CustomizeToolbar => {
+                self.update(Message::Toolbar(ToolbarMessage::Customize))
+            }
             MenuAction::Theme(theme) => self.update(Message::SetTheme(theme.to_owned())),
             MenuAction::Format(format) => match self.active_compose() {
                 Some(window) => self.update(Message::PopOut(
@@ -667,7 +936,9 @@ impl ReadyApp {
                 )),
                 None => Task::none(),
             },
-            MenuAction::AllAccounts => self.update(Message::Sidebar(SidebarMessage::SelectAllAccounts)),
+            MenuAction::AllAccounts => {
+                self.update(Message::Sidebar(SidebarMessage::SelectAllAccounts))
+            }
             MenuAction::Account(index) => {
                 self.update(Message::Sidebar(SidebarMessage::SelectAccount(index)))
             }
@@ -727,14 +998,20 @@ mod tests {
     #[test]
     fn every_shortcut_parses() {
         for keys in SHORTCUTS {
-            assert!(keys.parse::<KeyAccelerator>().is_ok(), "{keys} does not parse");
+            assert!(
+                keys.parse::<KeyAccelerator>().is_ok(),
+                "{keys} does not parse"
+            );
         }
     }
 
     #[test]
     fn no_shortcut_takes_a_text_editing_key() {
         for taken in ["cmd+c", "cmd+v", "cmd+x", "cmd+a", "cmd+z", "cmd+shift+z"] {
-            assert!(!SHORTCUTS.contains(&taken), "{taken} belongs to text fields");
+            assert!(
+                !SHORTCUTS.contains(&taken),
+                "{taken} belongs to text fields"
+            );
         }
     }
 
@@ -767,7 +1044,10 @@ mod tests {
             own: false,
             ..folder
         };
-        assert_eq!(folder_command(MenuAction::EmptyFolder, system.clone()), None);
+        assert_eq!(
+            folder_command(MenuAction::EmptyFolder, system.clone()),
+            None
+        );
         assert!(folder_command(MenuAction::MarkFolderRead, system).is_some());
     }
 }

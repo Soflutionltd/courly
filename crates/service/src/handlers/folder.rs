@@ -14,7 +14,10 @@ use super::label::{action_context_and_account, outcome_to_result};
 use crate::boot::BootSharedState;
 
 fn refuse_system_folder(method: &str, folder_id: &str) -> Result<(), ServiceError> {
-    if SYSTEM_FOLDER_ROLES.iter().any(|role| role.label_id == folder_id) {
+    if SYSTEM_FOLDER_ROLES
+        .iter()
+        .any(|role| role.label_id == folder_id)
+    {
         return Err(ServiceError::InvalidParams {
             method: method.into(),
             message: format!("{folder_id} is a system folder"),
@@ -153,7 +156,10 @@ mod tests {
     #[test]
     fn system_folders_are_refused_and_user_folders_pass() {
         for system in ["INBOX", "SENT", "TRASH", "DRAFT"] {
-            assert!(refuse_system_folder("folder.delete", system).is_err(), "{system}");
+            assert!(
+                refuse_system_folder("folder.delete", system).is_err(),
+                "{system}"
+            );
         }
         assert!(refuse_system_folder("folder.delete", "graph-AAMk").is_ok());
     }

@@ -177,7 +177,11 @@ fn thread_ids(messages: &[FolderMessage]) -> BTreeSet<&str> {
 }
 
 /// A thread reads as read once none of its messages is unread.
-fn mark_read_rows(tx: &WriteTxn<'_>, account_id: &str, messages: &[FolderMessage]) -> Result<(), String> {
+fn mark_read_rows(
+    tx: &WriteTxn<'_>,
+    account_id: &str,
+    messages: &[FolderMessage],
+) -> Result<(), String> {
     for message in messages {
         tx.execute(
             "UPDATE messages SET is_read = 1 WHERE account_id = ?1 AND id = ?2",
@@ -277,7 +281,12 @@ mod tests {
         let unread = folder_messages(&ctx, BifrostProviderKind::Graph, ACCOUNT, FOLDER, true)
             .await
             .expect("unread");
-        assert_eq!(write_local(&ctx, ACCOUNT, unread, mark_read_rows).await.expect("write"), 1);
+        assert_eq!(
+            write_local(&ctx, ACCOUNT, unread, mark_read_rows)
+                .await
+                .expect("write"),
+            1
+        );
         let (sent_read, thread_read): (bool, bool) = ctx
             .write_db
             .with_write_sync(|conn| {

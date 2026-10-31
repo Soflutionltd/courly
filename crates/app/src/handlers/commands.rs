@@ -128,7 +128,10 @@ impl ReadyApp {
         }
 
         // Deleting from the trash cannot be undone: ask first.
-        if matches!(intent, crate::action_resolve::MailActionIntent::PermanentDelete) {
+        if matches!(
+            intent,
+            crate::action_resolve::MailActionIntent::PermanentDelete
+        ) {
             self.pending_permanent_delete = Some(selected_threads);
             return Task::none();
         }
@@ -158,8 +161,7 @@ impl ReadyApp {
         };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
 
-        let Some(plan) =
-            ar::build_execution_plan(outcome, selected_threads, &mut self.thread_list)
+        let Some(plan) = ar::build_execution_plan(outcome, selected_threads, &mut self.thread_list)
         else {
             // NoOp (Unsubscribe)
             self.status_bar

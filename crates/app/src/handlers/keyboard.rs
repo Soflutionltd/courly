@@ -337,10 +337,7 @@ mod tests {
 
     #[test]
     fn the_delete_key_trashes_and_only_destroys_what_is_already_in_the_trash() {
-        assert!(matches!(
-            delete_key_intent(false),
-            MailActionIntent::Trash
-        ));
+        assert!(matches!(delete_key_intent(false), MailActionIntent::Trash));
         assert!(matches!(
             delete_key_intent(true),
             MailActionIntent::PermanentDelete

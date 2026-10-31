@@ -473,7 +473,9 @@ pub async fn await_oauth_callback(
                 return Err(format!("OAuth error: {error}"));
             }
             CallbackOutcome::Unrelated => {
-                _ = stream.write_all(CALLBACK_REJECTED_RESPONSE.as_bytes()).await;
+                _ = stream
+                    .write_all(CALLBACK_REJECTED_RESPONSE.as_bytes())
+                    .await;
             }
         }
     }

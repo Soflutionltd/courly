@@ -21,9 +21,9 @@ mod pending_ops_kick;
 mod pinned_search;
 mod settings;
 mod signature;
-mod template;
 mod smart_folder;
 mod sync;
+mod template;
 pub(crate) mod test_helpers;
 mod thread_ui_state;
 

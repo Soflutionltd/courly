@@ -79,8 +79,8 @@ fn popover_stack<'a, M: Clone + 'a>(
     card: Element<'a, M>,
     on_close: M,
 ) -> Element<'a, M> {
-    let backdrop = mouse_area(container("").width(Length::Fill).height(Length::Fill))
-        .on_press(on_close);
+    let backdrop =
+        mouse_area(container("").width(Length::Fill).height(Length::Fill)).on_press(on_close);
 
     let positioned = container(
         container(card)

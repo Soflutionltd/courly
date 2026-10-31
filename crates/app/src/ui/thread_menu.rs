@@ -181,11 +181,15 @@ fn menu_button<'a>(
     content: impl Into<Element<'a, ThreadListMessage>>,
     on_press: Option<ThreadListMessage>,
 ) -> Element<'a, ThreadListMessage> {
-    button(container(content).height(Length::Fill).align_y(Alignment::Center))
-        .on_press_maybe(on_press)
-        .padding(ROW_MENU_ITEM_PADDING)
-        .height(ROW_MENU_ITEM_HEIGHT)
-        .width(Length::Fill)
-        .style(theme::ButtonClass::Dropdown { selected: false }.style())
-        .into()
+    button(
+        container(content)
+            .height(Length::Fill)
+            .align_y(Alignment::Center),
+    )
+    .on_press_maybe(on_press)
+    .padding(ROW_MENU_ITEM_PADDING)
+    .height(ROW_MENU_ITEM_HEIGHT)
+    .width(Length::Fill)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .into()
 }

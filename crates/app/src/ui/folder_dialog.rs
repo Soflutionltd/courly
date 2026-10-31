@@ -7,8 +7,8 @@ use rust_i18n::t;
 
 use crate::ui::dialog::{DialogAction, alert_dialog, form_dialog};
 use crate::ui::layout::{
-    DROPDOWN_ITEM_HEIGHT, PAD_INPUT, PAD_NAV_ITEM, SPACE_MD, SPACE_SM, SPACE_XXS, TEXT_MD,
-    TEXT_SM, TYPEAHEAD_MAX_HEIGHT,
+    DROPDOWN_ITEM_HEIGHT, PAD_INPUT, PAD_NAV_ITEM, SPACE_MD, SPACE_SM, SPACE_XXS, TEXT_MD, TEXT_SM,
+    TYPEAHEAD_MAX_HEIGHT,
 };
 use crate::ui::sidebar::MoveTarget;
 use crate::ui::theme;
@@ -325,8 +325,14 @@ mod tests {
 
     #[test]
     fn unknown_providers_are_warned_as_permanent() {
-        assert_eq!(DeleteEffect::for_provider(Some("graph")), DeleteEffect::DeletedItems);
-        assert_eq!(DeleteEffect::for_provider(Some("imap")), DeleteEffect::Permanent);
+        assert_eq!(
+            DeleteEffect::for_provider(Some("graph")),
+            DeleteEffect::DeletedItems
+        );
+        assert_eq!(
+            DeleteEffect::for_provider(Some("imap")),
+            DeleteEffect::Permanent
+        );
         assert_eq!(DeleteEffect::for_provider(None), DeleteEffect::Permanent);
     }
 }

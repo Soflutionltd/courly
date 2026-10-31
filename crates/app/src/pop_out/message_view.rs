@@ -841,10 +841,10 @@ fn compact_attachment_card<'a>(
     att: &'a MessageViewAttachment,
     is_hovered: bool,
 ) -> Element<'a, Message> {
-    let filename = att
-        .filename
-        .as_deref()
-        .map_or_else(|| t!("compose.unnamed_attachment"), widgets::display_filename);
+    let filename = att.filename.as_deref().map_or_else(
+        || t!("compose.unnamed_attachment"),
+        widgets::display_filename,
+    );
     let file_ico = file_type_icon(att.mime_type.as_deref());
     let size_str = format_file_size(att.size);
 

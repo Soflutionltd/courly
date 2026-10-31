@@ -18,7 +18,9 @@ impl ReadyApp {
                 iced::Event::Window(iced::window::Event::Moved(point)) => {
                     Some(Message::WindowMoved(id, point))
                 }
-                iced::Event::Window(iced::window::Event::Focused) => Some(Message::WindowFocused(id)),
+                iced::Event::Window(iced::window::Event::Focused) => {
+                    Some(Message::WindowFocused(id))
+                }
                 _ => None,
             }),
             iced::time::every(updater::CHECK_INTERVAL)
@@ -145,11 +147,13 @@ impl ReadyApp {
 
         // My Day follows the clock past midnight while it shows.
         if self.side_panel.shows_my_day() {
-            subs.push(iced::time::every(std::time::Duration::from_secs(60)).map(|_| {
-                Message::SidePanel(crate::ui::side_panel::SidePanelMessage::MyDay(
-                    crate::ui::side_panel::my_day::MyDayMessage::Tick,
-                ))
-            }));
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(60)).map(|_| {
+                    Message::SidePanel(crate::ui::side_panel::SidePanelMessage::MyDay(
+                        crate::ui::side_panel::my_day::MyDayMessage::Tick,
+                    ))
+                }),
+            );
         }
 
         // Snooze resurface - check every 60 seconds for due threads.

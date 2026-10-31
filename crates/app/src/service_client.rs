@@ -11,11 +11,11 @@ use service_api::{
     CalendarStartAck, CalendarSyncResult, ContactDeleteAck, ContactDeleteParams,
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
     ContactSaveAck, ContactSaveParams, ContactSaveWithWritebackAck, DecryptForStorageAck,
-    DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams, HealthPingResponse,
-    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
-    FolderMoveParams, FolderRenameParams, FolderWriteAck, JsonRpcErrorObject, JsonRpcRequest, LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck,
-    LabelGroupReorderParams, LabelSaveAck, LabelSaveParams,
-    Notification, OauthExchangeCodeAck, OauthExchangeCodeParams, PROTOCOL_VERSION,
+    DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams, FolderContentsAck,
+    FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck, FolderMoveParams,
+    FolderRenameParams, FolderWriteAck, HealthPingResponse, JsonRpcErrorObject, JsonRpcRequest,
+    LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams, LabelSaveAck,
+    LabelSaveParams, Notification, OauthExchangeCodeAck, OauthExchangeCodeParams, PROTOCOL_VERSION,
     ParsedServiceMessage, PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams,
     PinnedSearchDeleteAck, PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams,
     PinnedSearchDeleteParams, PinnedSearchUpdateAck, PinnedSearchUpdateParams,
@@ -1516,9 +1516,13 @@ impl ServiceClient {
 
     /// Mark every unread message of one folder read via
     /// `folder.mark_all_read`; returns how many messages changed.
-    pub async fn mark_folder_read(&self, params: FolderContentsParams) -> Result<usize, ClientError> {
-        let ack: FolderContentsAck =
-            self.request(RequestParams::FolderMarkAllRead { params }).await?;
+    pub async fn mark_folder_read(
+        &self,
+        params: FolderContentsParams,
+    ) -> Result<usize, ClientError> {
+        let ack: FolderContentsAck = self
+            .request(RequestParams::FolderMarkAllRead { params })
+            .await?;
         Ok(ack.count)
     }
 
@@ -1532,14 +1536,16 @@ impl ServiceClient {
     /// Create (`label_id: None`), rename or recolour one provider label
     /// via `label.save`. Returns the label's storage id.
     pub async fn save_label(&self, params: LabelSaveParams) -> Result<String, ClientError> {
-        let ack: LabelSaveAck = self
-            .request(RequestParams::LabelSave { params })
-            .await?;
+        let ack: LabelSaveAck = self.request(RequestParams::LabelSave { params }).await?;
         Ok(ack.label_id)
     }
 
     /// Delete one provider label via `label.delete`.
-    pub async fn delete_label(&self, account_id: String, label_id: String) -> Result<(), ClientError> {
+    pub async fn delete_label(
+        &self,
+        account_id: String,
+        label_id: String,
+    ) -> Result<(), ClientError> {
         let _ack: LabelDeleteAck = self
             .request(RequestParams::LabelDelete {
                 params: LabelDeleteParams {

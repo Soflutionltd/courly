@@ -249,9 +249,7 @@ async fn persist_refreshed_token_best_effort(
     {
         Ok(encrypted_refresh) => encrypted_refresh,
         Err(error) => {
-            log::warn!(
-                "failed to encrypt rotated bifrost refresh token for {account_id}: {error}"
-            );
+            log::warn!("failed to encrypt rotated bifrost refresh token for {account_id}: {error}");
             return;
         }
     };
@@ -340,7 +338,13 @@ mod tests {
             r#"{"access_token":"a2","expires_in":3600}"#,
         ])
         .await;
-        let source = source(writer.clone(), "acct-rotate", "old-token", Some(100), endpoint);
+        let source = source(
+            writer.clone(),
+            "acct-rotate",
+            "old-token",
+            Some(100),
+            endpoint,
+        );
 
         source.refresh().await.expect("first refresh");
         source.refresh().await.expect("second refresh");

@@ -11,11 +11,11 @@ use crate::db::Account;
 use crate::icon;
 use crate::message::Message;
 use crate::ui::anchored_overlay::anchored_overlay;
-use crate::ui::search_suggest::SearchSuggestMessage;
 use crate::ui::layout::{
     ICON_MD, ICON_SM, PAD_DROPDOWN, PAD_NAV_ITEM, PAD_SEARCH_SCOPE_PILL, SEARCH_SCOPE_MENU_WIDTH,
     SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_SM,
 };
+use crate::ui::search_suggest::SearchSuggestMessage;
 use crate::ui::theme;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -143,13 +143,11 @@ pub fn search_field<'a>(
         None => Space::new().width(SPACE_XXS).into(),
     };
 
-    container(
-        row![pill, sender, container(input).width(Length::Fill)].align_y(Alignment::Center),
-    )
-    .padding(iced::Padding::from([0.0, SPACE_XXS]))
-    .align_y(Alignment::Center)
-    .style(theme::ContainerClass::TitleSearchField.style())
-    .into()
+    container(row![pill, sender, container(input).width(Length::Fill)].align_y(Alignment::Center))
+        .padding(iced::Padding::from([0.0, SPACE_XXS]))
+        .align_y(Alignment::Center)
+        .style(theme::ContainerClass::TitleSearchField.style())
+        .into()
 }
 
 /// The mailboxes, then below a rule the two choices that stay put however
@@ -236,7 +234,10 @@ mod tests {
 
     #[test]
     fn every_mailbox_is_the_default() {
-        assert_eq!(SearchScopeChoice::parse(None), SearchScopeChoice::AllMailboxes);
+        assert_eq!(
+            SearchScopeChoice::parse(None),
+            SearchScopeChoice::AllMailboxes
+        );
         assert_eq!(
             SearchScopeChoice::parse(Some("not json")),
             SearchScopeChoice::AllMailboxes

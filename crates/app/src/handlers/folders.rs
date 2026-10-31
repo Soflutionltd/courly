@@ -81,7 +81,10 @@ impl FolderRequest {
             Self::Rename(params) => client.rename_folder(params).await.map(FolderDone::Written),
             Self::Move(params) => client.move_folder(params).await.map(|()| FolderDone::Done),
             Self::Empty(params) => client.empty_folder(params).await.map(FolderDone::Moved),
-            Self::Delete(params) => client.delete_folder(params).await.map(|()| FolderDone::Done),
+            Self::Delete(params) => client
+                .delete_folder(params)
+                .await
+                .map(|()| FolderDone::Done),
         };
         done.map_err(|e| e.to_string())
     }
@@ -185,7 +188,8 @@ impl ReadyApp {
                     return Task::none();
                 };
                 let Some(client) = self.service_client.clone() else {
-                    dialog.error = Some(t!("main.folder_dialog.service_not_connected").into_owned());
+                    dialog.error =
+                        Some(t!("main.folder_dialog.service_not_connected").into_owned());
                     return Task::none();
                 };
                 dialog.pending = true;
@@ -267,7 +271,10 @@ impl ReadyApp {
         )
     }
 
-    pub(crate) fn finish_folder_mark_read(&mut self, result: Result<usize, String>) -> Task<Message> {
+    pub(crate) fn finish_folder_mark_read(
+        &mut self,
+        result: Result<usize, String>,
+    ) -> Task<Message> {
         let toast = match result {
             Ok(count) => t!("main.folder_dialog.marked_read", count = count),
             Err(error) => t!("main.folder_dialog.mark_read_failed", error = error),

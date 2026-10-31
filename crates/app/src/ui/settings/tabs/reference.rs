@@ -112,7 +112,9 @@ pub(super) fn about_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         tr(t!("settings.reference.license")),
         vec![static_row(
             container(column![
-                text("PolyForm Shield 1.0.0").size(TEXT_LG).style(text::base),
+                text("PolyForm Shield 1.0.0")
+                    .size(TEXT_LG)
+                    .style(text::base),
                 Space::new().height(SPACE_XS),
                 text(t!("settings.reference.license_body"))
                     .size(TEXT_SM)

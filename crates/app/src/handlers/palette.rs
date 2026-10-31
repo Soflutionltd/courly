@@ -13,7 +13,10 @@ impl ReadyApp {
     /// variants that carry a placeholder context (from the view closures).
     pub(crate) fn handle_palette(&mut self, msg: PaletteMessage) -> Task<Message> {
         // Dismiss conflicting overlays when opening the palette
-        if matches!(msg, PaletteMessage::Open(_) | PaletteMessage::OpenCommand(..)) {
+        if matches!(
+            msg,
+            PaletteMessage::Open(_) | PaletteMessage::OpenCommand(..)
+        ) {
             self.dismiss_overlays();
         }
 

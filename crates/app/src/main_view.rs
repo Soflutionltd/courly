@@ -311,9 +311,12 @@ impl ReadyApp {
             row![
                 panes,
                 Space::new().width(PANE_GAP),
-                container(ui::side_panel::view(&self.side_panel, self.calendar.week_start))
-                    .width(SIDE_PANEL_WIDTH)
-                    .height(Length::Fill),
+                container(ui::side_panel::view(
+                    &self.side_panel,
+                    self.calendar.week_start
+                ))
+                .width(SIDE_PANEL_WIDTH)
+                .height(Length::Fill),
             ]
             .height(Length::Fill)
             .into()
@@ -394,8 +397,7 @@ impl ReadyApp {
         else {
             return Some((id, &**state));
         };
-        (selected.id == reply_thread_id || selected.id == state.draft_id)
-            .then_some((id, &**state))
+        (selected.id == reply_thread_id || selected.id == state.draft_id).then_some((id, &**state))
     }
 
     pub(crate) fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {

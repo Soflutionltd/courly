@@ -311,7 +311,11 @@ impl ThreadList {
         self.collapsed_groups.insert(group);
         let visible = self.visible_rows();
         let is_hidden = |idx: &usize| !visible.get(*idx).copied().unwrap_or(false);
-        if self.row_menu.as_ref().is_some_and(|menu| is_hidden(&menu.index)) {
+        if self
+            .row_menu
+            .as_ref()
+            .is_some_and(|menu| is_hidden(&menu.index))
+        {
             self.row_menu = None;
         }
         // Actions must not reach rows the user no longer sees. As in
@@ -323,8 +327,9 @@ impl ThreadList {
         }
         let before = self.selected_threads.len();
         self.selected_threads.retain(|idx| !is_hidden(idx));
-        (self.selected_threads.len() != before)
-            .then_some(ThreadListEvent::MultiSelectionChanged(self.selected_threads.len()))
+        (self.selected_threads.len() != before).then_some(ThreadListEvent::MultiSelectionChanged(
+            self.selected_threads.len(),
+        ))
     }
 
     pub fn set_row_menu_pages(&mut self, pages: RowMenuPages) {
@@ -1011,8 +1016,10 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             ),
             |index, action| ThreadListMessage::RowAction { index, action },
         );
-        let mut row_el = super::anchored_overlay::anchored_overlay(card)
-            .on_right_press_offset(move |offset| ThreadListMessage::OpenRowMenu { index: i, offset });
+        let mut row_el =
+            super::anchored_overlay::anchored_overlay(card).on_right_press_offset(move |offset| {
+                ThreadListMessage::OpenRowMenu { index: i, offset }
+            });
         if let Some(menu) = state.row_menu.as_ref().filter(|menu| menu.index == i) {
             row_el = row_el
                 .popup(super::thread_menu::row_menu_card(menu))
@@ -1302,7 +1309,10 @@ mod tests {
         );
 
         let (_, event) = threads.update(ThreadListMessage::RowMenuPick(RowMenuItem::Archive));
-        assert_eq!(event, Some(ThreadListEvent::RowMenuPicked(RowMenuItem::Archive)));
+        assert_eq!(
+            event,
+            Some(ThreadListEvent::RowMenuPicked(RowMenuItem::Archive))
+        );
         assert!(threads.row_menu.is_none());
 
         let (_, again) = threads.update(ThreadListMessage::RowMenuPick(RowMenuItem::Archive));
@@ -1394,7 +1404,10 @@ mod tests {
 
         let (_, event) = threads.update(ThreadListMessage::AutoAdvance);
 
-        assert_eq!(event, Some(ThreadListEvent::AutoAdvance { new_index: Some(0) }));
+        assert_eq!(
+            event,
+            Some(ThreadListEvent::AutoAdvance { new_index: Some(0) })
+        );
     }
 
     #[test]

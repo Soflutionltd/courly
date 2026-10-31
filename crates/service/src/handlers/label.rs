@@ -6,8 +6,8 @@ use common::typed_ids::LabelId;
 use serde_json::Value;
 use service_api::actions::ActionOutcome;
 use service_api::{
-    LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams,
-    LabelSaveAck, LabelSaveParams, ServiceError,
+    LabelDeleteAck, LabelDeleteParams, LabelGroupReorderAck, LabelGroupReorderParams, LabelSaveAck,
+    LabelSaveParams, ServiceError,
 };
 
 use crate::actions::ActionContext;
@@ -59,7 +59,9 @@ pub(super) async fn action_context_and_account(
 pub(super) fn outcome_to_result(outcome: ActionOutcome) -> Result<(), ServiceError> {
     match outcome {
         ActionOutcome::Success | ActionOutcome::NoOp => Ok(()),
-        ActionOutcome::LocalOnly { reason, .. } => Err(ServiceError::Internal(reason.user_message())),
+        ActionOutcome::LocalOnly { reason, .. } => {
+            Err(ServiceError::Internal(reason.user_message()))
+        }
         ActionOutcome::Failed { error } => Err(ServiceError::Internal(error.user_message())),
     }
 }

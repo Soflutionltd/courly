@@ -79,9 +79,8 @@ impl ReadyApp {
         let report = std::mem::take(&mut self.updater.report_outcome);
         let info = match result {
             Ok(Some(info)) => {
-                self.settings.update_check_note = report.then(|| {
-                    t!("updater.available", version = info.version).into_owned()
-                });
+                self.settings.update_check_note =
+                    report.then(|| t!("updater.available", version = info.version).into_owned());
                 info
             }
             Ok(None) => {
@@ -90,8 +89,7 @@ impl ReadyApp {
                 }
                 if report {
                     self.settings.update_check_note = Some(
-                        t!("updater.up_to_date", version = updater::current_version())
-                            .into_owned(),
+                        t!("updater.up_to_date", version = updater::current_version()).into_owned(),
                     );
                 }
                 return Task::none();

@@ -762,7 +762,10 @@ impl ReadyApp {
                 }
                 self.app_mode = mode;
                 // An event glance belongs to the view it was opened from.
-                if matches!(self.calendar.workflow, CalendarWorkflow::ViewingEvent { .. }) {
+                if matches!(
+                    self.calendar.workflow,
+                    CalendarWorkflow::ViewingEvent { .. }
+                ) {
                     self.calendar.workflow = CalendarWorkflow::Idle;
                     self.calendar.sync_surfaces();
                 }
@@ -1058,7 +1061,10 @@ impl ReadyApp {
             }
             Message::WindowFocused(id) => {
                 self.focused_window = id;
-                if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
+                if matches!(
+                    self.pop_out_windows.get(&id),
+                    Some(PopOutWindow::Compose(_))
+                ) {
                     self.last_compose_window = Some(id);
                 }
                 let updater =

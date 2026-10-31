@@ -1,9 +1,9 @@
 use bifrost_types::{
     AccountId, CategoryDefinition, ContainerId, ContainerKind, ContainerStyle, ObjectId,
 };
-use label_colors::preset_colors;
 use common::typed_ids::LabelId;
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
+use label_colors::preset_colors;
 use types::{LabelKind, MailProviderKind};
 
 use super::context::ActionContext;
@@ -689,7 +689,14 @@ pub(crate) async fn create_label(
             mlog.emit(&outcome);
             return (outcome, None);
         }
-        upsert_local_label(ctx, account_id, &storage_id, name, preset_style(preset.as_deref())).await;
+        upsert_local_label(
+            ctx,
+            account_id,
+            &storage_id,
+            name,
+            preset_style(preset.as_deref()),
+        )
+        .await;
         let outcome = ActionOutcome::Success;
         mlog.emit(&outcome);
         return (outcome, Some(storage_id));
@@ -741,7 +748,8 @@ pub(crate) async fn rename_label(
     };
 
     if account.provider == BifrostProviderKind::Graph {
-        let outcome = recolor_graph_category(ctx, account, account_id, label_id, new_name, style).await;
+        let outcome =
+            recolor_graph_category(ctx, account, account_id, label_id, new_name, style).await;
         mlog.emit(&outcome);
         return outcome;
     }

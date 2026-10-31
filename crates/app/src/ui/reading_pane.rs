@@ -76,29 +76,17 @@ pub enum ReadingPaneMessage {
 #[derive(Debug, Clone)]
 pub enum ReadingPaneEvent {
     /// User clicked the pop-out button on a message; open it in a new window.
-    OpenMessagePopOut {
-        message_index: usize,
-    },
+    OpenMessagePopOut { message_index: usize },
     /// User clicked Reply on a specific message.
-    ReplyToMessage {
-        message_index: usize,
-    },
+    ReplyToMessage { message_index: usize },
     /// User clicked Reply All on a specific message.
-    ReplyAllToMessage {
-        message_index: usize,
-    },
+    ReplyAllToMessage { message_index: usize },
     /// User clicked Forward on a specific message.
-    ForwardMessage {
-        message_index: usize,
-    },
+    ForwardMessage { message_index: usize },
     /// User clicked a sender/recipient to edit their contact info.
-    EditContact {
-        email: String,
-    },
+    EditContact { email: String },
     /// User clicked the calendar button on a message to create a calendar event.
-    CreateEventFromEmail {
-        message_index: usize,
-    },
+    CreateEventFromEmail { message_index: usize },
     /// Answer a synced meeting invite. Unsynced invites deliberately have
     /// no standalone iMIP mail-reply path.
     RespondToMeetingInvite {
@@ -1044,7 +1032,11 @@ mod expansion_tests {
     #[test]
     fn a_thread_of_own_messages_opens_the_most_recent() {
         let mut pane = ReadingPane::new();
-        let messages = [message("latest", true), message("middle", true), message("first", true)];
+        let messages = [
+            message("latest", true),
+            message("middle", true),
+            message("first", true),
+        ];
         pane.apply_message_expansion(&messages);
         assert_eq!(pane.message_expanded, [true, false, true]);
     }

@@ -121,7 +121,8 @@ pub struct ReadyApp {
     pub(crate) pending_search_select: Option<(String, String)>,
     /// Row menu action that needs the conversation's messages, held until
     /// the reading pane has loaded that thread (account id, thread id).
-    pub(crate) pending_row_action: Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
+    pub(crate) pending_row_action:
+        Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
     pub(crate) toolbar: crate::ui::toolbar::Toolbar,
     pub(crate) search_scope: crate::ui::search_scope::SearchScopeState,
     pub(crate) palette: Palette,

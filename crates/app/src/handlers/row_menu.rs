@@ -41,7 +41,9 @@ impl ReadyApp {
         let ctx = command_dispatch::build_context(self);
         let thread = self.menu_thread();
         let single = self.thread_list.selection_count() == 1;
-        let has_sender = thread.and_then(|t| t.from_address.as_deref()).is_some_and(|a| !a.is_empty());
+        let has_sender = thread
+            .and_then(|t| t.from_address.as_deref())
+            .is_some_and(|a| !a.is_empty());
         let has_subject = thread
             .and_then(|t| t.subject.as_deref())
             .is_some_and(|s| !s.trim().is_empty());
@@ -53,21 +55,21 @@ impl ReadyApp {
             shortcut: self.binding_table.display_binding(id),
             enabled: self.is_command_available(id),
         };
-        let single_command = |item: RowMenuItem, label: Cow<'_, str>, id: CommandId| {
-            match command(item, label, id) {
-                RowMenuEntry::Item {
-                    item,
-                    label,
-                    shortcut,
-                    enabled,
-                } => RowMenuEntry::Item {
-                    item,
-                    label,
-                    shortcut,
-                    enabled: enabled && single,
-                },
-                other => other,
-            }
+        let single_command = |item: RowMenuItem, label: Cow<'_, str>, id: CommandId| match command(
+            item, label, id,
+        ) {
+            RowMenuEntry::Item {
+                item,
+                label,
+                shortcut,
+                enabled,
+            } => RowMenuEntry::Item {
+                item,
+                label,
+                shortcut,
+                enabled: enabled && single,
+            },
+            other => other,
         };
         let plain = |item: RowMenuItem, label: Cow<'_, str>, enabled: bool| RowMenuEntry::Item {
             item,
@@ -100,9 +102,17 @@ impl ReadyApp {
         };
 
         let main = vec![
-            plain(RowMenuItem::Open, t!("main.row_menu.open"), single && thread.is_some()),
+            plain(
+                RowMenuItem::Open,
+                t!("main.row_menu.open"),
+                single && thread.is_some(),
+            ),
             RowMenuEntry::Divider,
-            single_command(RowMenuItem::Reply, t!("main.row_menu.reply"), CommandId::ComposeReply),
+            single_command(
+                RowMenuItem::Reply,
+                t!("main.row_menu.reply"),
+                CommandId::ComposeReply,
+            ),
             single_command(
                 RowMenuItem::ReplyAll,
                 t!("main.row_menu.reply_all"),
@@ -140,7 +150,11 @@ impl ReadyApp {
                 t!("main.row_menu.related"),
                 single && (has_sender || has_subject),
             ),
-            page(RowMenuPage::Sender, t!("main.row_menu.sender"), single && has_sender),
+            page(
+                RowMenuPage::Sender,
+                t!("main.row_menu.sender"),
+                single && has_sender,
+            ),
             RowMenuEntry::Divider,
             command(
                 RowMenuItem::ToggleFlag,
@@ -180,7 +194,11 @@ impl ReadyApp {
                 ),
                 CommandId::EmailSpam,
             ),
-            command(RowMenuItem::Move, t!("main.row_menu.move"), CommandId::EmailMoveToFolder),
+            command(
+                RowMenuItem::Move,
+                t!("main.row_menu.move"),
+                CommandId::EmailMoveToFolder,
+            ),
             RowMenuEntry::Divider,
             command(
                 RowMenuItem::ToggleMute,
@@ -192,14 +210,22 @@ impl ReadyApp {
                 CommandId::EmailMute,
             ),
             delete,
-            command(RowMenuItem::Archive, t!("main.row_menu.archive"), CommandId::EmailArchive),
+            command(
+                RowMenuItem::Archive,
+                t!("main.row_menu.archive"),
+                CommandId::EmailArchive,
+            ),
         ];
 
         let snooze = crate::ui::palette::snooze_preset_options()
             .into_iter()
             .filter_map(|option| {
                 let until = option.id.parse::<i64>().ok()?;
-                Some(plain(RowMenuItem::Snooze { until }, Cow::Owned(option.label), true))
+                Some(plain(
+                    RowMenuItem::Snooze { until },
+                    Cow::Owned(option.label),
+                    true,
+                ))
             })
             .collect();
 
@@ -248,9 +274,7 @@ impl ReadyApp {
             RowMenuItem::Reply => self.run_or_hold_row_action(RowMessageAction::Reply),
             RowMenuItem::ReplyAll => self.run_or_hold_row_action(RowMessageAction::ReplyAll),
             RowMenuItem::Forward => self.run_or_hold_row_action(RowMessageAction::Forward),
-            RowMenuItem::CreateEvent => {
-                self.run_or_hold_row_action(RowMessageAction::CreateEvent)
-            }
+            RowMenuItem::CreateEvent => self.run_or_hold_row_action(RowMessageAction::CreateEvent),
             RowMenuItem::ToggleRead => self.handle_email_action(MailActionIntent::ToggleRead),
             RowMenuItem::Snooze { until } => {
                 self.handle_email_action(MailActionIntent::Snooze { until })

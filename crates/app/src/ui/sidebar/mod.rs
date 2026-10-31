@@ -555,8 +555,10 @@ impl Sidebar {
         }
         let scope = &self.selected_scope;
         let folder = self.section_nav(scope)?.folders.iter().find(|f| {
-            matches!(f.folder_kind, FolderKind::Universal | FolderKind::AccountFolder)
-                && universal_folder_selection(&f.id) == self.selection
+            matches!(
+                f.folder_kind,
+                FolderKind::Universal | FolderKind::AccountFolder
+            ) && universal_folder_selection(&f.id) == self.selection
         })?;
         let own = matches!(folder.folder_kind, FolderKind::AccountFolder);
         let account_ids = nav::scope_accounts(self, scope);
@@ -1242,7 +1244,11 @@ mod tests {
             .collect();
         assert_eq!(
             targets,
-            [None, Some("g-hotel".to_string()), Some("g-admin".to_string())]
+            [
+                None,
+                Some("g-hotel".to_string()),
+                Some("g-admin".to_string())
+            ]
         );
     }
 

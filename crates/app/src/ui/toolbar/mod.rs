@@ -242,7 +242,10 @@ pub enum ToolbarMessage {
     CloseOverflow,
     /// A button picked from the "…" menu.
     RunFromOverflow(CommandId),
-    OpenItemMenu { index: usize, offset: Vector },
+    OpenItemMenu {
+        index: usize,
+        offset: Vector,
+    },
     OpenBackgroundMenu(Point),
     CloseMenu,
     Remove(usize),
@@ -448,7 +451,11 @@ mod tests {
         }
     }
 
-    fn drag(toolbar: &mut Toolbar, source: DragSource, over: Option<DropTarget>) -> Option<ToolbarEvent> {
+    fn drag(
+        toolbar: &mut Toolbar,
+        source: DragSource,
+        over: Option<DropTarget>,
+    ) -> Option<ToolbarEvent> {
         toolbar.update(ToolbarMessage::DragStart(source));
         toolbar.update(ToolbarMessage::CursorMoved(Point::new(10.0, 10.0)));
         toolbar.update(ToolbarMessage::CursorMoved(Point::new(60.0, 12.0)));
@@ -463,7 +470,11 @@ mod tests {
     #[test]
     fn dragging_a_button_right_reorders_the_bar() {
         let mut toolbar = bar(&[Delete, Archive, Junk, Move]);
-        let event = drag(&mut toolbar, DragSource::Bar(0), Some(DropTarget::Before(3)));
+        let event = drag(
+            &mut toolbar,
+            DragSource::Bar(0),
+            Some(DropTarget::Before(3)),
+        );
         assert_eq!(toolbar.layout.items, vec![Archive, Junk, Delete, Move]);
         assert!(matches!(event, Some(ToolbarEvent::LayoutChanged(_))));
     }
@@ -471,7 +482,11 @@ mod tests {
     #[test]
     fn dragging_a_button_left_and_to_the_end() {
         let mut toolbar = bar(&[Delete, Archive, Junk]);
-        drag(&mut toolbar, DragSource::Bar(2), Some(DropTarget::Before(0)));
+        drag(
+            &mut toolbar,
+            DragSource::Bar(2),
+            Some(DropTarget::Before(0)),
+        );
         assert_eq!(toolbar.layout.items, vec![Junk, Delete, Archive]);
         drag(&mut toolbar, DragSource::Bar(0), Some(DropTarget::End));
         assert_eq!(toolbar.layout.items, vec![Delete, Archive, Junk]);
@@ -511,11 +526,19 @@ mod tests {
     #[test]
     fn a_panel_tile_adds_its_button_where_it_is_dropped() {
         let mut toolbar = bar(&[Delete, Archive]);
-        drag(&mut toolbar, DragSource::Catalog(Pin), Some(DropTarget::Before(1)));
+        drag(
+            &mut toolbar,
+            DragSource::Catalog(Pin),
+            Some(DropTarget::Before(1)),
+        );
         assert_eq!(toolbar.layout.items, vec![Delete, Pin, Archive]);
 
         // Already on the bar: the tile moves it instead of doubling it.
-        drag(&mut toolbar, DragSource::Catalog(Delete), Some(DropTarget::End));
+        drag(
+            &mut toolbar,
+            DragSource::Catalog(Delete),
+            Some(DropTarget::End),
+        );
         assert_eq!(toolbar.layout.items, vec![Pin, Archive, Delete]);
 
         assert_eq!(drag(&mut toolbar, DragSource::Catalog(Flag), None), None);
@@ -553,8 +576,14 @@ mod tests {
         assert_eq!(ToolbarLayout::parse(Some(&layout.to_json())), layout);
 
         let newer = r#"{"items":["delete","teleport","delete","pin"],"labels":"never"}"#;
-        assert_eq!(ToolbarLayout::parse(Some(newer)), layout_of(&[Delete, Pin], LabelMode::Never));
-        assert_eq!(ToolbarLayout::parse(Some("not json")), ToolbarLayout::default());
+        assert_eq!(
+            ToolbarLayout::parse(Some(newer)),
+            layout_of(&[Delete, Pin], LabelMode::Never)
+        );
+        assert_eq!(
+            ToolbarLayout::parse(Some("not json")),
+            ToolbarLayout::default()
+        );
         assert_eq!(ToolbarLayout::parse(None), ToolbarLayout::default());
     }
 
@@ -579,7 +608,10 @@ mod tests {
         for item in ToolbarItem::ALL {
             let desc = registry.get(item.command());
             assert!(desc.is_some(), "{item:?} has no registered command");
-            assert!(desc.is_some_and(|desc| !desc.label.is_empty()), "{item:?} has no label");
+            assert!(
+                desc.is_some_and(|desc| !desc.label.is_empty()),
+                "{item:?} has no label"
+            );
         }
     }
 }

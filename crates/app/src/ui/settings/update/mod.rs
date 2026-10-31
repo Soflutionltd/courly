@@ -407,7 +407,10 @@ impl Settings {
             let ids = self.managed_accounts.iter().map(|a| a.id.clone()).collect();
             (ids, None)
         } else {
-            (vec![editor.account_id.clone()], Some(editor.label_id.clone()))
+            (
+                vec![editor.account_id.clone()],
+                Some(editor.label_id.clone()),
+            )
         };
         editor.pending = true;
         editor.error = None;
@@ -1070,7 +1073,10 @@ mod label_editor_tests {
         assert!(color.is_some());
 
         let (_, again) = settings.update(SettingsMessage::LabelEditorSave);
-        assert!(again.is_none(), "a second click while pending must not resend");
+        assert!(
+            again.is_none(),
+            "a second click while pending must not resend"
+        );
     }
 
     #[test]

@@ -94,7 +94,10 @@ pub fn build_mdn_message(
 }
 
 fn strip_line_breaks(value: &str) -> String {
-    value.chars().filter(|&ch| ch != '\r' && ch != '\n').collect()
+    value
+        .chars()
+        .filter(|&ch| ch != '\r' && ch != '\n')
+        .collect()
 }
 
 // Server-side `$MDNSent` / `$mdnsent` keyword write-back is a Bifrost
