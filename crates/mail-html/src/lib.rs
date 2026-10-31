@@ -15,12 +15,15 @@ use std::time::{Duration, Instant};
 
 use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
-use blitz_dom::{DocumentConfig, UserAgentStylesheet, util::Color};
-use blitz_html::HtmlDocument;
+use blitz_dom::{BaseDocument, DocumentConfig, UserAgentStylesheet, util::Color};
+use blitz_html::DocumentHtmlParser;
 use blitz_paint::paint_scene;
 pub use blitz_traits::net::{Bytes, Url};
 use blitz_traits::net::{NetHandler, NetProvider, Request};
 use blitz_traits::shell::{ColorScheme, Viewport};
+use html5ever::tendril::TendrilSink as _;
+use html5ever::tree_builder::{QuirksMode, TreeBuilderOpts};
+use html5ever::{ParseOpts, parse_document};
 use num_traits::ToPrimitive as _;
 use peniko::Fill;
 use peniko::kurbo::Rect;
@@ -225,9 +228,35 @@ fn layout_viewport(width: f32, zoom: f32, hidpi: f32) -> Viewport {
     viewport
 }
 
+/// Parse a mail body with the HTML parser. Mail is served as `text/html`,
+/// so an XHTML doctype or namespace must not switch to the XML parser the
+/// way `HtmlDocument::from_html` does: a wrong namespace URL (common in
+/// templates) would leave every element unstyled.
+fn parse_mail(html: &str, config: DocumentConfig) -> BaseDocument {
+    let mut document = BaseDocument::new(config);
+    let mut mutator = document.mutate();
+    let opts = ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            drop_doctype: true,
+            quirks_mode: QuirksMode::NoQuirks,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    if let Err(error) = parse_document(DocumentHtmlParser::new(&mut mutator), opts)
+        .from_utf8()
+        .read_from(&mut html.as_bytes())
+    {
+        log::warn!("mail body parse stopped early: {error}");
+    }
+    drop(mutator);
+    document
+}
+
 /// Width and height of the laid out page in display px.
-fn content_size(document: &HtmlDocument, width: f32, zoom: f32) -> (f32, f32) {
-    let layout = document.as_ref().root_element().final_layout();
+fn content_size(document: &BaseDocument, width: f32, zoom: f32) -> (f32, f32) {
+    let layout = document.root_element().final_layout();
     let height = layout
         .size
         .height
@@ -262,7 +291,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         remote_requested: AtomicUsize::new(0),
     });
 
-    let mut document = HtmlDocument::from_html(
+    let mut document = parse_mail(
         &request.html,
         DocumentConfig {
             viewport: Some(layout_viewport(width, zoom, HIDPI_SCALE)),
@@ -276,20 +305,18 @@ pub fn render(request: RenderRequest) -> RenderedMail {
 
     let deadline = Instant::now() + REMOTE_DEADLINE;
     loop {
-        document.as_mut().resolve(0.0);
+        document.resolve(0.0);
         if pending.load(Ordering::SeqCst) == 0 || Instant::now() >= deadline {
             break;
         }
         std::thread::sleep(REMOTE_POLL);
     }
-    document.as_mut().resolve(0.0);
+    document.resolve(0.0);
 
     let (mut content_width, mut content_height) = content_size(&document, width, zoom);
     let scale = if content_height > HIDPI_MAX_HEIGHT {
-        document
-            .as_mut()
-            .set_viewport(layout_viewport(width, zoom, 1.0));
-        document.as_mut().resolve(0.0);
+        document.set_viewport(layout_viewport(width, zoom, 1.0));
+        document.resolve(0.0);
         (content_width, content_height) = content_size(&document, width, zoom);
         1.0
     } else {
@@ -309,7 +336,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
             );
             paint_scene(
                 scene,
-                document.as_mut(),
+                &mut document,
                 f64::from(scale * zoom),
                 px_width,
                 px_height,
@@ -353,8 +380,7 @@ fn split_into_tiles(buffer: &[u8], px_width: u32, px_height: u32, scale: f32) ->
     tiles
 }
 
-fn collect_links(document: &HtmlDocument, zoom: f32) -> Vec<LinkArea> {
-    let doc = document.as_ref();
+fn collect_links(doc: &BaseDocument, zoom: f32) -> Vec<LinkArea> {
     let Ok(anchors) = doc.query_selector_all("a[href]") else {
         return Vec::new();
     };
@@ -504,6 +530,29 @@ mod tests {
             </td></tr></table>"#,
         );
         assert!(x > 150.0, "link x was {x}");
+    }
+
+    #[test]
+    fn xhtml_doctypes_are_read_as_html() {
+        let html = r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="https://www.w3.org/1999/xhtml"><head>
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+            <title>Emailing survey 02</title>
+            <style>body {margin:0} p.tall {height:300px; margin:0}</style>
+            </head><body><table align="center" width="200"><tr><td><a href="https://e.x/">x</a></td></tr></table>
+            <p class="tall">Survey</p></body></html>"#;
+        let mail = render_html(html);
+        let link = mail.links.first().expect("link rendered");
+        assert!(link.x > 150.0, "table not centered, link x was {}", link.x);
+        assert!(
+            link.y < 40.0,
+            "head text pushed the body down to {}",
+            link.y
+        );
+        assert!(
+            mail.height >= 300.0,
+            "stylesheet ignored, height was {}",
+            mail.height
+        );
     }
 
     #[test]

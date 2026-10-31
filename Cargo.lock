@@ -4723,6 +4723,7 @@ dependencies = [
  "blitz-paint",
  "blitz-traits",
  "data-url",
+ "html5ever 0.40.1",
  "log",
  "num-traits",
  "parley",
