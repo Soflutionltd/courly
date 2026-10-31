@@ -67,6 +67,7 @@ impl SystemFonts {
 /// The format is `<family> <size>` where family may contain spaces and the size
 /// is always the last whitespace-separated token. Style words (Bold, Italic, etc.)
 /// that appear between the family name and size are stripped.
+#[cfg(any(target_os = "linux", test))]
 fn parse_font_description(desc: &str) -> Option<SystemFont> {
     let desc = desc.trim();
     if desc.is_empty() {
