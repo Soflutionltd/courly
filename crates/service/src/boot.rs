@@ -1659,14 +1659,15 @@ fn open_db_and_migrate(
 /// Phase 7-1 stub, fleshed out in 7-9c. Compares the persisted
 /// active search index `.version` to `search::INDEX_SCHEMA_VERSION`:
 ///
-/// - Absent (first-ever boot): write the current version, no rebuild.
-///   The writer task creates the index from scratch.
 /// - Match: no-op.
-/// - Mismatch: leave the `.version` file untouched (sentinel-write
+/// - Absent or mismatch: leave `.version` as it is (sentinel-write
 ///   ordering: only update after a successful rebuild) and mark a
 ///   pending rebuild on `BootSharedState`. The post-ready spawn
 ///   dispatches a PreserveExisting rebuild against a staging slot and
-///   rewrites `.version` on success.
+///   writes `.version` on success. An absent index is rebuilt too: the
+///   database may already hold messages (a deleted or moved index), and
+///   nothing else would ever index them; on a first boot the rebuild
+///   has nothing to read.
 ///
 /// v1 only handles additive schema changes (new fields). The existing
 /// index can be opened with the new schema; pre-existing docs simply
@@ -1693,10 +1694,11 @@ pub(crate) fn check_schema_version_and_dispatch(
     match stored {
         None => {
             log::info!(
-                "search index .version absent; writing current version {}",
+                "search index .version absent; marking a rebuild from the database \
+                 for version {}",
                 search::INDEX_SCHEMA_VERSION
             );
-            write_search_index_version(&version_path)?;
+            state.mark_pending_schema_rebuild();
         }
         Some(v) if v == search::INDEX_SCHEMA_VERSION => {
             log::debug!("search index .version matches current ({v})");
@@ -1839,31 +1841,27 @@ mod tests {
         assert!(matches!(got_result, Some(Ok(_))));
     }
 
-    /// Phase 7-1: schema-version sentinel writes the current version on a
-    /// fresh app-data directory (absent `.version` file) and is a no-op on
-    /// a subsequent boot at the same version. A mismatch case marks the
-    /// pending-rebuild flag rather than rewriting `.version` immediately.
+    /// The schema-version sentinel marks a rebuild when `.version` is
+    /// absent and is a no-op once the rebuild wrote the current version.
     #[test]
-    fn check_schema_version_writes_on_absent_and_no_ops_on_match() {
+    fn check_schema_version_rebuilds_on_absent_and_no_ops_on_match() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let app_data = tmp.path();
         let version_path = app_data.join("search_index").join(".version");
         let state = BootSharedState::new(app_data.to_path_buf(), DispatchConfig::default());
 
-        // First call: file is absent, function writes the current version.
+        // Absent: the database may hold messages the index never saw, so
+        // a rebuild is marked and `.version` waits for it to succeed.
         check_schema_version_and_dispatch(app_data, &state).expect("first call");
-        let stored = std::fs::read_to_string(&version_path).expect("read .version");
-        assert_eq!(
-            stored.trim(),
-            search::INDEX_SCHEMA_VERSION.to_string(),
-            "first call must persist current version"
-        );
+        assert!(!version_path.exists(), ".version must wait for the rebuild");
         assert!(
-            !state.take_pending_schema_rebuild(),
-            "absent path must not mark a rebuild"
+            state.take_pending_schema_rebuild(),
+            "an absent index must be rebuilt from the database"
         );
 
-        // Second call: file matches; function is a no-op.
+        // After the rebuild wrote it, a matching file is a no-op.
+        write_current_search_index_version(app_data).expect("rebuild writes .version");
+        let stored = std::fs::read_to_string(&version_path).expect("read .version");
         check_schema_version_and_dispatch(app_data, &state).expect("second call");
         let stored2 = std::fs::read_to_string(&version_path).expect("read .version");
         assert_eq!(stored2, stored, "second call must not change the file");
