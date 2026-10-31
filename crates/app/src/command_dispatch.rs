@@ -539,9 +539,7 @@ fn dispatch_nav_open(app: &ReadyApp) -> Option<Message> {
 pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Message> {
     match (id, args) {
         (CommandId::EmailMoveToFolder, CommandArgs::MoveToFolder { folder_id }) => {
-            Some(Message::EmailAction(MailActionIntent::MoveToFolder {
-                folder_id,
-            }))
+            Some(Message::EmailAction(MailActionIntent::move_to(folder_id)))
         }
         (CommandId::EmailAddLabel, CommandArgs::AddLabel { group_id }) => {
             Some(Message::EmailAction(MailActionIntent::ApplyLabelGroup {

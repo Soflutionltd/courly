@@ -266,7 +266,7 @@ impl ReadyApp {
             }
             RowMenuItem::Categorize => self.open_palette_on(CommandId::EmailAddLabel),
             RowMenuItem::Uncategorize => self.open_palette_on(CommandId::EmailRemoveLabel),
-            RowMenuItem::Move => self.open_palette_on(CommandId::EmailMoveToFolder),
+            RowMenuItem::Move => self.open_move_menu(),
             RowMenuItem::SearchSameSubject => {
                 let subject = self.menu_thread().and_then(|t| t.subject.as_deref());
                 let words = rtsk::threading::normalize_subject(subject).replace('"', " ");

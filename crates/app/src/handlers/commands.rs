@@ -56,6 +56,9 @@ impl ReadyApp {
         log::debug!("Executing command: {id:?}");
         self.registry.usage.record_usage(id);
         self.save_usage_counts();
+        if id == CommandId::EmailMoveToFolder {
+            return self.open_move_menu();
+        }
         match command_dispatch::dispatch_command(id, self) {
             Some(msg) => self.update(msg),
             // A folder, label or date is needed first: ask in the palette.

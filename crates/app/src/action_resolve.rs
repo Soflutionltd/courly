@@ -39,6 +39,19 @@ pub enum MailActionIntent {
     Unsubscribe,
 }
 
+impl MailActionIntent {
+    /// Moving to Archive, Trash or Junk runs the provider's own operation
+    /// for it; any other folder is a plain move.
+    pub fn move_to(folder_id: FolderId) -> Self {
+        match folder_id.as_str() {
+            "archive" => Self::Archive,
+            "TRASH" => Self::Trash,
+            "SPAM" => Self::ToggleSpam,
+            _ => Self::MoveToFolder { folder_id },
+        }
+    }
+}
+
 // ── UI Context ──────────────────────────────────────────
 
 /// UI state captured at resolution time. This is the contract between

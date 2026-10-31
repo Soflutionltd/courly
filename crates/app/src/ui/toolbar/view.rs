@@ -8,8 +8,9 @@ use rust_i18n::t;
 use super::{DragSource, DropTarget, LabelMode, Toolbar, ToolbarItem, ToolbarMenu, ToolbarMessage};
 use crate::icon;
 use crate::message::Message;
-use crate::ui::anchored_overlay::{AnchorPosition, anchored_overlay};
+use crate::ui::anchored_overlay::{AnchorPosition, AnchoredOverlay, anchored_overlay};
 use crate::ui::layout::*;
+use crate::ui::move_menu::{MoveMenu, MoveMenuMessage};
 use crate::ui::side_panel::SidePanelMessage;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -59,6 +60,7 @@ pub fn toolbar<'a>(
     registry: &CommandRegistry,
     ctx: &CommandContext,
     side_panel_open: bool,
+    move_menu: Option<&'a MoveMenu>,
 ) -> Element<'a, Message> {
     let buttons = resolve(state, registry, ctx);
     let labels = state.layout.labels;
@@ -66,7 +68,7 @@ pub fn toolbar<'a>(
         if state.customizing {
             editable_bar(state, &buttons, labels, size)
         } else {
-            live_bar(state, &buttons, labels, size)
+            live_bar(state, &buttons, labels, size, move_menu)
         }
     })
     .height(Length::Shrink);
@@ -136,12 +138,14 @@ fn side_panel_toggle<'a>(open: bool) -> Element<'a, Message> {
 // ── Live bar ────────────────────────────────────────────
 
 /// The buttons that fit, then "…" with the rest, the add-ins and
-/// "Customize toolbar".
+/// "Customize toolbar". The Move menu hangs under Move, or under "…" when
+/// Move is not on the bar.
 fn live_bar<'a>(
     state: &'a Toolbar,
     buttons: &[Resolved],
     labels: LabelMode,
     size: Size,
+    move_menu: Option<&'a MoveMenu>,
 ) -> Element<'a, Message> {
     let room = size.width - more_button_width() - SPACE_XXS;
     let mut used = 0.0;
@@ -155,17 +159,32 @@ fn live_bar<'a>(
         shown += 1;
     }
 
+    let move_shown = buttons[..shown]
+        .iter()
+        .any(|resolved| resolved.item == ToolbarItem::Move);
     let mut bar = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     for resolved in &buttons[..shown] {
-        bar = bar.push(bar_button(state, resolved, labels));
+        let menu = move_menu.filter(|_| resolved.item == ToolbarItem::Move);
+        bar = bar.push(bar_button(state, resolved, labels, menu));
     }
-    bar.push(more_button(state, &buttons[shown..])).into()
+    let menu = move_menu.filter(|_| !move_shown);
+    bar.push(more_button(state, &buttons[shown..], menu)).into()
+}
+
+fn with_move_menu<'a>(
+    slot: AnchoredOverlay<'a, Message>,
+    menu: &'a MoveMenu,
+) -> AnchoredOverlay<'a, Message> {
+    slot.popup(menu.view())
+        .popup_width(MOVE_MENU_WIDTH)
+        .on_dismiss(Message::MoveMenu(MoveMenuMessage::Close))
 }
 
 fn bar_button<'a>(
     state: &'a Toolbar,
     resolved: &Resolved,
     labels: LabelMode,
+    move_menu: Option<&'a MoveMenu>,
 ) -> Element<'a, Message> {
     let mut face = button(button_face(
         resolved.item,
@@ -199,15 +218,26 @@ fn bar_button<'a>(
             .anchor_offset(offset)
             .popup_width(TOOLBAR_MENU_WIDTH)
             .on_dismiss(toolbar_message(ToolbarMessage::CloseMenu));
+    } else if let Some(menu) = move_menu {
+        slot = with_move_menu(slot, menu);
     }
     slot.into()
 }
 
-fn more_button<'a>(state: &'a Toolbar, hidden: &[Resolved]) -> Element<'a, Message> {
+fn more_button<'a>(
+    state: &'a Toolbar,
+    hidden: &[Resolved],
+    move_menu: Option<&'a MoveMenu>,
+) -> Element<'a, Message> {
     let face = button(icon::ellipsis().size(ICON_MD).style(text::secondary))
         .on_press(toolbar_message(ToolbarMessage::ToggleOverflow))
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Action.style());
+    if let Some(menu) = move_menu {
+        return with_move_menu(anchored_overlay(face), menu)
+            .position(AnchorPosition::BelowRight)
+            .into();
+    }
     if !state.overflow_open {
         return face.into();
     }

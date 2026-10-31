@@ -5,9 +5,10 @@ use iced::{Alignment, Element, Length};
 
 use crate::icon;
 use crate::ui::layout::*;
+use crate::ui::move_menu::MoveDestination;
 use crate::ui::theme;
 use crate::ui::widgets;
-use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder};
+use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder, NavigationState};
 use rtsk::scope::ViewScope;
 use types::{FolderId, SidebarSelection};
 
@@ -309,6 +310,40 @@ fn folder_row<'a>(
         row_el,
         super::nav::folder_menu_items(scope, menu, root_index),
     )
+}
+
+/// Where messages can move from the folder `current`: Inbox, Archive,
+/// Trash and Junk, then the account's own folders in tree order.
+pub(crate) fn message_destinations(
+    nav: &NavigationState,
+    current: Option<&str>,
+) -> Vec<MoveDestination> {
+    const SYSTEM: [&str; 4] = ["INBOX", "archive", "TRASH", "SPAM"];
+    let system = SYSTEM.iter().filter_map(|id| {
+        nav.folders
+            .iter()
+            .find(|f| matches!(f.folder_kind, FolderKind::Universal) && f.id == *id)
+    });
+    let own: Vec<&NavigationFolder> = nav
+        .folders
+        .iter()
+        .filter(|f| matches!(f.folder_kind, FolderKind::AccountFolder))
+        .collect();
+    system
+        .map(|folder| (folder, 0))
+        .chain(
+            tree_sort(&own)
+                .into_iter()
+                .map(|node| (node.folder, node.depth)),
+        )
+        .filter(|(folder, _)| current != Some(folder.id.as_str()))
+        .map(|(folder, depth)| MoveDestination {
+            id: folder.id.clone(),
+            name: super::folder_display_name(folder).into_owned(),
+            depth,
+            system: matches!(folder.folder_kind, FolderKind::Universal),
+        })
+        .collect()
 }
 
 impl Sidebar {

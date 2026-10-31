@@ -26,8 +26,10 @@ mod smart;
 mod tree;
 
 use chats::chats_section;
+pub(crate) use folders::message_destinations;
 use labels::labels_section;
 use nav::nav_items;
+pub(crate) use nav::universal_folder_icon;
 use order::{SidebarEntry, SidebarLayouts};
 pub(crate) use pinned_searches::format_relative_time;
 use public_folders::pinned_public_folders_section;

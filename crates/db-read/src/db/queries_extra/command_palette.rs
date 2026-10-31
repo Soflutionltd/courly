@@ -7,45 +7,10 @@ use rusqlite::params;
 
 use crate::db::ReadConn;
 
-/// A label row: id + name.
-pub struct LabelRow {
-    pub id: String,
-    pub name: String,
-}
-
 /// A label group row: id + name.
 pub struct LabelGroupRow {
     pub id: i64,
     pub name: String,
-}
-
-/// User-visible folders for an account, excluding rows the user cannot
-/// delete. `is_undeletable = 0` covers system roles (INBOX, SENT, etc.)
-/// AND Gmail's `type: "system"` non-role labels like `CATEGORY_*` and
-/// `CHAT`, which live in `folders` but should not appear in user-facing
-/// folder pickers.
-pub fn get_user_folders_for_account_sync(
-    conn: &ReadConn<'_>,
-    account_id: &str,
-) -> Result<Vec<LabelRow>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name FROM folders
-             WHERE account_id = ?1 AND visible = 1
-               AND is_undeletable = 0
-             ORDER BY sort_order ASC, name ASC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    stmt.query_map(params![account_id], |row| {
-        Ok(LabelRow {
-            id: row.get("id")?,
-            name: row.get("name")?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
 }
 
 /// User-visible label groups.

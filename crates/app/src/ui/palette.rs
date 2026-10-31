@@ -177,6 +177,11 @@ impl Palette {
         let id = result.id;
         let input_mode = result.input_mode;
 
+        // Move picks its folder in the ribbon's Move menu.
+        if id == CommandId::EmailMoveToFolder {
+            self.close();
+            return (Task::none(), Some(PaletteEvent::ExecuteCommand(id)));
+        }
         match input_mode {
             InputMode::Direct => {
                 self.close();

@@ -535,7 +535,7 @@ pub(super) fn sidebar_nav_selection_is_active(
     sidebar.active_pinned_search.is_none() && sidebar.selection == *selection
 }
 
-fn universal_folder_icon<'a>(id: &str) -> iced::widget::Text<'a> {
+pub(crate) fn universal_folder_icon<'a>(id: &str) -> iced::widget::Text<'a> {
     match id {
         "INBOX" => icon::inbox(),
         "STARRED" => icon::star(),

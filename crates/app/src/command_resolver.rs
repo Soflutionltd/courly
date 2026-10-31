@@ -4,9 +4,8 @@ use cmdk::{CommandContext, CommandId, CommandInputResolver, OptionItem};
 
 use crate::db::Db;
 
-/// Concrete `CommandInputResolver` that queries the app's DB for
-/// folders, label groups, and accounts to populate the palette's stage 2
-/// option lists.
+/// Concrete `CommandInputResolver` that queries the app's DB for label
+/// groups to populate the palette's stage 2 option lists.
 pub struct AppInputResolver {
     db: Arc<Db>,
 }
@@ -26,13 +25,6 @@ impl CommandInputResolver for AppInputResolver {
         ctx: &CommandContext,
     ) -> Result<Vec<OptionItem>, String> {
         match (command_id, param_index) {
-            (CommandId::EmailMoveToFolder, 0) => {
-                let account_id = ctx
-                    .active_account_id
-                    .as_deref()
-                    .ok_or_else(|| "no active account".to_string())?;
-                self.db.get_user_folders_for_palette(account_id)
-            }
             (CommandId::EmailAddLabel, 0) => self.db.get_label_groups_for_palette(),
             (CommandId::EmailRemoveLabel, 0) => {
                 let account_id = ctx

@@ -14,6 +14,7 @@ pub mod label_paint;
 pub mod layout;
 pub mod mail_body;
 pub mod modal_overlay;
+pub mod move_menu;
 pub mod palette;
 pub mod pane_card;
 pub mod reading_pane;

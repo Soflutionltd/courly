@@ -110,6 +110,8 @@ pub struct ReadyApp {
     pub(crate) pending_permanent_delete: Option<Vec<(String, String)>>,
     /// Dialog opened from the sidebar folder menu.
     pub(crate) folder_dialog: Option<crate::ui::folder_dialog::FolderDialog>,
+    /// The ribbon's Move menu, open under its button.
+    pub(crate) move_menu: Option<crate::ui::move_menu::MoveMenu>,
     /// Row menu action that needs the conversation's messages, held until
     /// the reading pane has loaded that thread (account id, thread id).
     pub(crate) pending_row_action: Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
@@ -450,6 +452,7 @@ impl ReadyApp {
             pending_chord: None,
             pending_permanent_delete: None,
             folder_dialog: None,
+            move_menu: None,
             pending_row_action: None,
             toolbar: crate::ui::toolbar::Toolbar::default(),
             search_scope: crate::ui::search_scope::SearchScopeState::default(),

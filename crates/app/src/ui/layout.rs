@@ -160,6 +160,8 @@ pub const ROW_MENU_ITEM_PADDING: Padding = Padding {
 pub const ROW_MENU_WIDTH: f32 = 280.0;
 /// Toolbar "…" menu and button right-click menu.
 pub const TOOLBAR_MENU_WIDTH: f32 = 260.0;
+/// The ribbon's Move menu: folder search and list.
+pub const MOVE_MENU_WIDTH: f32 = 300.0;
 /// Customize-toolbar panel under the ribbon.
 pub const TOOLBAR_CUSTOMIZE_WIDTH: f32 = 860.0;
 pub const TOOLBAR_CUSTOMIZE_COLUMNS: usize = 4;

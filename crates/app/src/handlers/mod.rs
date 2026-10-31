@@ -16,6 +16,7 @@ mod core;
 mod folders;
 mod keyboard;
 pub mod labels;
+mod move_menu;
 mod navigation;
 mod palette;
 pub(crate) mod pop_out;

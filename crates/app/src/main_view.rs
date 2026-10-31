@@ -250,6 +250,7 @@ impl ReadyApp {
             &self.registry,
             &ctx,
             self.side_panel.open,
+            self.move_menu.as_ref(),
         );
         let sidebar = container(pane(self.sidebar.view().map(Message::Sidebar)))
             .width(self.sidebar_width)
