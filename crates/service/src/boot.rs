@@ -19,7 +19,9 @@ use crate::boot_progress;
 use crate::dispatch::DispatchConfig;
 use crypto_key::SecretKey;
 use db::db::action_journal::recover_stale_leases;
-use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
+use db::db::pending_ops::{
+    db_pending_ops_recover_on_boot_sync, db_pending_ops_requeue_unsent_trash_sync,
+};
 use db::db::queries_extra::{
     backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
     get_all_accounts_sync, get_all_send_identity_emails_read,
@@ -1143,7 +1145,8 @@ async fn run_boot_sequence_inner(
     // different failure mode (drafts that never made it into 'sending').
     boot_progress::emit(&out_tx, BootPhase::RecoveringPendingOps, None);
     if let Err(error) = run_boot_recovery(&db_write, "pending-ops recovery", |c| {
-        db_pending_ops_recover_on_boot_sync(c)
+        db_pending_ops_recover_on_boot_sync(c)?;
+        db_pending_ops_requeue_unsent_trash_sync(c).map(|_| ())
     })
     .await
     {

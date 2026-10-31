@@ -292,6 +292,53 @@ pub fn db_pending_ops_recover_on_boot_sync(conn: &impl WriteTarget) -> Result<()
     Ok(())
 }
 
+/// Queue a trash for every thread trashed locally while the server still
+/// holds its messages in the inbox and none in the trash. Those are trashes
+/// the provider refused before refused actions were undone locally;
+/// replaying them lines the server up with what the user did.
+pub fn db_pending_ops_requeue_unsent_trash_sync(conn: &impl WriteTarget) -> Result<usize, String> {
+    let queued = conn
+        .execute(
+            "INSERT INTO pending_operations
+                 (id, account_id, operation_type, resource_id, params, status, max_retries)
+             SELECT lower(hex(randomblob(16))), tf.account_id, 'trash', tf.thread_id, '{}',
+                    'pending', 10
+             FROM thread_folders tf
+             WHERE tf.folder_id = 'TRASH'
+               AND NOT EXISTS (
+                   SELECT 1 FROM thread_folders inbox
+                   WHERE inbox.account_id = tf.account_id
+                     AND inbox.thread_id = tf.thread_id
+                     AND inbox.folder_id = 'INBOX')
+               AND EXISTS (
+                   SELECT 1 FROM messages m
+                   JOIN message_folders mf
+                     ON mf.account_id = m.account_id AND mf.message_id = m.id
+                   WHERE m.account_id = tf.account_id
+                     AND m.thread_id = tf.thread_id
+                     AND mf.folder_id = 'INBOX')
+               AND NOT EXISTS (
+                   SELECT 1 FROM messages m
+                   JOIN message_folders mf
+                     ON mf.account_id = m.account_id AND mf.message_id = m.id
+                   WHERE m.account_id = tf.account_id
+                     AND m.thread_id = tf.thread_id
+                     AND mf.folder_id = 'TRASH')
+               AND NOT EXISTS (
+                   SELECT 1 FROM pending_operations queued
+                   WHERE queued.account_id = tf.account_id
+                     AND queued.resource_id = tf.thread_id
+                     AND queued.operation_type = 'trash'
+                     AND queued.status IN ('pending', 'executing'))",
+            [],
+        )
+        .map_err(|e| format!("requeue unsent trash: {e}"))?;
+    if queued > 0 {
+        log::info!("[pending_ops] Requeued {queued} trash actions the server never applied");
+    }
+    Ok(queued)
+}
+
 #[cfg(test)]
 mod boot_recovery_tests {
     use super::*;
@@ -324,6 +371,48 @@ mod boot_recovery_tests {
 
     fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
         crate::db::WriteConn::from_raw(conn)
+    }
+
+    #[test]
+    fn requeues_only_trashes_the_server_never_applied() {
+        let conn = make_conn();
+        conn.execute_batch(
+            "
+            CREATE TABLE thread_folders (thread_id TEXT, account_id TEXT, folder_id TEXT);
+            CREATE TABLE messages (id TEXT, account_id TEXT, thread_id TEXT);
+            CREATE TABLE message_folders (account_id TEXT, message_id TEXT, folder_id TEXT);
+            -- refused: trashed here, still in the server inbox
+            INSERT INTO thread_folders VALUES ('refused', 'a', 'TRASH');
+            INSERT INTO messages VALUES ('m1', 'a', 'refused');
+            INSERT INTO message_folders VALUES ('a', 'm1', 'INBOX');
+            -- applied: the server already moved it
+            INSERT INTO thread_folders VALUES ('applied', 'a', 'TRASH');
+            INSERT INTO messages VALUES ('m2', 'a', 'applied');
+            INSERT INTO message_folders VALUES ('a', 'm2', 'TRASH');
+            -- kept: still in the local inbox
+            INSERT INTO thread_folders VALUES ('kept', 'a', 'INBOX');
+            INSERT INTO messages VALUES ('m3', 'a', 'kept');
+            INSERT INTO message_folders VALUES ('a', 'm3', 'INBOX');
+            ",
+        )
+        .expect("fixtures");
+
+        assert_eq!(
+            db_pending_ops_requeue_unsent_trash_sync(&write(&conn)).expect("requeue"),
+            1
+        );
+        assert_eq!(
+            db_pending_ops_requeue_unsent_trash_sync(&write(&conn)).expect("requeue again"),
+            0
+        );
+        let queued: String = conn
+            .query_row(
+                "SELECT resource_id FROM pending_operations WHERE operation_type = 'trash'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("queued trash");
+        assert_eq!(queued, "refused");
     }
 
     #[test]
