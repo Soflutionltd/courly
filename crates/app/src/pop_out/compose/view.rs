@@ -537,27 +537,30 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         .height(editor_height)
         .font(font::text());
 
-    let body_card = container(editor)
+    // The page card stays put and the text scrolls inside it: a scrolled
+    // card would get its rounded corners cut square by the viewport. The
+    // inset keeps the scrolled content inside the rounding.
+    let page_card = |page: Element<'a, Message>| -> Element<'a, Message> {
+        container(
+            container(page)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(SPACE_XXS)
+                .style(theme::ContainerClass::EmailBody.style()),
+        )
         .width(Length::Fill)
-        .height(if has_extras {
-            Length::Shrink
-        } else {
-            Length::Fill
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            top: SPACE_XS,
+            right: SPACE_SM,
+            bottom: SPACE_XS,
+            left: SPACE_SM,
         })
-        .padding(PAD_CONTENT)
-        .style(theme::ContainerClass::EmailBody.style());
+        .into()
+    };
 
     if !has_extras {
-        return container(body_card)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(iced::Padding {
-                top: 0.0,
-                right: SPACE_SM,
-                bottom: 0.0,
-                left: SPACE_SM,
-            })
-            .into();
+        return page_card(container(editor).padding(PAD_CONTENT).into());
     }
 
     let compose = move |msg| Message::PopOut(window_id, PopOutMessage::Compose(msg));
@@ -572,9 +575,7 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
     };
     // Keyed so a signature arriving above the quote gets its own sensor
     // instead of inheriting the quote's, which has already reported a width.
-    let mut extras = iced::widget::keyed_column(Vec::new())
-        .spacing(SPACE_SM)
-        .padding(PAD_CONTENT);
+    let mut extras = iced::widget::keyed_column(Vec::new()).spacing(SPACE_SM);
     if let Some(signature) = state.signature.as_ref() {
         extras = extras.push(
             ComposePreview::Signature,
@@ -584,22 +585,23 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
     if let Some(quote) = state.quote.as_ref() {
         extras = extras.push(ComposePreview::Quote, preview(quote, ComposePreview::Quote));
     }
-    let extras_card = container(extras)
-        .width(Length::Fill)
-        .style(theme::ContainerClass::EmailBody.style());
-    let page = column![body_card, extras_card]
-        .spacing(SPACE_XS)
-        .padding(iced::Padding {
-            top: 0.0,
-            right: SPACE_SM,
-            bottom: 0.0,
-            left: SPACE_SM,
-        });
+    let page = column![editor, extras]
+        .spacing(SPACE_SM)
+        .padding(PAD_CONTENT);
 
-    iced::widget::scrollable(page)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    // The page can stay white in dark mode, where the theme's rail would
+    // draw a dark band down its edge.
+    page_card(
+        iced::widget::scrollable(page)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|theme, status| {
+                let mut style = iced::widget::scrollable::default(theme, status);
+                style.vertical_rail.background = None;
+                style
+            })
+            .into(),
+    )
 }
 
 fn compose_footer<'a>(

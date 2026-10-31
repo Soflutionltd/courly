@@ -636,9 +636,10 @@ pub const COMPOSE_MIN_WIDTH: f32 = 480.0;
 pub const COMPOSE_MIN_HEIGHT: f32 = 360.0;
 /// Width of the label column (From, To, Cc, Bcc, Subject) in compose.
 pub const COMPOSE_LABEL_WIDTH: f32 = 52.0;
-/// Height of an empty reply editor. It grows with the text, and the quoted
-/// original scrolls with it as one page.
-pub const COMPOSE_EDITOR_MIN_HEIGHT: f32 = 200.0;
+/// Height of an empty reply editor: a few lines above the signature, as in
+/// Outlook. It grows with the text, and the quoted original scrolls with it
+/// as one page.
+pub const COMPOSE_EDITOR_MIN_HEIGHT: f32 = 96.0;
 
 // ── Emoji picker ────────────────────────────────────────
 
