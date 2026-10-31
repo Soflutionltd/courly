@@ -2,7 +2,6 @@ use crate::app::ReadyApp;
 use crate::component::Component;
 use crate::message::Message;
 use crate::pop_out::PopOutWindow;
-use crate::pop_out::compose::ComposeMode;
 use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
 use crate::ui::calendar::{CalendarMessage, CalendarWorkflow};
@@ -178,7 +177,7 @@ impl ReadyApp {
             Message::Compose if self.sidebar.accounts.is_empty() => {
                 self.handle_open_add_account_wizard()
             }
-            Message::Compose => self.open_compose_window(ComposeMode::New),
+            Message::Compose => self.open_new_message(),
             Message::Noop => Task::none(),
             Message::AttachmentSaveFolderRemembered(key, folder) => {
                 self.attachment_last_folders.remember(key, folder);
@@ -826,10 +825,7 @@ impl ReadyApp {
                     &self.sidebar.accounts,
                     &draft,
                 );
-                self.open_compose_window_with_state(
-                    state,
-                    crate::pop_out::compose::ComposeMode::New,
-                )
+                self.open_local_draft(state)
             }
             Message::LocalDraftLoaded(Ok(None)) => {
                 log::warn!("Local draft not found in DB");

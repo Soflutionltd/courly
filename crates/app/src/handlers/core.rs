@@ -1187,12 +1187,13 @@ impl ReadyApp {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
         self.pending_row_action = None;
+        self.release_new_message_compose();
         let thread = self.thread_list.threads.get(idx);
         if let Some(t) = thread {
             log::debug!("Thread selected: {}", t.id);
         }
 
-        // Local drafts open in a compose pop-out instead of the reading pane.
+        // Local drafts reopen in the compose instead of the message view.
         if let Some(t) = thread
             && t.is_local_draft
         {

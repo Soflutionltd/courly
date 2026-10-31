@@ -91,13 +91,15 @@ impl ReadyApp {
         self.dispatch_message_view_loads(window_id, generation, account_id, message_id, open_task)
     }
 
-    /// Open a compose window with the given mode.
-    pub(crate) fn open_compose_window(&mut self, mode: ComposeMode) -> Task<Message> {
+    /// Start a new message in the reading pane.
+    pub(crate) fn open_new_message(&mut self) -> Task<Message> {
         let state = ComposeState::new(&self.sidebar.accounts);
-        self.open_compose_window_with_state(state, mode)
+        let show = self.show_mail_view();
+        let compose = self.open_inline_compose(state, ComposeMode::New);
+        Task::batch([show, compose, iced::window::gain_focus(self.main_window_id)])
     }
 
-    /// Open a new message whose subject and body come from a template.
+    /// Start a new message whose subject and body come from a template.
     pub(crate) fn open_compose_from_template(
         &mut self,
         subject: Option<&str>,
@@ -109,29 +111,13 @@ impl ReadyApp {
             state.subject = subject.to_string();
         }
         state.body = rte::EditorState::from_html(body_html);
-        let (window_id, open_task) = self.open_compose_window_for(state);
-        let sig_task = self.resolve_compose_signature(window_id);
-        Task::batch([open_task, sig_task])
+        let show = self.show_mail_view();
+        Task::batch([show, self.insert_inline_compose(state)])
     }
 
-    /// Open a compose window with pre-built state and mode.
-    /// If a compose window already exists for the same reply thread,
-    /// focuses it instead of opening a duplicate.
-    pub(crate) fn open_compose_window_with_state(
-        &mut self,
-        mut state: ComposeState,
-        mode: ComposeMode,
-    ) -> Task<Message> {
-        if let Some(existing) = self.existing_compose_for_thread(&state) {
-            return existing;
-        }
-        self.prepare_compose_state(&mut state, mode);
-        let (window_id, open_task) = self.open_compose_window_for(state);
-
-        // Dispatch initial signature resolution for the default From account.
-        let sig_task = self.resolve_compose_signature(window_id);
-
-        Task::batch([open_task, sig_task])
+    /// Reopen a saved local draft in the reading pane, as it was saved.
+    pub(crate) fn open_local_draft(&mut self, state: ComposeState) -> Task<Message> {
+        self.insert_inline_compose(state)
     }
 
     /// Reply or forward in the main window, in place of the reading pane,
@@ -148,10 +134,14 @@ impl ReadyApp {
             }
             return self.dock_compose_window(existing);
         }
+        self.prepare_compose_state(&mut state, mode);
+        self.insert_inline_compose(state)
+    }
+
+    fn insert_inline_compose(&mut self, mut state: ComposeState) -> Task<Message> {
         if !self.release_inline_compose() {
             return Task::none();
         }
-        self.prepare_compose_state(&mut state, mode);
         state.inline = true;
         let id = iced::window::Id::unique();
         self.pop_out_windows
@@ -163,7 +153,7 @@ impl ReadyApp {
     /// Make room for a new inline compose: the current one is saved as a
     /// draft when it has content. False when that save fails, so the
     /// current one stays open.
-    fn release_inline_compose(&mut self) -> bool {
+    pub(crate) fn release_inline_compose(&mut self) -> bool {
         let Some(previous) = self.inline_compose else {
             return true;
         };
@@ -178,6 +168,18 @@ impl ReadyApp {
         self.pop_out_windows.remove(&previous);
         self.inline_compose = None;
         true
+    }
+
+    /// A new message has no conversation to come back to, so selecting
+    /// another one files it as a draft, the way Outlook does.
+    pub(crate) fn release_new_message_compose(&mut self) {
+        let is_new_message = matches!(
+            self.inline_compose.and_then(|id| self.pop_out_windows.get(&id)),
+            Some(PopOutWindow::Compose(s)) if s.reply_thread_id.is_none()
+        );
+        if is_new_message {
+            self.release_inline_compose();
+        }
     }
 
     /// Bring a detached compose back into the main window and close its
@@ -228,15 +230,6 @@ impl ReadyApp {
                 matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
             })
             .map(|(&id, _)| id)
-    }
-
-    /// Focus the compose already open for the same conversation, if any.
-    fn existing_compose_for_thread(&self, state: &ComposeState) -> Option<Task<Message>> {
-        let existing_id = self.compose_for_thread(state)?;
-        if self.inline_compose == Some(existing_id) {
-            return Some(Task::none());
-        }
-        Some(iced::window::gain_focus(existing_id))
     }
 
     fn prepare_compose_state(&self, state: &mut ComposeState, mode: ComposeMode) {
@@ -341,14 +334,7 @@ impl ReadyApp {
     /// A conversation missing from the list leaves nothing selected, and the
     /// reading pane then shows the compose on its own.
     fn show_thread_in_main_window(&mut self, thread_id: &str) -> Task<Message> {
-        if self.show_settings {
-            self.close_settings();
-        }
-        let mode = if self.app_mode == AppMode::Mail {
-            Task::none()
-        } else {
-            self.update(Message::SetAppMode(AppMode::Mail))
-        };
+        let mode = self.show_mail_view();
         let select = match self
             .thread_list
             .threads
@@ -362,6 +348,18 @@ impl ReadyApp {
             }
         };
         Task::batch([mode, select])
+    }
+
+    /// Leave settings and the calendar so the reading pane is on screen.
+    fn show_mail_view(&mut self) -> Task<Message> {
+        if self.show_settings {
+            self.close_settings();
+        }
+        if self.app_mode == AppMode::Mail {
+            Task::none()
+        } else {
+            self.update(Message::SetAppMode(AppMode::Mail))
+        }
     }
 
     /// Handle compose actions from command dispatch (Reply/ReplyAll/Forward

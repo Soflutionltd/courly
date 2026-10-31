@@ -204,8 +204,6 @@ impl ReadyApp {
         self.pop_out_windows
             .insert(window_id, PopOutWindow::Compose(Box::new(state)));
 
-        // Resolve the signature for the From account (matches
-        // `open_compose_window_with_state`).
         self.resolve_compose_signature(window_id)
     }
 }

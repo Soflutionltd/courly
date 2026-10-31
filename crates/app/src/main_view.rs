@@ -314,14 +314,17 @@ impl ReadyApp {
             .into()
     }
 
-    /// The inline compose, when it belongs to the conversation on screen or
-    /// when no conversation is selected.
+    /// The inline compose, when it is a new message, belongs to the
+    /// conversation or draft on screen, or no conversation is selected.
     pub(crate) fn inline_compose_for_selected_thread(
         &self,
     ) -> Option<(iced::window::Id, &pop_out::compose::ComposeState)> {
         let id = self.inline_compose?;
         let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get(&id) else {
             return None;
+        };
+        let Some(reply_thread_id) = state.reply_thread_id.as_deref() else {
+            return Some((id, &**state));
         };
         let Some(selected) = self
             .thread_list
@@ -330,7 +333,8 @@ impl ReadyApp {
         else {
             return Some((id, &**state));
         };
-        (state.reply_thread_id.as_deref() == Some(selected.id.as_str())).then_some((id, &**state))
+        (selected.id == reply_thread_id || selected.id == state.draft_id)
+            .then_some((id, &**state))
     }
 
     pub(crate) fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {
