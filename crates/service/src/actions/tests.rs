@@ -183,6 +183,30 @@ fn flight_guard_different_accounts_independent() {
     drop(g2);
 }
 
+#[tokio::test]
+async fn pending_op_retry_is_not_refused_by_its_own_flight_guard() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    with_test_conn(&ctx, |conn| {
+        db::db::pending_ops::db_pending_ops_enqueue_sync(
+            conn,
+            "op1",
+            "acc1",
+            "star",
+            "t1",
+            r#"{"starred":true}"#,
+            10,
+        )
+        .expect("enqueue star");
+    });
+
+    super::pending::process_pending_ops(&ctx, None).await;
+
+    assert!(get_thread_starred(&ctx, "acc1", "t1"));
+    assert!(!ctx.is_in_flight("acc1", "t1"));
+}
+
 // ── Local mutation tests ────────────────────────────────────────────
 
 #[tokio::test]

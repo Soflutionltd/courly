@@ -195,20 +195,18 @@ async fn process_account_group(
     ops: Vec<db::db::pending_ops::PendingOperation>,
 ) {
     for op in ops {
-        // In-flight guard: acquire to block concurrent user mutations,
-        // or skip if already in flight from a user action.
-        let _guard = match ctx.try_acquire_flight(&op.account_id, &op.resource_id) {
-            Some(g) => g,
-            None => {
-                log::debug!(
-                    "[pending_ops] Skipping {} for {}/{} - in flight",
-                    op.operation_type,
-                    op.account_id,
-                    op.resource_id
-                );
-                continue; // Leave pending, don't increment retry
-            }
-        };
+        // Skip a thread a user action is mutating right now. The guard itself
+        // is taken by `batch_execute` below: taking it here too would make
+        // the retry refuse itself as "already in flight".
+        if ctx.is_in_flight(&op.account_id, &op.resource_id) {
+            log::debug!(
+                "[pending_ops] Skipping {} for {}/{} - in flight",
+                op.operation_type,
+                op.account_id,
+                op.resource_id
+            );
+            continue; // Leave pending, don't increment retry
+        }
 
         // Mark as executing
         let update_result = ctx
