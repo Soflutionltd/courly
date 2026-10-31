@@ -1,7 +1,8 @@
 # Branchement des IA à Courly par MCP (plan)
 
 Statut : plan validé dans son principe (phases 1 à 3), réalisation plus tard.
-Décision restant ouverte : politique d'envoi par défaut (voir « Décisions à prendre »).
+Politique d'envoi décidée le 2026-10-31 : envoi direct par l'IA autorisé, réglable par
+compte (niveau 4 sans liste blanche obligatoire), avec les exceptions toujours validées.
 
 ## Objectif
 
@@ -111,8 +112,8 @@ Réglée par compte, avec un défaut global :
 3. Envoi après validation : l'action part dans la file `approvals`, Courly affiche une
    carte (destinataires, objet, texte, agent à l'origine) avec Envoyer, Modifier, Refuser ;
    l'outil répond « en attente » puis l'agent peut interroger le résultat.
-4. Envoi direct : réservé aux destinataires d'une liste blanche (domaines ou adresses),
-   tout le reste retombe en niveau 3.
+4. Envoi direct : niveau par défaut choisi par Antoine. L'agent envoie en son nom. Une
+   liste noire facultative (domaines ou adresses) renvoie ces destinataires au niveau 3.
 
 Toujours soumis à validation, quel que soit le niveau : transfert vers une adresse
 extérieure aux comptes, règle serveur permanente, suppression définitive, vidage de
@@ -204,7 +205,9 @@ Copie de `slate-mcp` adaptée :
 
 - Faire les trois phases dans l'ordre, chacune livrable seule. La phase 1 apporte déjà
   l'essentiel (tri, classement, brouillons, factures) sans aucun envoi.
-- Garder « brouillons » comme défaut et n'ouvrir l'envoi direct que par liste blanche.
+- Avec l'envoi direct par défaut, les exceptions toujours validées (transfert externe,
+  règle permanente, suppression définitive, rafale d'envois) sont le seul rempart contre
+  un mail piégé : ne jamais les rendre désactivables.
 - Réutiliser au maximum le code de SofDocs (serveur, jeton, installation des skills,
   relais) plutôt que repartir de zéro.
 - Pour Docix : passer par son MCP existant depuis la skill `courly-factures` plutôt que
@@ -212,7 +215,5 @@ Copie de `slate-mcp` adaptée :
 
 ## Décisions à prendre
 
-1. Politique d'envoi par défaut : brouillons (recommandé), validation dans Courly, ou
-   envoi direct par liste blanche.
-2. Domaine du relais distant et nom du Worker.
-3. Clients à connecter en un clic : Cursor, Claude Code, Claude Desktop, Codex.
+1. Domaine du relais distant et nom du Worker.
+2. Clients à connecter en un clic : Cursor, Claude Code, Claude Desktop, Codex.
