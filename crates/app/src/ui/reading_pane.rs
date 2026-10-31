@@ -766,63 +766,33 @@ fn thread_view_with_commands<'a>(
 ) -> Element<'a, Message> {
     let mut col = column![].spacing(0).width(Length::Fill);
 
-    // Thread header (subject, expand/collapse) - uses ReadingPaneMessage internally
-    col = col.push(
-        thread_header(
-            thread_ref,
-            &pane.message_expanded,
-            &pane.thread_messages,
-            &pane.thread_labels,
-            ctx.allows_set_keywords(),
-        )
-        .map(Message::ReadingPane),
-    );
-
-    // Command-backed toolbar
-    col = col.push(command_toolbar(registry, binding_table, ctx));
+    // Reply, Reply All and Forward live in each message's header; the
+    // conversation-wide actions sit on the thread header's info line.
+    col = col.push(thread_header(
+        thread_ref,
+        pane,
+        ctx.allows_set_keywords(),
+        Message::ReadingPane,
+        vec![
+            widgets::command_icon_button(
+                CommandId::EmailArchive,
+                icon::archive(),
+                registry,
+                binding_table,
+                ctx,
+            ),
+            widgets::command_icon_button(
+                CommandId::EmailTrash,
+                icon::trash(),
+                registry,
+                binding_table,
+                ctx,
+            ),
+        ],
+    ));
 
     col = col.push(message_list(pane).map(Message::ReadingPane));
     col.into()
-}
-
-/// Build the reading pane toolbar from command registry metadata.
-///
-/// Buttons pull labels, availability, and keybinding hints from the
-/// registry. Toggle commands (Star/Unstar) resolve their label
-/// automatically via `resolved_label()`.
-fn command_toolbar<'a>(
-    registry: &CommandRegistry,
-    binding_table: &BindingTable,
-    ctx: &CommandContext,
-) -> Element<'a, Message> {
-    // Reply, Reply All and Forward live in each message's header.
-    let toolbar = row![
-        Space::new().width(Length::Fill),
-        widgets::command_icon_button(
-            CommandId::EmailArchive,
-            icon::archive(),
-            registry,
-            binding_table,
-            ctx,
-        ),
-        widgets::command_icon_button(
-            CommandId::EmailTrash,
-            icon::trash(),
-            registry,
-            binding_table,
-            ctx,
-        ),
-    ]
-    .spacing(SPACE_XS)
-    .align_y(Alignment::Center);
-
-    container(toolbar)
-        .padding(Padding {
-            top: SPACE_XXS,
-            ..PAD_CONTENT
-        })
-        .width(Length::Fill)
-        .into()
 }
 
 // ── View helpers ────────────────────────────────────────
@@ -847,23 +817,23 @@ fn thread_view<'a>(
     // No command context → allow star by default (non-command path)
     col = col.push(thread_header(
         thread_ref,
-        &pane.message_expanded,
-        &pane.thread_messages,
-        &pane.thread_labels,
+        pane,
         true,
+        std::convert::identity,
+        Vec::new(),
     ));
 
     col = col.push(message_list(pane));
     col.into()
 }
 
-fn thread_header<'a>(
+fn thread_header<'a, M: Clone + 'a>(
     thread_ref: &'a ThreadRef,
-    message_expanded: &'a [bool],
-    messages: &'a [ThreadMessage],
-    labels: &'a [ResolvedLabel],
+    pane: &'a ReadingPane,
     may_set_keywords: bool,
-) -> Element<'a, ReadingPaneMessage> {
+    wrap: fn(ReadingPaneMessage) -> M,
+    actions: Vec<Element<'a, M>>,
+) -> Element<'a, M> {
     let subject = thread_ref
         .subject
         .as_deref()
@@ -882,10 +852,10 @@ fn thread_header<'a>(
         .style(theme::ButtonClass::Ghost.style());
 
     if may_set_keywords {
-        star_btn = star_btn.on_press(ReadingPaneMessage::ToggleStar);
+        star_btn = star_btn.on_press(wrap(ReadingPaneMessage::ToggleStar));
     }
 
-    let toggle_label = if message_expanded.iter().all(|&e| e) {
+    let toggle_label = if pane.message_expanded.iter().all(|&e| e) {
         t!("main.reading_pane.collapse_all")
     } else {
         t!("main.reading_pane.expand_all")
@@ -896,13 +866,13 @@ fn thread_header<'a>(
             .size(TEXT_SM)
             .style(theme::TextClass::Tertiary.style()),
     )
-    .on_press(ReadingPaneMessage::ToggleAllMessages)
+    .on_press(wrap(ReadingPaneMessage::ToggleAllMessages))
     .style(theme::ButtonClass::Ghost.style())
     .padding(PAD_ICON_BTN);
 
     let mut info_row = row![
         container(
-            text(message_count_label(messages.len()))
+            text(message_count_label(pane.thread_messages.len()))
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
@@ -912,7 +882,7 @@ fn thread_header<'a>(
     .align_y(Alignment::Center);
 
     // Label group pills.
-    for label in labels {
+    for label in &pane.thread_labels {
         let paint = label.paint;
         info_row = info_row.push(
             container(text(&label.name).size(TEXT_XS).color(paint.fg()))
@@ -935,6 +905,9 @@ fn thread_header<'a>(
 
     info_row = info_row.push(Space::new().width(Length::Fill));
     info_row = info_row.push(expand_collapse_btn);
+    for action in actions {
+        info_row = info_row.push(action);
+    }
 
     container(
         column![
