@@ -39,7 +39,6 @@ pub struct AppThreadDetail {
     pub messages: Vec<ThreadMessage>,
     pub labels: Vec<ResolvedLabel>,
     pub attachments: Vec<ThreadAttachment>,
-    pub attachments_collapsed: bool,
     /// Pre-loaded CID-to-image-bytes map for inline `<img src="cid:...">` resolution.
     pub inline_images: HashMap<String, image::Handle>,
 }
@@ -72,7 +71,6 @@ fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
         messages,
         labels,
         attachments,
-        attachments_collapsed: detail.attachments_collapsed,
         inline_images: HashMap::new(),
     }
 }

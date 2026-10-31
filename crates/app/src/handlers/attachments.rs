@@ -109,7 +109,27 @@ impl ReadyApp {
             }
         };
         Task::perform(
-            open_attachment_worker(client, app_data_dir, params.item),
+            open_attachment_worker(client, app_data_dir, params.item, open_file_with_os_default),
+            |_| Message::Noop,
+        )
+    }
+
+    /// Same fetch as `handle_open_attachment`, shown in a quick-look panel
+    /// instead of the default application.
+    pub(crate) fn handle_preview_attachment(
+        &mut self,
+        params: OpenAttachmentParams,
+    ) -> Task<Message> {
+        let Some(client) = self.service_client.clone() else {
+            log::warn!("preview_attachment: service_client unavailable");
+            return Task::none();
+        };
+        let Some(app_data_dir) = crate::APP_DATA_DIR.get().cloned() else {
+            log::warn!("preview_attachment: APP_DATA_DIR not set");
+            return Task::none();
+        };
+        Task::perform(
+            open_attachment_worker(client, app_data_dir, params.item, preview_file),
             |_| Message::Noop,
         )
     }
@@ -179,6 +199,7 @@ async fn open_attachment_worker(
     client: Arc<ServiceClient>,
     app_data_dir: PathBuf,
     item: AttachmentRef,
+    show: fn(&Path),
 ) {
     let ack = match client
         .fetch_attachment(item.account_id, item.message_id, item.attachment_id.clone())
@@ -211,7 +232,7 @@ async fn open_attachment_worker(
         log::warn!("open_attachment write ({}): {e}", dest.display());
         return;
     }
-    open_file_with_os_default(&dest);
+    show(&dest);
 }
 
 /// Returns `Some(parent_dir)` if the user picked a path - the parent
@@ -549,6 +570,24 @@ fn mime_to_ext(mime: &str) -> Option<&'static str> {
 /// Cross-platform OS-default file opener. Mirrors the URL pattern in
 /// `crates/app/src/ui/reading_pane.rs::open_url_in_browser`. No
 /// whitelist - the path is constructed from sanitized app-data joins.
+/// Quick Look on macOS; elsewhere the default application stands in.
+fn preview_file(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = std::process::Command::new("qlmanage")
+            .arg("-p")
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            log::warn!("preview_file qlmanage: {e}");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    open_file_with_os_default(path);
+}
+
 fn open_file_with_os_default(path: &Path) {
     #[cfg(target_os = "linux")]
     {

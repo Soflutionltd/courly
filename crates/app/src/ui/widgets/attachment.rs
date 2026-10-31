@@ -1,16 +1,16 @@
-#![allow(dead_code)]
-
-use iced::widget::{Space, button, column, container, row, text};
-use iced::{Alignment, Element, Length};
+use iced::widget::{button, container, row, text};
+use iced::{Alignment, Element, Length, Padding};
 use rust_i18n::t;
 use std::borrow::Cow;
 
 use crate::db::ThreadAttachment;
 use crate::icon;
+use crate::ui::anchored_overlay::anchored_overlay;
 use crate::ui::layout::{
-    ATTACHMENT_ACTION_BTN_HEIGHT, ATTACHMENT_CARD_MAIN_ROW_HEIGHT, ATTACHMENT_CARD_META_ROW_HEIGHT,
-    ATTACHMENT_ICON_BTN_WIDTH, ICON_ATTACHMENT_FILE, ICON_MD, ICON_XS, PAD_ICON_BTN, PAD_NAV_ITEM,
-    SPACE_MD, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_SM, TEXT_XS,
+    ATTACHMENT_CHIP_HEIGHT, ATTACHMENT_CHIP_NAME_MAX_CHARS, ATTACHMENT_CHIP_NAME_MAX_WIDTH,
+    ATTACHMENT_MENU_WIDTH,
+    DROPDOWN_ITEM_HEIGHT, ICON_MD, ICON_SM, ICON_XS, PAD_DROPDOWN, PAD_NAV_ITEM, SLOT_DROPDOWN,
+    SPACE_XS, SPACE_XXS, TEXT_MD, TEXT_SM, TEXT_XS,
 };
 use crate::ui::theme;
 
@@ -33,187 +33,120 @@ pub(crate) fn display_filename(name: &str) -> Cow<'_, str> {
     }
 }
 
-/// Click-target messages for an attachment card.
-///
-/// Bundled into a struct to keep `attachment_card`'s arity below the
-/// `too_many_arguments` clippy threshold.
-pub struct AttachmentCardActions<M> {
-    /// Row-body click: open with the system default handler.
+/// Click targets of an attachment chip.
+pub struct AttachmentChipActions<M> {
+    pub on_preview: M,
     pub on_open: M,
-    /// Save icon click: save with file picker.
     pub on_save: M,
-    /// "N versions" toggle. `None` when the card has only one version.
-    pub on_toggle_versions: Option<M>,
-    /// Meta line click: pop out the parent message of the latest version.
-    pub on_pop_out_latest: M,
-    /// One-per-version: pop out the parent message of each version. Index
-    /// matches `versions[]`.
-    pub on_pop_out_versions: Vec<M>,
+    pub on_toggle_menu: M,
+    pub on_close_menu: M,
 }
 
-pub fn attachment_card<'a, M: 'a + Clone>(
-    primary: &'a ThreadAttachment,
-    versions: &[&'a ThreadAttachment],
-    expanded: bool,
-    actions: AttachmentCardActions<M>,
+/// Outlook-style attachment chip: icon, name and size; a click previews the
+/// file and the chevron unfolds Preview / Open / Download.
+pub fn attachment_chip<'a, M: 'a + Clone>(
+    attachment: &'a ThreadAttachment,
+    menu_open: bool,
+    actions: AttachmentChipActions<M>,
 ) -> Element<'a, M> {
-    let filename = primary
+    let filename = attachment
         .filename
         .as_deref()
         .map_or_else(|| t!("compose.unnamed_attachment"), display_filename);
-    let file_icon = file_type_icon(primary.mime_type.as_deref());
-    let latest = versions.first().copied().unwrap_or(primary);
-    let date_sender = format_attachment_date_sender(latest);
+    let name_width = if filename.chars().count() > ATTACHMENT_CHIP_NAME_MAX_CHARS {
+        Length::Fixed(ATTACHMENT_CHIP_NAME_MAX_WIDTH)
+    } else {
+        Length::Shrink
+    };
 
-    let top_row = row![
-        container(
+    let body = button(
+        row![
+            file_type_icon(attachment.mime_type.as_deref())
+                .size(ICON_MD)
+                .style(text::secondary),
             text(filename)
-                .size(TEXT_MD)
+                .size(TEXT_SM)
                 .style(text::base)
                 .wrapping(text::Wrapping::None)
-                .ellipsis(text::Ellipsis::Middle),
-        )
-        .width(Length::Fill)
+                .ellipsis(text::Ellipsis::Middle)
+                .width(name_width),
+            text(format_file_size(attachment.size))
+                .size(TEXT_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_XS)
         .align_y(Alignment::Center),
+    )
+    .on_press(actions.on_preview.clone())
+    .padding(Padding::from([0.0, SPACE_XS]))
+    .height(Length::Fill)
+    .style(theme::ButtonClass::Ghost.style());
+
+    let chevron = button(
         container(
-            text(format_file_size(latest.size))
-                .size(TEXT_SM)
+            icon::chevron_down()
+                .size(ICON_XS)
                 .style(theme::TextClass::Tertiary.style()),
         )
-        .align_y(Alignment::Center),
-    ]
-    .spacing(SPACE_XS)
-    .align_y(Alignment::Center);
-
-    let meta_btn = button(
-        text(date_sender)
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
+        .center_y(Length::Fill),
     )
-    .on_press(actions.on_pop_out_latest.clone())
-    .style(theme::ButtonClass::Ghost.style())
-    .padding(0);
+    .on_press(actions.on_toggle_menu)
+    .padding(Padding::from([0.0, SPACE_XXS]))
+    .height(Length::Fill)
+    .style(theme::ButtonClass::Ghost.style());
 
-    let mut bottom_row = row![
-        container(meta_btn)
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-    ]
-    .spacing(SPACE_XS)
-    .align_y(Alignment::Center);
+    let chip = container(row![body, chevron].align_y(Alignment::Center))
+        .height(Length::Fixed(ATTACHMENT_CHIP_HEIGHT))
+        .style(theme::ContainerClass::AttachmentChip.style());
 
-    if let Some(toggle_msg) = actions.on_toggle_versions {
-        let chevron = if expanded {
-            icon::chevron_down()
-        } else {
-            icon::chevron_right()
-        };
-        let versions_btn = button(
-            row![
-                chevron
-                    .size(ICON_XS)
-                    .style(theme::TextClass::Tertiary.style()),
-                text(t!("compose.versions_count", count = versions.len()))
-                    .size(TEXT_XS)
-                    .line_height(iced::widget::text::LineHeight::Relative(1.0))
-                    .style(theme::TextClass::Tertiary.style()),
+    let mut overlay = anchored_overlay(chip).on_dismiss(actions.on_close_menu);
+    if menu_open {
+        let menu = container(
+            iced::widget::column![
+                menu_item(icon::eye(), t!("main.attachments.preview"), actions.on_preview),
+                menu_item(
+                    icon::external_link(),
+                    t!("main.attachments.open"),
+                    actions.on_open
+                ),
+                menu_item(
+                    icon::download(),
+                    t!("main.attachments.download"),
+                    actions.on_save
+                ),
             ]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center),
+            .spacing(SPACE_XXS),
         )
-        .on_press(toggle_msg)
-        .style(theme::ButtonClass::Ghost.style())
-        .padding(PAD_ICON_BTN);
-        bottom_row = bottom_row.push(versions_btn);
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style());
+        overlay = overlay.popup(menu).popup_width(ATTACHMENT_MENU_WIDTH);
     }
+    overlay.into()
+}
 
-    let bottom_row_pinned = container(bottom_row)
-        .height(Length::Fixed(ATTACHMENT_CARD_META_ROW_HEIGHT))
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-
-    let text_col = column![top_row, bottom_row_pinned]
-        .spacing(SPACE_XXXS)
-        .width(Length::Fill);
-
-    let main_row = container(
+fn menu_item<'a, M: 'a + Clone>(
+    ico: iced::widget::Text<'a>,
+    label: Cow<'a, str>,
+    on_press: M,
+) -> Element<'a, M> {
+    button(
         row![
-            container(file_icon.size(ICON_ATTACHMENT_FILE).style(text::secondary),)
+            container(ico.size(ICON_SM).style(text::secondary))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
                 .align_y(Alignment::Center),
-            text_col,
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
         ]
-        .spacing(SPACE_MD)
+        .spacing(SPACE_XS)
         .align_y(Alignment::Center),
     )
-    .height(Length::Fixed(ATTACHMENT_CARD_MAIN_ROW_HEIGHT))
-    .align_y(Alignment::Center);
-
-    let mut card_col = column![main_row].spacing(SPACE_XXXS);
-
-    if expanded && versions.len() > 1 {
-        card_col = card_col.push(Space::new().height(SPACE_XXS));
-        for (i, ver) in versions.iter().enumerate() {
-            let label = format_attachment_version_line(ver, i == 0);
-            let on_press = actions
-                .on_pop_out_versions
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| actions.on_pop_out_latest.clone());
-            let version_btn = button(
-                text(label)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-            )
-            .on_press(on_press)
-            .style(theme::ButtonClass::Ghost.style())
-            .padding(0)
-            .width(Length::Fill);
-            card_col = card_col.push(
-                row![
-                    Space::new().width(ICON_ATTACHMENT_FILE + SPACE_MD),
-                    version_btn,
-                ]
-                .align_y(Alignment::Center),
-            );
-        }
-        card_col = card_col.push(Space::new().height(SPACE_XS));
-    }
-
-    let info_card = container(card_col)
-        .padding(PAD_NAV_ITEM)
-        .style(theme::ContainerClass::AttachmentCard.style())
-        .width(Length::Fill);
-
-    let open_btn = button(
-        container(icon::external_link().size(ICON_MD).style(text::secondary))
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .height(Length::Fill)
-            .width(Length::Fill),
-    )
-    .on_press(actions.on_open)
-    .style(theme::ButtonClass::Ghost.style())
-    .padding(0)
-    .height(Length::Fixed(ATTACHMENT_ACTION_BTN_HEIGHT))
-    .width(Length::Fixed(ATTACHMENT_ICON_BTN_WIDTH));
-
-    let save_btn = button(
-        container(icon::download().size(ICON_MD).style(text::secondary))
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .height(Length::Fill)
-            .width(Length::Fill),
-    )
-    .on_press(actions.on_save)
-    .style(theme::ButtonClass::Ghost.style())
-    .padding(0)
-    .height(Length::Fixed(ATTACHMENT_ACTION_BTN_HEIGHT))
-    .width(Length::Fixed(ATTACHMENT_ICON_BTN_WIDTH));
-
-    row![info_card, open_btn, save_btn]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Start)
-        .into()
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
 }
 
 fn file_type_icon<'a>(mime_type: Option<&str>) -> iced::widget::Text<'a> {
@@ -222,82 +155,6 @@ fn file_type_icon<'a>(mime_type: Option<&str>) -> iced::widget::Text<'a> {
         t if t.contains("pdf") => icon::file_text(),
         t if t.contains("spreadsheet") || t.contains("excel") => icon::file_spreadsheet(),
         _ => icon::file(),
-    }
-}
-
-fn format_attachment_meta(att: &ThreadAttachment) -> String {
-    let type_label = mime_to_type_label(att.mime_type.as_deref());
-    let size = format_file_size(att.size);
-    let date = att
-        .date
-        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
-        .map(|ts| short_date(&ts.to_zoned(jiff::tz::TimeZone::system())))
-        .unwrap_or_default();
-    let sender = attachment_sender(att);
-    format!(
-        "{type_label} \u{00B7} {size} \u{00B7} {}",
-        t!("compose.attachment_date_from", date = date, sender = sender)
-    )
-}
-
-/// "Mar 14 from Alex Morgan" - file size lives separately in the top-right
-/// of the card now, so the meta line carries only the sender context.
-fn format_attachment_date_sender(att: &ThreadAttachment) -> String {
-    let date = att
-        .date
-        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
-        .map(|ts| short_date(&ts.to_zoned(jiff::tz::TimeZone::system())))
-        .unwrap_or_default();
-    let sender = attachment_sender(att);
-    t!("compose.attachment_date_from", date = date, sender = sender).into_owned()
-}
-
-/// Per-version line shown under an expanded attachment card. Drops the type
-/// label (already implied by the parent filename + icon) and tags the latest.
-fn format_attachment_version_line(att: &ThreadAttachment, is_latest: bool) -> String {
-    let size = format_file_size(att.size);
-    let date = att
-        .date
-        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
-        .map(|ts| short_date(&ts.to_zoned(jiff::tz::TimeZone::system())))
-        .unwrap_or_default();
-    let sender = attachment_sender(att);
-    let date_from = if is_latest {
-        t!(
-            "compose.attachment_date_from_latest",
-            date = date,
-            sender = sender
-        )
-    } else {
-        t!("compose.attachment_date_from", date = date, sender = sender)
-    };
-    format!("{size} \u{00B7} {date_from}")
-}
-
-/// "Mar 14", "14 mars".
-fn short_date(zoned: &jiff::Zoned) -> String {
-    t!(
-        "compose.attachment_short_date",
-        month = crate::i18n::month_short(zoned.month()),
-        day = format!("{:02}", zoned.day())
-    )
-    .into_owned()
-}
-
-fn attachment_sender(att: &ThreadAttachment) -> Cow<'_, str> {
-    att.from_name
-        .as_deref()
-        .map_or_else(|| t!("compose.unknown_attachment_sender"), Cow::Borrowed)
-}
-
-fn mime_to_type_label(mime: Option<&str>) -> Cow<'static, str> {
-    match mime.unwrap_or("") {
-        t if t.starts_with("image/") => t!("compose.attachment_type.image"),
-        t if t.contains("pdf") => Cow::Borrowed("PDF"),
-        t if t.contains("spreadsheet") || t.contains("excel") => Cow::Borrowed("Excel"),
-        t if t.contains("word") || t.contains("document") => Cow::Borrowed("Word"),
-        t if t.contains("zip") || t.contains("archive") => t!("compose.attachment_type.archive"),
-        _ => t!("compose.attachment_type.file"),
     }
 }
 

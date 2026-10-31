@@ -31,6 +31,9 @@ pub enum ContainerClass {
     /// Attachment card beside an email body. Its text follows the theme,
     /// so it only takes the white body sheet in a light theme.
     AttachmentCard,
+    /// Attachment chip under a message header: no fill of its own, a thin
+    /// edge in every theme so it reads on a white message card.
+    AttachmentChip,
     /// Rich text field outside a message card: the email body sheet with
     /// a visible edge, since the panel around it can be white too.
     EditorField,
@@ -121,6 +124,7 @@ impl ContainerClass {
             Self::MessageCard => style_message_card_container,
             Self::EmailBody => style_email_body_container,
             Self::AttachmentCard => style_attachment_card_container,
+            Self::AttachmentChip => style_attachment_chip_container,
             Self::EditorField => style_editor_field_container,
             Self::ActionBar => style_action_bar_container,
             Self::Floating => style_floating_container,
@@ -366,6 +370,22 @@ fn style_email_body_container(theme: &Theme) -> container::Style {
     };
     container::Style {
         background: Some(bg.into()),
+        border: iced::Border {
+            color: border_color,
+            width: 1.0,
+            radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_attachment_chip_container(theme: &Theme) -> container::Style {
+    let border_color = if theme_is_light(theme) {
+        Color::BLACK.scale_alpha(0.12)
+    } else {
+        theme.palette().background.strongest.color.scale_alpha(0.2)
+    };
+    container::Style {
         border: iced::Border {
             color: border_color,
             width: 1.0,

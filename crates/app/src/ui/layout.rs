@@ -60,36 +60,14 @@ pub const ICON_LG: f32 = 13.0;
 pub const ICON_XL: f32 = 14.0;
 /// 28px - Mode switcher hero icon
 pub const ICON_HERO: f32 = 28.0;
-/// 24px - File type icon on attachment cards (near-doubled standard icon)
-pub const ICON_ATTACHMENT_FILE: f32 = 24.0;
-/// Fixed height of the file-info row inside an attachment card. Pinned so
-/// the collapsed card is the same height regardless of whether the
-/// "N versions" badge is present (the badge has button padding, the meta
-/// line is bare text - without a fixed wrapper height the row jumps).
-pub const ATTACHMENT_CARD_MAIN_ROW_HEIGHT: f32 = 36.0;
-/// Fixed height of the bottom (meta) row inside an attachment card.
-/// Matches the natural height of the versions badge (text size + button
-/// padding) so the row keeps a consistent height whether or not the
-/// badge is rendered. Without this, the filename row above shifts UP
-/// vertically when the badge is present, because the centered text
-/// column gets taller overall.
-pub const ATTACHMENT_CARD_META_ROW_HEIGHT: f32 = TEXT_SM + 2.0 * 4.0;
-/// Fixed height for the Open / Save action buttons that sit beside an
-/// attachment card. Equals `ATTACHMENT_CARD_MAIN_ROW_HEIGHT` plus the
-/// card's vertical padding (PAD_NAV_ITEM top + bottom = 8) so the buttons
-/// exactly span the collapsed card's height.
-pub const ATTACHMENT_ACTION_BTN_HEIGHT: f32 = ATTACHMENT_CARD_MAIN_ROW_HEIGHT + 8.0;
-/// Fixed width for the "Attachments" group header's right-side action
-/// button (Save All). Has to equal the file row's [Open, Save] cluster
-/// width (`2 * ATTACHMENT_ICON_BTN_WIDTH + SPACE_XS`) so the header's
-/// title area ends where the bordered file card ends.
-pub const ATTACHMENT_HEADER_ACTION_WIDTH: f32 = 2.0 * ATTACHMENT_ICON_BTN_WIDTH + SPACE_XS;
-/// Fixed width for each Open / Save icon button on a file row. Together
-/// with `SPACE_XS` between them and `ATTACHMENT_HEADER_ACTION_WIDTH` on
-/// Save All, this is what aligns the right edges of the title area and
-/// the bordered file card. Bumped from the natural ~28px so the icons
-/// have visual breathing room.
-pub const ATTACHMENT_ICON_BTN_WIDTH: f32 = 36.0;
+/// Height of an attachment chip under a message header in the reading pane.
+pub const ATTACHMENT_CHIP_HEIGHT: f32 = 28.0;
+/// Width an attachment chip gives a filename longer than
+/// `ATTACHMENT_CHIP_NAME_MAX_CHARS`, elided in the middle.
+pub const ATTACHMENT_CHIP_NAME_MAX_WIDTH: f32 = 200.0;
+pub const ATTACHMENT_CHIP_NAME_MAX_CHARS: usize = 32;
+/// Width of the Preview / Open / Download menu of an attachment chip.
+pub const ATTACHMENT_MENU_WIDTH: f32 = 180.0;
 /// Height of a compact attachment pill in the pop-out message viewer.
 /// Single-row content (`[icon] filename size`), shorter than the reading
 /// pane card since there is no meta line or version list.

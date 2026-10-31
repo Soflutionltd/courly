@@ -11,7 +11,6 @@ use crate::component::Component;
 use crate::db::{
     AppThreadDetail, DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage,
 };
-use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
@@ -23,21 +22,16 @@ use crate::ui::widgets;
 pub enum ReadingPaneMessage {
     ToggleMessageExpanded(usize),
     ToggleAllMessages,
-    ToggleAttachmentsCollapsed,
-    /// Save all attachments in the current thread.
-    SaveAllAttachments,
-    /// Toggle expansion of the version list for the attachment with the given
-    /// filename (versions are deduped on filename).
-    ToggleAttachmentVersions(String),
-    /// User clicked the row body of an attachment card; open with the system
-    /// default handler. The string is the attachment id.
+    /// Unfold or fold the Preview / Open / Download menu of the attachment
+    /// with this id.
+    ToggleAttachmentMenu(String),
+    CloseAttachmentMenu,
+    /// Quick-look the attachment with this id.
+    PreviewAttachment(String),
+    /// Open the attachment with this id in the system default handler.
     OpenAttachment(String),
-    /// User clicked the save icon on an attachment card. The string is the
-    /// attachment id.
+    /// Save the attachment with this id through a file picker.
     SaveAttachment(String),
-    /// User clicked the attachment meta line or a version line; pop out the
-    /// parent message. The string is the message id.
-    PopOutMessageById(String),
     PopOut(usize),
     /// Reply to the message at the given index.
     Reply(usize),
@@ -79,10 +73,6 @@ pub enum ReadingPaneMessage {
 /// Events the reading pane emits upward to the App.
 #[derive(Debug, Clone)]
 pub enum ReadingPaneEvent {
-    AttachmentCollapseChanged {
-        thread_key: String,
-        collapsed: bool,
-    },
     /// User clicked the pop-out button on a message; open it in a new window.
     OpenMessagePopOut {
         message_index: usize,
@@ -118,15 +108,12 @@ pub enum ReadingPaneEvent {
     },
     /// User toggled the star on the thread.
     ToggleStar,
-    /// Attachments roadmap Phase 5: user clicked Open on an
-    /// attachment chip.
+    /// User asked for a quick look at an attachment.
+    PreviewAttachment(crate::handlers::attachments::OpenAttachmentParams),
+    /// User clicked Open on an attachment chip.
     OpenAttachment(crate::handlers::attachments::OpenAttachmentParams),
-    /// Attachments roadmap Phase 5: user clicked Save on an
-    /// attachment chip.
+    /// User clicked Download on an attachment chip.
     SaveAttachment(crate::handlers::attachments::SaveAttachmentParams),
-    /// Attachments roadmap Phase 5: user clicked Save All in the
-    /// reading pane header.
-    SaveAllAttachments(crate::handlers::attachments::SaveAllAttachmentsParams),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -138,20 +125,13 @@ pub struct ReadingPane {
     pub message_expanded: Vec<bool>,
     /// Index of the currently focused message (for keyboard navigation).
     pub focused_message: Option<usize>,
-    pub attachments_collapsed: bool,
-    pub attachment_collapse_cache: HashMap<String, bool>,
     pub date_display: DateDisplay,
     /// The currently viewed thread (set by App when a thread is selected).
     current_thread: Option<ThreadRef>,
     /// Search terms to highlight in message bodies. Empty when not in search mode.
     pub search_highlight_terms: Vec<String>,
-    /// Cached deduplicated attachments. The first usize is the index of the
-    /// **latest** version (primary card), the Vec contains all indices for
-    /// that filename sorted latest-first.
-    deduped_attachments: Vec<(usize, Vec<usize>)>,
-    /// Set of filenames whose versions list is currently expanded.
-    /// Reset on thread switch.
-    expanded_attachment_versions: std::collections::HashSet<String>,
+    /// Attachment whose Preview / Open / Download menu is unfolded.
+    attachment_menu: Option<String>,
     /// HTML render state, one per message.
     html_bodies: Vec<super::mail_body::HtmlBodyState>,
     /// Inline images for CID resolution in HTML bodies, keyed by Content-ID.
@@ -173,6 +153,7 @@ struct ThreadRef {
 /// `build_attachment_event` for a single attachment chip click.
 #[derive(Debug, Clone, Copy)]
 enum AttachmentAction {
+    Preview,
     Open,
     Save,
 }
@@ -200,6 +181,9 @@ impl ReadingPane {
             mime_type: row.mime_type.clone(),
         };
         Some(match action {
+            AttachmentAction::Preview => ReadingPaneEvent::PreviewAttachment(
+                crate::handlers::attachments::OpenAttachmentParams { item },
+            ),
             AttachmentAction::Open => ReadingPaneEvent::OpenAttachment(
                 crate::handlers::attachments::OpenAttachmentParams { item },
             ),
@@ -265,13 +249,10 @@ impl ReadingPane {
             thread_labels: Vec::new(),
             message_expanded: Vec::new(),
             focused_message: None,
-            attachments_collapsed: false,
-            attachment_collapse_cache: HashMap::new(),
             date_display: DateDisplay::RelativeOffset,
             current_thread: None,
             search_highlight_terms: Vec::new(),
-            deduped_attachments: Vec::new(),
-            expanded_attachment_versions: std::collections::HashSet::new(),
+            attachment_menu: None,
             html_bodies: Vec::new(),
             inline_image_bytes: HashMap::new(),
             invites: HashMap::new(),
@@ -299,21 +280,10 @@ impl ReadingPane {
         self.thread_labels.clear();
         self.message_expanded.clear();
         self.focused_message = None;
-        self.deduped_attachments.clear();
-        self.expanded_attachment_versions.clear();
+        self.attachment_menu = None;
         self.html_bodies.clear();
         self.inline_image_bytes.clear();
         self.invites.clear();
-        // Restore attachment collapse state from cache
-        self.attachments_collapsed = thread
-            .map(|t| {
-                let key = format!("{}:{}", t.account_id, t.id);
-                self.attachment_collapse_cache
-                    .get(&key)
-                    .copied()
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
     }
 
     /// Apply message expansion rules after messages are loaded.
@@ -373,14 +343,6 @@ impl ReadingPane {
             is_starred: detail.is_starred,
         });
 
-        // Set attachments collapsed from persisted state
-        self.attachments_collapsed = detail.attachments_collapsed;
-
-        // Update cache too
-        let key = format!("{}:{}", detail.account_id, detail.thread_id);
-        self.attachment_collapse_cache
-            .insert(key, detail.attachments_collapsed);
-
         // Apply expansion rules then set messages
         self.apply_message_expansion(&detail.messages);
         self.html_bodies = detail
@@ -402,7 +364,6 @@ impl ReadingPane {
         self.thread_attachments = detail.attachments;
         self.thread_labels = detail.labels;
         self.inline_image_bytes = super::mail_body::inline_image_bytes(&detail.inline_images);
-        self.recompute_deduped_attachments();
     }
 
     /// Invites still waiting for their calendar lookup, as
@@ -432,44 +393,6 @@ impl ReadingPane {
         if let Some(card) = self.invites.get_mut(message_id) {
             card.finish(result);
         }
-    }
-
-    /// Recompute the deduplicated attachment list from `thread_attachments`.
-    fn recompute_deduped_attachments(&mut self) {
-        // Group indices by filename, then sort each group latest-first by date.
-        // Output rows are ordered by the position of each group's latest index
-        // in `thread_attachments` so the most recent uploads appear first.
-        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
-        for (i, att) in self.thread_attachments.iter().enumerate() {
-            let name = att.filename.as_deref().unwrap_or("").to_string();
-            by_name.entry(name).or_default().push(i);
-        }
-        for indices in by_name.values_mut() {
-            indices.sort_by(|&a, &b| {
-                let date_a = self.thread_attachments[a].date.unwrap_or(0);
-                let date_b = self.thread_attachments[b].date.unwrap_or(0);
-                date_b.cmp(&date_a)
-            });
-        }
-
-        let mut rows: Vec<(usize, Vec<usize>)> = by_name
-            .into_values()
-            .map(|indices| (indices[0], indices))
-            .collect();
-        // Order rows by the latest version's position in the thread (most
-        // recent first), giving us a stable, date-ordered top-level list.
-        rows.sort_by(|a, b| {
-            let date_a = self.thread_attachments[a.0].date.unwrap_or(0);
-            let date_b = self.thread_attachments[b.0].date.unwrap_or(0);
-            date_b.cmp(&date_a)
-        });
-        self.deduped_attachments = rows;
-    }
-
-    fn thread_key(&self) -> Option<String> {
-        self.current_thread
-            .as_ref()
-            .map(|t| format!("{}:{}", t.account_id, t.id))
     }
 
     /// Update the star state for a thread if it's currently displayed.
@@ -512,72 +435,31 @@ impl Component for ReadingPane {
                 self.message_expanded.fill(!all_expanded);
                 (Task::none(), None)
             }
-            ReadingPaneMessage::ToggleAttachmentsCollapsed => {
-                self.attachments_collapsed = !self.attachments_collapsed;
-                let event = self.thread_key().map(|key| {
-                    self.attachment_collapse_cache
-                        .insert(key.clone(), self.attachments_collapsed);
-                    ReadingPaneEvent::AttachmentCollapseChanged {
-                        thread_key: key,
-                        collapsed: self.attachments_collapsed,
-                    }
-                });
-                (Task::none(), event)
-            }
-            ReadingPaneMessage::SaveAllAttachments => {
-                let Some(thread) = self.current_thread.as_ref() else {
-                    return (Task::none(), None);
+            ReadingPaneMessage::ToggleAttachmentMenu(att_id) => {
+                self.attachment_menu = if self.attachment_menu.as_deref() == Some(att_id.as_str()) {
+                    None
+                } else {
+                    Some(att_id)
                 };
-                let items: Vec<crate::handlers::attachments::AttachmentRef> = self
-                    .thread_attachments
-                    .iter()
-                    .map(|a| crate::handlers::attachments::AttachmentRef {
-                        account_id: thread.account_id.clone(),
-                        message_id: a.message_id.clone(),
-                        attachment_id: a.id.clone(),
-                        filename: a.filename.clone(),
-                        mime_type: a.mime_type.clone(),
-                    })
-                    .collect();
-                if items.is_empty() {
-                    return (Task::none(), None);
-                }
-                let event = ReadingPaneEvent::SaveAllAttachments(
-                    crate::handlers::attachments::SaveAllAttachmentsParams {
-                        thread_id: thread.id.clone(),
-                        items,
-                    },
-                );
-                (Task::none(), Some(event))
-            }
-            ReadingPaneMessage::ToggleAttachmentVersions(filename) => {
-                if !self.expanded_attachment_versions.remove(&filename) {
-                    self.expanded_attachment_versions.insert(filename);
-                }
                 (Task::none(), None)
             }
+            ReadingPaneMessage::CloseAttachmentMenu => {
+                self.attachment_menu = None;
+                (Task::none(), None)
+            }
+            ReadingPaneMessage::PreviewAttachment(att_id) => {
+                self.attachment_menu = None;
+                let event = self.build_attachment_event(&att_id, AttachmentAction::Preview);
+                (Task::none(), event)
+            }
             ReadingPaneMessage::OpenAttachment(att_id) => {
-                let Some(event) = self.build_attachment_event(&att_id, AttachmentAction::Open)
-                else {
-                    return (Task::none(), None);
-                };
-                (Task::none(), Some(event))
+                self.attachment_menu = None;
+                let event = self.build_attachment_event(&att_id, AttachmentAction::Open);
+                (Task::none(), event)
             }
             ReadingPaneMessage::SaveAttachment(att_id) => {
-                let Some(event) = self.build_attachment_event(&att_id, AttachmentAction::Save)
-                else {
-                    return (Task::none(), None);
-                };
-                (Task::none(), Some(event))
-            }
-            ReadingPaneMessage::PopOutMessageById(message_id) => {
-                let event = self
-                    .thread_messages
-                    .iter()
-                    .position(|m| m.id == message_id)
-                    .map(|index| ReadingPaneEvent::OpenMessagePopOut {
-                        message_index: index,
-                    });
+                self.attachment_menu = None;
+                let event = self.build_attachment_event(&att_id, AttachmentAction::Save);
                 (Task::none(), event)
             }
             ReadingPaneMessage::PopOut(index) => {
@@ -963,18 +845,6 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     let first_message_date = pane.thread_messages.last().and_then(|m| m.date);
     let mut msg_col = column![].spacing(SPACE_XS).padding(messages_pad);
 
-    // Attachments scroll with the rest of the thread content rather than
-    // staying pinned at the top - the collapse header lets users park the
-    // section out of the way once they're past it.
-    if !pane.thread_attachments.is_empty() {
-        msg_col = msg_col.push(attachment_group(
-            &pane.thread_attachments,
-            &pane.deduped_attachments,
-            pane.attachments_collapsed,
-            &pane.expanded_attachment_versions,
-        ));
-    }
-
     for (i, msg) in pane.thread_messages.iter().enumerate() {
         let is_expanded = pane.message_expanded.get(i).copied().unwrap_or(false);
         if is_expanded {
@@ -998,6 +868,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 first_message_date,
                 &pane.search_highlight_terms,
                 invite,
+                message_attachments(pane, &msg.id),
                 html_body,
                 ReadingPaneMessage::LinkClicked,
                 ReadingPaneMessage::ToggleMessageExpanded,
@@ -1025,131 +896,46 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
         .into()
 }
 
-// ── Attachment group ────────────────────────────────────
+// ── Attachments ─────────────────────────────────────────
 
-fn attachment_group<'a>(
-    attachments: &'a [ThreadAttachment],
-    deduped_indices: &'a [(usize, Vec<usize>)],
-    collapsed: bool,
-    expanded_versions: &'a std::collections::HashSet<String>,
-) -> Element<'a, ReadingPaneMessage> {
-    let chevron = if collapsed {
-        icon::chevron_right()
-    } else {
-        icon::chevron_down()
-    };
-
-    // Header: chevron + title is one button (collapse/expand).
-    let title_btn = button(
-        row![
-            container(
-                chevron
-                    .size(ICON_XS)
-                    .style(theme::TextClass::Tertiary.style())
-            )
-            .align_y(Alignment::Center),
-            Space::new().width(SPACE_XXS),
-            container(
-                text(t!(
-                    "main.reading_pane.attachments",
-                    count = deduped_indices.len()
-                ))
-                .size(TEXT_MD)
-                .font(font::text_semibold())
-                .style(text::base),
-            )
-            .align_y(Alignment::Center),
-        ]
-        .align_y(Alignment::Center),
-    )
-    .on_press(ReadingPaneMessage::ToggleAttachmentsCollapsed)
-    .style(theme::ButtonClass::Ghost.style())
-    .padding(PAD_ICON_BTN)
-    .width(Length::Fill);
-
-    // Save All: separate button styled like Reply/Forward in-section
-    // actions. Width pinned to match the file row's [Open, Save] cluster
-    // so the header's title area ends where the bordered file card ends.
-    let save_all_btn = button(
-        row![
-            icon::download().size(ICON_SM).style(text::secondary),
-            text(t!("main.reading_pane.save_all"))
-                .size(TEXT_SM)
-                .style(text::secondary),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
-    )
-    .on_press(ReadingPaneMessage::SaveAllAttachments)
-    .style(theme::ButtonClass::Ghost.style())
-    .padding(PAD_ICON_BTN)
-    .width(Length::Fixed(ATTACHMENT_HEADER_ACTION_WIDTH));
-
-    let header = row![title_btn, save_all_btn]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center);
-
-    let mut content_col = column![header].spacing(SPACE_XS);
-
-    if !collapsed {
-        for (att_idx, version_indices) in deduped_indices {
-            let Some(primary) = attachments.get(*att_idx) else {
-                continue;
-            };
-            let versions: Vec<&ThreadAttachment> = version_indices
-                .iter()
-                .filter_map(|i| attachments.get(*i))
-                .collect();
-            let filename_key = primary.filename.clone().unwrap_or_default();
-            let expanded = expanded_versions.contains(&filename_key);
-            let on_toggle_versions = if versions.len() > 1 {
-                Some(ReadingPaneMessage::ToggleAttachmentVersions(
-                    filename_key.clone(),
-                ))
-            } else {
-                None
-            };
-            let latest_message_id = versions
-                .first()
-                .map(|v| v.message_id.clone())
-                .unwrap_or_else(|| primary.message_id.clone());
-            let on_pop_out_versions: Vec<ReadingPaneMessage> = versions
-                .iter()
-                .map(|v| ReadingPaneMessage::PopOutMessageById(v.message_id.clone()))
-                .collect();
-            let actions = widgets::AttachmentCardActions {
-                on_open: ReadingPaneMessage::OpenAttachment(primary.id.clone()),
-                on_save: ReadingPaneMessage::SaveAttachment(primary.id.clone()),
-                on_toggle_versions,
-                on_pop_out_latest: ReadingPaneMessage::PopOutMessageById(latest_message_id),
-                on_pop_out_versions,
-            };
-            content_col = content_col.push(widgets::attachment_card(
-                primary, &versions, expanded, actions,
-            ));
-        }
+/// The message's attachments as one row of chips under its header,
+/// scrolling sideways when they overflow the card.
+fn message_attachments<'a>(
+    pane: &'a ReadingPane,
+    message_id: &str,
+) -> Option<Element<'a, ReadingPaneMessage>> {
+    let mut chips = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+    let mut any = false;
+    for attachment in pane
+        .thread_attachments
+        .iter()
+        .filter(|attachment| attachment.message_id == message_id)
+    {
+        any = true;
+        let id = &attachment.id;
+        chips = chips.push(widgets::attachment_chip(
+            attachment,
+            pane.attachment_menu.as_deref() == Some(id.as_str()),
+            widgets::AttachmentChipActions {
+                on_preview: ReadingPaneMessage::PreviewAttachment(id.clone()),
+                on_open: ReadingPaneMessage::OpenAttachment(id.clone()),
+                on_save: ReadingPaneMessage::SaveAttachment(id.clone()),
+                on_toggle_menu: ReadingPaneMessage::ToggleAttachmentMenu(id.clone()),
+                on_close_menu: ReadingPaneMessage::CloseAttachmentMenu,
+            },
+        ));
     }
-
-    // Top padding intentionally smaller than PAD_CONTENT.top: the toolbar
-    // above already provides bottom padding, so the default 16px stacked
-    // on top of that read as too much separation.
-    container(
-        container(content_col)
-            .padding(PAD_CARD)
-            .style(theme::ContainerClass::MessageCard.style())
-            .width(Length::Fill),
-    )
-    // Horizontal padding comes from `msg_col` (`messages_pad = [0, SPACE_LG]`)
-    // since the attachment group lives inside the scrollable now. Keep only
-    // the bottom gap that separates it from the first message card.
-    .padding(iced::Padding {
-        top: 0.0,
-        right: 0.0,
-        bottom: PAD_CONTENT.bottom,
-        left: 0.0,
+    any.then(|| {
+        scrollable(chips)
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(TOOLBAR_SCROLLBAR_WIDTH)
+                    .scroller_width(TOOLBAR_SCROLLBAR_WIDTH)
+                    .spacing(SCROLLBAR_SPACING),
+            ))
+            .width(Length::Fill)
+            .into()
     })
-    .width(Length::Fill)
-    .into()
 }
 
 /// Open a URL in the system default browser.

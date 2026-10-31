@@ -257,50 +257,12 @@ impl ReadyApp {
 
     pub(crate) fn handle_reading_pane_event(&mut self, event: ReadingPaneEvent) -> Task<Message> {
         match event {
-            ReadingPaneEvent::AttachmentCollapseChanged {
-                thread_key,
-                collapsed,
-            } => {
-                // thread_key format is "account_id:thread_id"
-                let Some((account_id, thread_id)) = thread_key.split_once(':') else {
-                    return Task::none();
-                };
-                // Phase 6a: persist via Service IPC instead of UI-side write.
-                // The reading-pane UI state is already updated through the
-                // `ReadingPaneEvent` flow, so no eager-flip rollback is
-                // needed here; we just persist + log on failure. The
-                // policy is "log-only" because the surface is one bool
-                // per thread - surfacing a status-bar error on every
-                // failed collapse-toggle would be more annoying than
-                // helpful, and the next reload will catch up.
-                let Some(client) = self.service_client.as_ref().cloned() else {
-                    log::warn!("thread_ui_state.set: no ServiceClient yet; collapse not persisted");
-                    return Task::none();
-                };
-                let account_id = account_id.to_string();
-                let thread_id = thread_id.to_string();
-                Task::perform(
-                    async move {
-                        client
-                            .set_thread_ui_state(account_id, thread_id, Some(collapsed))
-                            .await
-                    },
-                    |result| {
-                        if let Err(e) = result {
-                            log::warn!("thread_ui_state.set failed: {e}");
-                        }
-                        Message::Noop
-                    },
-                )
-            }
             ReadingPaneEvent::OpenMessagePopOut { message_index } => {
                 self.open_message_view_window(message_index)
             }
+            ReadingPaneEvent::PreviewAttachment(params) => self.handle_preview_attachment(params),
             ReadingPaneEvent::OpenAttachment(params) => self.handle_open_attachment(params),
             ReadingPaneEvent::SaveAttachment(params) => self.handle_save_attachment(params),
-            ReadingPaneEvent::SaveAllAttachments(params) => {
-                self.handle_save_all_attachments(params)
-            }
             ReadingPaneEvent::ReplyToMessage { message_index } => self.handle_reading_pane_compose(
                 message_index,
                 ComposeMode::Reply {

@@ -386,6 +386,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
     invite: Option<Element<'a, M>>,
+    attachments: Option<Element<'a, M>>,
     html_body: Option<Element<'a, M>>,
     on_link: impl Fn(String) -> M + 'a,
     on_toggle: impl Fn(usize) -> M,
@@ -525,6 +526,9 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .into();
 
     let mut card_content = column![header].spacing(SPACE_XS);
+    if let Some(attachments) = attachments {
+        card_content = card_content.push(attachments);
+    }
     if let Some(invite) = invite {
         card_content = card_content.push(invite);
     }
