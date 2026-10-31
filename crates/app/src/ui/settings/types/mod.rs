@@ -474,6 +474,10 @@ impl Settings {
         {
             self.mail_check_interval = seconds.into();
         }
+        if let Some(label) = ui.email_body_background.as_deref() {
+            self.email_body_background = EmailBodyBackground::from_label(label);
+        }
+        crate::ui::theme::set_email_body_background(self.email_body_background);
         if let Some(zoom) = email_zoom_factor(&self.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
         }
@@ -769,6 +773,7 @@ mod tests {
             toolbar_layout: None,
             search_scope: None,
             mail_check_interval: None,
+            email_body_background: None,
         }
     }
 

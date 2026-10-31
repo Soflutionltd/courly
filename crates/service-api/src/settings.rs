@@ -66,6 +66,8 @@ pub enum SettingValue {
     /// Seconds between two checks for new mail on accounts without push
     /// (Outlook, and Gmail or JMAP when push is unavailable).
     MailCheckInterval(String),
+    /// Email body background mode, as its settings label ("Auto").
+    EmailBodyBackground(String),
 }
 
 impl SettingValue {
@@ -90,6 +92,7 @@ impl SettingValue {
             Self::ToolbarLayout(_) => "toolbar_layout",
             Self::SearchScope(_) => "search_scope",
             Self::MailCheckInterval(_) => "mail_check_interval",
+            Self::EmailBodyBackground(_) => "email_body_background",
         }
     }
 
@@ -121,7 +124,8 @@ impl SettingValue {
             | Self::SidebarLayout(s)
             | Self::ToolbarLayout(s)
             | Self::SearchScope(s)
-            | Self::MailCheckInterval(s) => s.clone(),
+            | Self::MailCheckInterval(s)
+            | Self::EmailBodyBackground(s) => s.clone(),
         }
     }
 }
@@ -184,6 +188,7 @@ mod tests {
             SettingValue::FontSize("medium".to_string()),
             SettingValue::ReadingPanePosition("right".to_string()),
             SettingValue::MailCheckInterval("2".to_string()),
+            SettingValue::EmailBodyBackground("Auto".to_string()),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();
