@@ -137,7 +137,7 @@ MCP ne réveille pas un agent quand un mail arrive. Trois moyens, cumulables :
   (`~/Library/Application Support/Claude/claude_desktop_config.json`), Codex
   (`~/.codex/config.toml`). Écriture fusionnée, jamais d'écrasement, sauvegarde avant.
 - Copier l'adresse et le jeton pour un autre client ; régénérer le jeton.
-- Par compte : niveau d'autonomie, liste blanche, accès oui ou non.
+- Par compte : niveau d'autonomie, liste noire facultative, accès oui ou non.
 - Skills : installées, à jour ou périmées, bouton d'installation.
 - Journal : dernières actions d'agent, filtre par agent et par compte, annulation des
   actions réversibles.
