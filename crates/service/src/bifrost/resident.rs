@@ -815,7 +815,13 @@ fn push_subscribe_scopes(
             }
             scopes
         }
-        BifrostProviderKind::Gmail | BifrostProviderKind::Jmap => vec![CursorScope::Account],
+        BifrostProviderKind::Gmail => vec![CursorScope::Account],
+        // JMAP push is per data type; its cursors are the Email and Mailbox
+        // states, and an `Account` scope maps to no data type at all.
+        BifrostProviderKind::Jmap => vec![
+            CursorScope::Type(ObjectType::Email),
+            CursorScope::Type(ObjectType::Mailbox),
+        ],
     }
 }
 
@@ -1734,6 +1740,26 @@ mod tests {
         assert!(scopes.contains(&CursorScope::Folder(FolderId(
             "#user/alice/INBOX".to_string()
         ))));
+    }
+
+    /// JMAP push subscribes per data type, so the request must name the
+    /// Email and Mailbox cursors; an `Account` scope maps to none and the
+    /// whole subscription is refused. Gmail keeps its account-wide watch.
+    #[test]
+    fn push_subscribe_scopes_name_each_providers_push_cursors() {
+        let (_, _, index) = super::super::containers::build_container_rows("acct", &[])
+            .expect("empty containers classify");
+        assert_eq!(
+            super::push_subscribe_scopes(BifrostProviderKind::Jmap, &index),
+            vec![
+                CursorScope::Type(ObjectType::Email),
+                CursorScope::Type(ObjectType::Mailbox),
+            ]
+        );
+        assert_eq!(
+            super::push_subscribe_scopes(BifrostProviderKind::Gmail, &index),
+            vec![CursorScope::Account]
+        );
     }
 
     /// The per-kick slot rebuild (detach + reattach, the only channel a
