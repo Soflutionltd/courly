@@ -102,6 +102,9 @@ pub enum ContainerClass {
     /// A main-window pane (folders, message list, reading pane) drawn as
     /// a rounded card on the canvas.
     Pane,
+    /// Inside of a pane card whose corners and border are drawn on top of
+    /// the content (`ui::pane_card`).
+    PaneBody,
 }
 
 impl ContainerClass {
@@ -151,6 +154,7 @@ impl ContainerClass {
             Self::TitleSearchField => style_title_search_field_container,
             Self::Canvas => style_canvas_container,
             Self::Pane => style_pane_container,
+            Self::PaneBody => style_pane_body_container,
         }
     }
 }
@@ -187,28 +191,45 @@ fn style_title_search_field_container(theme: &Theme) -> container::Style {
 /// The canvas sits one step darker than the panes in both modes.
 /// `background.weak` deviates toward the text color, which is darker in
 /// light mode but lighter in dark mode, so dark mode mixes toward black.
-fn style_canvas_container(theme: &Theme) -> container::Style {
+fn canvas_color(theme: &Theme) -> Color {
     let p = theme.palette();
-    let background = if p.is_dark {
+    if p.is_dark {
         mix(p.background.base.color, Color::BLACK, 0.35)
     } else {
         p.background.weak.color
-    };
+    }
+}
+
+fn pane_border_color(theme: &Theme) -> Color {
+    theme.palette().background.strongest.color.scale_alpha(0.12)
+}
+
+/// Canvas and border colours the pane card frame paints over the content.
+pub fn pane_frame_colors(theme: &Theme) -> (Color, Color) {
+    (canvas_color(theme), pane_border_color(theme))
+}
+
+fn style_canvas_container(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(background.into()),
+        background: Some(canvas_color(theme).into()),
         ..Default::default()
     }
 }
 
 fn style_pane_container(theme: &Theme) -> container::Style {
-    let p = theme.palette();
     container::Style {
-        background: Some(p.background.base.color.into()),
         border: iced::Border {
-            color: p.background.strongest.color.scale_alpha(0.12),
+            color: pane_border_color(theme),
             width: 1.0,
             radius: RADIUS_LG.into(),
         },
+        ..style_pane_body_container(theme)
+    }
+}
+
+fn style_pane_body_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.palette().background.base.color.into()),
         ..Default::default()
     }
 }

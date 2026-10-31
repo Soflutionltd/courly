@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use crate::Message;
 use crate::icon;
 use crate::ui::layout::*;
-use crate::ui::theme;
 use crate::ui::widgets;
 
 /// A module the panel can show.
@@ -117,16 +116,11 @@ pub fn view(panel: &SidePanel, week_start: Weekday) -> Element<'_, Message> {
             .map(|message| panel_message(SidePanelMessage::Templates(message))),
     };
 
-    container(column![
+    crate::ui::pane_card::pane_card(column![
         header,
         widgets::divider(),
         scrollable(body)
             .spacing(SCROLLBAR_SPACING)
             .height(Length::Fill),
     ])
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .clip(true)
-    .style(theme::ContainerClass::Pane.style())
-    .into()
 }

@@ -34,7 +34,7 @@ pub use button::{
 };
 pub use catalog::{THEMES, dark_theme, light_theme, theme_by_index};
 pub use color::hex_to_color;
-pub use container::ContainerClass;
+pub use container::{ContainerClass, pane_frame_colors};
 pub use forms::{
     PickListClass, RadioClass, RuleClass, SliderClass, TextClass, TextInputClass, TogglerClass,
 };

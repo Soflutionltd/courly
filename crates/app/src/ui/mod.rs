@@ -15,6 +15,7 @@ pub mod layout;
 pub mod mail_body;
 pub mod modal_overlay;
 pub mod palette;
+pub mod pane_card;
 pub mod reading_pane;
 pub mod side_panel;
 pub mod settings;

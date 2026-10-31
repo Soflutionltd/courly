@@ -432,10 +432,5 @@ impl ReadyApp {
 
 /// Wraps a pane's content in the rounded card that floats on the canvas.
 fn pane<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .clip(true)
-        .style(ui::theme::ContainerClass::Pane.style())
-        .into()
+    ui::pane_card::pane_card(content)
 }
