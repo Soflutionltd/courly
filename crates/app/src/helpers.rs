@@ -177,6 +177,16 @@ impl ReadyApp {
         ])
     }
 
+    /// `reload_after_server_change` plus the chat contact list, for
+    /// background passes that can also bring in new correspondents.
+    pub(crate) fn reload_after_background_change(&mut self) -> Task<Message> {
+        let chat_token = self.chat_list_generation.next();
+        Task::batch([
+            self.reload_after_server_change(),
+            self.fire_chat_contacts_load(chat_token),
+        ])
+    }
+
     /// Refresh after the background sync wrote server-side changes. Search
     /// results and the chat timeline are not a scope listing, so only the
     /// sidebar counts reload under them.

@@ -1385,8 +1385,7 @@ impl ReadyApp {
         );
         // Schedule the follow-up reload via a synthetic
         // SnoozeResurfaceComplete with `Ok(1)` (any non-zero count
-        // triggers `load_navigation_and_threads`). 1.5 s gives the
-        // worker time to drain.
+        // triggers the reload). 1.5 s gives the worker time to drain.
         let reload = Task::perform(
             async {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -1396,14 +1395,15 @@ impl ReadyApp {
         Task::batch([kick, reload])
     }
 
-    /// After unsnoozing due threads, reload navigation (unread counts) and thread list.
+    /// After unsnoozing due threads, reload navigation (unread counts) and
+    /// the thread list, leaving search results on screen.
     pub(crate) fn handle_snooze_resurface_complete(
         &mut self,
         result: Result<usize, String>,
     ) -> Task<Message> {
         match result {
             Ok(0) => Task::none(),
-            Ok(_count) => self.load_navigation_and_threads(),
+            Ok(_count) => self.reload_after_background_change(),
             Err(e) => {
                 log::error!("Snooze resurface check failed: {e}");
                 Task::none()
