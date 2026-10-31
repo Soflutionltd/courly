@@ -1017,6 +1017,7 @@ async fn resident_consumer_loop(
                         // (§ 4.3 "reset on a clean caught-up edge").
                         slot.redrive_attempt.store(0, Ordering::SeqCst);
                         slot.terminal_retry_attempt.store(0, Ordering::SeqCst);
+                        record_last_sync(&inner.write_db, &account_id).await;
                         let previous_seq = *slot.caught_up.borrow();
                         let seq = slot.run_seq.load(Ordering::SeqCst);
                         let _ = slot.caught_up.send(seq);
@@ -1186,6 +1187,29 @@ async fn mark_initial_sync_completed_once(
             Ok(completed)
         })
         .await
+}
+
+/// Seconds between two `last_sync_at` writes: the resident consumer catches
+/// up after every hot poll, every few seconds.
+const LAST_SYNC_RESOLUTION_SECS: i64 = 30;
+
+async fn record_last_sync(write_db: &WriteDbState, account_id: &str) {
+    let aid = account_id.to_string();
+    let now = jiff::Timestamp::now().as_second();
+    if let Err(error) = write_db
+        .with_write(move |conn| {
+            conn.execute(
+                "UPDATE accounts SET last_sync_at = ?1 \
+                 WHERE id = ?2 AND (last_sync_at IS NULL OR last_sync_at <= ?1 - ?3)",
+                rusqlite::params![now, aid, LAST_SYNC_RESOLUTION_SECS],
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        })
+        .await
+    {
+        log::warn!("record last_sync_at for {account_id}: {error}");
+    }
 }
 
 fn repush_full_reconcile(inner: &ResidentEngineInner, account_id: &str) {
