@@ -513,6 +513,25 @@ impl ReadyApp {
         })
     }
 
+    /// Re-render HTML bodies when the theme or the body background
+    /// preference changes what they are painted on.
+    pub(crate) fn sync_email_appearance(&mut self) -> Task<Message> {
+        let appearance = crate::ui::theme::email_body_appearance(&self.theme());
+        if crate::ui::mail_body::reading_appearance() == appearance {
+            return Task::none();
+        }
+        crate::ui::mail_body::set_reading_appearance(appearance);
+        Task::batch([
+            self.reading_pane
+                .set_reading_appearance(appearance)
+                .map(Message::ReadingPane),
+            self.settings
+                .set_signature_preview_appearance(appearance)
+                .map(Message::Settings),
+            self.set_pop_out_appearance(appearance),
+        ])
+    }
+
     /// Apply a keyboard zoom step to the reading zoom preference.
     pub(crate) fn step_email_zoom(
         &mut self,

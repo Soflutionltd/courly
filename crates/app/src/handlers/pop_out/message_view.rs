@@ -21,7 +21,9 @@ pub(super) fn handle_message_view_update(
         MessageViewMessage::BodyLoaded(_, Ok((body_text, body_html))) => {
             state.body_text = body_text;
             state.body_html = body_html;
-            state.html_body = crate::ui::mail_body::HtmlBodyState::default();
+            state.html_body = crate::ui::mail_body::HtmlBodyState::with_original(
+                state.rendering_mode == RenderingMode::OriginalHtml,
+            );
             Task::none()
         }
         MessageViewMessage::BodyLoaded(_, Err(e)) => {
@@ -46,7 +48,10 @@ pub(super) fn handle_message_view_update(
             state.rendering_mode = mode;
             // Mode picker lives inside the overflow menu; close it on select.
             state.context_menu_open = false;
-            Task::none()
+            let start = state
+                .html_body
+                .set_original(mode == RenderingMode::OriginalHtml);
+            start_html_render(window_id, state, start)
         }
         MessageViewMessage::OpenContextMenu => {
             state.context_menu_open = true;
@@ -104,6 +109,16 @@ pub(super) fn handle_message_view_update(
         | MessageViewMessage::SaveAs
         | MessageViewMessage::Noop => Task::none(),
     }
+}
+
+/// Re-render the HTML body on a new page appearance.
+pub(super) fn set_message_view_appearance(
+    window_id: iced::window::Id,
+    state: &mut MessageViewState,
+    appearance: mail_html::Appearance,
+) -> Task<Message> {
+    let start = state.html_body.set_appearance(appearance);
+    start_html_render(window_id, state, start)
 }
 
 /// Start a background render of the HTML body when `start` is set.

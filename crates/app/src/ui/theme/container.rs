@@ -28,6 +28,8 @@ pub enum ContainerClass {
     MessageCard,
     /// Email body inset - always white for rendering fidelity.
     EmailBody,
+    /// An email shown as sent, on white, while the theme is dark.
+    EmailBodyOriginal,
     /// Attachment card beside an email body. Its text follows the theme,
     /// so it only takes the white body sheet in a light theme.
     AttachmentCard,
@@ -123,6 +125,7 @@ impl ContainerClass {
             Self::Badge => style_badge_container,
             Self::MessageCard => style_message_card_container,
             Self::EmailBody => style_email_body_container,
+            Self::EmailBodyOriginal => style_email_body_original_container,
             Self::AttachmentCard => style_attachment_card_container,
             Self::AttachmentChip => style_attachment_chip_container,
             Self::EditorField => style_editor_field_container,
@@ -332,6 +335,19 @@ fn email_body_is_white(theme: &Theme) -> bool {
     }
 }
 
+/// What HTML bodies are painted on: white unless the body follows the
+/// theme, and recoloured when that theme is dark.
+pub fn email_body_appearance(theme: &Theme) -> mail_html::Appearance {
+    if email_body_is_white(theme) {
+        return mail_html::Appearance::default();
+    }
+    let [red, green, blue, _] = theme.palette().background.base.color.into_rgba8();
+    mail_html::Appearance {
+        background: [red, green, blue],
+        dark: !theme_is_light(theme),
+    }
+}
+
 /// In a light theme with white email bodies the whole card is white, so
 /// the email reads on one sheet like Outlook instead of a white box framed
 /// by the theme's tinted surface.
@@ -372,6 +388,18 @@ fn style_email_body_container(theme: &Theme) -> container::Style {
         background: Some(bg.into()),
         border: iced::Border {
             color: border_color,
+            width: 1.0,
+            radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_email_body_original_container(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Color::WHITE.into()),
+        border: iced::Border {
+            color: Color::BLACK.scale_alpha(0.08),
             width: 1.0,
             radius: RADIUS_MD.into(),
         },

@@ -67,6 +67,8 @@ pub enum ReadingPaneMessage {
     },
     /// Load remote images for the message at this index.
     ShowRemoteImages(usize),
+    /// Switch a dark-recoloured HTML body to the email as sent, and back.
+    ToggleOriginalTone(usize),
     Noop,
 }
 
@@ -234,6 +236,24 @@ impl ReadingPane {
             .iter_mut()
             .enumerate()
             .filter_map(|(index, state)| state.set_zoom(zoom).then_some(index))
+            .collect();
+        Task::batch(
+            starts
+                .into_iter()
+                .map(|index| self.start_html_render(index, true)),
+        )
+    }
+
+    /// Re-render every open HTML body on a new page appearance.
+    pub fn set_reading_appearance(
+        &mut self,
+        appearance: mail_html::Appearance,
+    ) -> Task<ReadingPaneMessage> {
+        let starts: Vec<usize> = self
+            .html_bodies
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(index, state)| state.set_appearance(appearance).then_some(index))
             .collect();
         Task::batch(
             starts
@@ -598,6 +618,13 @@ impl Component for ReadingPane {
                     .is_some_and(|state| state.finish(inputs, body));
                 (self.start_html_render(index, again), None)
             }
+            ReadingPaneMessage::ToggleOriginalTone(index) => {
+                let start = self
+                    .html_bodies
+                    .get_mut(index)
+                    .is_some_and(super::mail_body::HtmlBodyState::toggle_original);
+                (self.start_html_render(index, start), None)
+            }
             ReadingPaneMessage::ShowRemoteImages(index) => {
                 let start = self
                     .html_bodies
@@ -871,6 +898,11 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 invite,
                 message_attachments(pane, &msg.id),
                 html_body,
+                msg.body_html
+                    .as_ref()
+                    .and(pane.html_bodies.get(i))
+                    .and_then(super::mail_body::HtmlBodyState::dark_tone)
+                    .map(|original| (original, ReadingPaneMessage::ToggleOriginalTone(i))),
                 ReadingPaneMessage::LinkClicked,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,

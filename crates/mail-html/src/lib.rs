@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 
 use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
-use blitz_dom::{BaseDocument, DocumentConfig, UserAgentStylesheet, util::Color};
+use blitz_dom::util::{Color, ToColorColor as _};
+use blitz_dom::{
+    BaseDocument, DocumentConfig, NodeId, QualName, UserAgentStylesheet, local_name, ns,
+};
 use blitz_html::DocumentHtmlParser;
 use blitz_paint::paint_scene;
 pub use blitz_traits::net::{Bytes, Url};
@@ -26,6 +29,7 @@ use html5ever::tree_builder::{QuirksMode, TreeBuilderOpts};
 use html5ever::{ParseOpts, parse_document};
 use num_traits::ToPrimitive as _;
 use peniko::Fill;
+use peniko::color::{AlphaColor, Hsl, LinearSrgb, Srgb};
 use peniko::kurbo::Rect;
 
 /// Device pixel ratio used for normal-length emails.
@@ -104,6 +108,25 @@ static EMAIL_UA_SHEET: LazyLock<UserAgentStylesheet> =
 /// when the caller allowed remote content for this message.
 pub type RemoteFetcher = Arc<dyn Fn(&Url) -> Option<Bytes> + Send + Sync>;
 
+/// How the page around the email is painted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Appearance {
+    /// Page colour behind the email, as sRGB bytes.
+    pub background: [u8; 3],
+    /// Recolour the email for a dark page, like Outlook: light backgrounds
+    /// turn dark and dark text turns light, hues kept. Images are untouched.
+    pub dark: bool,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            background: [255, 255, 255],
+            dark: false,
+        }
+    }
+}
+
 pub struct RenderRequest {
     pub html: String,
     /// Available width in display px.
@@ -114,6 +137,7 @@ pub struct RenderRequest {
     /// Inline parts keyed by Content-ID (without the `cid:` prefix).
     pub inline_images: HashMap<String, Bytes>,
     pub remote: Option<RemoteFetcher>,
+    pub appearance: Appearance,
 }
 
 #[derive(Debug, Clone)]
@@ -216,13 +240,13 @@ fn device_pixels(value: f32) -> u32 {
 
 /// A viewport `width` CSS px wide. Text is shaped at `hidpi * zoom`, so
 /// the scene must be painted at that same scale.
-fn layout_viewport(width: f32, zoom: f32, hidpi: f32) -> Viewport {
+fn layout_viewport(width: f32, zoom: f32, hidpi: f32, scheme: ColorScheme) -> Viewport {
     let scale = hidpi * zoom;
     let mut viewport = Viewport::new(
         device_pixels(width * scale),
         device_pixels(LAYOUT_VIEWPORT_HEIGHT as f32 * scale),
         hidpi,
-        ColorScheme::Light,
+        scheme,
     );
     viewport.set_zoom(zoom);
     viewport
@@ -282,6 +306,14 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     let width = (request.width.clamp(1.0, MAX_WIDTH) / zoom)
         .floor()
         .max(1.0);
+    let appearance = request.appearance;
+    let scheme = if appearance.dark {
+        ColorScheme::Dark
+    } else {
+        ColorScheme::Light
+    };
+    let [red, green, blue] = appearance.background;
+    let page = Color::from_rgb8(red, green, blue);
     let pending = Arc::new(AtomicUsize::new(0));
     let net = Arc::new(MailNetProvider {
         inline_images: request.inline_images,
@@ -294,7 +326,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     let mut document = parse_mail(
         &request.html,
         DocumentConfig {
-            viewport: Some(layout_viewport(width, zoom, HIDPI_SCALE)),
+            viewport: Some(layout_viewport(width, zoom, HIDPI_SCALE, scheme)),
             base_url: Some(format!("https://{BASE_HOST}/")),
             net_provider: Some(Arc::clone(&net) as Arc<dyn NetProvider>),
             ua_stylesheets: vec![UserAgentStylesheet::default_sheet(), EMAIL_UA_SHEET.clone()],
@@ -312,10 +344,14 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         std::thread::sleep(REMOTE_POLL);
     }
     document.resolve(0.0);
+    if appearance.dark {
+        adapt_to_dark(&mut document, page);
+        document.resolve(0.0);
+    }
 
     let (mut content_width, mut content_height) = content_size(&document, width, zoom);
     let scale = if content_height > HIDPI_MAX_HEIGHT {
-        document.set_viewport(layout_viewport(width, zoom, 1.0));
+        document.set_viewport(layout_viewport(width, zoom, 1.0, scheme));
         document.resolve(0.0);
         (content_width, content_height) = content_size(&document, width, zoom);
         1.0
@@ -330,7 +366,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
             scene.fill(
                 Fill::NonZero,
                 Default::default(),
-                Color::WHITE,
+                page,
                 Default::default(),
                 &Rect::new(0.0, 0.0, f64::from(px_width), f64::from(px_height)),
             );
@@ -357,6 +393,143 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         tiles,
         links,
         blocked_remote: net.blocked.load(Ordering::Relaxed),
+    }
+}
+
+/// HSL lightness (0 to 100) dark text is lifted to: black lands on the
+/// first value, mid grey on the second.
+const DARK_TEXT_LIGHTNESS: (f32, f32) = (90.0, 62.0);
+/// Lightest a recoloured light background may end up.
+const DARK_BACKGROUND_CEILING: f32 = 40.0;
+/// Saturation kept on recoloured backgrounds, so pastel panels do not turn
+/// into loud dark colours.
+const DARK_BACKGROUND_SATURATION: f32 = 0.6;
+/// Channel spread under which a light background counts as plain white and
+/// takes the page colour exactly.
+const NEAR_WHITE_SPREAD: f32 = 0.04;
+const NEAR_WHITE_LIGHTNESS: f32 = 95.0;
+
+fn hsl_components(color: Color) -> [f32; 4] {
+    let [hue, saturation, lightness, alpha] = color.convert::<Hsl>().components;
+    let hue = if hue.is_finite() { hue } else { 0.0 };
+    [hue, saturation, lightness, alpha]
+}
+
+fn from_hsl(components: [f32; 4]) -> Color {
+    AlphaColor::<Hsl>::new(components).convert::<Srgb>()
+}
+
+/// WCAG relative luminance text needs on a dark page: about 5:1 contrast
+/// against a near-black background.
+const MIN_TEXT_LUMINANCE: f32 = 0.3;
+const TEXT_LIGHTNESS_STEP: f32 = 2.0;
+
+fn relative_luminance(color: Color) -> f32 {
+    let [red, green, blue, _] = color.convert::<LinearSrgb>().components;
+    0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+/// Text made light enough for a dark page, hue kept. `None` when it
+/// already reads. Saturated blues and reds are dim at any HSL lightness, so
+/// lightness keeps rising until the luminance is high enough.
+fn dark_text(color: Color) -> Option<Color> {
+    let [hue, saturation, lightness, alpha] = hsl_components(color);
+    if alpha == 0.0 || (lightness >= 50.0 && relative_luminance(color) >= MIN_TEXT_LUMINANCE) {
+        return None;
+    }
+    let (black, mid) = DARK_TEXT_LIGHTNESS;
+    let mut lightness = if lightness < 50.0 {
+        black - lightness / 50.0 * (black - mid)
+    } else {
+        lightness
+    };
+    let mut lifted = from_hsl([hue, saturation, lightness, alpha]);
+    while relative_luminance(lifted) < MIN_TEXT_LUMINANCE && lightness < 100.0 {
+        lightness = (lightness + TEXT_LIGHTNESS_STEP).min(100.0);
+        lifted = from_hsl([hue, saturation, lightness, alpha]);
+    }
+    Some(lifted)
+}
+
+/// Light background made dark for a dark page. Plain white becomes the
+/// page colour itself, so the email merges with the sheet around it.
+/// `None` for transparent or already dark backgrounds.
+fn dark_background(color: Color, page: Color) -> Option<Color> {
+    let [hue, saturation, lightness, alpha] = hsl_components(color);
+    if alpha == 0.0 || lightness < 50.0 {
+        return None;
+    }
+    let [red, green, blue, _] = color.components;
+    let spread = red.max(green).max(blue) - red.min(green).min(blue);
+    if lightness >= NEAR_WHITE_LIGHTNESS && spread < NEAR_WHITE_SPREAD {
+        return Some(page.with_alpha(alpha));
+    }
+    let page_lightness = hsl_components(page)[2];
+    let lightness =
+        page_lightness + (100.0 - lightness) / 50.0 * (DARK_BACKGROUND_CEILING - page_lightness);
+    Some(from_hsl([
+        hue,
+        saturation * DARK_BACKGROUND_SATURATION,
+        lightness,
+        alpha,
+    ]))
+}
+
+fn css_color(color: Color) -> String {
+    let rgba = color.to_rgba8();
+    format!(
+        "rgba({}, {}, {}, {:.3})",
+        rgba.r,
+        rgba.g,
+        rgba.b,
+        f32::from(rgba.a) / 255.0
+    )
+}
+
+/// Recolour every element for a dark page. The new colours are appended to
+/// each element's inline style as `!important`, which outranks the email's
+/// own rules, including its `!important` ones.
+fn adapt_to_dark(document: &mut BaseDocument, page: Color) {
+    let restyles: Vec<(NodeId, String)> = document
+        .tree()
+        .iter()
+        .filter(|(_, node)| node.is_element())
+        .filter_map(|(id, node)| {
+            let styles = node.primary_styles()?;
+            let current = styles.clone_color();
+            let text = dark_text(current.as_color_color());
+            let background = dark_background(
+                styles
+                    .get_background()
+                    .background_color
+                    .resolve_to_absolute(&current)
+                    .as_color_color(),
+                page,
+            );
+            if text.is_none() && background.is_none() {
+                return None;
+            }
+            let mut style = node
+                .attr(local_name!("style"))
+                .unwrap_or_default()
+                .trim_end()
+                .trim_end_matches(';')
+                .to_string();
+            if let Some(text) = text {
+                style.push_str(&format!(";color:{} !important", css_color(text)));
+            }
+            if let Some(background) = background {
+                style.push_str(&format!(
+                    ";background-color:{} !important",
+                    css_color(background)
+                ));
+            }
+            Some((id, style))
+        })
+        .collect();
+    let mut mutator = document.mutate();
+    for (id, style) in restyles {
+        mutator.set_attribute(id, QualName::new(None, ns!(), local_name!("style")), &style);
     }
 }
 
@@ -422,6 +595,7 @@ mod tests {
             zoom: 1.0,
             inline_images: HashMap::new(),
             remote: None,
+            appearance: Appearance::default(),
         })
     }
 
@@ -435,6 +609,7 @@ mod tests {
             zoom: 0.5,
             inline_images: HashMap::new(),
             remote: None,
+            appearance: Appearance::default(),
         });
         assert!(mail.width <= 601.0, "width was {}", mail.width);
         assert!(
@@ -445,6 +620,89 @@ mod tests {
         let covered: f32 = mail.tiles.iter().map(|t| t.height).sum();
         assert!((covered - mail.height).abs() < 1.0);
         assert!(mail.links[0].height < 15.0);
+    }
+
+    const DARK_PAGE: [u8; 3] = [31, 31, 31];
+
+    fn render_dark(html: &str) -> RenderedMail {
+        render(RenderRequest {
+            html: html.to_string(),
+            width: 200.0,
+            zoom: 1.0,
+            inline_images: HashMap::new(),
+            remote: None,
+            appearance: Appearance {
+                background: DARK_PAGE,
+                dark: true,
+            },
+        })
+    }
+
+    /// RGB of the device pixel at CSS position (`x`, `y`) of the first tile
+    /// of a short email, painted at `HIDPI_SCALE`.
+    fn pixel(mail: &RenderedMail, x: usize, y: usize) -> [u8; 3] {
+        let tile = &mail.tiles[0];
+        let scale = HIDPI_SCALE.to_usize().expect("integral scale");
+        let row = tile.px_width.to_usize().expect("tile width");
+        let offset = (y * scale * row + x * scale) * 4;
+        [
+            tile.rgba[offset],
+            tile.rgba[offset + 1],
+            tile.rgba[offset + 2],
+        ]
+    }
+
+    fn luma([red, green, blue]: [u8; 3]) -> f32 {
+        0.299 * f32::from(red) + 0.587 * f32::from(green) + 0.114 * f32::from(blue)
+    }
+
+    #[test]
+    fn dark_mode_turns_white_panels_into_the_page_colour() {
+        let mail = render_dark(
+            r#"<body style="margin:0;background:#ffffff">
+            <div style="background:#fff !important;height:40px"></div></body>"#,
+        );
+        assert_eq!(pixel(&mail, 100, 20), DARK_PAGE);
+    }
+
+    #[test]
+    fn dark_mode_darkens_tinted_panels_and_keeps_dark_ones() {
+        let mail = render_dark(
+            r#"<body style="margin:0">
+            <div style="background:#e8f4ff;height:40px"></div>
+            <div style="background:#0b3d91;height:40px"></div></body>"#,
+        );
+        let tinted = pixel(&mail, 100, 20);
+        assert!(luma(tinted) < 90.0, "tinted panel stayed light: {tinted:?}");
+        assert!(
+            tinted[2] > tinted[0],
+            "tinted panel lost its blue hue: {tinted:?}"
+        );
+        assert_eq!(pixel(&mail, 100, 60), [11, 61, 145]);
+    }
+
+    #[test]
+    fn dark_mode_lifts_dark_text_and_keeps_light_text() {
+        let lifted = dark_text(Color::from_rgb8(31, 31, 31))
+            .expect("dark text is lifted")
+            .to_rgba8();
+        assert!(luma([lifted.r, lifted.g, lifted.b]) > 200.0);
+        assert_eq!(dark_text(Color::WHITE), None);
+        let link = dark_text(Color::from_rgb8(0, 0, 238)).expect("dark links are lifted");
+        assert!(relative_luminance(link) >= MIN_TEXT_LUMINANCE);
+        let link = link.to_rgba8();
+        assert!(
+            link.b > link.r && link.b > 200,
+            "link lost its hue: {link:?}"
+        );
+        let brand = dark_text(Color::from_rgb8(26, 115, 232)).expect("dim brand blue is lifted");
+        assert!(relative_luminance(brand) >= MIN_TEXT_LUMINANCE);
+    }
+
+    #[test]
+    fn light_mode_paints_the_email_unchanged() {
+        let mail = render_html(r#"<body style="margin:0"><div style="height:40px"></div></body>"#);
+        assert_eq!(pixel(&mail, 100, 20), [255, 255, 255]);
     }
 
     #[test]
@@ -607,6 +865,7 @@ mod tests {
             zoom,
             inline_images: HashMap::new(),
             remote: None,
+            appearance: Appearance::default(),
         })
     }
 

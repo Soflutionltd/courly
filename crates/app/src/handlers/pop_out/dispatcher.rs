@@ -467,6 +467,27 @@ fn handle_compose_preview(
     start_compose_preview(window_id, state, which)
 }
 
+/// Re-render the signature and quote previews on a new page appearance.
+pub(super) fn set_compose_preview_appearance(
+    window_id: iced::window::Id,
+    state: &mut crate::pop_out::compose::ComposeState,
+    appearance: mail_html::Appearance,
+) -> Task<Message> {
+    use crate::pop_out::compose::ComposePreview;
+
+    let mut tasks = Vec::new();
+    for which in [ComposePreview::Signature, ComposePreview::Quote] {
+        let block = match which {
+            ComposePreview::Signature => state.signature.as_mut(),
+            ComposePreview::Quote => state.quote.as_mut(),
+        };
+        if block.is_some_and(|block| block.preview.set_appearance(appearance)) {
+            tasks.push(start_compose_preview(window_id, state, which));
+        }
+    }
+    Task::batch(tasks)
+}
+
 /// Render a signature or quote preview if its width is known.
 fn start_compose_preview(
     window_id: iced::window::Id,

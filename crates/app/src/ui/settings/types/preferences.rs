@@ -5,11 +5,12 @@ use crate::pop_out::RenderingMode;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EmailBodyBackground {
     /// Always use a white background (best for email rendering fidelity).
-    #[default]
     AlwaysWhite,
     /// Use the current theme's background color.
     MatchTheme,
-    /// White in light themes, theme background in dark themes.
+    /// White in light themes; in dark themes the email is recoloured
+    /// dark, like Outlook.
+    #[default]
     Auto,
 }
 
@@ -24,9 +25,9 @@ impl EmailBodyBackground {
 
     pub fn from_label(s: &str) -> Self {
         match s {
+            "Always White" => Self::AlwaysWhite,
             "Match Theme" => Self::MatchTheme,
-            "Auto" => Self::Auto,
-            _ => Self::AlwaysWhite,
+            _ => Self::Auto,
         }
     }
 }

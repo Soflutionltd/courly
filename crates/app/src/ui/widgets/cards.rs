@@ -388,6 +388,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     invite: Option<Element<'a, M>>,
     attachments: Option<Element<'a, M>>,
     html_body: Option<Element<'a, M>>,
+    body_tone: Option<(bool, M)>,
     on_link: impl Fn(String) -> M + 'a,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
@@ -427,7 +428,13 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
+    let showing_original = body_tone.as_ref().is_some_and(|(original, _)| *original);
+    let tone_button = body_tone.map(|(original, on_press)| {
+        let ico = if original { icon::moon() } else { icon::sun() };
+        header_icon_button(ico, on_press)
+    });
     let message_actions = row![
+        tone_button,
         header_icon_button(icon::reply(), on_reply(index)),
         header_icon_button(icon::reply_all(), on_reply_all(index)),
         header_icon_button(icon::forward(), on_forward(index)),
@@ -520,9 +527,14 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
             .into()
     };
 
+    let body_class = if showing_original {
+        theme::ContainerClass::EmailBodyOriginal
+    } else {
+        theme::ContainerClass::EmailBody
+    };
     let body: Element<'_, M> = container(body_inner)
         .width(Length::Fill)
-        .style(theme::ContainerClass::EmailBody.style())
+        .style(body_class.style())
         .into();
 
     let mut card_content = column![header].spacing(SPACE_XS);

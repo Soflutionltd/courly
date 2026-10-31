@@ -173,7 +173,9 @@ impl MessageViewState {
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
-            html_body: crate::ui::mail_body::HtmlBodyState::default(),
+            html_body: crate::ui::mail_body::HtmlBodyState::with_original(
+                default_rendering_mode == RenderingMode::OriginalHtml,
+            ),
             error_banner: None,
             source_selection,
             width: MESSAGE_VIEW_DEFAULT_WIDTH,
@@ -216,7 +218,9 @@ impl MessageViewState {
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
-            html_body: crate::ui::mail_body::HtmlBodyState::default(),
+            html_body: crate::ui::mail_body::HtmlBodyState::with_original(
+                default_rendering_mode == RenderingMode::OriginalHtml,
+            ),
             error_banner: None,
             source_selection,
             width: MESSAGE_VIEW_DEFAULT_WIDTH,
@@ -254,7 +258,9 @@ impl MessageViewState {
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
-            html_body: crate::ui::mail_body::HtmlBodyState::default(),
+            html_body: crate::ui::mail_body::HtmlBodyState::with_original(
+                default_rendering_mode == RenderingMode::OriginalHtml,
+            ),
             error_banner: None,
             source_selection: None, // not available on session restore
             width: entry.width,
@@ -700,6 +706,15 @@ fn message_view_body<'a>(
         }
     };
 
+    let showing_original = state.rendering_mode == RenderingMode::OriginalHtml
+        && state.body_html.is_some()
+        && state.html_body.dark_tone() == Some(true);
+    let body_class = if showing_original {
+        theme::ContainerClass::EmailBodyOriginal
+    } else {
+        theme::ContainerClass::EmailBody
+    };
+
     // Inner scrollable wraps just the text so the body card itself can fill
     // the leftover window height while overflowing text scrolls in place.
     let scrollable_text = scrollable(body_content)
@@ -711,7 +726,7 @@ fn message_view_body<'a>(
         .padding(PAD_CONTENT)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::ContainerClass::EmailBody.style());
+        .style(body_class.style());
 
     // Outer wrapper hugs the window edges more tightly than the header
     // (12px vs the header's 24px), matching the compose pop-out so the

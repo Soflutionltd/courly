@@ -1037,7 +1037,11 @@ impl App {
                 ready.thread_list.date_groups = ready.settings.thread_date_groups;
                 #[cfg(target_os = "macos")]
                 ready.refresh_menu_bar();
-                Task::batch([task, ready.persist_preferences_if_changed()])
+                Task::batch([
+                    task,
+                    ready.sync_email_appearance(),
+                    ready.persist_preferences_if_changed(),
+                ])
             }
         }
     }

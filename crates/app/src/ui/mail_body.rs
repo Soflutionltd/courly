@@ -12,7 +12,7 @@ use iced::widget::{
     Space, button, column, container, image, mouse_area, row, scrollable, sensor, stack, text,
 };
 use iced::{Alignment, Element, Length, Padding, mouse};
-use mail_html::{Bytes, LinkArea, RemoteFetcher, RenderRequest, Url};
+use mail_html::{Appearance, Bytes, LinkArea, RemoteFetcher, RenderRequest, Url};
 use rust_i18n::t;
 
 use crate::icon;
@@ -150,6 +150,7 @@ pub struct RenderInputs {
     pub width: f32,
     pub zoom: f32,
     pub allow_remote: bool,
+    pub appearance: Appearance,
 }
 
 /// Per-message render state in the reading pane.
@@ -161,11 +162,15 @@ pub struct HtmlBodyState {
     in_flight: Option<u64>,
     failed: bool,
     allow_remote: bool,
+    appearance: Appearance,
+    /// The user asked to see this message as sent, without dark recolouring.
+    original: bool,
     rendered: Option<Arc<RenderedBody>>,
 }
 
 thread_local! {
     static READING_ZOOM: Cell<f32> = const { Cell::new(1.0) };
+    static READING_APPEARANCE: Cell<Appearance> = Cell::new(Appearance::default());
 }
 
 /// Zoom applied to HTML bodies, set from the user's preference.
@@ -177,6 +182,15 @@ pub fn set_reading_zoom(zoom: f32) {
     READING_ZOOM.with(|cell| cell.set(zoom));
 }
 
+/// What HTML bodies are painted on, set from the theme and preference.
+pub fn reading_appearance() -> Appearance {
+    READING_APPEARANCE.with(Cell::get)
+}
+
+pub fn set_reading_appearance(appearance: Appearance) {
+    READING_APPEARANCE.with(|cell| cell.set(appearance));
+}
+
 impl Default for HtmlBodyState {
     fn default() -> Self {
         Self {
@@ -185,6 +199,8 @@ impl Default for HtmlBodyState {
             in_flight: None,
             failed: false,
             allow_remote: false,
+            appearance: reading_appearance(),
+            original: false,
             rendered: None,
         }
     }
@@ -198,6 +214,54 @@ impl HtmlBodyState {
         }
         self.zoom = zoom;
         self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
+    /// Change what the body is painted on. Returns true when a new render
+    /// should start.
+    pub fn set_appearance(&mut self, appearance: Appearance) -> bool {
+        if self.appearance == appearance {
+            return false;
+        }
+        self.appearance = appearance;
+        self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
+    /// Switch between the dark recolouring and the email as sent. Returns
+    /// true when a new render should start.
+    pub fn toggle_original(&mut self) -> bool {
+        self.set_original(!self.original)
+    }
+
+    /// Show the email as sent (`true`) or recoloured for the page. Returns
+    /// true when a new render should start.
+    pub fn set_original(&mut self, original: bool) -> bool {
+        if self.original == original {
+            return false;
+        }
+        self.original = original;
+        self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
+    /// A fresh state that shows the email as sent when `original` is set.
+    pub fn with_original(original: bool) -> Self {
+        Self {
+            original,
+            ..Self::default()
+        }
+    }
+
+    /// `Some(showing_original)` when the body is recoloured for a dark page,
+    /// so the reader can switch back to the email as sent.
+    pub fn dark_tone(&self) -> Option<bool> {
+        self.appearance.dark.then_some(self.original)
+    }
+
+    fn effective_appearance(&self) -> Appearance {
+        if self.original {
+            Appearance::default()
+        } else {
+            self.appearance
+        }
     }
 
     /// Record the width the body is laid out at. Returns true when a new
@@ -247,6 +311,7 @@ impl HtmlBodyState {
             None => self.failed = true,
         }
         (self.zoom - inputs.zoom).abs() >= f32::EPSILON
+            || inputs.appearance != self.effective_appearance()
             || self
                 .desired_width
                 .is_some_and(|w| (w - inputs.width).abs() >= 1.0)
@@ -262,6 +327,7 @@ impl HtmlBodyState {
             width,
             zoom: self.zoom,
             allow_remote: self.allow_remote,
+            appearance: self.effective_appearance(),
         })
     }
 }
@@ -293,6 +359,7 @@ pub async fn render(
             zoom: inputs.zoom,
             inline_images,
             remote,
+            appearance: inputs.appearance,
         });
         let tiles = mail
             .tiles
@@ -564,5 +631,42 @@ mod tests {
         let inputs = state.start().expect("restarted");
         assert!((inputs.zoom - 1.25).abs() < f32::EPSILON);
         assert!(!state.finish(inputs, body(600.0)));
+    }
+
+    const DARK: Appearance = Appearance {
+        background: [31, 31, 31],
+        dark: true,
+    };
+
+    #[test]
+    fn appearance_change_during_render_triggers_one_more_pass() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        assert!(
+            !state.set_appearance(DARK),
+            "no second render while in flight"
+        );
+        assert!(state.finish(inputs, body(600.0)));
+        let inputs = state.start().expect("restarted");
+        assert_eq!(inputs.appearance, DARK);
+        assert!(!state.finish(inputs, body(600.0)));
+    }
+
+    #[test]
+    fn showing_the_original_renders_without_recolouring() {
+        let mut state = HtmlBodyState::default();
+        assert_eq!(state.dark_tone(), None, "nothing to switch on a light page");
+        state.set_appearance(DARK);
+        state.set_width(600.0);
+        assert_eq!(state.dark_tone(), Some(false));
+        assert!(!state.set_original(false));
+        let inputs = state.start().expect("started");
+        assert_eq!(inputs.appearance, DARK);
+        assert!(!state.finish(inputs, body(600.0)));
+        assert!(state.toggle_original());
+        assert_eq!(state.dark_tone(), Some(true));
+        let inputs = state.start().expect("restarted");
+        assert_eq!(inputs.appearance, Appearance::default());
     }
 }

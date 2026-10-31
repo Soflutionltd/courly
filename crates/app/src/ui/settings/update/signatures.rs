@@ -78,17 +78,35 @@ impl Settings {
         if !start {
             return Task::none();
         }
-        let Some(html) = editor.raw_html.clone() else {
-            return Task::none();
-        };
-        let Some(inputs) = editor.preview.start() else {
-            return Task::none();
-        };
-        Task::perform(
-            crate::ui::mail_body::render(html, inputs, Default::default()),
-            move |body| SettingsMessage::SignatureEditorPreviewRendered { inputs, body },
-        )
+        start_signature_preview(editor)
     }
+
+    /// Re-render the signature preview on a new page appearance.
+    pub fn set_signature_preview_appearance(
+        &mut self,
+        appearance: mail_html::Appearance,
+    ) -> Task<SettingsMessage> {
+        let Some(editor) = self.signature_editor.as_mut() else {
+            return Task::none();
+        };
+        if !editor.preview.set_appearance(appearance) {
+            return Task::none();
+        }
+        start_signature_preview(editor)
+    }
+}
+
+fn start_signature_preview(editor: &mut SignatureEditorState) -> Task<SettingsMessage> {
+    let Some(html) = editor.raw_html.clone() else {
+        return Task::none();
+    };
+    let Some(inputs) = editor.preview.start() else {
+        return Task::none();
+    };
+    Task::perform(
+        crate::ui::mail_body::render(html, inputs, Default::default()),
+        move |body| SettingsMessage::SignatureEditorPreviewRendered { inputs, body },
+    )
 }
 
 /// `Ok(None)` when the picker is cancelled.

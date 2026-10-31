@@ -16,7 +16,7 @@ mod forms;
 // Style functions only receive `&Theme`, so we use a thread-local to
 // communicate the user's preference to `style_email_body_container`.
 thread_local! {
-    pub(crate) static EMAIL_BODY_BG_PREF: Cell<EmailBodyBackground> = const { Cell::new(EmailBodyBackground::AlwaysWhite) };
+    pub(crate) static EMAIL_BODY_BG_PREF: Cell<EmailBodyBackground> = const { Cell::new(EmailBodyBackground::Auto) };
 }
 
 /// Set the email body background preference. Call when preferences change.
@@ -34,7 +34,7 @@ pub use button::{
 };
 pub use catalog::{THEMES, dark_theme, light_theme, theme_by_index};
 pub use color::hex_to_color;
-pub use container::{ContainerClass, pane_frame_colors};
+pub use container::{ContainerClass, email_body_appearance, pane_frame_colors};
 pub use forms::{
     PickListClass, RadioClass, RuleClass, SliderClass, TextClass, TextInputClass, TogglerClass,
 };
