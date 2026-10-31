@@ -13,6 +13,11 @@ use crate::{Message, ReadyApp};
 use rtsk::db::types::AccountScope;
 use rtsk::scope::ViewScope;
 
+/// Pause in typing after which the list and the suggestions refresh. The
+/// deadline is polled every 50 ms, so results land 100 to 150 ms after the
+/// last key.
+const SEARCH_TYPING_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
+
 #[derive(Debug, Clone)]
 pub(crate) enum SearchIntent {
     AdHoc {
@@ -375,7 +380,7 @@ impl ReadyApp {
             }
         } else {
             self.search_debounce_deadline =
-                Some(iced::time::Instant::now() + std::time::Duration::from_millis(150));
+                Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
         }
 
         // Trigger typeahead based on cursor context (assume cursor at end)
@@ -787,8 +792,9 @@ impl ReadyApp {
         self.thread_list.typeahead.visible = false;
     }
 
-    /// People and the best messages for the query, under the search field.
-    /// The list itself only changes on Enter or a pick.
+    /// Runs on each typing pause: the list shows the results at once, and
+    /// people and the best messages show under the search field. Nothing is
+    /// saved as a pinned search until Enter or a pick.
     fn refresh_search_suggestions(&mut self) -> Task<Message> {
         self.search_debounce_deadline = None;
         let query = self.search_query.text().trim().to_string();
@@ -796,6 +802,7 @@ impl ReadyApp {
             self.search_suggest.close();
             return Task::none();
         }
+        let live = self.run_live_search();
         let message_query = self.effective_search_query();
         let (scope, folder_id) = self.search_target();
         let scope = execution_scope_to_account_scope(&SearchScope::View(scope));
@@ -805,7 +812,7 @@ impl ReadyApp {
         // Before the index is open the pipeline would fall back to SQL;
         // people still show, messages come with the next pause.
         let with_messages = !self.search_state_pending;
-        Task::perform(
+        let suggestions = Task::perform(
             async move {
                 let contacts = db.search_contacts_for_typeahead(query.clone()).await;
                 let messages = if with_messages {
@@ -831,7 +838,38 @@ impl ReadyApp {
                     messages,
                 })
             },
-        )
+        );
+        Task::batch([live, suggestions])
+    }
+
+    /// The typed query run into the list without saving it: Enter or a pick
+    /// still goes through `handle_search_execute`, which saves it once.
+    fn run_live_search(&mut self) -> Task<Message> {
+        let query = self.effective_search_query();
+        if query.is_empty() {
+            return Task::none();
+        }
+        let (scope, folder_id) = self.search_target();
+        let ctx = self.current_ui_search_context();
+        let pinned_state = match ctx.editing_pinned_search {
+            Some(id) => SearchPinnedStateBehavior::PinnedSearch {
+                active: PinnedSearchRef::Existing(id),
+                editing: PinnedSearchRef::Existing(id),
+            },
+            None => SearchPinnedStateBehavior::Clear,
+        };
+        let mut resolved = resolve_search_intent(
+            SearchIntent::AdHoc {
+                query,
+                scope,
+                folder_id,
+            },
+            &ctx,
+        );
+        resolved.completion.persistence = SearchPersistenceBehavior::None;
+        resolved.completion.pinned_state = pinned_state;
+        resolved.completion.post_success = SearchPostSuccessEffect::None;
+        self.dispatch_resolved_search(resolved)
     }
 
     /// A person from the menu: every message they sent, with the person
@@ -916,7 +954,7 @@ impl ReadyApp {
             self.search_debounce_deadline = None;
         } else {
             self.search_debounce_deadline =
-                Some(iced::time::Instant::now() + std::time::Duration::from_millis(150));
+                Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
         }
         Task::none()
     }
