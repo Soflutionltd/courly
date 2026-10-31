@@ -607,6 +607,32 @@ impl ResidentEngine {
         Ok(())
     }
 
+    /// Walk the whole account again: detach, drop every sync cursor and the
+    /// debt ledger, re-attach. With no durable cursor, attach establishes each
+    /// scope afresh and backfills it in full. Local mail is not deleted.
+    pub async fn resync_account(&self, account_id: &str) -> Result<(), String> {
+        self.detach_account(account_id).await?;
+        let aid = account_id.to_string();
+        self.inner
+            .write_db
+            .with_write(move |conn| {
+                conn.execute(
+                    "DELETE FROM sync_cursors WHERE account_id = ?1",
+                    rusqlite::params![aid],
+                )
+                .map_err(|error| format!("clear sync cursors: {error}"))?;
+                conn.execute(
+                    "DELETE FROM sync_ledgers WHERE account_id = ?1",
+                    rusqlite::params![aid],
+                )
+                .map_err(|error| format!("clear sync ledger: {error}"))?;
+                Ok(())
+            })
+            .await?;
+        log::info!("resync of {account_id}: cursors cleared, re-attaching");
+        self.attach_account(account_id).await
+    }
+
     pub async fn shutdown(&self) {
         self.inner.shutting_down.store(true, Ordering::SeqCst);
         let account_ids = self

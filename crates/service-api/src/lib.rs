@@ -140,8 +140,8 @@ pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, Tem
 pub use sync::{
     AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCancelAccountParams,
     SyncCancelAck, SyncCompleted, SyncFocusFolderAck, SyncFocusFolderParams, SyncPauseReason,
-    SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncRunId, SyncStartAccountParams,
-    SyncStartAck,
+    SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncResyncAccountParams, SyncResyncAck,
+    SyncRunId, SyncStartAccountParams, SyncStartAck,
 };
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use version::{MAX_FRAME_BYTES, PROTOCOL_VERSION};

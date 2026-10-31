@@ -101,6 +101,21 @@ pub struct SyncResumeAccountParams {
     pub account_id: String,
 }
 
+/// `sync.resync_account` request body. Drops the account's sync cursors and
+/// re-attaches it, so every folder is walked again from the server. Local
+/// mail is kept; the walk rewrites what it finds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncResyncAccountParams {
+    pub account_id: String,
+}
+
+/// Synchronous response to `sync.resync_account`, sent once the account is
+/// re-attached and its full walk has started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncResyncAck {
+    pub account_id: String,
+}
+
 /// `sync.focus_folder` request body: the folder the user is looking at, so
 /// the resident engine re-reads it on the fast cadence of the system
 /// folders. `folder_id` is the storage id the sidebar shows; `None` clears

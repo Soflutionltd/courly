@@ -455,6 +455,11 @@ impl SyncRuntime {
         self.inner.resident_engine.resume_account(account_id).await
     }
 
+    /// Walk every folder of the account again from the server.
+    pub async fn resync_account(&self, account_id: &str) -> Result<(), String> {
+        self.inner.resident_engine.resync_account(account_id).await
+    }
+
     /// Point the resident engine's fast cadence at the folder the user is
     /// looking at. Returns how many attached accounts hold it in focus.
     pub async fn focus_folder(&self, account_id: Option<&str>, folder_id: Option<&str>) -> u32 {

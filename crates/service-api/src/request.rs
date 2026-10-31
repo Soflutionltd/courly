@@ -38,7 +38,8 @@ use crate::signature::{
 use crate::smart_folder::SmartFolderCreateParams;
 use crate::template::{TemplateDeleteParams, TemplateSaveParams};
 use crate::sync::{
-    SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams, SyncStartAccountParams,
+    SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams,
+    SyncResyncAccountParams, SyncStartAccountParams,
 };
 use crate::thread_ui_state::ThreadUiStateSetParams;
 
@@ -1149,6 +1150,11 @@ pub enum RequestParams {
     SyncResumeAccount {
         params: SyncResumeAccountParams,
     },
+    /// Drop the account's sync cursors and re-attach it so every folder is
+    /// walked again. Waits for the detach, which joins the consumer task.
+    SyncResyncAccount {
+        params: SyncResyncAccountParams,
+    },
     /// Tell the resident sync engine which folder the user is looking at,
     /// so it is re-read on the fast cadence alongside the system folders.
     ///
@@ -1707,6 +1713,7 @@ impl RequestParams {
             Self::SyncStartAccount { .. } => "sync.start_account",
             Self::SyncCancelAccount { .. } => "sync.cancel_account",
             Self::SyncResumeAccount { .. } => "sync.resume_account",
+            Self::SyncResyncAccount { .. } => "sync.resync_account",
             Self::SyncFocusFolder { .. } => "sync.focus_folder",
             Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
@@ -1845,6 +1852,7 @@ impl RequestParams {
             // `run_id`. Cancellation propagation is async.
             Self::SyncCancelAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::SyncResumeAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::SyncResyncAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
             Self::SyncFocusFolder { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Handler-only budgets for the calendar request pair.
             // Same shape as the sync pair above.
@@ -2002,6 +2010,7 @@ impl RequestParams {
             | Self::OauthExchangeCode { .. }
             | Self::SyncCancelAccount { .. }
             | Self::SyncResumeAccount { .. }
+            | Self::SyncResyncAccount { .. }
             | Self::CalendarCancelAccountSync { .. }
             | Self::SignatureCreate { .. }
             | Self::TemplateSave { .. }
@@ -2133,6 +2142,7 @@ impl RequestParams {
             Self::SyncStartAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncCancelAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncResumeAccount { params } => serde_json::json!({ "params": params }),
+            Self::SyncResyncAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncFocusFolder { params } => serde_json::json!({ "params": params }),
             Self::CalendarStartAccountSync { params } => serde_json::json!({ "params": params }),
             Self::CalendarCancelAccountSync { params } => {
@@ -2339,6 +2349,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("sync.resume_account params: {e}"))?;
                 Ok(Self::SyncResumeAccount { params: p.params })
+            }
+            "sync.resync_account" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SyncResyncAccountParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("sync.resync_account params: {e}"))?;
+                Ok(Self::SyncResyncAccount { params: p.params })
             }
             "sync.focus_folder" => {
                 #[derive(Deserialize)]
