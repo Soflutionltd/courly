@@ -59,6 +59,7 @@ fn sender_or_unknown<'a>(name: Option<&'a str>, address: Option<&'a str>) -> Cow
         .map_or_else(|| t!("main.unknown_sender"), Cow::Borrowed)
 }
 use super::highlighted::highlighted_text_body;
+use super::search_highlight::highlighted_line;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 /// Pin, delete or flag, from the buttons kept visible on every row.
@@ -69,12 +70,20 @@ pub enum ThreadRowAction {
     Flag,
 }
 
+/// What a thread row shows beyond the thread itself.
+#[derive(Clone, Copy)]
+pub struct ThreadCardMarks<'b> {
+    pub label_paints: &'b [LabelPaint],
+    pub bimi_logo: Option<&'b Path>,
+    /// Query words to highlight; empty outside search results.
+    pub highlight_terms: &'b [String],
+}
+
 pub fn thread_card<'a, M: Clone + 'a>(
     thread: &'a Thread,
     index: usize,
     selected: bool,
-    label_paints: &[LabelPaint],
-    bimi_logo: Option<&Path>,
+    marks: ThreadCardMarks<'_>,
     (on_press, on_release, on_exit): (
         impl Fn(usize) -> M,
         impl Fn(usize) -> M,
@@ -82,6 +91,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
     ),
     on_action: impl Fn(usize, ThreadRowAction) -> M,
 ) -> Element<'a, M> {
+    let ThreadCardMarks {
+        label_paints,
+        bimi_logo,
+        highlight_terms,
+    } = marks;
     let sender = sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref());
 
     let subject = thread
@@ -171,15 +185,13 @@ pub fn thread_card<'a, M: Clone + 'a>(
     }
 
     let top_row = row![
-        container(
-            text(sender.clone())
-                .size(TEXT_MD)
-                .style(text::base)
-                .font(sender_font)
-                .wrapping(text::Wrapping::None)
-                .ellipsis(text::Ellipsis::End)
-                .width(Length::Fill),
-        )
+        container(highlighted_line(
+            sender.clone(),
+            highlight_terms,
+            TEXT_MD,
+            sender_font,
+            text::base,
+        ))
         .width(Length::Fill),
         container(
             text(date_str)
@@ -214,15 +226,13 @@ pub fn thread_card<'a, M: Clone + 'a>(
     .align_y(Alignment::Center);
 
     let subject_row = row![
-        container(
-            text(subject)
-                .size(TEXT_MD)
-                .style(subject_style)
-                .font(font::text())
-                .wrapping(text::Wrapping::None)
-                .ellipsis(text::Ellipsis::End)
-                .width(Length::Fill),
-        )
+        container(highlighted_line(
+            subject,
+            highlight_terms,
+            TEXT_MD,
+            font::text(),
+            subject_style,
+        ))
         .width(Length::Fill),
     ]
     // Selecting a local draft opens it in the compose, so its row carries
@@ -256,14 +266,13 @@ pub fn thread_card<'a, M: Clone + 'a>(
             .width(Length::Fill)
             .into()
         } else {
-            container(
-                text(snippet)
-                    .size(TEXT_SM)
-                    .style(text::secondary)
-                    .wrapping(text::Wrapping::None)
-                    .ellipsis(text::Ellipsis::End)
-                    .width(Length::Fill),
-            )
+            container(highlighted_line(
+                Cow::Borrowed(snippet),
+                highlight_terms,
+                TEXT_SM,
+                font::text(),
+                text::secondary,
+            ))
             .width(Length::Fill)
             .into()
         };

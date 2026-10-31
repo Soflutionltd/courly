@@ -957,6 +957,11 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             .is_some_and(|group| state.collapsed_groups.contains(group))
     };
 
+    let highlight_terms = if state.mode == ThreadListMode::Search {
+        widgets::query_terms(&state.search_query)
+    } else {
+        Vec::new()
+    };
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {
         match group_headers.get(i).copied().flatten() {
@@ -994,8 +999,11 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             thread,
             i,
             state.is_selected(i),
-            &thread.label_paints,
-            bimi_logo.as_deref(),
+            widgets::ThreadCardMarks {
+                label_paints: &thread.label_paints,
+                bimi_logo: bimi_logo.as_deref(),
+                highlight_terms: &highlight_terms,
+            },
             (
                 ThreadListMessage::RowPress,
                 ThreadListMessage::RowRelease,
