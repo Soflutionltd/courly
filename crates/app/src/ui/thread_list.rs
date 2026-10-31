@@ -35,6 +35,21 @@ pub struct TypeaheadItem {
     pub insert_value: String,
 }
 
+/// A thread taken out of the list by an action still in flight.
+#[derive(Debug, Clone)]
+pub struct HiddenThread {
+    pub index: usize,
+    pub thread: Thread,
+}
+
+/// Threads an action took out of the list, kept to put back on failure.
+#[derive(Debug, Clone, Default)]
+pub struct HiddenThreads {
+    pub threads: Vec<HiddenThread>,
+    /// The selection went with them, so the list should auto-advance.
+    pub held_selection: bool,
+}
+
 /// Direction for navigating typeahead suggestions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeaheadDirection {
@@ -365,6 +380,90 @@ impl ThreadList {
             (Some(index), Some(menu)) => menu.index = index,
             _ => self.row_menu = None,
         }
+    }
+
+    /// Drop the threads an action moves out of this view before the server
+    /// answers. When the selection goes with them, the cursor stays on the
+    /// first selected row so auto-advance picks its neighbour.
+    pub fn hide_threads(&mut self, keys: &[(String, String)]) -> HiddenThreads {
+        let gone: Vec<usize> = self
+            .threads
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                keys.iter()
+                    .any(|(account_id, id)| *account_id == t.account_id && *id == t.id)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+        if gone.is_empty() {
+            return HiddenThreads::default();
+        }
+        let is_gone = |idx: usize| gone.binary_search(&idx).is_ok();
+        let shift = |idx: usize| idx - gone.partition_point(|&g| g < idx);
+        let kept = |idx: usize| (!is_gone(idx)).then(|| shift(idx));
+
+        let first_selected_gone = self
+            .selected_thread
+            .into_iter()
+            .chain(self.selected_threads.iter().copied())
+            .filter(|&idx| is_gone(idx))
+            .min();
+        if let Some(idx) = first_selected_gone {
+            self.selected_thread = Some(shift(idx));
+            self.selected_threads.clear();
+        } else {
+            self.selected_thread = self.selected_thread.and_then(kept);
+            self.selected_threads = self
+                .selected_threads
+                .iter()
+                .filter_map(|&idx| kept(idx))
+                .collect();
+        }
+        self.last_selected_anchor = self.last_selected_anchor.and_then(kept);
+        self.row_menu = self.row_menu.take().and_then(|mut menu| {
+            kept(menu.index).map(|index| {
+                menu.index = index;
+                menu
+            })
+        });
+        self.pressed = None;
+
+        let mut threads = Vec::with_capacity(gone.len());
+        for (index, thread) in std::mem::take(&mut self.threads).into_iter().enumerate() {
+            if is_gone(index) {
+                threads.push(HiddenThread { index, thread });
+            } else {
+                self.threads.push(thread);
+            }
+        }
+        HiddenThreads {
+            threads,
+            held_selection: first_selected_gone.is_some(),
+        }
+    }
+
+    /// Put hidden threads back where they were, after a failed action.
+    /// Threads a reload already brought back are skipped.
+    pub fn restore_threads<'h>(&mut self, hidden: impl IntoIterator<Item = &'h HiddenThread>) {
+        let mut hidden: Vec<&HiddenThread> = hidden
+            .into_iter()
+            .filter(|h| {
+                !self
+                    .threads
+                    .iter()
+                    .any(|t| t.account_id == h.thread.account_id && t.id == h.thread.id)
+            })
+            .collect();
+        if hidden.is_empty() {
+            return;
+        }
+        hidden.sort_by_key(|h| h.index);
+        let mut threads = self.threads.clone();
+        for h in hidden {
+            threads.insert(h.index.min(threads.len()), h.thread.clone());
+        }
+        self.set_threads(threads);
     }
 
     pub fn set_context(&mut self, folder_name: String, scope_name: String) {
@@ -998,6 +1097,64 @@ mod tests {
         assert_eq!(threads.selected_thread, Some(1));
         assert_eq!(threads.last_selected_anchor, Some(1));
         assert_eq!(threads.selected_threads, HashSet::from([1, 2]));
+    }
+
+    fn ids(threads: &ThreadList) -> Vec<&str> {
+        threads.threads.iter().map(|t| t.id.as_str()).collect()
+    }
+
+    fn key(id: &str) -> (String, String) {
+        ("acc".to_string(), id.to_string())
+    }
+
+    #[test]
+    fn deleting_the_open_thread_removes_it_and_opens_the_next() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c"]));
+        threads.selected_thread = Some(1);
+
+        let hidden = threads.hide_threads(&[key("b")]);
+        assert!(hidden.held_selection);
+        assert_eq!(ids(&threads), ["a", "c"]);
+
+        let (_, event) = threads.update(ThreadListMessage::AutoAdvance);
+        assert!(matches!(
+            event,
+            Some(ThreadListEvent::AutoAdvance { new_index: Some(1) })
+        ));
+        assert_eq!(threads.threads[1].id, "c");
+    }
+
+    #[test]
+    fn hiding_other_threads_keeps_the_selection_on_its_thread() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c", "d"]));
+        threads.selected_thread = Some(3);
+
+        let hidden = threads.hide_threads(&[key("a"), key("c")]);
+        assert!(!hidden.held_selection);
+        assert_eq!(ids(&threads), ["b", "d"]);
+        assert_eq!(threads.selected_thread, Some(1));
+    }
+
+    #[test]
+    fn a_failed_delete_puts_the_threads_back_in_place() {
+        let mut threads = ThreadList::new(Arc::new(rtsk::bimi::BimiLruCache::new()));
+        threads.set_threads(list(&["a", "b", "c", "d"]));
+        threads.selected_thread = Some(1);
+        let hidden = threads.hide_threads(&[key("b"), key("c")]);
+        let (_, event) = threads.update(ThreadListMessage::AutoAdvance);
+        assert!(matches!(
+            event,
+            Some(ThreadListEvent::AutoAdvance { new_index: Some(1) })
+        ));
+
+        threads.restore_threads(&hidden.threads);
+        assert_eq!(ids(&threads), ["a", "b", "c", "d"]);
+        assert_eq!(threads.selected_thread, Some(3));
+
+        threads.restore_threads(&hidden.threads);
+        assert_eq!(ids(&threads), ["a", "b", "c", "d"]);
     }
 
     #[test]

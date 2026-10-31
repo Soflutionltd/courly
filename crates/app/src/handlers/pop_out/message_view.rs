@@ -292,6 +292,6 @@ impl ReadyApp {
         let Some(plan) = ar::build_execution_plan(outcome, &threads, &mut self.thread_list) else {
             return Task::none();
         };
-        self.dispatch_plan(plan)
+        self.dispatch_plan_advancing(plan)
     }
 }

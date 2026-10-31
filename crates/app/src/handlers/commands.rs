@@ -186,7 +186,21 @@ impl ReadyApp {
             }
         }
 
-        self.dispatch_plan(plan)
+        self.dispatch_plan_advancing(plan)
+    }
+
+    /// Dispatch, moving the selection on first when the plan took the
+    /// selected threads out of the list.
+    pub(crate) fn dispatch_plan_advancing(
+        &mut self,
+        plan: crate::action_resolve::ActionExecutionPlan,
+    ) -> Task<Message> {
+        let advance = if plan.hidden.held_selection {
+            self.handle_thread_list(crate::ui::thread_list::ThreadListMessage::AutoAdvance)
+        } else {
+            Task::none()
+        };
+        Task::batch([advance, self.dispatch_plan(plan)])
     }
 
     /// Dispatch an execution plan via IPC to the Service-side action
@@ -250,6 +264,7 @@ impl ReadyApp {
             // Pre-Ready (no client) or Service crashed without respawn:
             // roll back optimistic state and surface a toast.
             self.rollback_optimistic(&plan.optimistic);
+            self.thread_list.restore_threads(&plan.hidden.threads);
             self.status_bar
                 .show_confirmation(t!("main.action.unavailable_not_connected").into_owned());
             return Task::none();
@@ -276,6 +291,7 @@ impl ReadyApp {
                 "dispatch_plan dropped: target inside 200ms throttle window (double-click absorbed)",
             );
             self.rollback_optimistic(&plan.optimistic);
+            self.thread_list.restore_threads(&plan.hidden.threads);
             return Task::none();
         }
 
@@ -308,6 +324,7 @@ impl ReadyApp {
                 blocking.len(),
             );
             self.rollback_optimistic(&plan.optimistic);
+            self.thread_list.restore_threads(&plan.hidden.threads);
             self.status_bar
                 .show_confirmation(t!("main.action.deferred_reconciling").into_owned());
             return Task::none();
@@ -398,6 +415,16 @@ impl ReadyApp {
                 behavior: plan.behavior.clone(),
                 compensation: plan.compensation.clone(),
                 optimistic: opt_by_account.remove(&account_id).unwrap_or_default(),
+                hidden: crate::action_resolve::HiddenThreads {
+                    threads: plan
+                        .hidden
+                        .threads
+                        .iter()
+                        .filter(|h| h.thread.account_id == account_id)
+                        .cloned()
+                        .collect(),
+                    held_selection: false,
+                },
             };
             tasks.push(self.dispatch_plan_with_undo(sub_plan, undo_description.cloned()));
         }
@@ -455,6 +482,7 @@ impl ReadyApp {
                             .remove(&(account_id.clone(), thread_id.clone()));
                     }
                     self.rollback_optimistic(&state.plan.optimistic);
+                    self.thread_list.restore_threads(&state.plan.hidden.threads);
                 }
                 log::warn!("action plan {plan_id} dispatch failed: {reason}");
                 self.status_bar.show_confirmation(
@@ -601,6 +629,7 @@ impl ReadyApp {
                             .remove(&(account_id.clone(), thread_id.clone()));
                     }
                     self.rollback_optimistic(&state.plan.optimistic);
+                    self.thread_list.restore_threads(&state.plan.hidden.threads);
                     self.status_bar
                         .show_confirmation(t!("main.action.lost_on_restart").into_owned());
                 } else if self.in_flight_sends.remove(&plan_id).is_some() {
@@ -874,6 +903,7 @@ impl ReadyApp {
             if !plan.optimistic.is_empty() {
                 self.rollback_optimistic(&plan.optimistic);
             }
+            self.thread_list.restore_threads(&plan.hidden.threads);
             return Task::none();
         }
 
@@ -899,6 +929,20 @@ impl ReadyApp {
             }
         }
 
+        if any_failed {
+            let failed: Vec<(&str, &str)> = plan
+                .operations
+                .iter()
+                .zip(outcomes.iter())
+                .filter(|(_, outcome)| outcome.is_failed())
+                .map(|((account_id, thread_id, _), _)| (account_id.as_str(), thread_id.as_str()))
+                .collect();
+            self.thread_list
+                .restore_threads(plan.hidden.threads.iter().filter(|h| {
+                    failed.contains(&(h.thread.account_id.as_str(), h.thread.id.as_str()))
+                }));
+        }
+
         // Build and push undo payloads (C2, C4, C5)
         if matches!(behavior.undo, UndoBehavior::Reversible) {
             let payloads = ar::build_undo_payloads(plan, outcomes);
@@ -910,7 +954,7 @@ impl ReadyApp {
 
         // Post-success effects
         match behavior.view_effect {
-            ViewEffect::LeavesCurrentView if !all_failed => {
+            ViewEffect::LeavesCurrentView if !all_failed && plan.hidden.threads.is_empty() => {
                 return self
                     .handle_thread_list(crate::ui::thread_list::ThreadListMessage::AutoAdvance);
             }
@@ -1018,6 +1062,7 @@ impl ReadyApp {
             behavior,
             compensation: ar::CompensationContext::None,
             optimistic: Vec::new(),
+            hidden: ar::HiddenThreads::default(),
         };
         Task::batch([
             cancel_task,

@@ -11,6 +11,8 @@
 use rust_i18n::t;
 use service_api::actions::{ActionOutcome, FolderId, LabelGroupId, LabelId, MailOperation};
 
+pub use crate::ui::thread_list::HiddenThreads;
+
 // ── Intent ──────────────────────────────────────────────
 
 /// Raw user intent. Carries inline parameters but no resolved context.
@@ -682,6 +684,9 @@ pub struct ActionExecutionPlan {
     pub compensation: CompensationContext,
     /// Optimistic UI mutations applied (toggles only). Empty for non-toggles.
     pub optimistic: Vec<OptimisticMutation>,
+    /// Threads taken out of the list up front because the action moves
+    /// them out of the current view.
+    pub hidden: HiddenThreads,
 }
 
 // ── Resolution ──────────────────────────────────────────
@@ -793,11 +798,17 @@ pub fn build_execution_plan(
                 .iter()
                 .map(|(a, t)| (a.clone(), t.clone(), resolved.operation.clone()))
                 .collect();
+            let hidden = if behavior.view_effect == ViewEffect::LeavesCurrentView {
+                thread_list.hide_threads(threads)
+            } else {
+                HiddenThreads::default()
+            };
             Some(ActionExecutionPlan {
                 operations,
                 behavior,
                 compensation: resolved.compensation,
                 optimistic: vec![],
+                hidden,
             })
         }
         ResolveOutcome::PerThreadToggle {
@@ -846,6 +857,7 @@ pub fn build_execution_plan(
                 behavior,
                 compensation,
                 optimistic,
+                hidden: HiddenThreads::default(),
             })
         }
         ResolveOutcome::NoOp => None,
