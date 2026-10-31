@@ -37,6 +37,12 @@ const RESIDENT_REDRIVE_BACKOFF: Duration = Duration::from_millis(250);
 /// seconds keeps a healthy account's re-establish well under the original
 /// fixed-250ms regression budget while still defanging the hot-loop.
 const RESIDENT_REDRIVE_BACKOFF_CAP: Duration = Duration::from_secs(5);
+/// First automatic resume after a terminal failure the user cannot fix
+/// (anything but lost credentials). Doubles per consecutive failure up to
+/// `TERMINAL_RETRY_BACKOFF_CAP`, so a server-side fault stalls sync for a
+/// while instead of until the next restart.
+const TERMINAL_RETRY_BACKOFF: Duration = Duration::from_secs(30);
+const TERMINAL_RETRY_BACKOFF_CAP: Duration = Duration::from_secs(15 * 60);
 /// First auxiliary pass runs shortly after attach so the engine's own
 /// attach + initial drive gets a head start; thereafter the passes run on a
 /// wall-clock cadence chosen to match the legacy per-kick cadence, which was
@@ -86,6 +92,9 @@ struct ResidentSlot {
     /// account always re-establishes at the base delay. Readable off the
     /// probe to prove the clean edge reset the backoff.
     redrive_attempt: AtomicU32,
+    /// Consecutive automatic resumes after a non-auth terminal failure;
+    /// reset on a clean caught-up edge.
+    terminal_retry_attempt: AtomicU32,
     /// Latches true once the resident consumer has observed (or set) the
     /// account's `initial_sync_completed` marker, so the per-caught-up
     /// callback stops re-reading the marker from the DB on every idle
@@ -363,6 +372,7 @@ impl ResidentEngine {
             terminal: terminal_tx,
             redrive_total: AtomicU64::new(0),
             redrive_attempt: AtomicU32::new(0),
+            terminal_retry_attempt: AtomicU32::new(0),
             initial_marked: AtomicBool::new(false),
             provider,
             containers: Arc::clone(&containers),
@@ -998,6 +1008,7 @@ async fn resident_consumer_loop(
                         // next lag/closed re-drive starts at the base delay again
                         // (§ 4.3 "reset on a clean caught-up edge").
                         slot.redrive_attempt.store(0, Ordering::SeqCst);
+                        slot.terminal_retry_attempt.store(0, Ordering::SeqCst);
                         let previous_seq = *slot.caught_up.borrow();
                         let seq = slot.run_seq.load(Ordering::SeqCst);
                         let _ = slot.caught_up.send(seq);
@@ -1032,9 +1043,26 @@ async fn resident_consumer_loop(
                             .and_then(|outcome| outcome.pause.as_ref())
                             .is_some()
                     {
-                        emit_account_paused(&inner, &account_id, pause).await;
+                        emit_account_paused(&inner, &account_id, pause.clone()).await;
                     }
-                    wait_for_terminal_clear(&slot).await;
+                    if matches!(pause, SyncPauseReason::NeedsReauth) {
+                        wait_for_terminal_clear(&slot).await;
+                    } else {
+                        let attempt = slot.terminal_retry_attempt.fetch_add(1, Ordering::SeqCst);
+                        let delay = terminal_retry_backoff_for_attempt(attempt);
+                        if tokio::time::timeout(delay, wait_for_terminal_clear(&slot))
+                            .await
+                            .is_err()
+                        {
+                            log::info!(
+                                "resuming {account_id} after a terminal sync failure (attempt {attempt})"
+                            );
+                            if let Err(error) = inner.engine.engine().resume_account(&account) {
+                                log::debug!("engine resume for {account_id}: {error:?}");
+                            }
+                            let _ = slot.terminal.send(None);
+                        }
+                    }
                     slot.redrive_attempt.store(0, Ordering::SeqCst);
                     continue;
                 }
@@ -1092,6 +1120,13 @@ fn redrive_backoff_for_attempt(attempt: u32) -> Duration {
     RESIDENT_REDRIVE_BACKOFF
         .saturating_mul(factor)
         .min(RESIDENT_REDRIVE_BACKOFF_CAP)
+}
+
+fn terminal_retry_backoff_for_attempt(attempt: u32) -> Duration {
+    let factor = 1u32.checked_shl(attempt).unwrap_or(u32::MAX);
+    TERMINAL_RETRY_BACKOFF
+        .saturating_mul(factor)
+        .min(TERMINAL_RETRY_BACKOFF_CAP)
 }
 
 /// Sleep the bounded, jittered backoff for the slot's current re-drive attempt,
@@ -1610,8 +1645,17 @@ mod tests {
     use super::{
         BifrostProviderKind, CursorScope, DEFAULT_HOT_POLL_INTERVAL, Duration, FolderId,
         HOT_POLL_BACKOFF_CAP, HOT_POLL_CALM_TICKS, HotPollBackoff, ObjectType, account_mail_scope,
-        hot_poll_interval_from_setting, needs_hot_poll,
+        hot_poll_interval_from_setting, needs_hot_poll, terminal_retry_backoff_for_attempt,
     };
+
+    #[test]
+    fn terminal_failures_retry_with_a_capped_doubling_delay() {
+        assert_eq!(terminal_retry_backoff_for_attempt(0), Duration::from_secs(30));
+        assert_eq!(terminal_retry_backoff_for_attempt(1), Duration::from_secs(60));
+        assert_eq!(terminal_retry_backoff_for_attempt(5), Duration::from_secs(15 * 60));
+        assert_eq!(terminal_retry_backoff_for_attempt(40), Duration::from_secs(15 * 60));
+    }
+
     fn index_after(source: &str, needle: &str, after: usize) -> usize {
         source[after..]
             .find(needle)
