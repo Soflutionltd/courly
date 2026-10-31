@@ -320,13 +320,18 @@ impl ReadingPane {
     ///
     /// Rules (messages are newest-first):
     /// 1. Unread messages are expanded
-    /// 2. Most recent message (index 0) is expanded
+    /// 2. Most recent received message is expanded (the most recent message
+    ///    when the thread only holds the user's own)
     /// 3. First message in thread (last index) is expanded
-    /// 4. Own messages are collapsed (unless rule 1-3 applies)
+    /// 4. Own read messages are collapsed (unless rule 2 or 3 applies)
     /// 5. When search terms are present, messages containing any term are expanded
     pub fn apply_message_expansion(&mut self, messages: &[ThreadMessage]) {
         let len = messages.len();
         let mut expanded = vec![false; len];
+        let latest = messages
+            .iter()
+            .position(|msg| !msg.is_own_message)
+            .unwrap_or(0);
 
         if !self.search_highlight_terms.is_empty() {
             // Search mode: expand messages that contain any search term
@@ -344,12 +349,12 @@ impl ReadingPane {
             }
         } else {
             for (i, msg) in messages.iter().enumerate() {
-                // Rules 1-3: unread, most recent, or initial message
-                if !msg.is_read || i == 0 || i == len - 1 {
+                // Rules 1-3: unread, most recent received, or initial message
+                if !msg.is_read || i == latest || i == len - 1 {
                     expanded[i] = true;
                 }
                 // Rule 4: own messages default to collapsed
-                if msg.is_own_message && msg.is_read && i != 0 && i != len - 1 {
+                if msg.is_own_message && msg.is_read && i != latest && i != len - 1 {
                     expanded[i] = false;
                 }
             }
@@ -1170,5 +1175,58 @@ pub(crate) fn open_url_in_browser(url: &str) {
         let _ = std::process::Command::new("cmd")
             .args(["/c", "start", url])
             .spawn();
+    }
+}
+
+#[cfg(test)]
+mod expansion_tests {
+    use super::ReadingPane;
+    use crate::db::ThreadMessage;
+
+    fn message(id: &str, is_own_message: bool) -> ThreadMessage {
+        ThreadMessage {
+            id: id.to_owned(),
+            thread_id: "thread".to_owned(),
+            account_id: "account".to_owned(),
+            from_name: None,
+            from_address: None,
+            to_addresses: None,
+            cc_addresses: None,
+            date: None,
+            subject: None,
+            message_id_header: None,
+            snippet: None,
+            body_html: None,
+            body_text: None,
+            is_read: true,
+            is_starred: false,
+            is_replied: false,
+            is_forwarded: false,
+            has_meeting_invite: false,
+            meeting_invite_method: None,
+            meeting_invite_uid: None,
+            is_own_message,
+        }
+    }
+
+    #[test]
+    fn the_latest_received_message_opens_instead_of_the_users_reply() {
+        let mut pane = ReadingPane::new();
+        let messages = [
+            message("my-second-reply", true),
+            message("my-first-reply", true),
+            message("their-answer", false),
+            message("my-question", true),
+        ];
+        pane.apply_message_expansion(&messages);
+        assert_eq!(pane.message_expanded, [false, false, true, true]);
+    }
+
+    #[test]
+    fn a_thread_of_own_messages_opens_the_most_recent() {
+        let mut pane = ReadingPane::new();
+        let messages = [message("latest", true), message("middle", true), message("first", true)];
+        pane.apply_message_expansion(&messages);
+        assert_eq!(pane.message_expanded, [true, false, true]);
     }
 }
