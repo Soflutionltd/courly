@@ -124,6 +124,11 @@ impl ReadyApp {
                 _ => Task::none(),
             };
         }
+        if self.thread_drag.is_some() && *key == Key::Named(Named::Escape) {
+            return self.update(Message::ThreadDrag(
+                crate::handlers::thread_drag::ThreadDragMessage::Cancel,
+            ));
+        }
         if self.move_menu.is_some() && window_id == self.main_window_id {
             if *key == Key::Named(Named::Escape) {
                 self.move_menu = None;

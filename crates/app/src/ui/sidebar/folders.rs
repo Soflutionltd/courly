@@ -284,13 +284,24 @@ fn folder_row<'a>(
             .into();
 
     let query_prefix = build_search_here_user_folder_prefix(&folder.name, sidebar, scope);
-    let row_el: Element<'a, SidebarMessage> = mouse_area(label_btn)
+    let mut row_el: Element<'a, SidebarMessage> = mouse_area(label_btn)
         .on_right_press(SidebarMessage::OpenChildMenu {
             scope: scope.clone(),
             folder_id: folder.id.clone(),
             root_index,
         })
+        .on_enter(SidebarMessage::FolderEnter(
+            scope.clone(),
+            folder.id.clone(),
+        ))
+        .on_exit(SidebarMessage::FolderExit(scope.clone(), folder.id.clone()))
         .into();
+    if sidebar.is_drop_target(scope, &folder.id) {
+        row_el = container(row_el)
+            .style(theme::ContainerClass::DropTarget.style())
+            .width(Length::Fill)
+            .into();
+    }
     let menu_open = matches!(
         &sidebar.row_menu,
         Some(RowMenuAnchor::Child { scope: menu_scope, folder_id, .. })

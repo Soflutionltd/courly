@@ -235,6 +235,7 @@ pub enum Message {
     CancelPermanentDelete,
     FolderDialog(crate::ui::folder_dialog::FolderDialogMessage),
     MoveMenu(crate::ui::move_menu::MoveMenuMessage),
+    ThreadDrag(crate::handlers::thread_drag::ThreadDragMessage),
     /// "Mark All as Read" on a folder finished: messages marked, or the
     /// accounts that failed.
     FolderMarkedRead(Result<usize, String>),

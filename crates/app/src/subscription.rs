@@ -71,6 +71,26 @@ impl ReadyApp {
             }));
         }
 
+        // Follow the pointer from a press on a message row to its release,
+        // over the sidebar folders it may be dropped on.
+        if self.thread_drag.is_some() {
+            subs.push(iced::event::listen_with(|event, _status, _id| {
+                use crate::handlers::thread_drag::ThreadDragMessage;
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::ThreadDrag(ThreadDragMessage::Moved(position)))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::ThreadDrag(ThreadDragMessage::Released)),
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                        Some(Message::ThreadDrag(ThreadDragMessage::Cancel))
+                    }
+                    _ => None,
+                }
+            }));
+        }
+
         if self.service_client.is_some() {
             subs.push(
                 service_notification_subscription(&self.service_notifications)

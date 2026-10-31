@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use iced::widget::{Space, button, column, container, row, text};
+use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length, Theme};
 use rust_i18n::t;
 
@@ -75,7 +75,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
     selected: bool,
     label_paints: &[LabelPaint],
     bimi_logo: Option<&Path>,
-    on_select: impl Fn(usize) -> M,
+    (on_press, on_release, on_exit): (
+        impl Fn(usize) -> M,
+        impl Fn(usize) -> M,
+        impl Fn(usize) -> M,
+    ),
     on_action: impl Fn(usize, ThreadRowAction) -> M,
 ) -> Element<'a, M> {
     let sender = sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref());
@@ -221,8 +225,8 @@ pub fn thread_card<'a, M: Clone + 'a>(
         )
         .width(Length::Fill),
     ]
-    // Selecting a local draft opens it in a compose window, so its row
-    // carries no actions that would select it first.
+    // Selecting a local draft opens it in the compose, so its row carries
+    // no actions that would select it first.
     .push((!thread.is_local_draft).then_some(actions))
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
@@ -278,23 +282,29 @@ pub fn thread_card<'a, M: Clone + 'a>(
         .spacing(SPACE_SM)
         .align_y(Alignment::Center);
 
-    button(
+    // The press goes to the inner area, so a row can start a drag; a click
+    // is a release on the row pressed. The button only gives the styling.
+    let hit = mouse_area(
         container(content)
             .padding(PAD_THREAD_CARD)
             .height(THREAD_CARD_HEIGHT)
             .width(Length::Fill),
     )
-    .on_press(on_select(index))
-    .padding(0)
-    .style(
-        theme::ButtonClass::ThreadCard {
-            selected,
-            starred: thread.is_starred,
-        }
-        .style(),
-    )
-    .width(Length::Fill)
-    .into()
+    .on_press(on_press(index))
+    .on_release(on_release(index))
+    .on_exit(on_exit(index));
+    button(hit)
+        .on_press(on_release(index))
+        .padding(0)
+        .style(
+            theme::ButtonClass::ThreadCard {
+                selected,
+                starred: thread.is_starred,
+            }
+            .style(),
+        )
+        .width(Length::Fill)
+        .into()
 }
 
 /// One of the pin, delete and flag buttons kept visible on every row.

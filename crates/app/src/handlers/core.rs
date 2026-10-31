@@ -158,6 +158,14 @@ impl ReadyApp {
                 self.thread_list.clear_multi_select();
                 self.handle_select_thread(idx)
             }
+            ThreadListEvent::RowPressed(idx) => {
+                self.start_thread_drag(idx);
+                Task::none()
+            }
+            ThreadListEvent::PressedRowLeft => {
+                self.begin_thread_drag();
+                Task::none()
+            }
             ThreadListEvent::SearchQueryChanged(query) => {
                 self.update(Message::SearchQueryChanged(query))
             }

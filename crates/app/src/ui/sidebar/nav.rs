@@ -266,6 +266,7 @@ fn reorderable_row<'a>(
         .on_press(SidebarMessage::RowPress(scope.clone(), index))
         .on_release(SidebarMessage::RowRelease(scope.clone(), index))
         .on_enter(SidebarMessage::RowHover(scope.clone(), index))
+        .on_exit(SidebarMessage::RowExit(scope.clone(), index))
         .on_right_press(SidebarMessage::OpenRowMenu(scope.clone(), index));
     let mut row_el: Element<'a, SidebarMessage> = button(hit)
         .on_press(on_press)
@@ -274,7 +275,14 @@ fn reorderable_row<'a>(
         .width(Length::Fill)
         .into();
 
-    if let Some(drag) = sidebar
+    if let SidebarEntry::Folder(id) = entry
+        && sidebar.is_drop_target(scope, id)
+    {
+        row_el = container(row_el)
+            .style(theme::ContainerClass::DropTarget.style())
+            .width(Length::Fill)
+            .into();
+    } else if let Some(drag) = sidebar
         .drag
         .as_ref()
         .filter(|drag| drag.moved && drag.scope == *scope)

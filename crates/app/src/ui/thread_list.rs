@@ -68,6 +68,12 @@ impl Default for TypeaheadState {
 #[derive(Debug, Clone)]
 pub enum ThreadListMessage {
     SelectThread(usize),
+    /// Left press on a row: a click, or the start of a drag.
+    RowPress(usize),
+    /// Left release on a row: a click when that row was pressed.
+    RowRelease(usize),
+    /// The pointer left a row: a drag when that row is pressed.
+    RowExit(usize),
     /// Ctrl+click: toggle a thread in/out of multi-selection.
     ToggleThread(usize),
     /// Shift+click: range-select from last selected to this index.
@@ -172,6 +178,10 @@ pub enum ThreadListEvent {
         selection_changed: bool,
     },
     RowMenuPicked(RowMenuItem),
+    /// A row was pressed; the App follows the pointer for a drag.
+    RowPressed(usize),
+    /// The pointer left the pressed row: the press became a drag.
+    PressedRowLeft,
 }
 
 // ── Thread list mode ───────────────────────────────────
@@ -219,6 +229,8 @@ pub struct ThreadList {
     pub collapsed_groups: HashSet<DateGroup>,
     /// Open right-click menu, if any.
     pub row_menu: Option<RowMenu>,
+    /// Row under a left press not yet released or turned into a drag.
+    pressed: Option<usize>,
 }
 
 impl ThreadList {
@@ -240,7 +252,13 @@ impl ThreadList {
             date_groups: true,
             collapsed_groups: HashSet::new(),
             row_menu: None,
+            pressed: None,
         }
+    }
+
+    /// The press became a drag, so its release is no click.
+    pub fn cancel_press(&mut self) {
+        self.pressed = None;
     }
 
     /// The date group of each row, `None` when the list shows no headers.
@@ -320,6 +338,7 @@ impl ThreadList {
     /// user reads, so an index kept as-is would jump to a neighbour as soon
     /// as a thread above it is added or removed.
     pub fn set_threads(&mut self, threads: Vec<Thread>) {
+        self.pressed = None;
         let key_at = |idx: usize| {
             self.threads
                 .get(idx)
@@ -455,6 +474,20 @@ impl Component for ThreadList {
         message: ThreadListMessage,
     ) -> (Task<ThreadListMessage>, Option<ThreadListEvent>) {
         match message {
+            ThreadListMessage::RowPress(idx) => {
+                self.pressed = Some(idx);
+                (Task::none(), Some(ThreadListEvent::RowPressed(idx)))
+            }
+            ThreadListMessage::RowRelease(idx) => {
+                if self.pressed.take() == Some(idx) {
+                    return self.update(ThreadListMessage::SelectThread(idx));
+                }
+                (Task::none(), None)
+            }
+            ThreadListMessage::RowExit(idx) => {
+                let left = (self.pressed == Some(idx)).then_some(ThreadListEvent::PressedRowLeft);
+                (Task::none(), left)
+            }
             ThreadListMessage::SelectThread(idx) => {
                 if self.selected_thread == Some(idx) && self.selected_threads.is_empty() {
                     return (Task::none(), None);
@@ -906,7 +939,11 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
             state.is_selected(i),
             &thread.label_paints,
             bimi_logo.as_deref(),
-            ThreadListMessage::SelectThread,
+            (
+                ThreadListMessage::RowPress,
+                ThreadListMessage::RowRelease,
+                ThreadListMessage::RowExit,
+            ),
             |index, action| ThreadListMessage::RowAction { index, action },
         );
         let mut row_el = super::anchored_overlay::anchored_overlay(card)

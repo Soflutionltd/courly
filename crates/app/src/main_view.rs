@@ -6,8 +6,8 @@ use crate::pop_out::{self, PopOutWindow};
 use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
 use crate::ui::layout::{
-    APP_RAIL_WIDTH, PANE_GAP, READING_PANE_MIN_WIDTH, SIDE_PANEL_WIDTH, SIDEBAR_MIN_WIDTH,
-    THREAD_LIST_MIN_WIDTH,
+    APP_RAIL_WIDTH, DRAG_GHOST_MAX_WIDTH, ICON_MD, PAD_ICON_BTN, PANE_GAP, READING_PANE_MIN_WIDTH,
+    SIDE_PANEL_WIDTH, SIDEBAR_MIN_WIDTH, SPACE_SM, SPACE_XS, TEXT_MD, THREAD_LIST_MIN_WIDTH,
 };
 use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
@@ -309,10 +309,58 @@ impl ReadyApp {
             panes
         };
 
-        column![ribbon, panes]
+        let body = column![ribbon, panes]
             .spacing(PANE_GAP)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+        match self
+            .thread_drag
+            .as_ref()
+            .and_then(crate::handlers::thread_drag::ThreadDrag::ghost)
+        {
+            Some(ghost) => ui::anchored_overlay::anchored_overlay(body)
+                .popup(self.thread_drag_ghost(&ghost))
+                .anchor_point(ghost.cursor + iced::Vector::new(SPACE_SM, SPACE_SM))
+                .popup_width(DRAG_GHOST_MAX_WIDTH)
+                .into(),
+            None => body.into(),
+        }
+    }
+
+    /// The label that follows the pointer while messages are dragged: the
+    /// subject of one message, or how many.
+    fn thread_drag_ghost(
+        &self,
+        ghost: &crate::handlers::thread_drag::DragGhost<'_>,
+    ) -> Element<'_, Message> {
+        let label = if ghost.count == 1 {
+            let (account_id, thread_id) = ghost.pressed;
+            self.thread_list
+                .threads
+                .iter()
+                .find(|t| t.account_id == account_id && t.id == thread_id)
+                .and_then(|thread| thread.subject.clone())
+                .filter(|subject| !subject.trim().is_empty())
+                .unwrap_or_else(|| t!("main.no_subject").into_owned())
+        } else {
+            t!("main.drag.messages", count = ghost.count).into_owned()
+        };
+        container(
+            row![
+                crate::icon::mail()
+                    .size(ICON_MD)
+                    .style(iced::widget::text::secondary),
+                iced::widget::text(label)
+                    .size(TEXT_MD)
+                    .style(iced::widget::text::base)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .ellipsis(iced::widget::text::Ellipsis::End),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding(PAD_ICON_BTN)
+        .style(ui::theme::ContainerClass::SelectMenu.style())
+        .into()
     }
 
     /// The inline compose, when it is a new message, belongs to the

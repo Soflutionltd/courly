@@ -78,6 +78,10 @@ pub enum SidebarMessage {
     RowPress(ViewScope, usize),
     RowRelease(ViewScope, usize),
     RowHover(ViewScope, usize),
+    RowExit(ViewScope, usize),
+    /// The pointer entered or left a subfolder row, for dropping messages.
+    FolderEnter(ViewScope, String),
+    FolderExit(ViewScope, String),
     /// Left release anywhere in the folder section: drops a moved row.
     DragEnd,
     DragCancel,
@@ -283,6 +287,29 @@ pub struct Sidebar {
     pub drag: Option<SidebarDrag>,
     /// Folder-section row whose right-click menu is open.
     pub row_menu: Option<RowMenuAnchor>,
+    /// Messages dragged from the list, set by the App while they move.
+    pub message_drop: Option<MessageDrop>,
+    /// The folder row under the pointer: a drag can reach the sidebar
+    /// before it starts, when the pointer moves fast.
+    hovered_folder: Option<DropFolder>,
+}
+
+/// System folders messages can be dropped on.
+const MESSAGE_DROP_SYSTEM: [&str; 4] = ["INBOX", "archive", "TRASH", "SPAM"];
+
+/// Messages being dragged over the sidebar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageDrop {
+    /// The accounts the dragged messages belong to.
+    pub accounts: Vec<String>,
+    pub target: Option<DropFolder>,
+}
+
+/// A folder row messages would be dropped on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropFolder {
+    pub scope: ViewScope,
+    pub folder_id: String,
 }
 
 /// Where the folder-section right-click menu is open.
@@ -326,7 +353,75 @@ impl Sidebar {
             layouts: SidebarLayouts::default(),
             drag: None,
             row_menu: None,
+            message_drop: None,
+            hovered_folder: None,
         }
+    }
+
+    /// Messages from these accounts start moving over the sidebar.
+    pub fn start_message_drop(&mut self, accounts: Vec<String>) {
+        self.message_drop = Some(MessageDrop {
+            accounts,
+            target: None,
+        });
+        self.update_drop_target();
+    }
+
+    fn hover_folder(&mut self, scope: &ViewScope, folder_id: &str) {
+        self.hovered_folder = Some(DropFolder {
+            scope: scope.clone(),
+            folder_id: folder_id.to_string(),
+        });
+        self.update_drop_target();
+    }
+
+    fn leave_folder(&mut self, scope: &ViewScope, folder_id: &str) {
+        if self
+            .hovered_folder
+            .as_ref()
+            .is_some_and(|f| f.scope == *scope && f.folder_id == folder_id)
+        {
+            self.hovered_folder = None;
+            self.update_drop_target();
+        }
+    }
+
+    fn update_drop_target(&mut self) {
+        let target = self
+            .hovered_folder
+            .clone()
+            .filter(|folder| self.accepts_drop(folder));
+        if let Some(drop) = self.message_drop.as_mut() {
+            drop.target = target;
+        }
+    }
+
+    /// The dragged messages can go to Inbox, Archive, Trash or Junk, or to
+    /// a folder of the one account they all belong to.
+    fn accepts_drop(&self, folder: &DropFolder) -> bool {
+        let Some(drop) = self.message_drop.as_ref() else {
+            return false;
+        };
+        let own_folder = self.section_nav(&folder.scope).is_some_and(|nav| {
+            nav.folders.iter().any(|f| {
+                f.id == folder.folder_id && matches!(f.folder_kind, FolderKind::AccountFolder)
+            })
+        });
+        let destination = own_folder || MESSAGE_DROP_SYSTEM.contains(&folder.folder_id.as_str());
+        destination
+            && match &folder.scope {
+                ViewScope::AllAccounts => !own_folder,
+                ViewScope::Account(id) => drop.accounts.iter().all(|a| a == id),
+                _ => false,
+            }
+    }
+
+    /// Whether this folder row is where the dragged messages would land.
+    pub(super) fn is_drop_target(&self, scope: &ViewScope, folder_id: &str) -> bool {
+        self.message_drop
+            .as_ref()
+            .and_then(|drop| drop.target.as_ref())
+            .is_some_and(|t| t.scope == *scope && t.folder_id == folder_id)
     }
 
     fn entry_at(&self, scope: &ViewScope, index: usize) -> Option<SidebarEntry> {
@@ -571,6 +666,23 @@ impl Component for Sidebar {
                         drag.target = Some(entry);
                     }
                 }
+                if let Some(SidebarEntry::Folder(id)) = self.entry_at(&scope, index) {
+                    self.hover_folder(&scope, &id);
+                }
+                (Task::none(), None)
+            }
+            SidebarMessage::RowExit(scope, index) => {
+                if let Some(SidebarEntry::Folder(id)) = self.entry_at(&scope, index) {
+                    self.leave_folder(&scope, &id);
+                }
+                (Task::none(), None)
+            }
+            SidebarMessage::FolderEnter(scope, folder_id) => {
+                self.hover_folder(&scope, &folder_id);
+                (Task::none(), None)
+            }
+            SidebarMessage::FolderExit(scope, folder_id) => {
+                self.leave_folder(&scope, &folder_id);
                 (Task::none(), None)
             }
             SidebarMessage::RowRelease(scope, index) => {
@@ -950,6 +1062,42 @@ mod tests {
                 SidebarEntry::Separator(id) => format!("sep{id}"),
             })
             .collect()
+    }
+
+    fn drop_target(sidebar: &Sidebar) -> Option<String> {
+        sidebar
+            .message_drop
+            .as_ref()
+            .and_then(|drop| drop.target.as_ref())
+            .map(|target| target.folder_id.clone())
+    }
+
+    #[test]
+    fn a_folder_hovered_before_the_drag_starts_is_the_drop_target() {
+        let mut sidebar = sidebar();
+        let _ = sidebar.update(SidebarMessage::FolderEnter(acc(), "g-hotel".to_string()));
+        sidebar.start_message_drop(vec!["acc".to_string()]);
+        assert_eq!(drop_target(&sidebar).as_deref(), Some("g-hotel"));
+        let _ = sidebar.update(SidebarMessage::FolderExit(acc(), "g-hotel".to_string()));
+        assert_eq!(drop_target(&sidebar), None);
+    }
+
+    #[test]
+    fn messages_drop_only_where_they_can_go() {
+        let mut sidebar = sidebar();
+        sidebar.start_message_drop(vec!["acc".to_string()]);
+        let _ = sidebar.update(SidebarMessage::FolderEnter(acc(), "SENT".to_string()));
+        assert_eq!(drop_target(&sidebar), None);
+        let _ = sidebar.update(SidebarMessage::FolderEnter(acc(), "TRASH".to_string()));
+        assert_eq!(drop_target(&sidebar).as_deref(), Some("TRASH"));
+
+        sidebar.start_message_drop(vec!["acc".to_string(), "other".to_string()]);
+        assert_eq!(drop_target(&sidebar), None);
+        let _ = sidebar.update(SidebarMessage::FolderEnter(
+            ViewScope::AllAccounts,
+            "TRASH".to_string(),
+        ));
+        assert_eq!(drop_target(&sidebar).as_deref(), Some("TRASH"));
     }
 
     #[test]

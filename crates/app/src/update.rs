@@ -557,6 +557,7 @@ impl ReadyApp {
             Message::ConfirmPermanentDelete => self.confirm_permanent_delete(),
             Message::FolderDialog(msg) => self.handle_folder_dialog(msg),
             Message::MoveMenu(msg) => self.handle_move_menu(msg),
+            Message::ThreadDrag(msg) => self.handle_thread_drag(msg),
             Message::FolderMarkedRead(result) => self.finish_folder_mark_read(result),
             Message::Toolbar(msg) => self.handle_toolbar(msg),
             Message::SearchScope(msg) => self.handle_search_scope(msg),
