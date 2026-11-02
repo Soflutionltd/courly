@@ -9,6 +9,10 @@ use iced::{Color, Element, Font, Length, Theme};
 const MATCH_BACKGROUND: Color = Color::from_rgb8(0xFF, 0xE0, 0x4D);
 const MATCH_TEXT: Color = Color::from_rgb8(0x1F, 0x1F, 0x1F);
 
+/// Shorter words still filter the results but would light up nearly every
+/// word of a row.
+const MIN_HIGHLIGHT_CHARS: usize = 2;
+
 /// The words of a search query that matched text, without its operators.
 pub fn query_terms(query: &str) -> Vec<String> {
     let parsed = smart_folder::parse_query(query);
@@ -17,7 +21,7 @@ pub fn query_terms(query: &str) -> Vec<String> {
         .split_whitespace()
         .chain(parsed.from.iter().map(String::as_str))
         .map(|word| word.trim_matches('"'))
-        .filter(|word| !word.is_empty())
+        .filter(|word| word.chars().count() >= MIN_HIGHLIGHT_CHARS)
         .map(str::to_owned)
         .collect()
 }
@@ -136,5 +140,10 @@ mod tests {
     fn operators_are_not_highlighted() {
         assert_eq!(query_terms("nath has:attachment"), ["nath"]);
         assert_eq!(query_terms("from:martin facture"), ["facture", "martin"]);
+    }
+
+    #[test]
+    fn a_single_letter_is_not_highlighted() {
+        assert_eq!(query_terms("philippe de r"), ["philippe", "de"]);
     }
 }
