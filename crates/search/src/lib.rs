@@ -3,7 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, BoostQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
+use tantivy::query::{
+    BooleanQuery, BoostQuery, Occur, PhrasePrefixQuery, Query, QueryParser, RangeQuery, TermQuery,
+};
 use tantivy::schema::{
     DateOptions, Field, NumericOptions, STORED, STRING, Schema, TextFieldIndexing, TextOptions,
 };
@@ -722,7 +724,7 @@ impl SearchReadState {
         if let Some(ref text) = params.free_text
             && !text.is_empty()
         {
-            let qp = word_prefix_parser(
+            let mut qp = word_prefix_parser(
                 searcher.index(),
                 vec![
                     self.fields.subject,
@@ -734,10 +736,25 @@ impl SearchReadState {
                     self.fields.attachment_filename,
                 ],
             );
-            let q = qp
+            // Every typed word must match somewhere; where it matches sets
+            // the rank.
+            qp.set_conjunction_by_default();
+            qp.set_field_boost(self.fields.from_name, SENDER_FIELD_BOOST);
+            qp.set_field_boost(self.fields.to_addresses, RECIPIENT_FIELD_BOOST);
+            qp.set_field_boost(self.fields.subject, SUBJECT_FIELD_BOOST);
+            let words = qp
                 .parse_query(text)
                 .map_err(|e| format!("parse free text: {e}"))?;
-            clauses.push((Occur::Must, q));
+            let mut free_text: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, words)];
+            for (field, bonus) in [
+                (self.fields.from_name, SENDER_NAME_BONUS),
+                (self.fields.to_addresses, RECIPIENT_NAME_BONUS),
+            ] {
+                if let Some(name) = name_prefix_query(searcher.index(), field, text)? {
+                    free_text.push((Occur::Should, Box::new(BoostQuery::new(name, bonus))));
+                }
+            }
+            clauses.push((Occur::Must, Box::new(BooleanQuery::new(free_text))));
         }
 
         // from → OR across all from values (address term OR name phrase)
@@ -1144,6 +1161,37 @@ impl SearchReadState {
 
 /// Free text matches every word as the start of a word, as it is typed:
 /// "nath" finds "Nathalie". Quoted phrases keep their exact meaning.
+/// Rank weights for free text: a word in the sender's name counts most, then
+/// the recipients and the subject, then the body.
+const SENDER_FIELD_BOOST: f32 = 4.0;
+const RECIPIENT_FIELD_BOOST: f32 = 2.0;
+const SUBJECT_FIELD_BOOST: f32 = 2.0;
+/// Extra weight when the typed words, in order, start the sender's (or a
+/// recipient's) name: "philippe de r" puts Philippe de Richaud's mail first.
+const SENDER_NAME_BONUS: f32 = 10.0;
+const RECIPIENT_NAME_BONUS: f32 = 3.0;
+
+/// The typed words as one phrase whose last word may be unfinished, on
+/// `field`. `None` when the text has no word to match.
+fn name_prefix_query(
+    index: &tantivy::Index,
+    field: Field,
+    text: &str,
+) -> Result<Option<Box<dyn Query>>, String> {
+    let mut analyzer = index
+        .tokenizer_for_field(field)
+        .map_err(|e| format!("tokenizer for name bonus: {e}"))?;
+    let mut stream = analyzer.token_stream(text);
+    let mut terms = Vec::new();
+    while stream.advance() {
+        terms.push(Term::from_field_text(field, &stream.token().text));
+    }
+    if terms.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Box::new(PhrasePrefixQuery::new(terms))))
+}
+
 fn word_prefix_parser(index: &tantivy::Index, fields: Vec<Field>) -> QueryParser {
     let mut parser = QueryParser::for_index(index, fields.clone());
     for field in fields {
@@ -1363,6 +1411,84 @@ mod tests {
             thread_filter: None,
             limit: Some(10),
         }
+    }
+
+    fn build_people_test_index() -> SearchReadState {
+        let schema = build_schema();
+        let fields = Fields::from_schema(&schema);
+        let index = Index::create_in_ram(schema);
+        let mut writer: tantivy::IndexWriter = index.writer(15_000_000).expect("writer");
+        let mails = [
+            (
+                "mention",
+                "Perrotin",
+                "Antoine <antoine@pinelli.fr>",
+                "PREVIEW // JEAN-PHILIPPE DELHOMME",
+                "Cher Antoine, j'ai le plaisir de partager avec vous, regards",
+            ),
+            (
+                "unrelated",
+                "Graziella Mattei",
+                "Antoine <antoine@pinelli.fr>",
+                "Offre d'acquisition de la société",
+                "Chère Maître Rolet, je vous prie de bien vouloir",
+            ),
+            (
+                "to-philippe",
+                "Antoine Pinelli",
+                "Philippe de Richaud <lbd@orange.fr>",
+                "Devis",
+                "Bonjour Philippe, merci pour ton retour",
+            ),
+            (
+                "from-philippe",
+                "Philippe de Richaud",
+                "Antoine <antoine@pinelli.fr>",
+                "Fwd:",
+                "Bonjour Antoine, je te prie de trouver ci-joint le devis",
+            ),
+        ];
+        for (message_id, from_name, to, subject, body) in mails {
+            let doc = SearchDocument {
+                message_id: message_id.into(),
+                account_id: "acct1".into(),
+                thread_id: format!("thread-{message_id}"),
+                subject: Some(subject.into()),
+                from_name: Some(from_name.into()),
+                from_address: Some(format!("{message_id}@example.com")),
+                to_addresses: Some(to.into()),
+                body_text: Some(body.into()),
+                snippet: Some(body.into()),
+                date: 1000,
+                is_read: false,
+                is_starred: false,
+                has_attachment: false,
+                attachments: Vec::new(),
+            };
+            writer
+                .add_document(build_search_doc(&fields, &doc))
+                .expect("add");
+        }
+        writer.commit().expect("commit");
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()
+            .expect("reader");
+        SearchReadState { reader, fields }
+    }
+
+    #[test]
+    fn a_person_typed_by_name_ranks_their_mail_first() {
+        let read = build_people_test_index();
+        let results = read
+            .search_with_filters(&SearchParams {
+                free_text: Some("philippe de r".into()),
+                ..date_boundary_params(None, None)
+            })
+            .expect("search");
+        let order: Vec<&str> = results.iter().map(|r| r.message_id.as_str()).collect();
+        assert_eq!(order, ["from-philippe", "to-philippe", "mention"]);
     }
 
     #[test]
