@@ -172,6 +172,10 @@ pub const SIDE_PANEL_WIDTH: f32 = 280.0;
 /// Label dot diameter on thread cards (line 3 indicators)
 pub const LABEL_DOT_SIZE: f32 = 6.0;
 
+/// Unread dot left of the avatar on thread cards. It sits in the card's
+/// left padding, so the avatar keeps its place.
+pub const UNREAD_DOT_SIZE: f32 = 8.0;
+
 /// Thread card fixed height (three lines + padding)
 pub const THREAD_CARD_HEIGHT: f32 = 68.0;
 /// Thickness of a user-added sidebar separator.

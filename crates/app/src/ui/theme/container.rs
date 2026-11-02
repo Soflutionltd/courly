@@ -2,7 +2,9 @@ use iced::widget::container;
 use iced::{Color, Theme, border};
 
 use super::{EMAIL_BODY_BG_PREF, ON_AVATAR};
-use crate::ui::layout::{CHAT_BUBBLE_RADIUS, RADIO_CIRCLE_SIZE, RADIUS_LG, RADIUS_MD, RADIUS_SM};
+use crate::ui::layout::{
+    CHAT_BUBBLE_RADIUS, RADIO_CIRCLE_SIZE, RADIUS_LG, RADIUS_MD, RADIUS_SM, UNREAD_DOT_SIZE,
+};
 use crate::ui::settings::types::EmailBodyBackground;
 
 /// All custom container styles used in the app.
@@ -53,6 +55,8 @@ pub enum ContainerClass {
     ColorSwatchSelectedRing,
     /// Shortcut key badge.
     KeyBadge,
+    /// Unread dot on a thread card, in the accent color.
+    UnreadDot,
     /// Active drag-reorder row highlight.
     DraggingRow,
     /// Drop target outline while a drag-reorder hovers a row.
@@ -136,6 +140,7 @@ impl ContainerClass {
             Self::ThemeSelectedRing => style_theme_selected_ring,
             Self::ColorSwatchSelectedRing => style_color_swatch_selected_ring,
             Self::KeyBadge => style_key_badge_container,
+            Self::UnreadDot => style_unread_dot_container,
             Self::DraggingRow => style_dragging_row_container,
             Self::DropTarget => style_drop_target_container,
             Self::StatusBar => style_status_bar_container,
@@ -559,6 +564,17 @@ fn style_key_badge_container(theme: &Theme) -> container::Style {
             color: p.background.strongest.color.scale_alpha(0.2),
             width: 1.0,
             radius: RADIUS_SM.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_unread_dot_container(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.palette().primary.base.color.into()),
+        border: iced::Border {
+            radius: (UNREAD_DOT_SIZE / 2.0).into(),
+            ..Default::default()
         },
         ..Default::default()
     }

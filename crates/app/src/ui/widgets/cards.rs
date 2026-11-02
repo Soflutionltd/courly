@@ -14,7 +14,7 @@ use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{
     AVATAR_MESSAGE_CARD, AVATAR_THREAD_CARD, ICON_SM, ICON_XS, PAD_BADGE, PAD_BODY, PAD_CARD,
     PAD_HTML_BODY, PAD_ICON_BTN, PAD_THREAD_CARD, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS,
-    TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS, THREAD_CARD_HEIGHT,
+    TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS, THREAD_CARD_HEIGHT, UNREAD_DOT_SIZE,
 };
 use crate::ui::theme::{self, RowActionTone};
 
@@ -130,14 +130,21 @@ pub fn thread_card<'a, M: Clone + 'a>(
         })
         .unwrap_or_default();
 
-    let sender_font = if thread.is_read {
+    // Unread reads as in Outlook: a blue dot, the sender and subject in
+    // bold, the subject and time in the accent color.
+    let emphasis_font = if thread.is_read {
         font::text()
     } else {
-        font::text_semibold()
+        font::text_bold()
     };
 
     let subject_style: fn(&Theme) -> text::Style = if thread.is_read {
         theme::TextClass::Muted.style()
+    } else {
+        theme::TextClass::Accent.style()
+    };
+    let date_style: fn(&Theme) -> text::Style = if thread.is_read {
+        theme::TextClass::Tertiary.style()
     } else {
         theme::TextClass::Accent.style()
     };
@@ -189,7 +196,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
             sender.clone(),
             highlight_terms,
             TEXT_MD,
-            sender_font,
+            emphasis_font,
             text::base,
         ))
         .width(Length::Fill)
@@ -197,7 +204,8 @@ pub fn thread_card<'a, M: Clone + 'a>(
         container(
             text(date_str)
                 .size(TEXT_XS)
-                .style(theme::TextClass::Tertiary.style())
+                .font(emphasis_font)
+                .style(date_style)
         ),
     ]
     .spacing(SPACE_XS)
@@ -231,7 +239,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
             subject,
             highlight_terms,
             TEXT_MD,
-            font::text(),
+            emphasis_font,
             subject_style,
         ))
         .width(Length::Fill)
@@ -291,15 +299,33 @@ pub fn thread_card<'a, M: Clone + 'a>(
 
     let avatar = sender_avatar(&sender, bimi_logo, AVATAR_THREAD_CARD);
 
-    let content = row![avatar, text_content]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center);
+    let unread_dot: Element<'a, M> = if thread.is_read {
+        Space::new().width(UNREAD_DOT_SIZE).into()
+    } else {
+        container(Space::new())
+            .width(UNREAD_DOT_SIZE)
+            .height(UNREAD_DOT_SIZE)
+            .style(theme::ContainerClass::UnreadDot.style())
+            .into()
+    };
+
+    let content = row![
+        row![unread_dot, avatar]
+            .spacing(SPACE_XXXS)
+            .align_y(Alignment::Center),
+        text_content
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
 
     // The press goes to the inner area, so a row can start a drag; a click
     // is a release on the row pressed. The button only gives the styling.
     let hit = mouse_area(
         container(content)
-            .padding(PAD_THREAD_CARD)
+            .padding(iced::Padding {
+                left: PAD_THREAD_CARD.left - UNREAD_DOT_SIZE - SPACE_XXXS,
+                ..PAD_THREAD_CARD
+            })
             .height(THREAD_CARD_HEIGHT)
             .width(Length::Fill),
     )
