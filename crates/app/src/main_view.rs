@@ -205,9 +205,11 @@ impl ReadyApp {
         );
         // The field stays wrapped whether or not the menu shows: changing the
         // widget tree around it would rebuild the field and drop its focus.
-        let mut search = ui::anchored_overlay::anchored_overlay(search).on_dismiss(
-            Message::SearchSuggest(ui::search_suggest::SearchSuggestMessage::Close),
-        );
+        let mut search = ui::anchored_overlay::anchored_overlay(search)
+            .on_dismiss(Message::SearchSuggest(
+                ui::search_suggest::SearchSuggestMessage::Close,
+            ))
+            .base_clicks_pass();
         if let Some(menu) =
             ui::search_suggest::view(&self.search_suggest, &self.thread_list.typeahead)
         {

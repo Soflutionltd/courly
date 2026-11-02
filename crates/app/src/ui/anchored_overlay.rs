@@ -11,6 +11,7 @@ pub struct AnchoredOverlay<'a, Message> {
     base: iced::Element<'a, Message>,
     popup: Option<iced::Element<'a, Message>>,
     on_dismiss: Option<Message>,
+    base_clicks_pass: bool,
     popup_width: Option<f32>,
     position: AnchorPosition,
     anchor_point: Option<Point>,
@@ -36,6 +37,7 @@ pub fn anchored_overlay<'a, Message: 'a>(
         base: base.into(),
         popup: None,
         on_dismiss: None,
+        base_clicks_pass: false,
         popup_width: None,
         position: AnchorPosition::default(),
         anchor_point: None,
@@ -53,6 +55,14 @@ impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
 
     pub fn on_dismiss(mut self, message: Message) -> Self {
         self.on_dismiss = Some(message);
+        self
+    }
+
+    /// A click on the base dismisses the popup and still reaches the base,
+    /// so a button there acts on the first click. Leave it off when the
+    /// base toggles the popup, or that click would reopen it.
+    pub fn base_clicks_pass(mut self) -> Self {
+        self.base_clicks_pass = true;
         self
     }
 
@@ -280,6 +290,9 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
             viewport: *viewport,
             window,
             on_dismiss: self.on_dismiss.clone(),
+            passing_base: self
+                .base_clicks_pass
+                .then(|| Rectangle::new(base_position, layout.bounds().size())),
         })));
 
         overlays
@@ -369,6 +382,7 @@ struct AnchoredOverlayLayer<'a, 'b, Message> {
     viewport: Rectangle,
     window: Size,
     on_dismiss: Option<Message>,
+    passing_base: Option<Rectangle>,
 }
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
@@ -434,9 +448,14 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
         {
             if cursor.is_over(layout.bounds()) {
                 shell.capture_event();
-            } else if let Some(on_dismiss) = &self.on_dismiss {
-                shell.publish(on_dismiss.clone());
-                shell.capture_event();
+            } else {
+                if let Some(on_dismiss) = &self.on_dismiss {
+                    shell.publish(on_dismiss.clone());
+                }
+                let over_passing_base = self.passing_base.is_some_and(|base| cursor.is_over(base));
+                if self.on_dismiss.is_some() && !over_passing_base {
+                    shell.capture_event();
+                }
             }
         } else if matches!(event, Event::Mouse(_) | Event::Touch(_))
             && cursor.is_over(layout.bounds())
