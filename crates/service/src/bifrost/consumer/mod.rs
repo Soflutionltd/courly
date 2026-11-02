@@ -769,8 +769,8 @@ impl ChangeStreamConsumer {
                 // Accumulate this batch's live ids and Graph removed-candidates
                 // into the drive-level reconcile state (finding A). The actual
                 // deletion of unreconciled candidates is deferred to drive end.
-                pending.live.extend(hydrated.live_ids.iter().cloned());
-                pending.add_removed(&hydrated.removed_ids);
+                pending.add_live(&event.scope, &hydrated.live_ids);
+                pending.add_removed(&event.scope, &hydrated.removed_ids);
                 let affected = write::persist_in_namespace(
                     &self.stores,
                     &self.account_id.0,
@@ -1048,12 +1048,7 @@ impl ChangeStreamConsumer {
     /// never populate `removed`) and when nothing needs deleting.
     /// Returns whether anything was deleted.
     async fn flush_pending_deletions(&self, pending: &PendingDeletions) -> Result<bool, Error> {
-        let to_delete: Vec<String> = pending
-            .removed
-            .iter()
-            .filter(|id| !pending.live.contains(*id))
-            .cloned()
-            .collect();
+        let to_delete = pending.ids_to_delete();
         if to_delete.is_empty() {
             return Ok(false);
         }
@@ -1134,7 +1129,7 @@ mod deletion_flush_tests {
 
     fn pending_removed_for(age: Duration) -> PendingDeletions {
         let mut pending = PendingDeletions::default();
-        pending.add_removed(&["msg".to_string()]);
+        pending.add_removed(&CursorScope::Account, &["msg".to_string()]);
         pending.removed_since = Instant::now().checked_sub(age);
         pending
     }
@@ -1147,10 +1142,40 @@ mod deletion_flush_tests {
     #[test]
     fn the_wait_counts_from_the_oldest_candidate_not_the_newest() {
         let mut pending = pending_removed_for(Duration::from_secs(11));
-        pending.add_removed(&["later".to_string()]);
+        pending.add_removed(&CursorScope::Account, &["later".to_string()]);
         assert!(pending.deletion_due());
         pending.clear();
         assert!(!pending.deletion_due());
+    }
+
+    fn folder(id: &str) -> CursorScope {
+        CursorScope::FolderType {
+            folder: bifrost_types::FolderId(id.to_string()),
+            ty: ObjectType::Email,
+        }
+    }
+
+    #[test]
+    fn a_message_that_arrived_then_was_deleted_in_one_drive_is_deleted() {
+        let mut pending = PendingDeletions::default();
+        let ids = ["msg".to_string()];
+        pending.add_live(&folder("inbox"), &ids);
+        pending.add_removed(&folder("inbox"), &ids);
+        assert_eq!(pending.ids_to_delete(), ids);
+    }
+
+    #[test]
+    fn a_move_survives_whichever_side_arrives_first() {
+        let ids = ["msg".to_string()];
+        let mut destination_first = PendingDeletions::default();
+        destination_first.add_live(&folder("trash"), &ids);
+        destination_first.add_removed(&folder("inbox"), &ids);
+        assert!(destination_first.ids_to_delete().is_empty());
+
+        let mut source_first = PendingDeletions::default();
+        source_first.add_removed(&folder("inbox"), &ids);
+        source_first.add_live(&folder("trash"), &ids);
+        assert!(source_first.ids_to_delete().is_empty());
     }
 }
 
@@ -1174,18 +1199,46 @@ fn completion_backfill_checkpoint(scope: CursorScope, seen: u64) -> BackfillChec
 #[derive(Default)]
 struct PendingDeletions {
     removed: HashSet<String>,
-    live: HashSet<String>,
+    /// Each live id with the scopes that saw it live. A later removal from
+    /// one of those scopes supersedes that scope's signal, so a message that
+    /// arrived and was then deleted within one long drive is still deleted.
+    live: HashMap<String, HashSet<CursorScope>>,
     /// When the oldest candidate still in `removed` arrived.
     removed_since: Option<Instant>,
 }
 
 impl PendingDeletions {
-    fn add_removed(&mut self, ids: &[String]) {
+    fn add_live(&mut self, scope: &CursorScope, ids: &[String]) {
+        for id in ids {
+            self.live
+                .entry(id.clone())
+                .or_default()
+                .insert(scope.clone());
+        }
+    }
+
+    fn add_removed(&mut self, scope: &CursorScope, ids: &[String]) {
         if ids.is_empty() {
             return;
         }
         self.removed_since.get_or_insert_with(Instant::now);
-        self.removed.extend(ids.iter().cloned());
+        for id in ids {
+            if let Some(scopes) = self.live.get_mut(id) {
+                scopes.remove(scope);
+                if scopes.is_empty() {
+                    self.live.remove(id);
+                }
+            }
+            self.removed.insert(id.clone());
+        }
+    }
+
+    fn ids_to_delete(&self) -> Vec<String> {
+        self.removed
+            .iter()
+            .filter(|id| !self.live.contains_key(*id))
+            .cloned()
+            .collect()
     }
 
     fn deletion_due(&self) -> bool {
