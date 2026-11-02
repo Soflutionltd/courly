@@ -904,10 +904,13 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_search_clear(&mut self) -> Task<Message> {
+        self.sidebar.active_pinned_search = None;
+        self.editing_pinned_search = None;
         self.search_sender = None;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
+        self.close_search_menus();
         let _ = self.search_generation.next();
         self.restore_folder_view()
     }

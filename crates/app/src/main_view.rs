@@ -201,6 +201,7 @@ impl ReadyApp {
             &self.sidebar.accounts,
             self.search_sender.as_deref(),
             self.thread_list.search_bar().map(Message::ThreadList),
+            !self.search_query.text().is_empty() || self.search_sender.is_some(),
         );
         // The field stays wrapped whether or not the menu shows: changing the
         // widget tree around it would rebuild the field and drop its focus.

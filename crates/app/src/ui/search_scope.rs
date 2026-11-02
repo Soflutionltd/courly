@@ -12,8 +12,8 @@ use crate::icon;
 use crate::message::Message;
 use crate::ui::anchored_overlay::anchored_overlay;
 use crate::ui::layout::{
-    ICON_MD, ICON_SM, PAD_DROPDOWN, PAD_NAV_ITEM, PAD_SEARCH_SCOPE_PILL, SEARCH_SCOPE_MENU_WIDTH,
-    SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_SM,
+    ICON_MD, ICON_SM, PAD_DROPDOWN, PAD_ICON_BTN, PAD_NAV_ITEM, PAD_SEARCH_SCOPE_PILL,
+    SEARCH_SCOPE_MENU_WIDTH, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_SM,
 };
 use crate::ui::search_suggest::SearchSuggestMessage;
 use crate::ui::theme;
@@ -95,12 +95,14 @@ fn choice_label(choice: &SearchScopeChoice, accounts: &[Account]) -> String {
     }
 }
 
-/// The search box: scope pill, the picked sender if any, then `input`.
+/// The search box: scope pill, the picked sender if any, `input`, then a
+/// cross that empties the search when there is one.
 pub fn search_field<'a>(
     state: &SearchScopeState,
     accounts: &'a [Account],
     sender: Option<&'a str>,
     input: Element<'a, Message>,
+    clearable: bool,
 ) -> Element<'a, Message> {
     let current = state.choice.effective(accounts);
     let pill = button(
@@ -143,11 +145,29 @@ pub fn search_field<'a>(
         None => Space::new().width(SPACE_XXS).into(),
     };
 
-    container(row![pill, sender, container(input).width(Length::Fill)].align_y(Alignment::Center))
-        .padding(iced::Padding::from([0.0, SPACE_XXS]))
-        .align_y(Alignment::Center)
-        .style(theme::ContainerClass::TitleSearchField.style())
+    // Kept in the tree when empty, like the sender slot, so the field keeps
+    // its focus as the cross comes and goes.
+    let clear: Element<'a, Message> = if clearable {
+        button(
+            container(icon::x().size(ICON_SM).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(Message::SearchClear)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style())
         .into()
+    } else {
+        Space::new().width(0).into()
+    };
+
+    container(
+        row![pill, sender, container(input).width(Length::Fill), clear].align_y(Alignment::Center),
+    )
+    .padding(iced::Padding::from([0.0, SPACE_XXS]))
+    .align_y(Alignment::Center)
+    .style(theme::ContainerClass::TitleSearchField.style())
+    .into()
 }
 
 /// The mailboxes, then below a rule the two choices that stay put however

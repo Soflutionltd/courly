@@ -567,8 +567,6 @@ impl ReadyApp {
                     || self.search_sender.is_some()
                     || self.sidebar.active_pinned_search.is_some()
                 {
-                    self.sidebar.active_pinned_search = None;
-                    self.editing_pinned_search = None;
                     return self.update(Message::SearchClear);
                 }
                 Task::none()
