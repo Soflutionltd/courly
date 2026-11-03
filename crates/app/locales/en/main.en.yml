@@ -128,7 +128,6 @@ main.permanent_delete.body_other: "They are in the Trash. Once deleted, they can
 main.permanent_delete.cancel: "Cancel"
 main.permanent_delete.confirm: "Delete"
 main.folder_dialog.cancel: "Cancel"
-main.folder_dialog.create_title: "New Folder"
 main.folder_dialog.create_in_title: "New Folder in \"%{parent}\""
 main.folder_dialog.create: "Create"
 main.folder_dialog.name_placeholder: "Folder name"

@@ -31,7 +31,9 @@ impl FolderRequest {
     fn from_dialog(dialog: &FolderDialog) -> Option<Self> {
         let name = dialog.name.trim().to_string();
         Some(match &dialog.kind {
-            FolderDialogKind::Create { account_id, parent } => Self::Create(FolderCreateParams {
+            FolderDialogKind::Create {
+                account_id, parent, ..
+            } => Self::Create(FolderCreateParams {
                 account_id: account_id.clone(),
                 name,
                 parent_id: parent.as_ref().map(|(id, _)| id.clone()),
@@ -98,7 +100,19 @@ impl ReadyApp {
                 folder_id,
             } => return self.mark_folder_read(account_ids, folder_id),
             FolderCommand::Create { account_id, parent } => {
-                FolderDialogKind::Create { account_id, parent }
+                let Some(account) = self
+                    .sidebar
+                    .accounts
+                    .iter()
+                    .find(|account| account.id == account_id)
+                else {
+                    return Task::none();
+                };
+                FolderDialogKind::Create {
+                    account_email: account.email.clone(),
+                    account_id,
+                    parent,
+                }
             }
             FolderCommand::Rename {
                 account_id,

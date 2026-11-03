@@ -128,7 +128,6 @@ main.permanent_delete.body_other: "Elles sont dans la Corbeille. Une fois suppri
 main.permanent_delete.cancel: "Annuler"
 main.permanent_delete.confirm: "Supprimer"
 main.folder_dialog.cancel: "Annuler"
-main.folder_dialog.create_title: "Nouveau dossier"
 main.folder_dialog.create_in_title: "Nouveau dossier dans « %{parent} »"
 main.folder_dialog.create: "Créer"
 main.folder_dialog.name_placeholder: "Nom du dossier"

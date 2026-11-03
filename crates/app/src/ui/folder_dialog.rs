@@ -43,6 +43,8 @@ impl DeleteEffect {
 pub enum FolderDialogKind {
     Create {
         account_id: String,
+        /// The account's address, naming where a top-level folder goes.
+        account_email: String,
         /// Parent folder (id, name); `None` creates at the top level.
         parent: Option<(String, String)>,
     },
@@ -151,13 +153,13 @@ impl FolderDialog {
         };
 
         match &self.kind {
-            FolderDialogKind::Create { parent, .. } => {
-                let title = match parent {
-                    Some((_, parent_name)) => {
-                        t!("main.folder_dialog.create_in_title", parent = parent_name)
-                    }
-                    None => t!("main.folder_dialog.create_title"),
-                };
+            FolderDialogKind::Create {
+                account_email,
+                parent,
+                ..
+            } => {
+                let place = parent.as_ref().map_or(account_email, |(_, name)| name);
+                let title = t!("main.folder_dialog.create_in_title", parent = place);
                 form_dialog(
                     title,
                     self.name_body(),
