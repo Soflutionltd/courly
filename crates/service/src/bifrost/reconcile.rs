@@ -4,16 +4,20 @@
 //! A deletion it never delivers (the account stopped mid-drive, a delta page
 //! lost to a crash) leaves a local row the server no longer holds, and nothing
 //! ever revisits it. This pass lists every personal mail folder in full,
-//! compares the server's ids with the local ones, and removes the local rows
-//! the server confirms are gone. It never writes to the server.
+//! compares the server's ids with the local ones, removes the local rows
+//! the server confirms are gone and fetches the server messages Courly does
+//! not hold. It never writes to the server.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bifrost_sync::SyncEngine;
 use bifrost_types::{
-    AccountErrorKind, AccountId, FolderId, HydrationProjection, ObjectId, ResourceKind,
+    AccountErrorKind, AccountId, Change, FolderId, HydrationProjection, ObjectChange,
+    ObjectChangeKind, ObjectId, ResourceKind,
 };
+use common::types::FolderKind;
 
+use super::consumer::hydrate::{ConsumerMessageRow, HydrateBatch};
 use super::consumer::write;
 use super::containers::ContainerIndex;
 use super::{BifrostConsumerStores, BifrostProviderKind};
@@ -26,13 +30,18 @@ const MAX_REMOVAL_SHARE_PERCENT: usize = 10;
 /// One server read per candidate: the rest waits for the next pass rather
 /// than burst into the provider's throttling budget.
 const MAX_CONFIRMATIONS_PER_PASS: usize = 500;
+/// Missing messages fetched per pass. Each is a few requests, so a large gap
+/// fills over several passes instead of in one burst.
+const MAX_FETCHES_PER_PASS: usize = 200;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ReconcileReport {
     /// Local messages the server confirmed gone, now deleted locally.
     pub removed: usize,
-    /// Server messages Courly does not hold. Reported, not fetched.
+    /// Server messages Courly does not hold.
     pub missing: usize,
+    /// Of `missing`, those fetched and stored by this pass.
+    pub fetched: usize,
 }
 
 pub(crate) async fn reconcile_graph_mail(
@@ -44,6 +53,7 @@ pub(crate) async fn reconcile_graph_mail(
     let server = GraphMailbox {
         engine,
         account: AccountId(account_id.to_string()),
+        folder_map: containers.folder_map(),
     };
     reconcile_mail(
         &server,
@@ -63,11 +73,16 @@ trait MailboxServer {
 
     /// True only when the server answers that the message does not exist.
     async fn is_gone(&self, id: &str) -> Result<bool, String>;
+
+    /// The rows for messages the server holds. A message that could not be
+    /// read is left out, for the next pass.
+    async fn fetch(&self, ids: &[String]) -> Result<Vec<ConsumerMessageRow>, String>;
 }
 
 struct GraphMailbox<'a> {
     engine: &'a SyncEngine,
     account: AccountId,
+    folder_map: &'a HashMap<String, FolderKind>,
 }
 
 impl MailboxServer for GraphMailbox<'_> {
@@ -102,6 +117,28 @@ impl MailboxServer for GraphMailbox<'_> {
             Err(error) => Err(error.to_string()),
         }
     }
+
+    async fn fetch(&self, ids: &[String]) -> Result<Vec<ConsumerMessageRow>, String> {
+        let changes: Vec<Change> = ids
+            .iter()
+            .map(|id| {
+                Change::ObjectChange(ObjectChange {
+                    id: ObjectId(id.clone()),
+                    kind: ObjectChangeKind::Created,
+                })
+            })
+            .collect();
+        let batch = HydrateBatch::from_changes(
+            self.engine,
+            &self.account,
+            BifrostProviderKind::Graph,
+            self.folder_map,
+            &changes,
+        )
+        .await
+        .map_err(|error| format!("fetch missing: {error}"))?;
+        Ok(batch.rows)
+    }
 }
 
 /// `folders` are `(native id, storage id)` pairs.
@@ -126,10 +163,12 @@ async fn reconcile_mail(
         .filter(|id| !server_ids.contains(*id))
         .collect();
     candidates.sort();
-    let missing = server_ids
+    let mut missing: Vec<String> = server_ids
         .iter()
         .filter(|id| !local_ids.contains(*id))
-        .count();
+        .cloned()
+        .collect();
+    missing.sort();
     if !removal_is_plausible(candidates.len(), local_ids.len()) {
         return Err(format!(
             "{} of {} local messages are absent from the server listing; \
@@ -157,9 +196,22 @@ async fn reconcile_mail(
             .await
             .map_err(|error| format!("reconcile delete: {error}"))?;
     }
+    let to_fetch = &missing[..missing.len().min(MAX_FETCHES_PER_PASS)];
+    let rows = if to_fetch.is_empty() {
+        Vec::new()
+    } else {
+        server.fetch(to_fetch).await?
+    };
+    if !rows.is_empty() {
+        write::persist(stores, account_id, BifrostProviderKind::Graph, &rows, &[])
+            .await
+            .map_err(|error| format!("reconcile fetch: {error}"))?;
+        stores.search.flush_now().await?;
+    }
     Ok(ReconcileReport {
         removed: gone.len(),
-        missing,
+        missing: missing.len(),
+        fetched: rows.len(),
     })
 }
 
@@ -212,6 +264,8 @@ mod tests {
         gone: HashSet<String>,
         unreachable: HashSet<String>,
         confirmations: std::sync::atomic::AtomicUsize,
+        fetchable: HashMap<String, String>,
+        fetches: std::sync::atomic::AtomicUsize,
     }
 
     impl FakeServer {
@@ -236,6 +290,14 @@ mod tests {
             self.unreachable = ids.iter().map(|id| (*id).to_string()).collect();
             self
         }
+
+        fn fetchable(mut self, ids: &[(&str, &str)]) -> Self {
+            self.fetchable = ids
+                .iter()
+                .map(|(id, folder)| ((*id).to_string(), (*folder).to_string()))
+                .collect();
+            self
+        }
     }
 
     impl MailboxServer for FakeServer {
@@ -253,6 +315,19 @@ mod tests {
                 return Err("throttled".to_string());
             }
             Ok(self.gone.contains(id))
+        }
+
+        async fn fetch(&self, ids: &[String]) -> Result<Vec<ConsumerMessageRow>, String> {
+            self.fetches
+                .fetch_add(ids.len(), std::sync::atomic::Ordering::SeqCst);
+            Ok(ids
+                .iter()
+                .filter_map(|id| {
+                    self.fetchable
+                        .get(id)
+                        .map(|folder| synthetic_row(id, &format!("thread-{id}"), &[folder]))
+                })
+                .collect())
         }
     }
 
@@ -304,7 +379,8 @@ mod tests {
         let server = FakeServer::default()
             .folder("mbx-inbox", &["kept", "new"])
             .folder("mbx-trash", &["trashed"])
-            .gone(&["ghost"]);
+            .gone(&["ghost"])
+            .fetchable(&[("new", "INBOX")]);
 
         let report = reconcile_mail(&server, &stores, "acc", folders()).await?;
 
@@ -312,12 +388,13 @@ mod tests {
             report,
             ReconcileReport {
                 removed: 1,
-                missing: 1
+                missing: 1,
+                fetched: 1
             }
         );
         assert_eq!(
             message_ids(&stores).await?,
-            vec!["kept", "trashed", "unconfirmed"]
+            vec!["kept", "new", "trashed", "unconfirmed"]
         );
         Ok(())
     }
@@ -408,6 +485,44 @@ mod tests {
         assert_eq!(
             message_ids(&stores).await?.len(),
             total - MAX_CONFIRMATIONS_PER_PASS
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_message_moved_on_the_server_is_removed_and_fetched_under_its_new_id()
+    -> Result<(), String> {
+        let (stores, _tmp) = seeded(&[("old-id", "INBOX")]).await?;
+        let server = FakeServer::default()
+            .folder("mbx-inbox", &[])
+            .folder("mbx-trash", &["new-id"])
+            .gone(&["old-id"])
+            .fetchable(&[("new-id", "TRASH")]);
+
+        let report = reconcile_mail(&server, &stores, "acc", folders()).await?;
+
+        assert_eq!((report.removed, report.fetched), (1, 1));
+        assert_eq!(message_ids(&stores).await?, vec!["new-id"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fetches_stop_at_the_per_pass_budget() -> Result<(), String> {
+        let (stores, _tmp) = seeded(&[]).await?;
+        let names: Vec<String> = (0..MAX_FETCHES_PER_PASS + 10)
+            .map(|n| format!("m{n:04}"))
+            .collect();
+        let all: Vec<&str> = names.iter().map(String::as_str).collect();
+        let server = FakeServer::default()
+            .folder("mbx-inbox", &all)
+            .folder("mbx-trash", &[]);
+
+        let report = reconcile_mail(&server, &stores, "acc", folders()).await?;
+
+        assert_eq!(report.missing, MAX_FETCHES_PER_PASS + 10);
+        assert_eq!(
+            server.fetches.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_FETCHES_PER_PASS
         );
         Ok(())
     }

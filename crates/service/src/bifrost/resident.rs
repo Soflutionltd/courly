@@ -49,11 +49,12 @@ const TERMINAL_RETRY_BACKOFF_CAP: Duration = Duration::from_secs(15 * 60);
 /// driven by the app's 5-minute `SyncTick` (`app::subscription`).
 const RESIDENT_AUX_INITIAL_DELAY: Duration = Duration::from_secs(5);
 const RESIDENT_AUX_CADENCE: Duration = Duration::from_secs(300);
-/// Graph mailbox reconcile: first on the aux tick after this delay, so the
-/// attach drive lands first, then at this cadence. Each run lists every
-/// personal mail folder, so it stays rare.
+/// Graph mailbox reconcile: first after this delay, so the attach drive
+/// lands first, then at this cadence. A run lists every personal mail folder,
+/// about one request per thousand messages, and is the backstop for any
+/// change the delta never delivered.
 const RESIDENT_RECONCILE_INITIAL_DELAY: Duration = Duration::from_secs(120);
-const RESIDENT_RECONCILE_CADENCE: Duration = Duration::from_secs(6 * 60 * 60);
+const RESIDENT_RECONCILE_CADENCE: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone)]
 pub struct ResidentEngine {
@@ -434,6 +435,11 @@ impl ResidentEngine {
         }
         if provider == BifrostProviderKind::Graph {
             tokio::spawn(category_refresh_loop(
+                Arc::clone(&self.inner),
+                Arc::clone(&slot),
+                account_id.to_string(),
+            ));
+            tokio::spawn(reconcile_loop(
                 Arc::clone(&self.inner),
                 Arc::clone(&slot),
                 account_id.to_string(),
@@ -1545,7 +1551,6 @@ async fn resident_aux_loop(
         .await
         .unwrap_or(false);
     let mut delay = RESIDENT_AUX_INITIAL_DELAY;
-    let mut next_reconcile = tokio::time::Instant::now() + RESIDENT_RECONCILE_INITIAL_DELAY;
     loop {
         tokio::select! {
             () = cancel.cancelled() => return,
@@ -1554,10 +1559,6 @@ async fn resident_aux_loop(
         delay = RESIDENT_AUX_CADENCE;
         if cancel.is_cancelled() {
             return;
-        }
-        if provider == BifrostProviderKind::Graph && tokio::time::Instant::now() >= next_reconcile {
-            next_reconcile = tokio::time::Instant::now() + RESIDENT_RECONCILE_CADENCE;
-            run_reconcile_pass(&inner, &account_id).await;
         }
         run_aux_pass(
             ResidentEngine {
@@ -1572,10 +1573,23 @@ async fn resident_aux_loop(
     }
 }
 
-async fn run_reconcile_pass(inner: &ResidentEngineInner, account_id: &str) {
-    let Some(slot) = inner.slots.lock().await.get(account_id).cloned() else {
-        return;
-    };
+async fn reconcile_loop(
+    inner: Arc<ResidentEngineInner>,
+    slot: Arc<ResidentSlot>,
+    account_id: String,
+) {
+    let mut delay = RESIDENT_RECONCILE_INITIAL_DELAY;
+    loop {
+        tokio::select! {
+            () = slot.cancel.cancelled() => return,
+            () = tokio::time::sleep(delay) => {}
+        }
+        delay = RESIDENT_RECONCILE_CADENCE;
+        run_reconcile_pass(&inner, &slot, &account_id).await;
+    }
+}
+
+async fn run_reconcile_pass(inner: &ResidentEngineInner, slot: &ResidentSlot, account_id: &str) {
     match super::reconcile::reconcile_graph_mail(
         &inner.engine.engine(),
         &inner.stores,
@@ -1587,11 +1601,12 @@ async fn run_reconcile_pass(inner: &ResidentEngineInner, account_id: &str) {
         Ok(report) => {
             log::info!(
                 "reconcile {account_id}: removed {} message(s) gone from the server, \
-                 {} server message(s) not held locally",
+                 {} server message(s) not held locally, {} of them fetched",
                 report.removed,
-                report.missing
+                report.missing,
+                report.fetched
             );
-            if report.removed > 0 {
+            if report.removed > 0 || report.fetched > 0 {
                 slot.mutation_signal.notify_one();
             }
         }
