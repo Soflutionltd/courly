@@ -36,36 +36,6 @@ pub fn label_exists_sync(
     .map_err(|e| e.to_string())
 }
 
-/// Identity fields needed to route a contact mutation through the right provider.
-pub struct ContactMeta {
-    pub source: Option<String>,
-    pub server_id: Option<String>,
-    pub account_id: Option<String>,
-}
-
-/// Look up contact metadata by ID. Returns `None` when the contact row is missing.
-pub fn get_contact_meta_by_id_sync(
-    conn: &ReadConn<'_>,
-    contact_id: &str,
-) -> Result<Option<ContactMeta>, String> {
-    conn.query_row(
-        "SELECT source, server_id, account_id FROM contacts WHERE id = ?1",
-        params![contact_id],
-        |row| {
-            Ok(ContactMeta {
-                source: row.get(0)?,
-                server_id: row.get(1)?,
-                account_id: row.get(2)?,
-            })
-        },
-    )
-    .map(Some)
-    .or_else(|e| match e {
-        crate::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        _ => Err(e.to_string()),
-    })
-}
-
 /// Set snooze state on a thread.
 pub fn snooze_thread_sync(
     conn: &impl WriteTarget,
