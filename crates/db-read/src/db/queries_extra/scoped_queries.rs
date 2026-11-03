@@ -815,8 +815,8 @@ pub(crate) fn get_local_draft_summaries(
                 }
             }
             let trimmed: String = result.split_whitespace().collect::<Vec<_>>().join(" ");
-            if trimmed.len() > 200 {
-                format!("{}...", &trimmed[..197])
+            if trimmed.chars().count() > 200 {
+                format!("{}...", trimmed.chars().take(197).collect::<String>())
             } else {
                 trimmed
             }
