@@ -41,7 +41,7 @@ const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const MICROSOFT_GRAPH_ME_URL: &str =
     "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName";
-const MICROSOFT_GRAPH_SCOPES: [&str; 12] = [
+const MICROSOFT_GRAPH_SCOPES: [&str; 13] = [
     "Mail.ReadWrite",
     "Mail.ReadWrite.Shared",
     "Mail.Send",
@@ -49,6 +49,7 @@ const MICROSOFT_GRAPH_SCOPES: [&str; 12] = [
     "Mail.Read.Shared",
     "MailboxSettings.ReadWrite",
     "Calendars.ReadWrite",
+    "Contacts.ReadWrite",
     "offline_access",
     "openid",
     "profile",
@@ -914,6 +915,24 @@ mod tests {
         assert!(
             !scopes.iter().any(|scope| scope == SCOPE),
             "Outlook discovery registry entry must not request {SCOPE}"
+        );
+    }
+
+    /// The contact pull reads `/me/contacts`, which answers 403 unless the
+    /// token carries a contacts scope.
+    #[test]
+    fn microsoft_graph_scopes_allow_reading_contacts() {
+        const SCOPE: &str = "Contacts.ReadWrite";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(
+            scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry must request {SCOPE}"
         );
     }
 

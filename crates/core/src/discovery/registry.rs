@@ -150,6 +150,7 @@ static REGISTRY: &[RegistryEntry] = &[
                             "Mail.Read.Shared",
                             "MailboxSettings.ReadWrite",
                             "Calendars.ReadWrite",
+                            "Contacts.ReadWrite",
                             "offline_access",
                             "openid",
                             "profile",
