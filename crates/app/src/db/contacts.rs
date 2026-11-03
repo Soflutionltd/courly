@@ -1,6 +1,7 @@
-use rtsk::contacts::search::{ContactSearchKind, search_contacts_unified};
+use rtsk::contacts::search::{ContactOrigins, ContactSearchKind, search_contacts_unified};
 use rtsk::db::queries_extra::{
-    load_contacts_for_settings_sync, load_group_member_emails_sync, load_groups_for_settings_sync,
+    ContactOriginFilter, load_contacts_for_settings_sync, load_group_member_emails_sync,
+    load_groups_for_settings_sync,
 };
 
 use super::connection::Db;
@@ -18,6 +19,7 @@ pub struct ContactMatch {
     pub group_id: Option<String>,
     /// Member count (only set for group results).
     pub member_count: Option<i64>,
+    pub origins: ContactOrigins,
 }
 
 // ── Async autocomplete wrapper for Db ─────────────────────────
@@ -40,6 +42,7 @@ impl Db {
                         is_group: false,
                         group_id: None,
                         member_count: None,
+                        origins: row.origins,
                     },
                     ContactSearchKind::Group {
                         group_id,
@@ -50,6 +53,7 @@ impl Db {
                         is_group: true,
                         group_id: Some(group_id),
                         member_count: Some(member_count),
+                        origins: row.origins,
                     },
                 })
                 .collect())
@@ -80,6 +84,7 @@ pub struct ContactEntry {
     /// Provider-assigned server ID for synced contacts. Used by the action
     /// service for write-back dispatch without ambiguous email-based lookups.
     pub server_id: Option<String>,
+    pub origins: ContactOrigins,
 }
 
 /// A contact group entry for the settings management UI.
@@ -110,9 +115,10 @@ impl Db {
     pub async fn get_contacts_for_settings(
         &self,
         filter: String,
+        origin: ContactOriginFilter,
     ) -> Result<Vec<ContactEntry>, String> {
         self.with_read(move |conn| {
-            Ok(load_contacts_for_settings_sync(conn, &filter)?
+            Ok(load_contacts_for_settings_sync(conn, &filter, origin)?
                 .into_iter()
                 .map(|row| ContactEntry {
                     id: row.id,
@@ -127,6 +133,7 @@ impl Db {
                     groups: row.groups,
                     source: row.source,
                     server_id: row.server_id,
+                    origins: row.origins,
                 })
                 .collect())
         })

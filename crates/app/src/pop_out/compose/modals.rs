@@ -7,7 +7,7 @@ use crate::font;
 use crate::icon;
 use crate::ui::dialog::{DialogAction, alert_dialog, form_dialog};
 use crate::ui::layout::*;
-use crate::ui::theme;
+use crate::ui::{theme, widgets};
 
 use crate::pop_out::PopOutMessage;
 
@@ -344,17 +344,26 @@ pub(super) fn autocomplete_dropdown<'a>(
             .spacing(SPACE_XS)
             .align_y(Alignment::Center)
             .into()
-        } else if let Some(ref name) = entry.display_name {
-            column![
-                text(name).size(TEXT_SM).style(text::base),
-                text(&entry.email)
-                    .size(TEXT_XS)
-                    .style(theme::TextClass::Tertiary.style()),
-            ]
-            .spacing(SPACE_XXXS)
-            .into()
         } else {
-            text(&entry.email).size(TEXT_SM).style(text::base).into()
+            let person: Element<'_, Message> = if let Some(ref name) = entry.display_name {
+                column![
+                    text(name).size(TEXT_SM).style(text::base),
+                    text(&entry.email)
+                        .size(TEXT_XS)
+                        .style(theme::TextClass::Tertiary.style()),
+                ]
+                .spacing(SPACE_XXXS)
+                .into()
+            } else {
+                text(&entry.email).size(TEXT_SM).style(text::base).into()
+            };
+            match widgets::contact_origin_marks(entry.origins, ICON_MD) {
+                Some(marks) => row![container(person).width(Length::Fill), marks]
+                    .spacing(SPACE_XS)
+                    .align_y(Alignment::Center)
+                    .into(),
+                None => person,
+            }
         };
 
         let row_btn = button(content)

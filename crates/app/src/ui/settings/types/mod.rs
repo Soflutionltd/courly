@@ -386,6 +386,7 @@ pub struct Settings {
     pub confirm_delete_signature: Option<String>,
     // Contacts management
     pub contact_filter: String,
+    pub contact_origin_filter: rtsk::db::queries_extra::ContactOriginFilter,
     pub contacts: Vec<crate::db::ContactEntry>,
     pub contact_editor: Option<ContactEditorState>,
     /// Pending contact delete ID awaiting confirmation.
@@ -657,6 +658,7 @@ impl Default for Settings {
             signature_editor: None,
             confirm_delete_signature: None,
             contact_filter: String::new(),
+            contact_origin_filter: rtsk::db::queries_extra::ContactOriginFilter::All,
             contacts: Vec::new(),
             contact_editor: None,
             confirm_delete_contact: None,

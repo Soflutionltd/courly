@@ -2,6 +2,8 @@ use iced::widget::{
     Space, button, column, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Alignment, Element, Length};
+use rtsk::contacts::search::ContactOrigins;
+use rtsk::db::queries_extra::ContactOriginFilter;
 use rust_i18n::t;
 
 use super::accounts::tr;
@@ -30,6 +32,7 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
             &state.contact_filter,
             state.focused_filter == Some(FilterId::Contacts),
         )),
+        static_row(contact_origin_chips(state)),
         static_row(contact_list_panel(state)),
         people_add_button(
             tr(t!("settings.people.new_contact")),
@@ -68,6 +71,84 @@ fn contact_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessag
     .padding(PAD_SETTINGS_ROW)
     .width(Length::Fill)
     .into()
+}
+
+/// Narrows the list to one address book. Outlook and Google show only
+/// when an account of that kind is set up.
+fn contact_origin_chips(state: &Settings) -> Element<'_, SettingsMessage> {
+    let has_provider = |provider: &str| {
+        state
+            .managed_accounts
+            .iter()
+            .any(|account| account.provider == provider)
+    };
+    let mut choices = vec![(
+        ContactOriginFilter::All,
+        tr(t!("settings.people.origin_all")),
+        ContactOrigins::default(),
+    )];
+    if cfg!(target_os = "macos") {
+        choices.push((
+            ContactOriginFilter::Apple,
+            tr(t!("settings.people.origin_apple")),
+            ContactOrigins {
+                apple: true,
+                ..ContactOrigins::default()
+            },
+        ));
+    }
+    if has_provider("graph") {
+        choices.push((
+            ContactOriginFilter::Microsoft,
+            tr(t!("settings.people.origin_microsoft")),
+            ContactOrigins {
+                microsoft: true,
+                ..ContactOrigins::default()
+            },
+        ));
+    }
+    if has_provider("gmail_api") {
+        choices.push((
+            ContactOriginFilter::Google,
+            tr(t!("settings.people.origin_google")),
+            ContactOrigins {
+                google: true,
+                ..ContactOrigins::default()
+            },
+        ));
+    }
+    choices.push((
+        ContactOriginFilter::Courly,
+        tr(t!("settings.people.origin_courly")),
+        ContactOrigins {
+            courly: true,
+            ..ContactOrigins::default()
+        },
+    ));
+
+    let mut chips = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+    for (filter, label, origins) in choices {
+        let mut content = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+        if let Some(marks) = widgets::contact_origin_marks(origins, ICON_SM) {
+            content = content.push(marks);
+        }
+        content = content.push(text(label).size(TEXT_SM));
+        chips = chips.push(
+            button(content)
+                .on_press(SettingsMessage::ContactOriginFilterChanged(filter))
+                .padding(PAD_CHIP)
+                .style(
+                    theme::ButtonClass::Chip {
+                        active: state.contact_origin_filter == filter,
+                    }
+                    .style(),
+                ),
+        );
+    }
+    container(chips)
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into()
 }
 
 fn group_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
@@ -203,8 +284,14 @@ fn contact_card<'a>(
         .unwrap_or(tr(t!("settings.people.no_name")));
     let id = contact.id.clone();
 
+    let mut name_row = row![text(name).size(TEXT_LG).style(text::base)]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+    if let Some(marks) = widgets::contact_origin_marks(contact.origins, ICON_MD) {
+        name_row = name_row.push(marks);
+    }
     let header = row![
-        container(text(name).size(TEXT_LG).style(text::base))
+        container(name_row)
             .align_y(Alignment::Center)
             .width(Length::Fill),
         text(&contact.email).size(TEXT_SM).style(text::secondary),

@@ -16,9 +16,10 @@ impl ReadyApp {
         let db = Arc::clone(&self.db);
         let db2 = Arc::clone(&self.db);
         let group_filter = self.settings.group_filter.clone();
+        let origin = self.settings.contact_origin_filter;
         Task::batch([
             Task::perform(
-                async move { db.get_contacts_for_settings(filter).await },
+                async move { db.get_contacts_for_settings(filter, origin).await },
                 |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
             ),
             Task::perform(
@@ -43,6 +44,7 @@ impl ReadyApp {
         };
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
+        let origin = self.settings.contact_origin_filter;
         let params = contact_entry_to_save_params(entry);
 
         Task::perform(
@@ -52,7 +54,7 @@ impl ReadyApp {
                 // and LocalOnly the local row landed; on a wire/local
                 // failure the list state is unchanged but reloading is
                 // harmless and keeps the panel in sync with the DB.
-                let contacts = db.get_contacts_for_settings(filter).await;
+                let contacts = db.get_contacts_for_settings(filter, origin).await;
                 (result, contacts)
             },
             |(result, contacts)| match result {
@@ -81,6 +83,7 @@ impl ReadyApp {
         };
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
+        let origin = self.settings.contact_origin_filter;
 
         Task::perform(
             async move {
@@ -89,7 +92,7 @@ impl ReadyApp {
                 // local row is untouched - skip the reload.
                 let contacts = match &result {
                     Err(_) => None,
-                    Ok(_) => db.get_contacts_for_settings(filter).await.ok(),
+                    Ok(_) => db.get_contacts_for_settings(filter, origin).await.ok(),
                 };
                 (result, contacts)
             },
@@ -402,6 +405,7 @@ fn build_contact_entry(
         groups: contact.groups.clone(),
         source: None,
         server_id: None,
+        origins: rtsk::contacts::search::ContactOrigins::default(),
     }
 }
 

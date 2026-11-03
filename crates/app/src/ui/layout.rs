@@ -161,6 +161,12 @@ pub const PAD_SEARCH_SCOPE_PILL: Padding = Padding {
     bottom: SPACE_XXXS,
     left: SPACE_XS,
 };
+pub const PAD_CHIP: Padding = Padding {
+    top: SPACE_XXS,
+    right: SPACE_SM,
+    bottom: SPACE_XXS,
+    left: SPACE_SM,
+};
 pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
 
 // ── Panel widths ────────────────────────────────────────

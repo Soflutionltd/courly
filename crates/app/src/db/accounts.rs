@@ -1,6 +1,7 @@
 use super::connection::Db;
 use super::types::*;
 use crate::ui::thread_list::TypeaheadItem;
+use rtsk::contacts::search::ContactOrigins;
 
 impl Db {
     pub fn get_account_auth_info(
@@ -97,6 +98,7 @@ impl Db {
                         label: row.name.clone(),
                         detail: Some(row.account_email),
                         insert_value: row.name,
+                        origins: ContactOrigins::default(),
                     })
                     .collect(),
             )
@@ -123,6 +125,7 @@ impl Db {
                             label,
                             detail: Some(row.email.clone()),
                             insert_value: row.email,
+                            origins: row.origins,
                         }
                     })
                     .collect(),
@@ -151,6 +154,7 @@ impl Db {
                             label: label.clone(),
                             detail: Some(row.email),
                             insert_value: label,
+                            origins: ContactOrigins::default(),
                         }
                     })
                     .collect(),

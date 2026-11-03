@@ -36,6 +36,70 @@ pub struct ContactSearchResult {
     pub kind: ContactSearchKind,
     /// Source identifier (e.g. "google", "graph", "carddav", "user", "seen").
     pub source: Option<String>,
+    pub origins: ContactOrigins,
+}
+
+/// The address books holding a contact's address. One address can sit in
+/// several at once: the Mac's address book and an Outlook account, say.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContactOrigins {
+    /// The Mac's address book (iCloud and the accounts added to Contacts).
+    pub apple: bool,
+    /// A Microsoft account, or its organization directory.
+    pub microsoft: bool,
+    /// A Google account, or its organization directory.
+    pub google: bool,
+    /// A CardDAV or JMAP address book.
+    pub other_book: bool,
+    /// Written in Courly and kept only here.
+    pub courly: bool,
+}
+
+/// Columns `ContactOrigins::from_row` reads, for the contact aliased `c`.
+pub const CONTACT_ORIGIN_COLUMNS: &str = "c.source AS origin_source,
+    (SELECT group_concat(DISTINCT cc.source) FROM contact_claims cc
+      WHERE cc.email = c.email AND cc.corpus = 'main') AS origin_claims,
+    EXISTS (SELECT 1 FROM device_contact_claims d WHERE d.email = c.email) AS origin_device";
+
+impl ContactOrigins {
+    /// Reads the columns of `CONTACT_ORIGIN_COLUMNS`.
+    pub fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        let mut origins = Self::default();
+        if let Some(source) = row.get::<_, Option<String>>("origin_source")? {
+            origins.add_source(&source);
+        }
+        if let Some(claims) = row.get::<_, Option<String>>("origin_claims")? {
+            for source in claims.split(',') {
+                origins.add_source(source);
+            }
+        }
+        origins.apple |= row.get::<_, bool>("origin_device")?;
+        Ok(origins)
+    }
+
+    /// Records the address book a `contacts.source` or claim source names.
+    pub fn add_source(&mut self, source: &str) {
+        match source {
+            "macos" => self.apple = true,
+            "graph" => self.microsoft = true,
+            "google" => self.google = true,
+            "jmap" | "carddav" => self.other_book = true,
+            "user" => self.courly = true,
+            _ => {}
+        }
+    }
+
+    /// The origin of a directory entry cached for an account of `provider`.
+    #[must_use]
+    pub fn of_directory(provider: &str) -> Self {
+        let mut origins = Self::default();
+        match provider {
+            "graph" => origins.microsoft = true,
+            "gmail_api" => origins.google = true,
+            _ => origins.other_book = true,
+        }
+        origins
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +111,7 @@ pub struct ContactSearchResult {
 pub struct PersonTypeaheadRow {
     pub email: String,
     pub display_name: Option<String>,
+    pub origins: ContactOrigins,
 }
 
 const PEOPLE_TYPEAHEAD_LIMIT: i64 = 10;
@@ -83,18 +148,21 @@ pub fn search_people_for_typeahead_sync(
             .join(" AND ")
     };
     let sql = format!(
-        "SELECT email, display_name FROM (
+        "SELECT email, display_name, origin_source, origin_claims, origin_device FROM (
            SELECT email, display_name, rank, recency,
+                  origin_source, origin_claims, origin_device,
                   ROW_NUMBER() OVER (
                     PARTITION BY lower(email) ORDER BY rank, recency DESC
                   ) AS rn
            FROM (
              SELECT c.email, c.display_name, 0 AS rank,
-                    COALESCE(c.last_contacted_at, 0) AS recency
+                    COALESCE(c.last_contacted_at, 0) AS recency,
+                    {CONTACT_ORIGIN_COLUMNS}
              FROM contacts c
              WHERE {contact_match}
              UNION ALL
-             SELECT s.email, s.display_name, 1 AS rank, s.last_seen_at AS recency
+             SELECT s.email, s.display_name, 1 AS rank, s.last_seen_at AS recency,
+                    NULL, NULL, 0
              FROM seen_addresses s
              WHERE {seen_match}
            )
@@ -114,6 +182,7 @@ pub fn search_people_for_typeahead_sync(
         Ok(PersonTypeaheadRow {
             email: row.get("email")?,
             display_name: row.get("display_name")?,
+            origins: ContactOrigins::from_row(row)?,
         })
     })
     .map_err(|e| e.to_string())?
@@ -202,14 +271,16 @@ fn search_contacts_fts_or_like(
 ) -> Result<(), String> {
     let fts_query = build_fts_query(raw_query);
     if !fts_query.is_empty() {
-        let fts_sql = "SELECT c.email, c.display_name, c.source
-                       FROM contacts c
-                       INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
-                       WHERE contacts_fts MATCH ?1
-                       ORDER BY c.last_contacted_at DESC NULLS LAST,
-                                c.display_name ASC
-                       LIMIT ?2";
-        match conn.prepare(fts_sql) {
+        let fts_sql = format!(
+            "SELECT c.email, c.display_name, c.source, {CONTACT_ORIGIN_COLUMNS}
+             FROM contacts c
+             INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
+             WHERE contacts_fts MATCH ?1
+             ORDER BY c.last_contacted_at DESC NULLS LAST,
+                      c.display_name ASC
+             LIMIT ?2"
+        );
+        match conn.prepare(&fts_sql) {
             Ok(mut stmt) => {
                 let rows = stmt
                     .query_map(params![&fts_query, limit], |row| {
@@ -218,6 +289,7 @@ fn search_contacts_fts_or_like(
                             display_name: row.get("display_name")?,
                             kind: ContactSearchKind::Contact,
                             source: row.get("source")?,
+                            origins: ContactOrigins::from_row(row)?,
                         })
                     })
                     .map_err(|e| e.to_string())?;
@@ -245,9 +317,11 @@ fn search_gal_cache(
     seen_emails: &mut std::collections::HashSet<String>,
     results: &mut Vec<ContactSearchResult>,
 ) -> Result<(), String> {
-    let sql = "SELECT email, display_name FROM gal_cache
-               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
-               ORDER BY display_name ASC
+    let sql = "SELECT g.email, g.display_name, a.provider
+               FROM gal_cache g
+               JOIN accounts a ON a.id = g.account_id
+               WHERE g.email LIKE ?1 ESCAPE '\\' OR g.display_name LIKE ?1 ESCAPE '\\'
+               ORDER BY g.display_name ASC
                LIMIT ?2";
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -257,6 +331,7 @@ fn search_gal_cache(
                 display_name: row.get("display_name")?,
                 kind: ContactSearchKind::Contact,
                 source: Some("gal_cache".to_string()),
+                origins: ContactOrigins::of_directory(&row.get::<_, String>("provider")?),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -281,11 +356,14 @@ fn search_contacts_table(
     seen_emails: &mut std::collections::HashSet<String>,
     results: &mut Vec<ContactSearchResult>,
 ) -> Result<(), String> {
-    let sql = "SELECT email, display_name, source FROM contacts
-               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
-               ORDER BY last_contacted_at DESC NULLS LAST, display_name ASC
-               LIMIT ?2";
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let sql = format!(
+        "SELECT c.email, c.display_name, c.source, {CONTACT_ORIGIN_COLUMNS}
+         FROM contacts c
+         WHERE c.email LIKE ?1 ESCAPE '\\' OR c.display_name LIKE ?1 ESCAPE '\\'
+         ORDER BY c.last_contacted_at DESC NULLS LAST, c.display_name ASC
+         LIMIT ?2"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![pattern, limit], |row| {
             Ok(ContactSearchResult {
@@ -293,6 +371,7 @@ fn search_contacts_table(
                 display_name: row.get("display_name")?,
                 kind: ContactSearchKind::Contact,
                 source: row.get("source")?,
+                origins: ContactOrigins::from_row(row)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -333,6 +412,7 @@ fn search_seen_addresses_fts_or_like(
                             display_name: row.get("display_name")?,
                             kind: ContactSearchKind::SeenAddress,
                             source: Some("seen".to_string()),
+                            origins: ContactOrigins::default(),
                         })
                     })
                     .map_err(|e| e.to_string())?;
@@ -362,6 +442,7 @@ fn search_seen_addresses_fts_or_like(
                 display_name: row.get("display_name")?,
                 kind: ContactSearchKind::SeenAddress,
                 source: Some("seen".to_string()),
+                origins: ContactOrigins::default(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -402,6 +483,7 @@ fn search_groups_table(
                     member_count: count,
                 },
                 source: None,
+                origins: ContactOrigins::default(),
             })
         })
         .map_err(|e| e.to_string())?;

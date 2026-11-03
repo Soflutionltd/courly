@@ -33,6 +33,8 @@ pub struct TypeaheadItem {
     pub label: String,
     pub detail: Option<String>,
     pub insert_value: String,
+    /// Address books holding a suggested person; empty for other values.
+    pub origins: rtsk::contacts::search::ContactOrigins,
 }
 
 /// A thread taken out of the list by an action still in flight.

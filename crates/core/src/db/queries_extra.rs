@@ -17,8 +17,8 @@ pub(crate) use db_read::db::queries_extra::send_identity::*;
 pub use db_read::db::queries_extra::thread_detail;
 pub use db_read::db::queries_extra::thread_detail::*;
 pub use db_read::db::queries_extra::{
-    AccountAuthInfo, LocalDraftSummary, MatchedGroup, SaveLocalDraftParams, SendIdentity,
-    UpdateAccountParams, account_exists_by_email_sync, check_gmail_duplicate_sync,
+    AccountAuthInfo, ContactOriginFilter, LocalDraftSummary, MatchedGroup, SaveLocalDraftParams,
+    SendIdentity, UpdateAccountParams, account_exists_by_email_sync, check_gmail_duplicate_sync,
     db_expand_contact_group_with_names, db_find_contact_group_id_by_name,
     db_find_contact_id_by_email, db_find_group_matching_emails, db_get_all_accounts,
     db_get_all_signatures, db_get_all_templates, db_get_local_draft,

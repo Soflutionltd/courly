@@ -10,6 +10,7 @@ use crate::ui::search_suggest::{SearchSuggestMessage, SuggestRow};
 use crate::ui::sidebar::truncate_query;
 use crate::ui::thread_list::ThreadListMode;
 use crate::{Message, ReadyApp};
+use rtsk::contacts::search::ContactOrigins;
 use rtsk::db::types::AccountScope;
 use rtsk::scope::ViewScope;
 
@@ -957,6 +958,7 @@ impl ReadyApp {
                     label: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
+                    origins: ContactOrigins::default(),
                 })
                 .collect(),
             ),
@@ -970,6 +972,7 @@ impl ReadyApp {
                     label: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
+                    origins: ContactOrigins::default(),
                 })
                 .collect(),
             ),
@@ -995,6 +998,7 @@ impl ReadyApp {
                     label: s.to_string(),
                     detail: None,
                     insert_value: s.to_string(),
+                    origins: ContactOrigins::default(),
                 })
                 .collect(),
             ),
@@ -1013,6 +1017,7 @@ impl ReadyApp {
                     label: label.to_string(),
                     detail: Some(format!("{operator}:{value}")),
                     insert_value: value.to_string(),
+                    origins: ContactOrigins::default(),
                 })
                 .collect(),
             ),

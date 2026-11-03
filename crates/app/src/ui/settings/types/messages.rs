@@ -142,6 +142,7 @@ pub enum SettingsMessage {
     FilterFocusUpdated(Option<FilterId>),
     // Contacts
     ContactFilterChanged(String),
+    ContactOriginFilterChanged(rtsk::db::queries_extra::ContactOriginFilter),
     ContactsLoaded(Result<Vec<crate::db::ContactEntry>, String>),
     ContactClick(String),
     ContactEditorFieldChanged(ContactField, String),

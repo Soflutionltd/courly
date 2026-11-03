@@ -184,6 +184,9 @@ fn contact_row(contact: &TypeaheadItem, index: usize, selected: bool) -> Element
                 .ellipsis(text::Ellipsis::End),
         );
     }
+    if let Some(marks) = widgets::contact_origin_marks(contact.origins, ICON_MD) {
+        line = line.push(Space::new().width(Length::Fill)).push(marks);
+    }
     suggestion_button(line, SearchSuggestMessage::PickContact(index), selected)
 }
 
@@ -255,6 +258,7 @@ mod tests {
             label: email.to_owned(),
             detail: None,
             insert_value: email.to_owned(),
+            origins: rtsk::contacts::search::ContactOrigins::default(),
         }
     }
 

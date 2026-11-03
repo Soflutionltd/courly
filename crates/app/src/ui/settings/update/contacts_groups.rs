@@ -89,6 +89,7 @@ impl Settings {
             groups: Vec::new(),
             source: editor.source.clone().or_else(|| Some("user".to_string())),
             server_id: editor.server_id.clone(),
+            origins: rtsk::contacts::search::ContactOrigins::default(),
         };
         if close_sheet {
             self.active_sheet = None;

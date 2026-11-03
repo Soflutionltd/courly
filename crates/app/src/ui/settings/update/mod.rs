@@ -303,6 +303,13 @@ impl Component for Settings {
                 self.focused_filter = Some(FilterId::Contacts);
                 return (Task::none(), Some(SettingsEvent::LoadContacts(v)));
             }
+            SettingsMessage::ContactOriginFilterChanged(origin) => {
+                self.contact_origin_filter = origin;
+                return (
+                    Task::none(),
+                    Some(SettingsEvent::LoadContacts(self.contact_filter.clone())),
+                );
+            }
             SettingsMessage::GroupFilterChanged(v) => {
                 self.group_filter = v.clone();
                 self.focused_filter = Some(FilterId::Groups);
