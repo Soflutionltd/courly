@@ -1,6 +1,7 @@
 //! The Mac's address book (the Contacts app: iCloud and every account the
-//! user added there), imported read-only into `contacts` so search and
-//! compose suggest those people. macOS asks the user once for access.
+//! user added there), imported into `contacts` so search and compose
+//! suggest those people, and written when the user edits one of them in
+//! Courly. macOS asks the user once for access.
 
 mod address_book;
 
@@ -12,6 +13,9 @@ use db::db::queries_extra::{
 };
 use service_state::WriteDbState;
 
+use crate::actions::contact_fields::ContactFields;
+use address_book::StoreError;
+
 /// A person in the Mac's address book.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeviceContact {
@@ -20,6 +24,52 @@ pub(crate) struct DeviceContact {
     pub family_name: String,
     pub organization: String,
     pub emails: Vec<String>,
+    pub phones: Vec<String>,
+}
+
+/// Adds a person to the address book. Returns the person's identifier.
+pub(crate) async fn create(
+    write_db: &WriteDbState,
+    fields: ContactFields,
+) -> Result<String, String> {
+    let identifier = in_address_book(move || address_book::create(&fields)).await?;
+    refresh(write_db).await?;
+    Ok(identifier)
+}
+
+pub(crate) async fn update(
+    write_db: &WriteDbState,
+    identifier: String,
+    old: ContactFields,
+    new: ContactFields,
+) -> Result<(), String> {
+    in_address_book(move || address_book::update(&identifier, &old, &new)).await?;
+    refresh(write_db).await.map(drop)
+}
+
+pub(crate) async fn delete(write_db: &WriteDbState, identifier: String) -> Result<(), String> {
+    in_address_book(move || address_book::delete(&identifier)).await?;
+    refresh(write_db).await.map(drop)
+}
+
+/// Rereads the address book so the local copy matches what was written.
+async fn refresh(write_db: &WriteDbState) -> Result<usize, String> {
+    let contacts = in_address_book(address_book::read).await?;
+    import(write_db, contacts).await
+}
+
+async fn in_address_book<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, StoreError> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("the address book task failed: {error}"))?
+        .map_err(|error| match error {
+            StoreError::Denied => "Courly may not use Contacts: allow it in System Settings \
+                                   > Privacy & Security > Contacts"
+                .to_owned(),
+            StoreError::Failed(message) => message,
+        })
 }
 
 /// One row per address: a person with a work and a home address can be
@@ -41,6 +91,12 @@ fn rows_for(contacts: &[DeviceContact]) -> Vec<DeviceContactRow> {
             Some(full_name.to_owned())
         };
         let company = (!organization.is_empty()).then(|| organization.to_owned());
+        let phone = contact
+            .phones
+            .iter()
+            .map(|phone| phone.trim())
+            .find(|phone| !phone.is_empty())
+            .map(str::to_owned);
         for email in &contact.emails {
             let email = email.trim().to_lowercase();
             if email.is_empty() || !seen.insert(email.clone()) {
@@ -50,6 +106,7 @@ fn rows_for(contacts: &[DeviceContact]) -> Vec<DeviceContactRow> {
                 email,
                 display_name: display_name.clone(),
                 company: company.clone(),
+                phone: phone.clone(),
                 server_id: contact.identifier.clone(),
             });
         }
@@ -84,7 +141,7 @@ mod run {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::address_book::{self, ReadError};
+    use super::address_book::{self, StoreError};
     use crate::boot;
 
     /// The Contacts framework offers change notifications only to a running
@@ -113,14 +170,14 @@ mod run {
                         Ok(count) => log::info!("device contacts: {count} address(es) imported"),
                         Err(error) => log::warn!("device contacts: import failed: {error}"),
                     },
-                    Ok(Err(ReadError::Denied)) => {
+                    Ok(Err(StoreError::Denied)) => {
                         log::warn!(
                             "device contacts: access to Contacts is not granted; \
                              allow Courly in System Settings > Privacy & Security > Contacts"
                         );
                         return;
                     }
-                    Ok(Err(ReadError::Failed(error))) => {
+                    Ok(Err(StoreError::Failed(error))) => {
                         log::warn!("device contacts: reading the address book failed: {error}");
                     }
                     Err(error) => log::warn!("device contacts: reader task failed: {error}"),
@@ -154,6 +211,7 @@ mod tests {
             family_name: family.to_owned(),
             organization: String::new(),
             emails: emails.iter().map(|email| (*email).to_owned()).collect(),
+            phones: Vec::new(),
         }
     }
 

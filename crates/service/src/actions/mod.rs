@@ -8,6 +8,7 @@
 
 mod archive;
 pub mod batch;
+pub(crate) mod contact_fields;
 pub mod contacts;
 mod context;
 pub(crate) mod dispatch_target;
