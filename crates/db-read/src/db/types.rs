@@ -703,18 +703,17 @@ pub struct DbTaskTag {
 
 // ── Folder Unread Count ─────────────────────────────────────
 
-/// `is_read = 0` subset of a folder's synced thread membership. This is the
-/// only count shape the universal sidebar pill (Inbox, Drafts, Sent, ...)
-/// accepts. Disjoint from `DraftTotalCount` so a future contributor cannot
-/// route synced+local totals through the pill without a type error - the
-/// Drafts pill stays "unread within folder membership" like every other
-/// universal pill, not a total-count carve-out.
+/// A universal folder's synced count as Outlook shows it: unread messages
+/// in the folder, or every message for Drafts and Junk. This is the only
+/// count shape the universal sidebar pill (Inbox, Drafts, Sent, ...)
+/// accepts. Disjoint from `DraftTotalCount` so local, unsynced drafts cannot
+/// reach the pill without a type error.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct UniversalUnreadCount(i64);
 
 impl UniversalUnreadCount {
-    pub fn from_synced_thread_count(count: i64) -> Self {
+    pub fn from_synced_folder_count(count: i64) -> Self {
         Self(count)
     }
 

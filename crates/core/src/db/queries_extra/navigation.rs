@@ -207,11 +207,11 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
     ("all-mail", "All Mail"),
 ];
 
-/// Universal folders with their unread counts.
+/// Universal folders with their counts.
 ///
-/// Every universal pill - Drafts included - counts the `is_read = 0`
-/// subset of the folder's synced thread membership. Rationale and the
-/// local-drafts carve-out: `reference/glossary/drafts.md` § "Count semantics."
+/// Each pill shows the folder's synced messages as Outlook does: unread
+/// ones, or all of them for Drafts and Junk. Rationale and the local-drafts
+/// carve-out: `reference/glossary/drafts.md` § "Count semantics."
 fn build_universal_folders(
     conn: &ReadConn<'_>,
     scope: &AccountScope,
@@ -604,7 +604,7 @@ pub fn get_shared_mailbox_navigation(
                 name: (*name).to_owned(),
                 folder_kind: FolderKind::Universal,
                 unread_count: NavigationUnreadCount::Universal(
-                    UniversalUnreadCount::from_synced_thread_count(unread),
+                    UniversalUnreadCount::from_synced_folder_count(unread),
                 ),
                 account_id: None,
                 parent_id: None,

@@ -43,35 +43,38 @@ fn account_scope_clause(
     }
 }
 
-/// Folder IDs that, when present on a thread, exclude it from the broad
-/// All-Accounts Inbox view. Drafts, trashed mail, sent mail, archived
-/// mail, and spam are intentionally hidden from the unified Inbox; user
-/// folders, starred-but-archived, and any unfoldered mail stay in.
-const BROAD_INBOX_EXCLUSIONS: &[&str] = &["DRAFT", "TRASH", "SENT", "archive", "SPAM"];
+/// Folder IDs that keep a pinned thread out of the All-Accounts Inbox view.
+const PINNED_INBOX_EXCLUSIONS: &[&str] = &["DRAFT", "TRASH", "SENT", "archive", "SPAM"];
 
-/// In All-Accounts scope, "Inbox" means "everything that isn't a draft,
-/// trashed, sent, archived, or spam" - not just rows in the `INBOX`
-/// folder. Single- and multi-account scopes keep the strict folder match.
+/// In All-Accounts scope, "Inbox" is every account's Inbox, as in Outlook,
+/// plus the pinned threads filed elsewhere. Single- and multi-account scopes
+/// keep the strict folder match.
 fn is_all_accounts_inbox(scope: &AccountScope, label_id: Option<&str>) -> bool {
     matches!(scope, AccountScope::All) && label_id == Some("INBOX")
 }
 
-/// SQL clause that excludes threads with any of the broad-inbox exclusion
-/// folders. Placeholders start at `base_idx`. Returns `(clause, params)`.
-fn broad_inbox_exclusion_clause(base_idx: usize) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let placeholders: Vec<String> = BROAD_INBOX_EXCLUSIONS
+/// SQL clause selecting the All-Accounts Inbox threads: those in an
+/// `INBOX`, and the pinned ones outside drafts, trash, sent, archive and
+/// spam. Placeholders start at `base_idx`. Returns `(clause, params)`.
+fn all_accounts_inbox_clause(base_idx: usize) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let placeholders: Vec<String> = PINNED_INBOX_EXCLUSIONS
         .iter()
         .enumerate()
         .map(|(i, _)| format!("?{}", base_idx + i))
         .collect();
     let clause = format!(
-        "NOT EXISTS (SELECT 1 FROM thread_folders tf_excl
-                     WHERE tf_excl.account_id = t.account_id
-                       AND tf_excl.thread_id = t.id
-                       AND tf_excl.folder_id IN ({}))",
+        "(EXISTS (SELECT 1 FROM thread_folders tf_inbox
+                  WHERE tf_inbox.account_id = t.account_id
+                    AND tf_inbox.thread_id = t.id
+                    AND tf_inbox.folder_id = 'INBOX')
+          OR (t.is_pinned = 1
+              AND NOT EXISTS (SELECT 1 FROM thread_folders tf_excl
+                              WHERE tf_excl.account_id = t.account_id
+                                AND tf_excl.thread_id = t.id
+                                AND tf_excl.folder_id IN ({}))))",
         placeholders.join(", ")
     );
-    let params: Vec<Box<dyn rusqlite::types::ToSql>> = BROAD_INBOX_EXCLUSIONS
+    let params: Vec<Box<dyn rusqlite::types::ToSql>> = PINNED_INBOX_EXCLUSIONS
         .iter()
         .map(|id| Box::new((*id).to_owned()) as _)
         .collect();
@@ -130,8 +133,8 @@ pub fn get_threads_scoped(
     let next_idx = scope_params.len() + 1;
 
     if is_all_accounts_inbox(scope, label_id) {
-        let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
-        let folder_idx = next_idx + excl_params.len();
+        let (inbox_clause, inbox_params) = all_accounts_inbox_clause(next_idx);
+        let folder_idx = next_idx + inbox_params.len();
         let limit_idx = folder_idx + 1;
         let sql = format!(
             "SELECT {FOLDER_THREAD_COLUMNS} FROM threads t
@@ -140,14 +143,14 @@ pub fn get_threads_scoped(
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
-               AND {excl_clause}
+               AND {inbox_clause}
              ORDER BY t.is_pinned DESC, last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
             folder_latest = folder_latest_message_subquery(folder_idx),
             offset_idx = limit_idx + 1,
         );
         let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
-        all_params.extend(excl_params);
+        all_params.extend(inbox_params);
         all_params.push(Box::new("INBOX".to_owned()));
         all_params.push(Box::new(lim));
         all_params.push(Box::new(off));
@@ -299,14 +302,14 @@ pub fn get_thread_count_scoped(
     let next_idx = scope_params.len() + 1;
 
     if is_all_accounts_inbox(scope, label_id) {
-        let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
+        let (inbox_clause, inbox_params) = all_accounts_inbox_clause(next_idx);
         let sql = format!(
             "SELECT COUNT(*) AS cnt FROM threads t
              WHERE {scope_clause} AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
-               AND {excl_clause}"
+               AND {inbox_clause}"
         );
         let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
-        all_params.extend(excl_params);
+        all_params.extend(inbox_params);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             all_params.iter().map(AsRef::as_ref).collect();
         return conn
@@ -331,48 +334,21 @@ pub fn get_thread_count_scoped(
     }
 }
 
-/// Like `get_unread_count` but accepts an `AccountScope`. Returns the
-/// unread count for the scope's Inbox view - the narrow `INBOX`-labelled
-/// thread count in Single/Multiple scopes, the broad "everything except
-/// drafts/trash/sent/archive/spam" count in All.
+/// Like `get_unread_count` but accepts an `AccountScope`: the unread
+/// messages in the scope's Inboxes, summed over its accounts as Outlook does.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_count_scoped(conn: &ReadConn<'_>, scope: &AccountScope) -> Result<i64, String> {
-    if matches!(scope, AccountScope::All) {
-        return broad_inbox_unread_count(conn, scope);
-    }
-
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
 
     let sql = format!(
-        "SELECT COUNT(*) AS cnt FROM threads t
-         INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
-         WHERE {scope_clause} AND tf.folder_id = 'INBOX' AND t.is_read = 0
+        "SELECT COUNT(*) AS cnt FROM messages m
+         INNER JOIN message_folders mf ON mf.account_id = m.account_id AND mf.message_id = m.id
+         INNER JOIN threads t ON t.account_id = m.account_id AND t.id = m.thread_id
+         WHERE {scope_clause} AND mf.folder_id = 'INBOX' AND m.is_read = 0
            AND t.namespace_kind IS NULL AND t.is_chat_thread = 0"
     );
 
     execute_count_query(conn, &sql, scope_params, None)
-}
-
-/// Unread count for the broad All-Accounts Inbox view: everything except
-/// `BROAD_INBOX_EXCLUSIONS`.
-fn broad_inbox_unread_count(conn: &ReadConn<'_>, scope: &AccountScope) -> Result<i64, String> {
-    let (scope_clause, scope_params) = account_scope_clause(scope, 1);
-    let next_idx = scope_params.len() + 1;
-    let (excl_clause, excl_params) = broad_inbox_exclusion_clause(next_idx);
-
-    let sql = format!(
-        "SELECT COUNT(*) AS cnt FROM threads t
-         WHERE {scope_clause} AND t.is_read = 0
-           AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
-           AND {excl_clause}"
-    );
-
-    let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = scope_params;
-    all_params.extend(excl_params);
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        all_params.iter().map(AsRef::as_ref).collect();
-    conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
-        .map_err(|e| e.to_string())
 }
 
 fn execute_count_query(
@@ -393,8 +369,12 @@ fn execute_count_query(
         .map_err(|e| e.to_string())
 }
 
-/// System folder IDs whose unread count comes from `thread_folders`.
+/// System folder IDs whose count comes from `message_folders`.
 const SYSTEM_FOLDER_IDS: &[&str] = &["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "archive"];
+
+/// System folders whose pill counts every message, read or not, as Outlook
+/// does for Drafts and Junk. The others count unread messages.
+const TOTAL_COUNT_FOLDER_IDS: &str = "'DRAFT', 'SPAM'";
 
 /// Return unread counts for each universal folder, aggregated across `scope`.
 ///
@@ -409,23 +389,6 @@ pub fn get_unread_counts_by_folder(
     results.push(get_flag_folder_unread_count(conn, scope, "STARRED")?);
     results.push(get_flag_folder_unread_count(conn, scope, "SNOOZED")?);
     results.push(get_all_mail_unread_count(conn, scope)?);
-
-    // All-Accounts Inbox is the broad "everything except drafts/trash/
-    // sent/archive/spam" view; the INBOX-label-based row that's currently
-    // in `results` undercounts it.
-    if matches!(scope, AccountScope::All) {
-        let broad =
-            UniversalUnreadCount::from_synced_thread_count(broad_inbox_unread_count(conn, scope)?);
-        if let Some(row) = results.iter_mut().find(|r| r.folder_id == "INBOX") {
-            row.unread_count = broad;
-        } else {
-            results.push(FolderUnreadCount {
-                folder_id: "INBOX".to_string(),
-                unread_count: broad,
-            });
-        }
-    }
-
     Ok(results)
 }
 
@@ -445,7 +408,9 @@ pub fn get_unread_counts_by_folder_and_account(
     Ok(results)
 }
 
-/// Unread counts for system folders (INBOX, SENT, DRAFT, TRASH, SPAM).
+/// Per-message counts for the system folders (INBOX, SENT, DRAFT, TRASH,
+/// SPAM, archive), as Outlook shows them: a conversation with one unread
+/// reply counts once in the Inbox, not in Sent because the user wrote in it.
 fn get_system_folder_unread_counts(
     conn: &ReadConn<'_>,
     scope: &AccountScope,
@@ -458,12 +423,14 @@ fn get_system_folder_unread_counts(
         .collect();
 
     let sql = format!(
-        "SELECT tf.folder_id AS folder_id, COUNT(*) AS unread_count FROM threads t
-         INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
-         WHERE {scope_clause} AND t.is_read = 0
+        "SELECT mf.folder_id AS folder_id, COUNT(*) AS unread_count FROM messages m
+         INNER JOIN message_folders mf ON mf.account_id = m.account_id AND mf.message_id = m.id
+         INNER JOIN threads t ON t.account_id = m.account_id AND t.id = m.thread_id
+         WHERE {scope_clause}
+           AND (m.is_read = 0 OR mf.folder_id IN ({TOTAL_COUNT_FOLDER_IDS}))
            AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
-           AND tf.folder_id IN ({})
-         GROUP BY tf.folder_id",
+           AND mf.folder_id IN ({})
+         GROUP BY mf.folder_id",
         placeholders.join(", ")
     );
 
@@ -505,7 +472,7 @@ fn get_flag_folder_unread_count(
 
     Ok(FolderUnreadCount {
         folder_id: folder_id.to_owned(),
-        unread_count: UniversalUnreadCount::from_synced_thread_count(count),
+        unread_count: UniversalUnreadCount::from_synced_folder_count(count),
     })
 }
 
@@ -527,11 +494,11 @@ fn get_all_mail_unread_count(
         .map_err(|e| e.to_string())?;
     Ok(FolderUnreadCount {
         folder_id: "all-mail".to_owned(),
-        unread_count: UniversalUnreadCount::from_synced_thread_count(count),
+        unread_count: UniversalUnreadCount::from_synced_folder_count(count),
     })
 }
 
-/// System folder unread counts grouped by account.
+/// `get_system_folder_unread_counts`, grouped by account.
 fn get_system_folder_unread_counts_by_account(
     conn: &ReadConn<'_>,
     scope: &AccountScope,
@@ -544,12 +511,14 @@ fn get_system_folder_unread_counts_by_account(
         .collect();
 
     let sql = format!(
-        "SELECT tf.folder_id AS folder_id, t.account_id, COUNT(*) AS unread_count FROM threads t
-         INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
-         WHERE {scope_clause} AND t.is_read = 0
+        "SELECT mf.folder_id AS folder_id, t.account_id, COUNT(*) AS unread_count FROM messages m
+         INNER JOIN message_folders mf ON mf.account_id = m.account_id AND mf.message_id = m.id
+         INNER JOIN threads t ON t.account_id = m.account_id AND t.id = m.thread_id
+         WHERE {scope_clause}
+           AND (m.is_read = 0 OR mf.folder_id IN ({TOTAL_COUNT_FOLDER_IDS}))
            AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
-           AND tf.folder_id IN ({})
-         GROUP BY tf.folder_id, t.account_id",
+           AND mf.folder_id IN ({})
+         GROUP BY mf.folder_id, t.account_id",
         placeholders.join(", ")
     );
 
@@ -591,7 +560,7 @@ fn get_flag_folder_unread_by_account(
         Ok(FolderAccountUnreadCount {
             folder_id: folder_id.to_owned(),
             account_id: row.get("account_id")?,
-            unread_count: UniversalUnreadCount::from_synced_thread_count(row.get("unread_count")?),
+            unread_count: UniversalUnreadCount::from_synced_folder_count(row.get("unread_count")?),
         })
     })
     .map_err(|e| e.to_string())?
@@ -618,7 +587,7 @@ fn get_all_mail_unread_by_account(
         Ok(FolderAccountUnreadCount {
             folder_id: "all-mail".to_owned(),
             account_id: row.get("account_id")?,
-            unread_count: UniversalUnreadCount::from_synced_thread_count(row.get("unread_count")?),
+            unread_count: UniversalUnreadCount::from_synced_folder_count(row.get("unread_count")?),
         })
     })
     .map_err(|e| e.to_string())?

@@ -91,9 +91,9 @@ Server-synced drafts (the other half of the Drafts list) arrive through the norm
 
 ## Count semantics
 
-Every universal-folder pill in the sidebar - Drafts included - counts the `is_read = 0` subset of the folder's synced thread membership. There is one uniform rule across the sidebar: pills mean "unread within folder membership," with no per-folder predicate variants and no per-folder pill styling.
+Universal-folder pills in the sidebar match Outlook, which users compare Courly against folder by folder. They count synced messages in the folder (`message_folders`), not threads: Inbox, Sent, Trash and Archive count the unread ones, Drafts and Spam count every message. A conversation with one unread reply therefore counts once in the Inbox and not in Sent, where the user's own message sits. The All-Accounts Inbox pill is the sum of the accounts' Inboxes. No pill is capped.
 
-For Drafts this typically means an empty pill: a draft you authored is read by you, so `is_read` is usually 1. That is the accepted cost of a single legible rule, and applies equally to Sent, Trash, Spam, and Archive. `get_draft_count_with_local` still exists for callers that genuinely want a total (pane headers, compose-pane indicators) but is not routed to the sidebar pill.
+`get_draft_count_with_local` still exists for callers that want synced and local drafts together (pane headers, compose-pane indicators) but is not routed to the sidebar pill.
 
 Local drafts have no `is_read` column and are not in the read/unread state space; they are pre-sync compositions, not threads. They appear in the Drafts *list* (via `get_drafts_view`) because the list answers "what compositions are pending my attention," but they do not contribute to the pill. The disjoint `UniversalUnreadCount` and `DraftTotalCount` wrapper types (`crates/db/src/db/types.rs`) make this a compile-time invariant: a future contributor cannot route synced+local totals back through the pill without a type error.
 
