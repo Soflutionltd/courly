@@ -836,44 +836,6 @@ pub fn search_labels_for_typeahead_sync(
     .map_err(|e| e.to_string())
 }
 
-/// A seen-address row for search-operator typeahead.
-#[derive(Debug, Clone)]
-pub struct SeenAddressTypeaheadRow {
-    pub email: String,
-    pub display_name: Option<String>,
-}
-
-/// Search seen addresses for `from:` / `to:` operator typeahead.
-///
-/// This queries `seen_addresses` (addresses observed in message headers),
-/// not the synced contacts table.
-pub fn search_seen_addresses_for_typeahead_sync(
-    conn: &ReadConn<'_>,
-    query: &str,
-) -> Result<Vec<SeenAddressTypeaheadRow>, String> {
-    let pattern = crate::db::make_like_pattern(query.trim());
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT display_name, email
-             FROM seen_addresses
-             WHERE (display_name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-                    OR email LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
-             ORDER BY last_seen_at DESC
-             LIMIT 10",
-        )
-        .map_err(|e| e.to_string())?;
-
-    stmt.query_map(params![pattern], |row| {
-        Ok(SeenAddressTypeaheadRow {
-            email: row.get("email")?,
-            display_name: row.get("display_name")?,
-        })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
-}
-
 /// An account row for search-operator typeahead.
 #[derive(Debug, Clone)]
 pub struct AccountTypeaheadRow {

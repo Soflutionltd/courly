@@ -39,6 +39,89 @@ pub struct ContactSearchResult {
 }
 
 // ---------------------------------------------------------------------------
+// Search-field suggestions
+// ---------------------------------------------------------------------------
+
+/// A person suggested while typing a search or an address.
+#[derive(Debug, Clone)]
+pub struct PersonTypeaheadRow {
+    pub email: String,
+    pub display_name: Option<String>,
+}
+
+const PEOPLE_TYPEAHEAD_LIMIT: i64 = 10;
+/// Words past this many are ignored, keeping the statement small.
+const PEOPLE_TYPEAHEAD_MAX_WORDS: usize = 6;
+
+/// People matching every typed word in their name, address or company, as
+/// Outlook suggests them: "florian contemporary" finds Florian Koenig at
+/// noacontemporary.com. Address-book contacts come first, then addresses
+/// seen in mail; each address appears once, the most recent first.
+pub fn search_people_for_typeahead_sync(
+    conn: &ReadConn<'_>,
+    query: &str,
+) -> Result<Vec<PersonTypeaheadRow>, String> {
+    let patterns: Vec<String> = query
+        .split_whitespace()
+        .take(PEOPLE_TYPEAHEAD_MAX_WORDS)
+        .map(make_like_pattern)
+        .collect();
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let every_word = |columns: &[&str]| {
+        (1..=patterns.len())
+            .map(|idx| {
+                let any_column = columns
+                    .iter()
+                    .map(|column| format!("{column} LIKE ?{idx} ESCAPE '\\' COLLATE NOCASE"))
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                format!("({any_column})")
+            })
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    };
+    let sql = format!(
+        "SELECT email, display_name FROM (
+           SELECT email, display_name, rank, recency,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY lower(email) ORDER BY rank, recency DESC
+                  ) AS rn
+           FROM (
+             SELECT c.email, c.display_name, 0 AS rank,
+                    COALESCE(c.last_contacted_at, 0) AS recency
+             FROM contacts c
+             WHERE {contact_match}
+             UNION ALL
+             SELECT s.email, s.display_name, 1 AS rank, s.last_seen_at AS recency
+             FROM seen_addresses s
+             WHERE {seen_match}
+           )
+         )
+         WHERE rn = 1
+         ORDER BY rank, recency DESC
+         LIMIT {PEOPLE_TYPEAHEAD_LIMIT}",
+        contact_match = every_word(&["c.display_name", "c.email", "c.email2", "c.company"]),
+        seen_match = every_word(&["s.display_name", "s.email"]),
+    );
+    let params: Vec<&dyn rusqlite::types::ToSql> = patterns
+        .iter()
+        .map(|p| p as &dyn rusqlite::types::ToSql)
+        .collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_map(params.as_slice(), |row| {
+        Ok(PersonTypeaheadRow {
+            email: row.get("email")?,
+            display_name: row.get("display_name")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Unified search
 // ---------------------------------------------------------------------------
 

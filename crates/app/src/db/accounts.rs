@@ -111,7 +111,7 @@ impl Db {
     ) -> Result<Vec<TypeaheadItem>, String> {
         self.with_read(move |conn| {
             Ok(
-                rtsk::db::queries_extra::search_seen_addresses_for_typeahead_sync(conn, &partial)?
+                rtsk::db::queries_extra::search_people_for_typeahead_sync(conn, &partial)?
                     .into_iter()
                     .map(|row| {
                         let label = row

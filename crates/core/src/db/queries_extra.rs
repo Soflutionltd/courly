@@ -29,7 +29,7 @@ pub use db_read::db::queries_extra::{
     get_threads_for_shared_mailbox_label_group, get_threads_for_shared_mailbox_snoozed,
     get_threads_for_shared_mailbox_starred, get_threads_scoped, get_used_account_colors_sync,
     load_contacts_for_settings_sync, load_group_member_emails_sync, load_groups_for_settings_sync,
-    query_thread_list_decorations,
+    query_thread_list_decorations, search_people_for_typeahead_sync,
 };
 
 // navigation.rs remains in core until the smart-folder count/query glue moves
