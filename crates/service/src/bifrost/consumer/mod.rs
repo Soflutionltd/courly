@@ -771,6 +771,18 @@ impl ChangeStreamConsumer {
                 // deletion of unreconciled candidates is deferred to drive end.
                 pending.add_live(&event.scope, &hydrated.live_ids);
                 pending.add_removed(&event.scope, &hydrated.removed_ids);
+                if matches!(batch.checkpoint, Some(Checkpoint::Change(_)))
+                    && !batch.items.is_empty()
+                {
+                    log::info!(
+                        "live change for {}: scope {:?}, {} item(s), {} live, {} removed",
+                        self.account_id.0,
+                        event.scope,
+                        batch.items.len(),
+                        hydrated.live_ids.len(),
+                        hydrated.removed_ids.len()
+                    );
+                }
                 let affected = write::persist_in_namespace(
                     &self.stores,
                     &self.account_id.0,
