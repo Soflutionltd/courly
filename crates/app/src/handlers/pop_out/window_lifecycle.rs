@@ -94,6 +94,16 @@ impl ReadyApp {
     /// Start a new message in the reading pane.
     pub(crate) fn open_new_message(&mut self) -> Task<Message> {
         let state = ComposeState::new(&self.sidebar.accounts);
+        self.open_new_message_with(state)
+    }
+
+    /// Start a new message to `address`, from a link's menu.
+    pub(crate) fn open_new_message_to(&mut self, address: String) -> Task<Message> {
+        let state = ComposeState::new(&self.sidebar.accounts).with_recipient(address);
+        self.open_new_message_with(state)
+    }
+
+    fn open_new_message_with(&mut self, state: ComposeState) -> Task<Message> {
         let show = self.show_mail_view();
         let compose = self.open_inline_compose(state, ComposeMode::New);
         Task::batch([show, compose, iced::window::gain_focus(self.main_window_id)])

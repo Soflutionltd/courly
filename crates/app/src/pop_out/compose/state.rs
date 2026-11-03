@@ -266,6 +266,11 @@ impl ComposeState {
         }
     }
 
+    pub fn with_recipient(mut self, email: String) -> Self {
+        push_recipient(&mut self.to, None, email);
+        self
+    }
+
     pub fn new_reply(
         accounts: &[db::Account],
         mode: &ComposeMode,

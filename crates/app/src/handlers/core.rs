@@ -287,6 +287,7 @@ impl ReadyApp {
                 // Find or create the contact, then open settings with editor.
                 self.open_contact_editor_for_email(email)
             }
+            ReadingPaneEvent::ComposeTo { address } => self.open_new_message_to(address),
             ReadingPaneEvent::CreateEventFromEmail { message_index } => {
                 self.create_event_from_email(message_index)
             }

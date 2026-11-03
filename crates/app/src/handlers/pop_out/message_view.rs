@@ -77,6 +77,30 @@ pub(super) fn handle_message_view_update(
             crate::ui::reading_pane::open_url_in_browser(&url);
             Task::none()
         }
+        MessageViewMessage::BodyLink(action) => {
+            use crate::ui::mail_body::LinkAction;
+
+            state.html_body.close_link_menu();
+            match action {
+                LinkAction::Open(url) => {
+                    crate::ui::reading_pane::open_url_in_browser(&url);
+                    Task::none()
+                }
+                LinkAction::ShowMenu { href, at } => {
+                    state.html_body.show_link_menu(href, at);
+                    Task::none()
+                }
+                LinkAction::CloseMenu => Task::none(),
+                LinkAction::Copy(value) => iced::clipboard::write(value).discard(),
+                LinkAction::Compose(_) => {
+                    log::warn!(
+                        "MessageViewMessage::BodyLink(Compose) reached message_view.rs \
+                         - dispatcher routing regression",
+                    );
+                    Task::none()
+                }
+            }
+        }
         MessageViewMessage::HoverAttachment(id) => {
             state.hovered_attachment_id = id;
             Task::none()

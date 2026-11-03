@@ -57,6 +57,8 @@ pub enum ReadingPaneMessage {
     ToggleStar,
     /// User clicked a hyperlink in the HTML body; open it in the system browser.
     LinkClicked(String),
+    /// A link in the HTML body of the message at this index.
+    BodyLink(usize, super::mail_body::LinkAction),
     /// The HTML body of the message at this index was laid out at a new width.
     HtmlBodyResized(usize, f32),
     /// A background HTML render finished.
@@ -85,6 +87,8 @@ pub enum ReadingPaneEvent {
     ForwardMessage { message_index: usize },
     /// User clicked a sender/recipient to edit their contact info.
     EditContact { email: String },
+    /// Start a new message to this address, from a link's menu.
+    ComposeTo { address: String },
     /// User clicked the calendar button on a message to create a calendar event.
     CreateEventFromEmail { message_index: usize },
     /// Answer a synced meeting invite. Unsynced invites deliberately have
@@ -215,6 +219,36 @@ impl ReadingPane {
                 body,
             },
         )
+    }
+
+    /// Any link action closes the open link menu, whichever message it is in.
+    fn handle_body_link(
+        &mut self,
+        index: usize,
+        action: super::mail_body::LinkAction,
+    ) -> (Task<ReadingPaneMessage>, Option<ReadingPaneEvent>) {
+        use super::mail_body::LinkAction;
+
+        self.html_bodies
+            .iter_mut()
+            .for_each(super::mail_body::HtmlBodyState::close_link_menu);
+        match action {
+            LinkAction::Open(url) => {
+                open_url_in_browser(&url);
+                (Task::none(), None)
+            }
+            LinkAction::ShowMenu { href, at } => {
+                if let Some(state) = self.html_bodies.get_mut(index) {
+                    state.show_link_menu(href, at);
+                }
+                (Task::none(), None)
+            }
+            LinkAction::CloseMenu => (Task::none(), None),
+            LinkAction::Copy(value) => (iced::clipboard::write(value).discard(), None),
+            LinkAction::Compose(address) => {
+                (Task::none(), Some(ReadingPaneEvent::ComposeTo { address }))
+            }
+        }
     }
 
     /// Re-render every open HTML body at a new reading zoom.
@@ -588,6 +622,7 @@ impl Component for ReadingPane {
                 open_url_in_browser(&url);
                 (Task::none(), None)
             }
+            ReadingPaneMessage::BodyLink(index, action) => self.handle_body_link(index, action),
             ReadingPaneMessage::HtmlBodyResized(index, width) => {
                 let start = self
                     .html_bodies
@@ -865,11 +900,11 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
         let is_expanded = pane.message_expanded.get(i).copied().unwrap_or(false);
         if is_expanded {
             let html_body = msg.body_html.as_ref().map(|_| {
-                super::mail_body::view(
+                super::mail_body::view_with_link_menu(
                     pane.html_bodies.get(i),
                     msg.body_text.as_deref(),
                     move |width| ReadingPaneMessage::HtmlBodyResized(i, width),
-                    ReadingPaneMessage::LinkClicked,
+                    move |action| ReadingPaneMessage::BodyLink(i, action),
                     ReadingPaneMessage::ShowRemoteImages(i),
                 )
             });

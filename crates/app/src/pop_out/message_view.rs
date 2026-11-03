@@ -67,6 +67,8 @@ pub enum MessageViewMessage {
     },
     /// User clicked a link in the HTML body.
     LinkClicked(String),
+    /// A link in the HTML body.
+    BodyLink(crate::ui::mail_body::LinkAction),
     /// User clicked Open on an attachment card. The string is the
     /// attachment id. Stubbed: opens with the system default handler.
     OpenAttachment(String),
@@ -681,11 +683,11 @@ fn message_view_body<'a>(
             if state.body_html.is_some() {
                 let view_msg =
                     move |msg| Message::PopOut(window_id, PopOutMessage::MessageView(msg));
-                crate::ui::mail_body::view(
+                crate::ui::mail_body::view_with_link_menu(
                     Some(&state.html_body),
                     state.body_text.as_deref(),
                     move |width| view_msg(MessageViewMessage::HtmlBodyResized(width)),
-                    move |url| view_msg(MessageViewMessage::LinkClicked(url)),
+                    move |action| view_msg(MessageViewMessage::BodyLink(action)),
                     view_msg(MessageViewMessage::LoadRemoteContent),
                 )
             } else {

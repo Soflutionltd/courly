@@ -11,13 +11,35 @@ use std::time::Duration;
 use iced::widget::{
     Space, button, column, container, image, mouse_area, row, scrollable, sensor, stack, text,
 };
-use iced::{Alignment, Element, Length, Padding, mouse};
+use iced::{Alignment, Element, Length, Padding, Vector, mouse};
 use mail_html::{Appearance, Bytes, LinkArea, RemoteFetcher, RenderRequest, Url};
 use rust_i18n::t;
 
 use crate::icon;
+use crate::ui::anchored_overlay::anchored_overlay;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::widgets;
+
+const LINK_MENU_WIDTH: f32 = 280.0;
+/// Longer link addresses are cut in the menu header.
+const LINK_MENU_HREF_CHARS: usize = 160;
+
+/// What a link in an HTML body asks for.
+#[derive(Debug, Clone)]
+pub enum LinkAction {
+    Open(String),
+    /// Right-click: show the link menu at this offset from the page's
+    /// top-left corner.
+    ShowMenu {
+        href: String,
+        at: Vector,
+    },
+    CloseMenu,
+    Copy(String),
+    /// Start a new message to this address, from a `mailto:` link.
+    Compose(String),
+}
 
 /// Largest remote resource accepted when the user allows remote content.
 const REMOTE_MAX_BYTES: u64 = 15 * 1024 * 1024;
@@ -166,6 +188,8 @@ pub struct HtmlBodyState {
     /// The user asked to see this message as sent, without dark recolouring.
     original: bool,
     rendered: Option<Arc<RenderedBody>>,
+    /// The link whose right-click menu is open, and where it opens.
+    link_menu: Option<(String, Vector)>,
 }
 
 thread_local! {
@@ -209,11 +233,20 @@ impl Default for HtmlBodyState {
             appearance: reading_appearance(),
             original: false,
             rendered: None,
+            link_menu: None,
         }
     }
 }
 
 impl HtmlBodyState {
+    pub fn show_link_menu(&mut self, href: String, at: Vector) {
+        self.link_menu = Some((href, at));
+    }
+
+    pub fn close_link_menu(&mut self) {
+        self.link_menu = None;
+    }
+
     /// Change the reading zoom. Returns true when a new render should start.
     pub fn set_zoom(&mut self, zoom: f32) -> bool {
         if (self.zoom - zoom).abs() < f32::EPSILON {
@@ -310,6 +343,8 @@ impl HtmlBodyState {
             return false;
         }
         self.in_flight = None;
+        // The links moved with the new layout, so the menu would point at nothing.
+        self.link_menu = None;
         match body {
             Some(body) => {
                 self.failed = false;
@@ -420,8 +455,17 @@ fn remote_fetcher(runtime: tokio::runtime::Handle) -> RemoteFetcher {
     })
 }
 
-/// The HTML body of one message. Reports its available width through
-/// `on_width` so the owner can (re)render at the right size.
+/// What the links of a rendered body do.
+enum Links<'a, M> {
+    /// A click opens the link; nothing else.
+    OpenOnly(Rc<dyn Fn(String) -> M + 'a>),
+    /// A click opens the link and a right-click shows its menu.
+    WithMenu(Rc<dyn Fn(LinkAction) -> M + 'a>),
+}
+
+/// An HTML body whose links only open on click, for previews. Reports its
+/// available width through `on_width` so the owner can (re)render at the
+/// right size.
 pub fn view<'a, M: Clone + 'a>(
     state: Option<&'a HtmlBodyState>,
     fallback_text: Option<&'a str>,
@@ -429,15 +473,50 @@ pub fn view<'a, M: Clone + 'a>(
     on_link: impl Fn(String) -> M + 'a,
     on_show_remote: M,
 ) -> Element<'a, M> {
+    body_view(
+        state,
+        fallback_text,
+        on_width,
+        &Links::OpenOnly(Rc::new(on_link)),
+        on_show_remote,
+    )
+}
+
+/// The HTML body of a received message, whose links also have a
+/// right-click menu.
+pub fn view_with_link_menu<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    on_link: impl Fn(LinkAction) -> M + 'a,
+    on_show_remote: M,
+) -> Element<'a, M> {
+    body_view(
+        state,
+        fallback_text,
+        on_width,
+        &Links::WithMenu(Rc::new(on_link)),
+        on_show_remote,
+    )
+}
+
+fn body_view<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    links: &Links<'a, M>,
+    on_show_remote: M,
+) -> Element<'a, M> {
     let content: Element<'a, M> = match state {
         Some(HtmlBodyState {
             rendered: Some(body),
             allow_remote,
             desired_width,
+            link_menu,
             ..
         }) => {
             let overflows = desired_width.is_some_and(|w| body.width > w + 1.0);
-            let page = rendered_page(body, overflows, on_link);
+            let page = rendered_page(body, link_menu.as_ref(), overflows, links);
             if body.blocked_remote > 0 && !allow_remote {
                 column![remote_banner(on_show_remote), page]
                     .spacing(SPACE_XS)
@@ -468,8 +547,9 @@ pub fn view<'a, M: Clone + 'a>(
 
 fn rendered_page<'a, M: Clone + 'a>(
     body: &'a RenderedBody,
+    link_menu: Option<&'a (String, Vector)>,
     overflows: bool,
-    on_link: impl Fn(String) -> M + 'a,
+    links: &Links<'a, M>,
 ) -> Element<'a, M> {
     let mut tiles = column![].width(body.width);
     for (handle, height) in &body.tiles {
@@ -483,26 +563,145 @@ fn rendered_page<'a, M: Clone + 'a>(
 
     let mut layers = stack![tiles].width(body.width).height(body.height);
     for link in &body.links {
-        let hit = mouse_area(Space::new().width(link.width).height(link.height))
-            .on_press(on_link(link.href.clone()))
+        let origin = Vector::new(link.x.max(0.0), link.y.max(0.0));
+        let area = mouse_area(Space::new().width(link.width).height(link.height))
             .interaction(mouse::Interaction::Pointer);
+        let hit: Element<'a, M> = match links {
+            Links::OpenOnly(on_open) => area.on_press(on_open(link.href.clone())).into(),
+            Links::WithMenu(on_link) => {
+                let on_menu = Rc::clone(on_link);
+                let href = link.href.clone();
+                anchored_overlay(area.on_press(on_link(LinkAction::Open(link.href.clone()))))
+                    .on_right_press_offset(move |at| {
+                        on_menu(LinkAction::ShowMenu {
+                            href: href.clone(),
+                            at: origin + at,
+                        })
+                    })
+                    .into()
+            }
+        };
         layers = layers.push(container(hit).padding(Padding {
-            top: link.y.max(0.0),
-            left: link.x.max(0.0),
+            top: origin.y,
+            left: origin.x,
             right: 0.0,
             bottom: 0.0,
         }));
     }
 
-    if !overflows {
-        return layers.into();
+    let mut page = anchored_overlay(layers);
+    if let (Links::WithMenu(on_link), Some((href, at))) = (links, link_menu) {
+        page = page
+            .popup(link_menu_card(href, on_link.as_ref()))
+            .anchor_offset(*at)
+            .popup_width(LINK_MENU_WIDTH)
+            .on_dismiss(on_link(LinkAction::CloseMenu));
     }
-    scrollable(layers)
+
+    if !overflows {
+        return page.into();
+    }
+    scrollable(page)
         .direction(scrollable::Direction::Horizontal(
             scrollable::Scrollbar::default(),
         ))
         .width(Length::Fill)
         .into()
+}
+
+/// The right-click menu of a link: its real address first, so a link
+/// whose text names another site can be spotted, then what it can do.
+fn link_menu_card<'a, M: Clone + 'a>(
+    href: &'a str,
+    on_link: &(dyn Fn(LinkAction) -> M + 'a),
+) -> Element<'a, M> {
+    let shown = match href.char_indices().nth(LINK_MENU_HREF_CHARS) {
+        Some((cut, _)) => format!("{}…", &href[..cut]),
+        None => href.to_owned(),
+    };
+    let mut items = column![
+        container(
+            text(shown)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style())
+                .wrapping(text::Wrapping::WordOrGlyph),
+        )
+        .padding(PAD_NAV_ITEM)
+        .width(Length::Fill),
+        widgets::divider(),
+    ]
+    .spacing(SPACE_XXS);
+    if let Some(address) = mailto_address(href) {
+        items = items
+            .push(link_menu_item(
+                icon::pencil(),
+                t!("main.link_menu.new_message"),
+                on_link(LinkAction::Compose(address.clone())),
+            ))
+            .push(link_menu_item(
+                icon::copy(),
+                t!("main.link_menu.copy_address"),
+                on_link(LinkAction::Copy(address)),
+            ));
+    } else {
+        if is_web_link(href) {
+            items = items.push(link_menu_item(
+                icon::external_link(),
+                t!("main.link_menu.open"),
+                on_link(LinkAction::Open(href.to_owned())),
+            ));
+        }
+        items = items.push(link_menu_item(
+            icon::copy(),
+            t!("main.link_menu.copy_link"),
+            on_link(LinkAction::Copy(href.to_owned())),
+        ));
+    }
+    container(items)
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style())
+        .into()
+}
+
+fn link_menu_item<'a, M: Clone + 'a>(
+    ico: iced::widget::Text<'a>,
+    label: std::borrow::Cow<'a, str>,
+    on_press: M,
+) -> Element<'a, M> {
+    button(
+        row![
+            container(ico.size(ICON_MD).style(text::secondary))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
+}
+
+fn is_web_link(href: &str) -> bool {
+    Url::parse(href).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+}
+
+/// The first address of a `mailto:` link, without its subject or body.
+fn mailto_address(href: &str) -> Option<String> {
+    let url = Url::parse(href)
+        .ok()
+        .filter(|url| url.scheme() == "mailto")?;
+    url.path()
+        .split(',')
+        .map(str::trim)
+        .find(|address| address.contains('@'))
+        .map(str::to_owned)
 }
 
 fn remote_banner<'a, M: Clone + 'a>(on_show_remote: M) -> Element<'a, M> {
@@ -634,6 +833,35 @@ mod tests {
         assert!(!state.allow_remote(), "already allowed");
         assert!(state.start().expect("started").allow_remote);
         set_remote_content_allowed(false);
+    }
+
+    #[test]
+    fn a_new_render_closes_the_link_menu() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        state.show_link_menu("https://example.com".into(), Vector::new(10.0, 20.0));
+        state.finish(inputs, body(600.0));
+        assert!(state.link_menu.is_none());
+    }
+
+    #[test]
+    fn link_menu_reads_the_address_of_a_mailto_link() {
+        assert_eq!(
+            mailto_address("mailto:jo@example.com?subject=Hi").as_deref(),
+            Some("jo@example.com")
+        );
+        assert_eq!(
+            mailto_address("mailto:,al@example.com,bo@example.com").as_deref(),
+            Some("al@example.com")
+        );
+        assert_eq!(mailto_address("mailto:?subject=Hi"), None);
+        assert_eq!(
+            mailto_address("https://example.com/mailto:jo@example.com"),
+            None
+        );
+        assert!(is_web_link("https://example.com/a"));
+        assert!(!is_web_link("tel:+33123456789"));
     }
 
     #[test]

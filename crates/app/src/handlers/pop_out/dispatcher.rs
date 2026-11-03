@@ -108,6 +108,15 @@ impl ReadyApp {
                 }
                 self.handle_save_all_attachments(params)
             }
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::BodyLink(
+                    crate::ui::mail_body::LinkAction::Compose(address),
+                )),
+            ) => {
+                state.html_body.close_link_menu();
+                self.open_new_message_to(address.clone())
+            }
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
                 let PopOutMessage::MessageView(msg) = pop_out_msg else {
