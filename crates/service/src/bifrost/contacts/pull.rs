@@ -62,7 +62,7 @@ pub async fn run_contact_pull(
     let address_books = match engine.address_books_list(&account).await {
         Ok(address_books) => address_books,
         Err(error) if is_unsupported(&error) => return Ok(0),
-        Err(error) => return Err(format!("contact address books: {error}")),
+        Err(error) => return Err(format!("contact address books: {}", detail(&error))),
     };
     // Native providers use the account-wide route. CardDAV multiget hydration
     // is address-book scoped, so its contact provenance selects the per-book
@@ -79,7 +79,7 @@ pub async fn run_contact_pull(
             let (book_cards, book_failed_ids) =
                 collect_contact_pages(engine, &account, Some(address_book.id.clone()))
                     .await
-                    .map_err(|error| format!("CardDAV address-book pull: {error}"))?;
+                    .map_err(|error| format!("CardDAV address-book pull: {}", detail(&error)))?;
             cards.extend(book_cards);
             failed_ids.extend(book_failed_ids);
         }
@@ -94,13 +94,15 @@ pub async fn run_contact_pull(
                     let (book_cards, book_failed_ids) =
                         collect_contact_pages(engine, &account, Some(address_book.id.clone()))
                             .await
-                            .map_err(|error| format!("contact address-book pull: {error}"))?;
+                            .map_err(|error| {
+                                format!("contact address-book pull: {}", detail(&error))
+                            })?;
                     cards.extend(book_cards);
                     failed_ids.extend(book_failed_ids);
                 }
                 (cards, failed_ids)
             }
-            Err(error) => return Err(format!("contact pull: {error}")),
+            Err(error) => return Err(format!("contact pull: {}", detail(&error))),
         }
     };
     // Google exposes its auto-collected People corpus as a distinct synthetic
@@ -115,7 +117,7 @@ pub async fn run_contact_pull(
         let (other_cards, other_failed_ids) =
             collect_contact_pages(engine, &account, Some(address_book.id.clone()))
                 .await
-                .map_err(|error| format!("other contacts pull: {error}"))?;
+                .map_err(|error| format!("other contacts pull: {}", detail(&error)))?;
         cards.extend(other_cards);
         failed_ids.extend(other_failed_ids);
     }
@@ -196,6 +198,18 @@ pub async fn run_contact_pull(
             Ok(count)
         })
         .await
+}
+
+/// The provider's own error: `Error::Account` displays only "account
+/// operation failed".
+fn detail(error: &Error) -> String {
+    match error {
+        Error::Account(account_error) => match std::error::Error::source(account_error) {
+            Some(cause) => format!("{account_error}: {cause}"),
+            None => account_error.to_string(),
+        },
+        other => other.to_string(),
+    }
 }
 
 fn is_unsupported(error: &Error) -> bool {
