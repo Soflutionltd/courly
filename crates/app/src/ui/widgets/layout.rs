@@ -22,12 +22,7 @@ pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
     if count == 0 {
         return Space::new().width(0).height(0).into();
     }
-    let label = if count > 999 {
-        "999+".to_string()
-    } else {
-        count.to_string()
-    };
-    text(label)
+    text(count.to_string())
         .size(TEXT_SM)
         .font(crate::font::text_semibold())
         .style(theme::TextClass::Accent.style())
