@@ -15,11 +15,13 @@ use crate::ui::layout::{
 use crate::ui::theme;
 use crate::ui::widgets;
 
-/// Empty title bar space that moves the window when pressed, since the
-/// system title bar is transparent and covered by this one.
+/// Empty title bar space that moves the window when pressed and zooms it
+/// on a double click, since the system title bar is transparent and
+/// covered by this one.
 fn drag_area<'a>(width: Length) -> Element<'a, Message> {
     mouse_area(container(Space::new()).width(width).height(Length::Fill))
         .on_press(Message::DragMainWindow)
+        .on_double_click(Message::ToggleMaximizeMainWindow)
         .into()
 }
 

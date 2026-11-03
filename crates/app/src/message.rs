@@ -358,6 +358,9 @@ pub enum Message {
     SetAppMode(AppMode),
     /// Press on an empty part of the custom title bar: move the main window.
     DragMainWindow,
+    /// Double click on an empty part of the custom title bar: zoom the main
+    /// window, as the system title bar does.
+    ToggleMaximizeMainWindow,
     SetCalendarView(CalendarView),
     CalendarToday,
     /// Calendar sync completed - refresh in-memory calendar state.
