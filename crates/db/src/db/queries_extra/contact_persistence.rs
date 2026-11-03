@@ -74,6 +74,75 @@ pub fn upsert_contact_sync(conn: &impl WriteTarget, row: &ContactWriteRow) -> Re
     Ok(())
 }
 
+/// `contacts.source` of the rows imported from the Mac's address book.
+pub const DEVICE_CONTACT_SOURCE: &str = "macos";
+
+/// One address of a contact in the Mac's address book.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceContactRow {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub company: Option<String>,
+    pub server_id: String,
+}
+
+/// Adds a contact from the Mac's address book, or refreshes one this import
+/// added before. A contact the user wrote or a provider synced keeps its
+/// data, so the address book never overrides Outlook or Google.
+pub fn upsert_device_contact_sync(
+    conn: &impl WriteTarget,
+    row: &DeviceContactRow,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO contacts (id, email, display_name, company, source, server_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+         ON CONFLICT(email) DO UPDATE SET \
+           display_name = CASE \
+             WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
+             ELSE excluded.display_name \
+           END, \
+           company = excluded.company, \
+           server_id = excluded.server_id, \
+           updated_at = unixepoch() \
+         WHERE contacts.source = ?5",
+        params![
+            format!("{DEVICE_CONTACT_SOURCE}-{}", row.email),
+            row.email,
+            row.display_name,
+            row.company,
+            DEVICE_CONTACT_SOURCE,
+            row.server_id,
+        ],
+    )
+    .map_err(|e| format!("upsert device contact: {e}"))?;
+    Ok(())
+}
+
+/// Removes the imported address-book contacts whose address is no longer
+/// in the Mac's address book. Returns how many were removed.
+pub fn prune_device_contacts_sync(
+    conn: &impl WriteTarget,
+    kept: &std::collections::HashSet<String>,
+) -> Result<usize, String> {
+    let mut stmt = conn
+        .prepare("SELECT email FROM contacts WHERE source = ?1")
+        .map_err(|e| format!("list device contacts: {e}"))?;
+    let stale: Vec<String> = stmt
+        .query_map(params![DEVICE_CONTACT_SOURCE], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| format!("list device contacts: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("list device contacts: {e}"))?
+        .into_iter()
+        .filter(|email| !kept.contains(email))
+        .collect();
+    for email in &stale {
+        delete_contact_by_email_and_source_sync(conn, email, DEVICE_CONTACT_SOURCE)?;
+    }
+    Ok(stale.len())
+}
+
 pub fn delete_contact_by_email_and_source_sync(
     conn: &impl WriteTarget,
     email: &str,

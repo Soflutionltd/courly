@@ -5340,6 +5340,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-contacts"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b034b578389f89a85c055eacc8d8b368be5f04a6c1b07f672bf3aec21d0ef621"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-core-data"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5421,7 +5432,7 @@ checksum = "000cfee34e683244f284252ee206a27953279d370e309649dc3ee317b37e5781"
 dependencies = [
  "block2 0.5.1",
  "objc2 0.5.2",
- "objc2-contacts",
+ "objc2-contacts 0.2.2",
  "objc2-foundation 0.2.2",
 ]
 
@@ -7314,6 +7325,7 @@ dependencies = [
  "bifrost-sync",
  "bifrost-types",
  "blake3",
+ "block2 0.6.2",
  "bytes",
  "cal",
  "common",
@@ -7329,6 +7341,9 @@ dependencies = [
  "libc",
  "log",
  "mail-parser",
+ "objc2 0.6.5",
+ "objc2-contacts 0.3.2",
+ "objc2-foundation 0.3.2",
  "pdf-extract",
  "process-lifetime",
  "quick-xml 0.42.0",

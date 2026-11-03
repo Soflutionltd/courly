@@ -72,6 +72,7 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
 cp LICENSE NOTICE "$APP/Contents/Resources/"
+cp -R assets/macos/fr.lproj "$APP/Contents/Resources/"
 cp LICENSES/Apache-2.0.txt "$APP/Contents/Resources/LICENSE-APACHE"
 cargo about generate --manifest-path crates/runner/Cargo.toml --locked about.hbs \
   -o "$APP/Contents/Resources/THIRD-PARTY-LICENSES.html"
@@ -107,12 +108,15 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSContactsUsageDescription</key>
+	<string>Courly suggests the people in your address book when you search or write mail.</string>
 </dict>
 </plist>
 PLIST
 
 echo "==> Signing with ${SIGN_IDENTITY}"
-codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+codesign --force --options runtime --timestamp \
+  --entitlements assets/macos/Courly.entitlements --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --strict --verbose=2 "$APP"
 
 echo "==> Notarizing"

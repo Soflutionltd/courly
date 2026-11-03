@@ -55,6 +55,9 @@ pub(crate) struct Subsystems {
     /// Post-ready: dispatches a `PreserveExisting` rebuild when boot
     /// detected a `.version` mismatch. No-op in the steady state.
     pub schema_rebuild: Option<JoinHandle<()>>,
+    /// Post-ready: imports the Mac's address book, then rereads it on a
+    /// timer until shutdown. `None` off macOS.
+    pub device_contacts: Option<JoinHandle<()>>,
 }
 
 impl Subsystems {
@@ -157,6 +160,9 @@ impl Subsystems {
         }
         if let Some(handle) = self.schema_rebuild.take() {
             abort_and_await(handle, "schema_rebuild").await;
+        }
+        if let Some(handle) = self.device_contacts.take() {
+            abort_and_await(handle, "device_contacts").await;
         }
     }
 

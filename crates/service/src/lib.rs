@@ -7,6 +7,8 @@ mod boot;
 mod boot_progress;
 pub(crate) mod cal_actions;
 pub(crate) mod calendar;
+#[cfg(target_os = "macos")]
+mod device_contacts;
 mod draft_wal;
 mod eviction;
 mod extract;

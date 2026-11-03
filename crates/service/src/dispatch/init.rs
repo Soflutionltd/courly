@@ -109,6 +109,12 @@ where
         spawn_post_ready_prefetch_startup(Arc::clone(&boot_state), out_tx.clone());
     let schema_rebuild_handle =
         spawn_post_ready_schema_rebuild(Arc::clone(&boot_state), app_data_dir.clone());
+    #[cfg(target_os = "macos")]
+    let device_contacts_handle = Some(crate::device_contacts::spawn_post_ready_device_contacts(
+        Arc::clone(&boot_state),
+    ));
+    #[cfg(not(target_os = "macos"))]
+    let device_contacts_handle = None;
 
     DispatchState {
         started_at,
@@ -131,6 +137,7 @@ where
             extract_startup: Some(extract_startup_handle),
             prefetch_startup: Some(prefetch_startup_handle),
             schema_rebuild: Some(schema_rebuild_handle),
+            device_contacts: device_contacts_handle,
         },
         pending_shutdown_id: None,
         boot_exit_code: None,
