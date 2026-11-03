@@ -95,7 +95,7 @@ Universal-folder pills in the sidebar match Outlook, which users compare Courly 
 
 `get_draft_count_with_local` still exists for callers that want synced and local drafts together (pane headers, compose-pane indicators) but is not routed to the sidebar pill.
 
-Local drafts have no `is_read` column and are not in the read/unread state space; they are pre-sync compositions, not threads. They appear in the Drafts *list* (via `get_drafts_view`) because the list answers "what compositions are pending my attention," but they do not contribute to the pill. The disjoint `UniversalUnreadCount` and `DraftTotalCount` wrapper types (`crates/db/src/db/types.rs`) make this a compile-time invariant: a future contributor cannot route synced+local totals back through the pill without a type error.
+Local drafts are pre-sync compositions that Outlook has never seen. They appear in the Drafts *list* (via `get_drafts_view`) because the list answers "what compositions are pending my attention," but they do not contribute to the pill. The disjoint `UniversalUnreadCount` and `DraftTotalCount` wrapper types (`crates/db-read/src/db/types.rs`) make this a compile-time invariant: a future contributor cannot route synced+local totals back through the pill without a type error.
 
 ## What NOT to do
 

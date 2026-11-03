@@ -721,9 +721,8 @@ fn flag_column(folder_id: &str) -> &'static str {
 /// Total count of all drafts (server-synced thread drafts + local-only
 /// drafts), scoped by `AccountScope`.
 ///
-/// Not used by the sidebar pill - the pill counts the `is_read = 0`
-/// subset of synced drafts, uniform with every other universal folder.
-/// This helper exists for callers that want the total (pane headers,
+/// Not used by the sidebar pill, which counts synced drafts only. This
+/// helper exists for callers that want the total (pane headers,
 /// compose-pane indicators). Rationale: `reference/glossary/drafts.md`
 /// § "Count semantics."
 pub fn get_draft_count_with_local(
