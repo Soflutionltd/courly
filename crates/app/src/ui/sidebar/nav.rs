@@ -498,6 +498,32 @@ pub(super) fn background_menu(sidebar: &Sidebar) -> Element<'_, SidebarMessage> 
     menu_card(scope, items)
 }
 
+/// Menu of an account's section header: everything in it targets that
+/// account, whichever account the scope selector shows.
+pub(super) fn account_menu_items<'a>(
+    sidebar: &Sidebar,
+    account_id: &str,
+) -> iced::widget::Column<'a, SidebarMessage> {
+    let scope = ViewScope::Account(account_id.to_owned());
+    let mut items = column![menu_item(
+        icon::plus(),
+        t!("main.sidebar.new_folder"),
+        SidebarMessage::Folder(FolderCommand::Create {
+            account_id: account_id.to_owned(),
+            parent: None,
+        }),
+    )]
+    .spacing(SPACE_XXS);
+    if let Some(last) = current_order(sidebar, &scope).len().checked_sub(1) {
+        items = items.push(menu_item(
+            icon::minus(),
+            t!("main.sidebar.add_separator"),
+            SidebarMessage::AddSeparatorBelow(scope, last),
+        ));
+    }
+    items
+}
+
 /// Float the right-click menu below `row_el`.
 pub(super) fn with_row_menu<'a>(
     scope: &ViewScope,

@@ -92,6 +92,8 @@ pub enum SidebarMessage {
         folder_id: String,
         root_index: usize,
     },
+    /// Right-click on an account's section header.
+    OpenAccountMenu(String),
     /// Right-click anywhere else in the sidebar, at this window position.
     OpenBackgroundMenu(iced::Point),
     CloseRowMenu,
@@ -358,6 +360,8 @@ pub enum RowMenuAnchor {
         folder_id: String,
         root_index: usize,
     },
+    /// An account's section header, by account id.
+    Account(String),
     /// Empty space or a non-folder row, at the clicked window position.
     Background(iced::Point),
 }
@@ -777,6 +781,12 @@ impl Component for Sidebar {
                     folder_id,
                     root_index,
                 });
+                (Task::none(), None)
+            }
+            SidebarMessage::OpenAccountMenu(account_id) => {
+                self.drag = None;
+                self.section_drag = None;
+                self.row_menu = Some(RowMenuAnchor::Account(account_id));
                 (Task::none(), None)
             }
             SidebarMessage::OpenBackgroundMenu(point) => {
@@ -1266,6 +1276,26 @@ mod tests {
             event,
             Some(SidebarEvent::Folder(FolderCommand::Delete { ref folder_id, .. }))
                 if folder_id == "g-hotel"
+        ));
+    }
+
+    #[test]
+    fn a_folder_created_from_an_account_header_goes_to_that_account() {
+        let mut sidebar = sidebar();
+        let _ = sidebar.update(SidebarMessage::OpenAccountMenu("other".into()));
+        assert_eq!(
+            sidebar.row_menu,
+            Some(RowMenuAnchor::Account("other".into()))
+        );
+        let (_, event) = sidebar.update(SidebarMessage::Folder(FolderCommand::Create {
+            account_id: "other".into(),
+            parent: None,
+        }));
+        assert!(sidebar.row_menu.is_none());
+        assert!(matches!(
+            event,
+            Some(SidebarEvent::Folder(FolderCommand::Create { ref account_id, parent: None }))
+                if account_id == "other"
         ));
     }
 

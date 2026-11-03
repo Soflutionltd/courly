@@ -8,9 +8,9 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use rtsk::scope::ViewScope;
 
-use super::nav::nav_items;
+use super::nav::{account_menu_items, nav_items, with_row_menu};
 use super::order::scope_key;
-use super::{Sidebar, SidebarMessage, SidebarTextSize};
+use super::{RowMenuAnchor, Sidebar, SidebarMessage, SidebarTextSize};
 
 /// Outlook-style folders: the unified section, then one section per
 /// account in account order. Dragging an account header moves the whole
@@ -76,6 +76,7 @@ fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a
     )
     .on_press(SidebarMessage::SectionPress(account.id.clone()))
     .on_release(SidebarMessage::SectionRelease(account.id.clone()))
+    .on_right_press(SidebarMessage::OpenAccountMenu(account.id.clone()))
     .interaction(mouse::Interaction::Pointer)
     .into();
     if let Some(drag) = sidebar.section_drag.as_ref().filter(|drag| drag.moved) {
@@ -92,6 +93,10 @@ fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a
                 .width(Length::Fill)
                 .into();
         }
+    }
+
+    if sidebar.row_menu.as_ref() == Some(&RowMenuAnchor::Account(account.id.clone())) {
+        header = with_row_menu(&scope, header, account_menu_items(sidebar, &account.id));
     }
 
     let mut section = column![header].spacing(SPACE_XXS);
