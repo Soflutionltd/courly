@@ -1664,7 +1664,7 @@ async fn run_aux_pass(
         )
         .await
     {
-        log::debug!("resident contact pull for {account_id} skipped: {error}");
+        log::warn!("resident contact pull for {account_id} skipped: {error}");
     }
     let group_cycle = next_group_pull_cycle(inner, account_id).await;
     if super::contacts::groups::should_pull_groups_on_cycle(group_cycle)
@@ -1675,7 +1675,7 @@ async fn run_aux_pass(
         )
         .await
     {
-        log::debug!("resident directory-group pull for {account_id} skipped: {error}");
+        log::warn!("resident directory-group pull for {account_id} skipped: {error}");
     }
 }
 
