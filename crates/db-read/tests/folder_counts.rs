@@ -44,6 +44,7 @@ fn mailbox_db() -> rusqlite::Connection {
             ('a', 't1', 'INBOX'), ('a', 't2', 'SENT'), ('a', 't3', 'INBOX'),
             ('a', 'd1', 'DRAFT'), ('a', 'j1', 'SPAM'), ('a', 'p1', 'projects'),
             ('a', 'f1', 'projects'), ('b', 'o1', 'INBOX');
+        ALTER TABLE messages ADD COLUMN to_addresses TEXT;
         ",
     )
     .expect("fixtures");

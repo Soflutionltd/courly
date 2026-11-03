@@ -93,15 +93,17 @@ COALESCE(fm.date, t.last_message_at) AS last_message_at,
 t.message_count, t.is_read, t.is_starred, t.is_important, t.has_attachments,
 t.is_snoozed, t.snooze_until, t.is_pinned, t.is_muted, t.is_flag_complete,
 CASE WHEN fm.id IS NULL THEN m.from_name ELSE fm.from_name END AS from_name,
-CASE WHEN fm.id IS NULL THEN m.from_address ELSE fm.from_address END AS from_address";
+CASE WHEN fm.id IS NULL THEN m.from_address ELSE fm.from_address END AS from_address,
+fm.to_addresses AS to_addresses";
 
 /// Latest message per thread among those the server files in the folder
 /// bound to `?{folder_idx}`.
 fn folder_latest_message_subquery(folder_idx: usize) -> String {
     format!(
-        "SELECT id, account_id, thread_id, from_name, from_address, snippet, date FROM (
+        "SELECT id, account_id, thread_id, from_name, from_address, to_addresses, snippet, date
+         FROM (
            SELECT msg.id, msg.account_id, msg.thread_id, msg.from_name, msg.from_address,
-                  msg.snippet, msg.date,
+                  msg.to_addresses, msg.snippet, msg.date,
                   ROW_NUMBER() OVER (
                     PARTITION BY msg.account_id, msg.thread_id
                     ORDER BY msg.date DESC, msg.id DESC
@@ -667,15 +669,18 @@ pub(crate) fn get_draft_threads_synced(
     let next_idx = scope_params.len() + 1;
 
     let sql = format!(
-        "SELECT t.*, m.from_name, m.from_address FROM threads t
+        "SELECT {FOLDER_THREAD_COLUMNS} FROM threads t
          INNER JOIN thread_folders tf ON tf.account_id = t.account_id AND tf.thread_id = t.id
+         LEFT JOIN ({folder_latest}
+         ) fm ON fm.account_id = t.account_id AND fm.thread_id = t.id
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND tf.folder_id = ?{next_idx}
            AND t.namespace_kind IS NULL AND t.is_chat_thread = 0
          GROUP BY t.account_id, t.id
-         ORDER BY t.is_pinned DESC, t.last_message_at DESC
+         ORDER BY t.is_pinned DESC, last_message_at DESC
          LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
+        folder_latest = folder_latest_message_subquery(next_idx),
         limit_idx = next_idx + 1,
         offset_idx = next_idx + 2,
     );
@@ -751,6 +756,7 @@ pub struct LocalDraftSummary {
     pub snippet: Option<String>,
     pub updated_at: i64,
     pub from_email: Option<String>,
+    pub to_addresses: Option<String>,
 }
 
 /// Fetch local-only drafts (not yet synced) as summaries, scoped by `AccountScope`.
@@ -772,7 +778,7 @@ pub(crate) fn get_local_draft_summaries(
     let next_idx = scope_params.len() + 1;
 
     let sql = format!(
-        "SELECT id, account_id, subject, body_html, updated_at, from_email
+        "SELECT id, account_id, subject, body_html, updated_at, from_email, to_addresses
          FROM local_drafts
          WHERE {clause} AND sync_status != 'synced'
          ORDER BY updated_at DESC
@@ -822,6 +828,7 @@ pub(crate) fn get_local_draft_summaries(
             snippet,
             updated_at: row.get("updated_at")?,
             from_email: row.get("from_email")?,
+            to_addresses: row.get("to_addresses")?,
         })
     })
     .map_err(|e| e.to_string())?

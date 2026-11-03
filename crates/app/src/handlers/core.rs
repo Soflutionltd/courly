@@ -1436,7 +1436,12 @@ impl ReadyApp {
                 .unwrap_or(folder_id.as_str())
                 .to_string(),
         };
-        self.thread_list.set_context(folder_name, scope_name);
+        let shows_recipients = matches!(
+            self.sidebar.selection.navigation_folder_id().as_deref(),
+            Some("SENT" | "DRAFT")
+        );
+        self.thread_list
+            .set_context(folder_name, scope_name, shows_recipients);
     }
 }
 

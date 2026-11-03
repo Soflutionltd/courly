@@ -220,6 +220,8 @@ pub struct ThreadList {
     /// The last index that was clicked/toggled, used as anchor for shift-click range select.
     pub last_selected_anchor: Option<usize>,
     pub folder_name: String,
+    /// Sent and Drafts name each row by its recipients, like Outlook.
+    pub shows_recipients: bool,
     pub scope_name: String,
     /// Current display mode (folder view vs search results).
     pub mode: ThreadListMode,
@@ -256,6 +258,7 @@ impl ThreadList {
             selected_threads: HashSet::new(),
             last_selected_anchor: None,
             folder_name: t!("main.folder.inbox").into_owned(),
+            shows_recipients: false,
             scope_name: t!("main.thread_list.scope_all").into_owned(),
             mode: ThreadListMode::Scope,
             search_query: String::new(),
@@ -471,8 +474,9 @@ impl ThreadList {
         self.set_threads(threads);
     }
 
-    pub fn set_context(&mut self, folder_name: String, scope_name: String) {
+    pub fn set_context(&mut self, folder_name: String, scope_name: String, shows_recipients: bool) {
         self.folder_name = folder_name;
+        self.shows_recipients = shows_recipients;
         self.scope_name = scope_name;
     }
 
@@ -1008,6 +1012,7 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
                 label_paints: &thread.label_paints,
                 bimi_logo: bimi_logo.as_deref(),
                 highlight_terms: &highlight_terms,
+                shows_recipients: state.shows_recipients,
             },
             (
                 ThreadListMessage::RowPress,
@@ -1089,6 +1094,7 @@ mod tests {
             label_paints: Vec::new(),
             from_name: None,
             from_address: None,
+            to_addresses: None,
             is_local_draft: false,
             match_kind: None,
             also_matched: Vec::new(),

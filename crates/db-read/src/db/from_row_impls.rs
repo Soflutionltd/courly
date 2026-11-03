@@ -5,6 +5,7 @@
 //! `DbMessage` which hardcodes `body_html`/`body_text` to `None`)
 //! are intentionally excluded.
 
+use super::from_row::FromRow;
 use super::types::*;
 use crate::impl_from_row;
 
@@ -55,25 +56,35 @@ impl_from_row!(DbAccount {
 
 // ── Thread ──────────────────────────────────────────────────
 
-impl_from_row!(DbThread {
-    id,
-    account_id,
-    subject,
-    snippet,
-    last_message_at,
-    message_count,
-    bool is_read,
-    bool is_starred,
-    bool is_important,
-    bool has_attachments,
-    bool is_snoozed,
-    snooze_until,
-    bool is_pinned,
-    bool is_muted,
-    bool is_flag_complete,
-    from_name,
-    from_address,
-});
+impl FromRow for DbThread {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        let to_addresses = if row.as_ref().column_index("to_addresses").is_ok() {
+            row.get("to_addresses")?
+        } else {
+            None
+        };
+        Ok(Self {
+            id: row.get("id")?,
+            account_id: row.get("account_id")?,
+            subject: row.get("subject")?,
+            snippet: row.get("snippet")?,
+            last_message_at: row.get("last_message_at")?,
+            message_count: row.get("message_count")?,
+            is_read: row.get::<_, i64>("is_read")? != 0,
+            is_starred: row.get::<_, i64>("is_starred")? != 0,
+            is_important: row.get::<_, i64>("is_important")? != 0,
+            has_attachments: row.get::<_, i64>("has_attachments")? != 0,
+            is_snoozed: row.get::<_, i64>("is_snoozed")? != 0,
+            snooze_until: row.get("snooze_until")?,
+            is_pinned: row.get::<_, i64>("is_pinned")? != 0,
+            is_muted: row.get::<_, i64>("is_muted")? != 0,
+            is_flag_complete: row.get::<_, i64>("is_flag_complete")? != 0,
+            from_name: row.get("from_name")?,
+            from_address: row.get("from_address")?,
+            to_addresses,
+        })
+    }
+}
 
 // ── Folder / label ──────────────────────────────────────────
 

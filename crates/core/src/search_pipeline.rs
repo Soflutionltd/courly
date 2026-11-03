@@ -671,6 +671,7 @@ mod tests {
             is_flag_complete: false,
             from_name: Some("Alice".to_owned()),
             from_address: Some("alice@test.com".to_owned()),
+            to_addresses: None,
         };
 
         let result = db_thread_to_unified(thread);
@@ -770,6 +771,7 @@ mod tests {
             is_flag_complete: false,
             from_name: Some("Latest sender".to_owned()),
             from_address: Some("latest@test.com".to_owned()),
+            to_addresses: None,
         };
         // Tantivy's hit may be on the best-scoring (not latest) message.
         let result = UnifiedSearchResult {

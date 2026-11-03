@@ -77,6 +77,8 @@ pub struct ThreadCardMarks<'b> {
     pub bimi_logo: Option<&'b Path>,
     /// Query words to highlight; empty outside search results.
     pub highlight_terms: &'b [String],
+    /// Name the row by its recipients, as Sent and Drafts do.
+    pub shows_recipients: bool,
 }
 
 pub fn thread_card<'a, M: Clone + 'a>(
@@ -95,8 +97,18 @@ pub fn thread_card<'a, M: Clone + 'a>(
         label_paints,
         bimi_logo,
         highlight_terms,
+        shows_recipients,
     } = marks;
-    let sender = sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref());
+    let recipients = if shows_recipients {
+        crate::ui::invite_card::display_names(thread.to_addresses.as_deref()).join(", ")
+    } else {
+        String::new()
+    };
+    let sender = if recipients.is_empty() {
+        sender_or_unknown(thread.from_name.as_deref(), thread.from_address.as_deref())
+    } else {
+        Cow::Owned(recipients)
+    };
 
     let subject = thread
         .subject

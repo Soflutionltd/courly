@@ -77,6 +77,9 @@ pub struct Thread {
     pub label_paints: Vec<LabelPaint>,
     pub from_name: Option<String>,
     pub from_address: Option<String>,
+    /// Recipients of the row's message, shown instead of the sender in Sent
+    /// and Drafts.
+    pub to_addresses: Option<String>,
     /// Whether this is a local-only draft (not yet synced to server).
     pub is_local_draft: bool,
     /// Phase 7-8: which field carried the primary match for this
@@ -108,6 +111,7 @@ impl Thread {
             label_paints: Vec::new(),
             from_name: t.from_name,
             from_address: t.from_address,
+            to_addresses: t.to_addresses,
             is_local_draft: false,
             // not a search hit - no field attribution to carry
             match_kind: None,
@@ -134,6 +138,7 @@ impl Thread {
             label_paints: Vec::new(),
             from_name: None,
             from_address: d.from_email,
+            to_addresses: d.to_addresses,
             is_local_draft: true,
             // not a search hit - no field attribution to carry
             match_kind: None,
@@ -160,6 +165,7 @@ impl Thread {
             label_paints: Vec::new(),
             from_name: r.from_name,
             from_address: r.from_address,
+            to_addresses: None,
             is_local_draft: false,
             match_kind: r.match_kind,
             also_matched: r.also_matched,

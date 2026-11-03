@@ -85,6 +85,9 @@ pub struct DbThread {
     // Joined from latest message
     pub from_name: Option<String>,
     pub from_address: Option<String>,
+    /// Recipients of the latest message filed in the listed folder. Only
+    /// folder lists select it; Sent and Drafts rows show them, like Outlook.
+    pub to_addresses: Option<String>,
 }
 
 // ── Message ──────────────────────────────────────────────────

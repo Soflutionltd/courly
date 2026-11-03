@@ -541,6 +541,7 @@ impl ReadyApp {
                             self.thread_list.set_context(
                                 t!("main.search.pinned_title", query = label).into_owned(),
                                 pinned_search_scope_name(self, ps),
+                                false,
                             );
                             self.status = format!(
                                 "{} threads (pinned search)",

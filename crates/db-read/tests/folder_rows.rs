@@ -32,6 +32,9 @@ fn folder_view_db() -> rusqlite::Connection {
         INSERT INTO message_folders VALUES
             ('a', 'in', 'INBOX'), ('a', 'out', 'SENT'), ('a', 'news', 'INBOX'),
             ('a', 'moved', 'archive');
+        ALTER TABLE messages ADD COLUMN to_addresses TEXT;
+        UPDATE messages SET to_addresses = 'Shop <shop@example.com>' WHERE id = 'out';
+        INSERT INTO thread_folders VALUES ('a', 'replied', 'SENT');
         ",
     )
     .expect("fixtures");
@@ -60,4 +63,25 @@ fn folder_rows_show_the_latest_message_filed_in_that_folder() {
     let moved = &threads[2];
     assert_eq!(moved.from_address.as_deref(), Some("old@example.com"));
     assert_eq!(moved.last_message_at, Some(50));
+}
+
+#[test]
+fn sent_rows_carry_the_recipients_of_the_sent_message() {
+    let conn = folder_view_db();
+    let read = ReadConn::from_raw(&conn);
+    let threads = get_threads_scoped(
+        &read,
+        &AccountScope::Single("a".to_owned()),
+        Some("SENT"),
+        None,
+        None,
+    )
+    .expect("sent threads");
+
+    assert_eq!(threads.len(), 1);
+    assert_eq!(
+        threads[0].to_addresses.as_deref(),
+        Some("Shop <shop@example.com>")
+    );
+    assert_eq!(threads[0].last_message_at, Some(300));
 }
