@@ -1655,16 +1655,18 @@ async fn run_aux_pass(
         log::warn!("resident auxiliary pass for {account_id} skipped: {error}");
     }
     let cycle = next_contact_pull_cycle(inner, account_id, provider).await;
-    if super::contacts::pull::should_pull_on_cycle(provider, cycle)
-        && let Err(error) = super::contacts::pull::run_contact_pull(
+    if super::contacts::pull::should_pull_on_cycle(provider, cycle) {
+        match super::contacts::pull::run_contact_pull(
             &inner.engine.engine(),
             account_id,
             provider,
             &inner.write_db,
         )
         .await
-    {
-        log::warn!("resident contact pull for {account_id} skipped: {error}");
+        {
+            Ok(count) => log::info!("resident contact pull for {account_id}: {count} address(es)"),
+            Err(error) => log::warn!("resident contact pull for {account_id} skipped: {error}"),
+        }
     }
     let group_cycle = next_group_pull_cycle(inner, account_id).await;
     if super::contacts::groups::should_pull_groups_on_cycle(group_cycle)
