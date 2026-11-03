@@ -737,9 +737,7 @@ impl ReadyApp {
             // Calendar - delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
             Message::DragMainWindow => iced::window::drag(self.main_window_id),
-            Message::ToggleMaximizeMainWindow => {
-                iced::window::toggle_maximize(self.main_window_id)
-            }
+            Message::ToggleMaximizeMainWindow => iced::window::toggle_maximize(self.main_window_id),
             Message::ToggleAppMode => {
                 // If calendar is popped out, focus the pop-out instead of toggling
                 if self.app_mode == AppMode::Mail
