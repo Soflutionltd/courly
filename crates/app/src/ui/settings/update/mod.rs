@@ -594,6 +594,7 @@ impl Settings {
             }
             SettingsMessage::ToggleBlockRemoteImages(v) => {
                 self.block_remote_images = v;
+                crate::ui::mail_body::set_remote_content_allowed(!v);
                 if let Some(ref mut prefs) = self.editing_preferences {
                     prefs.block_remote_images = v;
                 }

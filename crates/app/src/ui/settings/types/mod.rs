@@ -458,6 +458,7 @@ impl Settings {
         self.sync_status_bar = ui.show_sync_status;
         self.auto_update = ui.auto_update;
         self.block_remote_images = settings.block_remote_images;
+        crate::ui::mail_body::set_remote_content_allowed(!self.block_remote_images);
         self.phishing_detection = settings.phishing_detection_enabled;
         if let Some(canonical) = settings
             .phishing_sensitivity
@@ -552,6 +553,7 @@ impl Settings {
         self.sync_status_bar = prefs.sync_status_bar;
         self.auto_update = prefs.auto_update;
         self.block_remote_images = prefs.block_remote_images;
+        crate::ui::mail_body::set_remote_content_allowed(!prefs.block_remote_images);
         self.phishing_detection = prefs.phishing_detection;
         self.phishing_sensitivity = prefs.phishing_sensitivity.clone();
         self.default_rendering_mode = prefs.default_rendering_mode;

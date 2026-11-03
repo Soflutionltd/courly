@@ -171,6 +171,13 @@ pub struct HtmlBodyState {
 thread_local! {
     static READING_ZOOM: Cell<f32> = const { Cell::new(1.0) };
     static READING_APPEARANCE: Cell<Appearance> = Cell::new(Appearance::default());
+    static REMOTE_CONTENT_ALLOWED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether messages load remote content without asking, set from the
+/// "block remote images" preference.
+pub fn set_remote_content_allowed(allowed: bool) {
+    REMOTE_CONTENT_ALLOWED.with(|cell| cell.set(allowed));
 }
 
 /// Zoom applied to HTML bodies, set from the user's preference.
@@ -198,7 +205,7 @@ impl Default for HtmlBodyState {
             zoom: reading_zoom(),
             in_flight: None,
             failed: false,
-            allow_remote: false,
+            allow_remote: REMOTE_CONTENT_ALLOWED.with(Cell::get),
             appearance: reading_appearance(),
             original: false,
             rendered: None,
@@ -617,6 +624,16 @@ mod tests {
         assert!(state.allow_remote());
         assert!(!state.allow_remote());
         assert!(state.start().expect("started").allow_remote);
+    }
+
+    #[test]
+    fn remote_content_loads_without_asking_when_not_blocked() {
+        set_remote_content_allowed(true);
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        assert!(!state.allow_remote(), "already allowed");
+        assert!(state.start().expect("started").allow_remote);
+        set_remote_content_allowed(false);
     }
 
     #[test]
