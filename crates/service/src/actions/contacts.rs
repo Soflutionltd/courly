@@ -12,7 +12,7 @@ use db::db::queries_extra::contacts::{
 };
 use db::db::queries_extra::{
     AccountContactHolder, ContactHolders, StoredContact, contact_holders_sync,
-    forget_contact_holders_sync, get_stored_contact_sync, rename_contact_holders_sync,
+    forget_contact_holders_sync, get_stored_contact_sync, rename_contact_claim_sync,
     set_contact_origin_sync, upsert_contact_claim_sync,
 };
 
@@ -192,17 +192,34 @@ async fn save(
                 return Ok(ActionOutcome::Success);
             }
             let mut failures = Vec::new();
+            let mut updated_cards = Vec::new();
             for holder in holders_of(&stored, holders) {
-                if let Some(failure) = update_holder(ctx, accounts, holder, &old, &new).await {
-                    failures.push(failure);
+                match update_holder(ctx, accounts, &holder, &old, &new).await {
+                    Some(failure) => failures.push(failure),
+                    None => {
+                        if let Holder::Account(card) = holder {
+                            updated_cards.push(card);
+                        }
+                    }
                 }
             }
-            if !same_address(&old.email, &new.email) {
+            if !same_address(&old.email, &new.email) && !updated_cards.is_empty() {
                 let (old_email, new_email) = (old.email.clone(), new.email.trim().to_lowercase());
                 ctx.write_db
                     .clone()
                     .with_write_mapped(
-                        move |conn| rename_contact_holders_sync(conn, &old_email, &new_email),
+                        move |conn| {
+                            for card in &updated_cards {
+                                rename_contact_claim_sync(
+                                    conn,
+                                    &card.account_id,
+                                    &card.server_id,
+                                    &old_email,
+                                    &new_email,
+                                )?;
+                            }
+                            Ok(())
+                        },
                         std::convert::identity,
                     )
                     .await
@@ -259,7 +276,7 @@ async fn write_local(
 async fn update_holder(
     ctx: &ActionContext,
     accounts: &ContactAccounts,
-    holder: Holder,
+    holder: &Holder,
     old: &ContactFields,
     new: &ContactFields,
 ) -> Option<BookFailure> {
@@ -274,13 +291,15 @@ async fn update_holder(
                 error,
             })
         }
-        Holder::Device(identifier) => update_device(ctx, identifier, old.clone(), new.clone())
-            .await
-            .err()
-            .map(|error| BookFailure {
-                book: book_name(DEVICE_SOURCE).to_owned(),
-                error,
-            }),
+        Holder::Device(identifier) => {
+            update_device(ctx, identifier.clone(), old.clone(), new.clone())
+                .await
+                .err()
+                .map(|error| BookFailure {
+                    book: book_name(DEVICE_SOURCE).to_owned(),
+                    error,
+                })
+        }
     }
 }
 

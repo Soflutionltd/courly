@@ -259,24 +259,28 @@ pub fn set_contact_origin_sync(
     Ok(())
 }
 
-/// Moves the accounts' claims on `old` to `new` once the user changed the
-/// address in every card holding it, so the contact keeps its origins
-/// until the next pull confirms them.
-pub fn rename_contact_holders_sync(
+/// Moves a card's claim on `old` to `new` once the user changed the
+/// address in that card, so the contact keeps its origin until the next
+/// pull confirms it.
+pub fn rename_contact_claim_sync(
     conn: &impl WriteTarget,
+    account_id: &str,
+    server_id: &str,
     old: &str,
     new: &str,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE OR IGNORE contact_claims SET email = ?2 WHERE email = ?1 AND corpus = 'main'",
-        params![old, new],
+        "UPDATE OR IGNORE contact_claims SET email = ?4 \
+         WHERE account_id = ?1 AND server_id = ?2 AND email = ?3 AND corpus = 'main'",
+        params![account_id, server_id, old, new],
     )
-    .map_err(|e| format!("move contact claims: {e}"))?;
+    .map_err(|e| format!("move contact claim: {e}"))?;
     conn.execute(
-        "DELETE FROM contact_claims WHERE email = ?1 AND corpus = 'main'",
-        params![old],
+        "DELETE FROM contact_claims \
+         WHERE account_id = ?1 AND server_id = ?2 AND email = ?3 AND corpus = 'main'",
+        params![account_id, server_id, old],
     )
-    .map_err(|e| format!("drop moved contact claims: {e}"))?;
+    .map_err(|e| format!("drop moved contact claim: {e}"))?;
     Ok(())
 }
 
