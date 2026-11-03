@@ -94,6 +94,19 @@ static MIGRATIONS: &[Migration] = &[
                 updated_at INTEGER NOT NULL DEFAULT (unixepoch())
               );",
     },
+    Migration {
+        version: 105,
+        description: "Mac address-book contact claims",
+        sql: "CREATE TABLE device_contact_claims (
+                server_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                PRIMARY KEY (server_id, email)
+              );
+              CREATE INDEX idx_device_contact_claims_email ON device_contact_claims(email);
+              INSERT OR IGNORE INTO device_contact_claims (server_id, email)
+                SELECT server_id, email FROM contacts
+                WHERE source = 'macos' AND server_id IS NOT NULL;",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.
@@ -313,6 +326,7 @@ mod tests {
         assert_eq!(column("messages", "is_flag_complete"), 1);
         assert_eq!(column("threads", "is_flag_complete"), 1);
         assert_eq!(column("templates", "body_html"), 1);
+        assert_eq!(column("device_contact_claims", "server_id"), 1);
     }
 
     #[test]

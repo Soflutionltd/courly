@@ -7,7 +7,8 @@ mod address_book;
 use std::collections::HashSet;
 
 use db::db::queries_extra::{
-    DeviceContactRow, prune_device_contacts_sync, upsert_device_contact_sync,
+    DeviceContactRow, begin_device_contact_import_sync, prune_device_contacts_sync,
+    upsert_device_contact_sync,
 };
 use service_state::WriteDbState;
 
@@ -65,11 +66,11 @@ async fn import(write_db: &WriteDbState, contacts: Vec<DeviceContact>) -> Result
             let tx = conn
                 .transaction()
                 .map_err(|error| format!("begin device contact import: {error}"))?;
+            begin_device_contact_import_sync(&tx)?;
             for row in &rows {
                 upsert_device_contact_sync(&tx, row)?;
             }
-            let kept: HashSet<String> = rows.iter().map(|row| row.email.clone()).collect();
-            prune_device_contacts_sync(&tx, &kept)?;
+            prune_device_contacts_sync(&tx)?;
             tx.commit()
                 .map_err(|error| format!("commit device contact import: {error}"))?;
             Ok(rows.len())
@@ -237,6 +238,14 @@ mod tests {
                     contact(conn, "shared@example.test"),
                     Some((Some("From Outlook".to_owned()), "graph".to_owned()))
                 );
+                let held: Vec<String> = conn
+                    .prepare("SELECT email FROM device_contact_claims ORDER BY email")
+                    .and_then(|mut stmt| {
+                        stmt.query_map([], |row| row.get(0))?
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .map_err(|e| e.to_string())?;
+                assert_eq!(held, ["ada@example.test"]);
                 Ok(())
             })
             .await

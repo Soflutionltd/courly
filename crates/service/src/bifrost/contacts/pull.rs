@@ -4,8 +4,9 @@ use bifrost_sync::{Error, SyncEngine};
 use bifrost_types::{AccountId, AddressBookId, ContactCard, ContactCorpus, ProtocolKind};
 use db::db::WriteTxn;
 use db::db::queries_extra::{
-    delete_seen_address_google_other, reconcile_contact_claims_sync, upsert_contact_claim_sync,
-    upsert_contact_sync, upsert_seen_address_google_other,
+    delete_seen_address_google_other, reconcile_contact_claims_sync,
+    release_unclaimed_contact_sync, upsert_contact_claim_sync, upsert_contact_sync,
+    upsert_seen_address_google_other,
 };
 use service_state::WriteDbState;
 
@@ -257,12 +258,8 @@ fn reconcile_source(
             // Never prune a locally authored contact: the upsert preserves
             // `source='user'` against provider writes, so the reconcile must
             // not delete one just because the provider that also claimed its
-            // email dropped it.
-            tx.execute(
-                "DELETE FROM contacts WHERE email = ?1 AND source != 'user'",
-                rusqlite::params![email],
-            )
-            .map_err(|e| format!("delete orphan contact: {e}"))?;
+            // email dropped it. The Mac's address book keeps its own.
+            release_unclaimed_contact_sync(tx, &email)?;
         }
     }
     Ok(())
@@ -500,6 +497,41 @@ mod tests {
                     !contact_exists(conn, "dup@x.test"),
                     "row deleted once the last claim is gone"
                 );
+                Ok(())
+            })
+            .expect("reconcile");
+    }
+
+    /// A provider dropping a person the Mac's address book still holds hands
+    /// the row back to the address book instead of deleting it.
+    #[test]
+    fn contact_pull_reconcile_hands_device_held_row_back_to_the_address_book() {
+        let (write_db, _tmp) = fresh_db();
+        write_db
+            .with_write_sync(|conn| {
+                seed_account(conn, ACCOUNT);
+                seed_contact(conn, "both@x.test", "graph");
+                seed_claim(conn, "graph", "srv-B", "both@x.test");
+                conn.execute(
+                    "INSERT INTO device_contact_claims (server_id, email) \
+                     VALUES ('mac-B', 'both@x.test')",
+                    [],
+                )
+                .map_err(|e| e.to_string())?;
+
+                let tx = conn.transaction().map_err(|e| e.to_string())?;
+                reconcile_source(&tx, ACCOUNT, "graph", &empty(), &empty())?;
+                tx.commit().map_err(|e| e.to_string())?;
+
+                let (source, server_id): (String, Option<String>) = conn
+                    .query_row(
+                        "SELECT source, server_id FROM contacts WHERE email = 'both@x.test'",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|e| e.to_string())?;
+                assert_eq!(source, "macos");
+                assert_eq!(server_id.as_deref(), Some("mac-B"));
                 Ok(())
             })
             .expect("reconcile");

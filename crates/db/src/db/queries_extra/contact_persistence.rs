@@ -86,13 +86,27 @@ pub struct DeviceContactRow {
     pub server_id: String,
 }
 
+/// Forgets which addresses the Mac's address book holds, ahead of an
+/// import that records them again.
+pub fn begin_device_contact_import_sync(conn: &impl WriteTarget) -> Result<(), String> {
+    conn.execute("DELETE FROM device_contact_claims", [])
+        .map_err(|e| format!("clear device contact claims: {e}"))?;
+    Ok(())
+}
+
 /// Adds a contact from the Mac's address book, or refreshes one this import
-/// added before. A contact the user wrote or a provider synced keeps its
-/// data, so the address book never overrides Outlook or Google.
+/// added before, and records that the address book holds the address. A
+/// contact the user wrote or a provider synced keeps its data, so the
+/// address book never overrides Outlook or Google.
 pub fn upsert_device_contact_sync(
     conn: &impl WriteTarget,
     row: &DeviceContactRow,
 ) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO device_contact_claims (server_id, email) VALUES (?1, ?2)",
+        params![row.server_id, row.email],
+    )
+    .map_err(|e| format!("record device contact claim: {e}"))?;
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, company, source, server_id) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
@@ -118,41 +132,36 @@ pub fn upsert_device_contact_sync(
     Ok(())
 }
 
-/// Removes the imported address-book contacts whose address is no longer
-/// in the Mac's address book. Returns how many were removed.
-pub fn prune_device_contacts_sync(
-    conn: &impl WriteTarget,
-    kept: &std::collections::HashSet<String>,
-) -> Result<usize, String> {
-    let mut stmt = conn
-        .prepare("SELECT email FROM contacts WHERE source = ?1")
-        .map_err(|e| format!("list device contacts: {e}"))?;
-    let stale: Vec<String> = stmt
-        .query_map(params![DEVICE_CONTACT_SOURCE], |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(|e| format!("list device contacts: {e}"))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("list device contacts: {e}"))?
-        .into_iter()
-        .filter(|email| !kept.contains(email))
-        .collect();
-    for email in &stale {
-        delete_contact_by_email_and_source_sync(conn, email, DEVICE_CONTACT_SOURCE)?;
-    }
-    Ok(stale.len())
+/// Removes the imported address-book contacts whose address the Mac's
+/// address book no longer holds, unless an account still holds it.
+/// Returns how many were removed.
+pub fn prune_device_contacts_sync(conn: &impl WriteTarget) -> Result<usize, String> {
+    conn.execute(
+        "DELETE FROM contacts \
+         WHERE source = ?1 \
+           AND NOT EXISTS (SELECT 1 FROM device_contact_claims d WHERE d.email = contacts.email) \
+           AND NOT EXISTS (SELECT 1 FROM contact_claims c WHERE c.email = contacts.email)",
+        params![DEVICE_CONTACT_SOURCE],
+    )
+    .map_err(|e| format!("prune device contacts: {e}"))
 }
 
-pub fn delete_contact_by_email_and_source_sync(
-    conn: &impl WriteTarget,
-    email: &str,
-    source: &str,
-) -> Result<(), String> {
+/// Drops a contact no account claims any more. When the Mac's address book
+/// still holds the address, the row is handed back to it instead.
+pub fn release_unclaimed_contact_sync(conn: &impl WriteTarget, email: &str) -> Result<(), String> {
     conn.execute(
-        "DELETE FROM contacts WHERE email = ?1 AND source = ?2",
-        params![email, source],
+        "UPDATE contacts SET source = ?2, account_id = NULL, \
+           server_id = (SELECT server_id FROM device_contact_claims d WHERE d.email = ?1 LIMIT 1) \
+         WHERE email = ?1 AND source NOT IN ('user', ?2) \
+           AND EXISTS (SELECT 1 FROM device_contact_claims d WHERE d.email = ?1)",
+        params![email, DEVICE_CONTACT_SOURCE],
     )
-    .map_err(|e| format!("delete contact by email/source: {e}"))?;
+    .map_err(|e| format!("hand contact back to the address book: {e}"))?;
+    conn.execute(
+        "DELETE FROM contacts WHERE email = ?1 AND source NOT IN ('user', ?2)",
+        params![email, DEVICE_CONTACT_SOURCE],
+    )
+    .map_err(|e| format!("delete orphan contact: {e}"))?;
     Ok(())
 }
 
