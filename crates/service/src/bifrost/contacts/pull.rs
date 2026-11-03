@@ -202,7 +202,7 @@ pub async fn run_contact_pull(
 
 /// The provider's own error: `Error::Account` displays only "account
 /// operation failed".
-fn detail(error: &Error) -> String {
+pub(super) fn detail(error: &Error) -> String {
     match error {
         Error::Account(account_error) => match std::error::Error::source(account_error) {
             Some(cause) => format!("{account_error}: {cause}"),

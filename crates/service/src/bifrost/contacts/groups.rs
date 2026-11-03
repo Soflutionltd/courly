@@ -8,6 +8,8 @@ use std::future::Future;
 
 use bifrost_sync::{Error, SyncEngine};
 use bifrost_types::{AccountId, DirectoryGroup, DirectoryGroupKind, Page};
+
+use super::pull::detail;
 use db::db::WriteTxn;
 use db::db::queries_extra::{
     ContactGroupRow, delete_contact_group_by_id, delete_contact_group_members,
@@ -127,7 +129,7 @@ where
         let page = match fetch(cursor).await {
             Ok(page) => page,
             Err(error) if first_call && is_unsupported(&error) => return Ok(None),
-            Err(error) => return Err(format!("directory group list: {error}")),
+            Err(error) => return Err(format!("directory group list: {}", detail(&error))),
         };
         first_call = false;
         groups.extend(page.items);
@@ -162,8 +164,9 @@ async fn expand_group_members(
             }
             Err(error) => {
                 log::warn!(
-                    "directory group expansion for {} failed: {error}",
-                    group.id.0
+                    "directory group expansion for {} failed: {}",
+                    group.id.0,
+                    detail(&error)
                 );
                 return None;
             }
