@@ -215,12 +215,20 @@ pub fn select<'a, M: Clone + 'a>(
 #[derive(Debug, Clone, Copy)]
 pub enum SelectIcon {
     ColorDot(Color),
+    /// The marks of address books (Apple, Outlook, Courly...).
+    Origins(rtsk::contacts::search::ContactOrigins),
 }
 
 impl SelectIcon {
     fn into_element<'a, M: 'a>(self) -> Element<'a, M> {
         match self {
             SelectIcon::ColorDot(color) => super::avatars::color_dot(color),
+            SelectIcon::Origins(origins) => {
+                iced::widget::Row::with_children(super::origins::origin_marks(origins, ICON_SM))
+                    .spacing(SPACE_XXS)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+            }
         }
     }
 }

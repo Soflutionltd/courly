@@ -389,6 +389,8 @@ pub struct Settings {
     pub contact_origin_filter: rtsk::db::queries_extra::ContactOriginFilter,
     pub contacts: Vec<crate::db::ContactEntry>,
     pub contact_editor: Option<ContactEditorState>,
+    /// Why the last contact write did not reach every address book.
+    pub contact_issue: Option<String>,
     /// Pending contact delete ID awaiting confirmation.
     pub confirm_delete_contact: Option<String>,
     // Groups management
@@ -661,6 +663,7 @@ impl Default for Settings {
             contact_origin_filter: rtsk::db::queries_extra::ContactOriginFilter::All,
             contacts: Vec::new(),
             contact_editor: None,
+            contact_issue: None,
             confirm_delete_contact: None,
             group_filter: String::new(),
             groups: Vec::new(),

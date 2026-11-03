@@ -62,11 +62,8 @@ impl ReadyApp {
                     Message::Settings(SettingsMessage::ContactsLoaded(contacts))
                 }
                 Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
-                    // Local save committed; provider not notified.
-                    // Logged here; surface in Settings status area when
-                    // it lands.
                     log::warn!("Contact save local-only: {reason}");
-                    Message::Settings(SettingsMessage::ContactsLoaded(contacts))
+                    Message::Settings(SettingsMessage::ContactWriteIncomplete(contacts, reason))
                 }
                 Err(e) => {
                     log::error!("Contact save failed: {e}");
@@ -106,11 +103,10 @@ impl ReadyApp {
                 }
                 Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
                     log::warn!("Contact delete local-only: {reason}");
-                    if let Some(list) = contacts {
-                        Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
-                    } else {
-                        Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
-                    }
+                    Message::Settings(SettingsMessage::ContactWriteIncomplete(
+                        contacts.ok_or_else(|| "contacts reload failed".to_owned()),
+                        reason,
+                    ))
                 }
                 Err(e) => {
                     log::error!("Contact delete failed: {e}");

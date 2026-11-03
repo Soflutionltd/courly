@@ -182,11 +182,11 @@ impl Component for Settings {
             }
             SettingsMessage::ContactEditorFieldChanged(_, _) => {
                 self.handle_remaining_message(message);
-                if let Some(ref editor) = self.contact_editor {
-                    let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
-                    if is_local && editor.contact_id.is_some() {
-                        return self.handle_contact_autosave();
-                    }
+                if let Some(ref editor) = self.contact_editor
+                    && editor.contact_id.is_some()
+                    && !editor.is_synced()
+                {
+                    return self.handle_contact_autosave();
                 }
                 return (Task::none(), None);
             }
@@ -856,8 +856,27 @@ impl Settings {
                     editor.dirty = true;
                 }
             }
+            SettingsMessage::ContactEditorDestinationChanged(destination) => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.destination = destination;
+                    editor.dirty = true;
+                }
+            }
             SettingsMessage::ContactSaved(Ok(())) | SettingsMessage::ContactDeleted(Ok(())) => {}
-            SettingsMessage::ContactSaved(Err(_)) | SettingsMessage::ContactDeleted(Err(_)) => {}
+            SettingsMessage::ContactSaved(Err(reason))
+            | SettingsMessage::ContactDeleted(Err(reason)) => {
+                self.contact_issue = Some(reason);
+            }
+            SettingsMessage::ContactWriteIncomplete(contacts, reason) => {
+                self.contact_issue = Some(reason);
+                match contacts {
+                    Ok(contacts) => self.contacts = contacts,
+                    Err(e) => log::error!("Failed to load contacts: {e}"),
+                }
+            }
+            SettingsMessage::DismissContactIssue => {
+                self.contact_issue = None;
+            }
             SettingsMessage::GroupCreate => {
                 self.open_new_group_editor();
             }

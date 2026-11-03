@@ -148,12 +148,17 @@ pub enum SettingsMessage {
     ContactEditorFieldChanged(ContactField, String),
     ContactEditorSave,
     ContactEditorAccountChanged(Option<String>),
+    ContactEditorDestinationChanged(super::ContactDestination),
     ContactDelete(String),
     ContactConfirmDelete(String),
     ContactCancelDelete,
     ContactCreate,
     ContactSaved(Result<(), String>),
     ContactDeleted(Result<(), String>),
+    /// The contact landed in Courly but an address book refused it; the
+    /// reloaded list and the reason.
+    ContactWriteIncomplete(Result<Vec<crate::db::ContactEntry>, String>, String),
+    DismissContactIssue,
     // Contact Import
     ImportContactsOpen,
     ImportFileSelected(String, Vec<u8>),

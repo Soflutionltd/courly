@@ -28,6 +28,16 @@ pub fn contact_origin_marks<'a, M: 'a>(
     origins: ContactOrigins,
     size: f32,
 ) -> Option<Element<'a, M>> {
+    let marks = origin_marks(origins, size);
+    (!marks.is_empty()).then(|| {
+        Row::with_children(marks)
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center)
+            .into()
+    })
+}
+
+pub(super) fn origin_marks<'a, M: 'a>(origins: ContactOrigins, size: f32) -> Vec<Element<'a, M>> {
     let mut marks: Vec<Element<'a, M>> = Vec::new();
     if origins.apple {
         marks.push(monochrome(&APPLE, size));
@@ -44,12 +54,7 @@ pub fn contact_origin_marks<'a, M: 'a>(
     if origins.courly {
         marks.push(in_color(&COURLY, size));
     }
-    (!marks.is_empty()).then(|| {
-        Row::with_children(marks)
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center)
-            .into()
-    })
+    marks
 }
 
 fn in_color<'a, M: 'a>(handle: &svg::Handle, size: f32) -> Element<'a, M> {

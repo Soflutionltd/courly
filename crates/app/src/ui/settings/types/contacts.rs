@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use rtsk::contacts::search::ContactOrigins;
 use rust_i18n::t;
 
 use crate::ui::undoable::UndoableText;
@@ -31,8 +32,55 @@ pub struct ContactEditorState {
     pub source: Option<String>,
     /// Provider-assigned server ID for synced contacts.
     pub server_id: Option<String>,
+    /// The address books holding an existing contact.
+    pub origins: ContactOrigins,
+    /// Where a new contact is created.
+    pub destination: ContactDestination,
     /// Whether fields have been modified since opening the editor.
     pub dirty: bool,
+}
+
+impl ContactEditorState {
+    /// An existing contact held by an address book: edits go there on
+    /// Save rather than on every keystroke.
+    pub fn is_synced(&self) -> bool {
+        let origins = self.origins;
+        self.contact_id.is_some()
+            && (origins.apple || origins.microsoft || origins.google || origins.other_book)
+    }
+}
+
+/// The contact source of an account whose address book Courly can write,
+/// by the account's provider.
+pub fn contact_source_of(provider: &str) -> Option<&'static str> {
+    match provider {
+        "graph" => Some("graph"),
+        "gmail_api" => Some("google"),
+        "jmap" => Some("jmap"),
+        _ => None,
+    }
+}
+
+/// Where a new contact is created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContactDestination {
+    /// Courly only.
+    Courly,
+    /// The Mac's address book, which iCloud carries to the iPhone.
+    Apple,
+    /// An account's address book.
+    Account(String),
+}
+
+impl ContactDestination {
+    /// The Mac's address book where there is one.
+    pub fn default_for_platform() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Apple
+        } else {
+            Self::Courly
+        }
+    }
 }
 
 /// Editing state for the group editor sheet.

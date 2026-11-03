@@ -27,6 +27,12 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         SettingsMessage::ImportContactsOpen,
     )]));
 
+    if let Some(issue) = &state.contact_issue {
+        col = col.push(section_untitled(vec![static_row(contact_issue_banner(
+            issue,
+        ))]));
+    }
+
     let contact_items: Vec<RowBuilder<'_>> = vec![
         static_row(contact_filter_row(
             &state.contact_filter,
@@ -57,6 +63,33 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     col = col.push(section(tr(t!("settings.people.groups")), group_items));
 
     col.into()
+}
+
+/// Why the last contact write left an address book behind.
+fn contact_issue_banner(issue: &str) -> Element<'_, SettingsMessage> {
+    container(
+        row![
+            column![
+                text(t!("settings.people.write_issue"))
+                    .size(TEXT_LG)
+                    .style(text::danger),
+                text(issue)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill),
+            button(icon::x().size(ICON_MD).style(text::secondary))
+                .on_press(SettingsMessage::DismissContactIssue)
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style()),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
 }
 
 fn contact_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {

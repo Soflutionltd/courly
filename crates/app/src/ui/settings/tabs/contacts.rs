@@ -1,5 +1,6 @@
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
+use rtsk::contacts::search::ContactOrigins;
 use rust_i18n::t;
 
 use super::accounts::tr;
@@ -42,11 +43,16 @@ pub(super) fn contact_editor_sheet(state: &Settings) -> Element<'_, SettingsMess
     );
 
     let picker_open = state.open_select == Some(SelectField::ContactAccount);
-    col = col.push(section_untitled(vec![contact_account_selector(
-        editor,
-        &state.managed_accounts,
-        picker_open,
-    )]));
+    let book_row = if is_new {
+        contact_destination_selector(editor, &state.managed_accounts, picker_open)
+    } else if editor.is_synced()
+        && let Some(marks) = widgets::contact_origin_marks(editor.origins, ICON_MD)
+    {
+        contact_books_row(editor.origins, marks)
+    } else {
+        contact_account_selector(editor, &state.managed_accounts, picker_open)
+    };
+    col = col.push(section_untitled(vec![book_row]));
 
     col = col.push(contact_editor_fields(editor));
     col = col.push(contact_editor_buttons(
@@ -111,6 +117,110 @@ fn contact_account_selector<'a>(
         Some(tr(t!("settings.contacts.account_description"))),
         dropdown,
         SettingsMessage::ToggleSelect(SelectField::ContactAccount),
+    )
+}
+
+const DESTINATION_COURLY: &str = "courly";
+const DESTINATION_APPLE: &str = "apple";
+
+/// Where a new contact is created: Courly, the Mac's address book, or an
+/// account whose address book Courly can write.
+fn contact_destination_selector<'a>(
+    editor: &'a ContactEditorState,
+    accounts: &'a [ManagedAccount],
+    open: bool,
+) -> RowBuilder<'a> {
+    let selected_value = match &editor.destination {
+        ContactDestination::Courly => DESTINATION_COURLY,
+        ContactDestination::Apple => DESTINATION_APPLE,
+        ContactDestination::Account(id) => id.as_str(),
+    };
+    let marks = |origins: ContactOrigins| Some(widgets::SelectIcon::Origins(origins));
+
+    let mut options: Vec<widgets::SelectOption<'a>> = Vec::with_capacity(accounts.len() + 2);
+    if cfg!(target_os = "macos") {
+        options.push(widgets::SelectOption {
+            value: DESTINATION_APPLE.to_owned(),
+            label: tr(t!("settings.contacts.destination_apple")),
+            icon: marks(ContactOrigins {
+                apple: true,
+                ..ContactOrigins::default()
+            }),
+        });
+    }
+    for account in accounts {
+        let Some(source) = contact_source_of(&account.provider) else {
+            continue;
+        };
+        let label = account
+            .account_name
+            .as_deref()
+            .or(account.display_name.as_deref())
+            .unwrap_or(&account.email);
+        options.push(widgets::SelectOption {
+            value: account.id.clone(),
+            label,
+            icon: marks(ContactOrigins {
+                microsoft: source == "graph",
+                google: source == "google",
+                other_book: source == "jmap",
+                ..ContactOrigins::default()
+            }),
+        });
+    }
+    options.push(widgets::SelectOption {
+        value: DESTINATION_COURLY.to_owned(),
+        label: tr(t!("settings.contacts.destination_courly")),
+        icon: marks(ContactOrigins {
+            courly: true,
+            ..ContactOrigins::default()
+        }),
+    });
+
+    let dropdown = widgets::select_with_icons(
+        options,
+        Some(selected_value),
+        open,
+        true,
+        tr(t!("settings.contacts.destination")),
+        SettingsMessage::ToggleSelect(SelectField::ContactAccount),
+        |value| {
+            SettingsMessage::ContactEditorDestinationChanged(match value.as_str() {
+                DESTINATION_COURLY => ContactDestination::Courly,
+                DESTINATION_APPLE => ContactDestination::Apple,
+                _ => ContactDestination::Account(value),
+            })
+        },
+    );
+
+    let description = if editor.destination == ContactDestination::Apple {
+        t!("settings.contacts.destination_apple_description")
+    } else {
+        t!("settings.contacts.destination_description")
+    };
+    setting_row_with_description(
+        tr(t!("settings.contacts.destination")),
+        Some(tr(description)),
+        dropdown,
+        SettingsMessage::ToggleSelect(SelectField::ContactAccount),
+    )
+}
+
+/// The address books holding an existing contact, which receive its edits.
+fn contact_books_row<'a>(
+    origins: ContactOrigins,
+    marks: Element<'a, SettingsMessage>,
+) -> RowBuilder<'a> {
+    let description = if origins.apple {
+        t!("settings.contacts.books_apple_description")
+    } else {
+        t!("settings.contacts.books_description")
+    };
+    setting_row_with_description(
+        tr(t!("settings.contacts.books")),
+        Some(tr(description)),
+        marks,
+        SettingsMessage::Noop,
     )
 }
 
@@ -227,8 +337,7 @@ fn contact_editor_buttons<'a>(
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
-    let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
-    if is_local {
+    if !editor.is_synced() {
         if editor.contact_id.is_some() {
             btn_row = btn_row.push(
                 text(t!("settings.contacts.auto_saved"))

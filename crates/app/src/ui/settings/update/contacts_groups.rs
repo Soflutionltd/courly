@@ -22,8 +22,11 @@ impl Settings {
                 notes: UndoableText::with_initial(contact.notes.as_deref().unwrap_or("")),
                 source: contact.source.clone(),
                 server_id: contact.server_id.clone(),
+                origins: contact.origins,
+                destination: ContactDestination::Courly,
                 dirty: false,
             });
+            self.contact_issue = None;
             self.active_sheet = Some(SettingsSheetPage::EditContact {
                 contact_id: Some(contact.id.clone()),
             });
@@ -43,8 +46,11 @@ impl Settings {
             notes: UndoableText::new(),
             source: None,
             server_id: None,
+            origins: rtsk::contacts::search::ContactOrigins::default(),
+            destination: ContactDestination::default_for_platform(),
             dirty: false,
         });
+        self.contact_issue = None;
         self.active_sheet = Some(SettingsSheetPage::EditContact { contact_id: None });
         self.sheet_anim.go_mut(true, Instant::now());
     }
@@ -73,6 +79,25 @@ impl Settings {
         if email.is_empty() {
             return (Task::none(), None);
         }
+        let (account_id, source) = match (&editor.contact_id, &editor.destination) {
+            (Some(_), _) => (
+                editor.account_id.clone(),
+                editor.source.clone().unwrap_or_else(|| "user".to_owned()),
+            ),
+            (None, ContactDestination::Courly) => (None, "user".to_owned()),
+            (None, ContactDestination::Apple) => (None, "macos".to_owned()),
+            (None, ContactDestination::Account(account_id)) => {
+                let Some(source) = self
+                    .managed_accounts
+                    .iter()
+                    .find(|account| &account.id == account_id)
+                    .and_then(|account| contact_source_of(&account.provider))
+                else {
+                    return (Task::none(), None);
+                };
+                (Some(account_id.clone()), source.to_owned())
+            }
+        };
         let entry = crate::db::ContactEntry {
             id: editor
                 .contact_id
@@ -84,10 +109,10 @@ impl Settings {
             phone: non_empty(editor.phone.text().trim()),
             company: non_empty(editor.company.text().trim()),
             notes: non_empty(editor.notes.text().trim()),
-            account_id: editor.account_id.clone(),
+            account_id,
             account_color: None,
             groups: Vec::new(),
-            source: editor.source.clone().or_else(|| Some("user".to_string())),
+            source: Some(source),
             server_id: editor.server_id.clone(),
             origins: rtsk::contacts::search::ContactOrigins::default(),
         };
