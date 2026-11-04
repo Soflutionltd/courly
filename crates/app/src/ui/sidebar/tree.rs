@@ -6,6 +6,7 @@ use crate::db::Account;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::widgets;
 use rtsk::scope::ViewScope;
 
 use super::nav::{account_menu_items, nav_items, with_row_menu};
@@ -30,15 +31,12 @@ fn all_accounts_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let scope = ViewScope::AllAccounts;
     let key = scope_key(&scope);
     let expanded = !sidebar.collapsed_sections.contains(&key);
-    let header = button(title_row(
+    let header = top_title_row(
         expanded,
         t!("main.sidebar.all_accounts"),
         sidebar.text_size,
-    ))
-    .on_press(SidebarMessage::ToggleSection(key))
-    .padding(PAD_SIDEBAR_SECTION_TITLE)
-    .style(theme::ButtonClass::Ghost.style())
-    .width(Length::Fill);
+        SidebarMessage::ToggleSection(key),
+    );
     let mut section = column![header].spacing(SPACE_XXS);
     if expanded {
         section = section.push(nav_items(sidebar, &scope));
@@ -46,15 +44,64 @@ fn all_accounts_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     section.into()
 }
 
-fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a, SidebarMessage> {
-    let scope = ViewScope::Account(account.id.clone());
-    let expanded = !sidebar.collapsed_sections.contains(&account.id);
-    let label = account
+/// The folders of a lone account, under its name in place of the unified
+/// section of the tree.
+pub(super) fn sole_scope_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let account = match &sidebar.selected_scope {
+        ViewScope::Account(id) => sidebar.accounts.iter().find(|a| a.id == *id),
+        _ => None,
+    }
+    .or_else(|| sidebar.accounts.iter().find(|a| !a.is_deleting));
+    let label = account.map_or_else(
+        || t!("main.sidebar.all_accounts"),
+        |account| account_label(account).into(),
+    );
+    let header = top_title_row(
+        sidebar.folders_expanded,
+        label,
+        sidebar.text_size,
+        SidebarMessage::ToggleFolders,
+    );
+    let mut section = column![header].spacing(SPACE_XXS);
+    if sidebar.folders_expanded {
+        section = section.push(nav_items(sidebar, &sidebar.selected_scope));
+    }
+    section.into()
+}
+
+/// First section title of the sidebar, with the add-account button.
+fn top_title_row<'a>(
+    expanded: bool,
+    label: impl text::IntoFragment<'a>,
+    text_size: SidebarTextSize,
+    on_toggle: SidebarMessage,
+) -> Element<'a, SidebarMessage> {
+    row![
+        button(title_row(expanded, label, text_size))
+            .on_press(on_toggle)
+            .padding(PAD_SIDEBAR_SECTION_TITLE)
+            .style(theme::ButtonClass::Ghost.style())
+            .width(Length::Fill),
+        widgets::add_button(SidebarMessage::AddAccount),
+    ]
+    .spacing(SPACE_XXS)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+fn account_label(account: &Account) -> &str {
+    account
         .account_name
         .as_deref()
         .or(account.display_name.as_deref())
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or(&account.email);
+        .unwrap_or(&account.email)
+}
+
+fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a, SidebarMessage> {
+    let scope = ViewScope::Account(account.id.clone());
+    let expanded = !sidebar.collapsed_sections.contains(&account.id);
+    let label = account_label(account);
 
     let mut title = column![title_row(expanded, label, sidebar.text_size)].spacing(SPACE_XXXS);
     if label != account.email {

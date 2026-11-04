@@ -928,13 +928,16 @@ impl Component for Sidebar {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, SidebarMessage> {
-        let header_row = row![
-            scope::folders_toggle(self.folders_expanded),
-            container(scope_dropdown(self)).width(Length::Fill),
-            widgets::add_button(SidebarMessage::AddAccount),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center);
+        // Shared mailboxes are only reachable from the scope selector.
+        let header_row = (!self.shared_mailboxes.is_empty()).then(|| {
+            row![
+                scope::folders_toggle(self.folders_expanded),
+                container(scope_dropdown(self)).width(Length::Fill),
+                widgets::add_button(SidebarMessage::AddAccount),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center)
+        });
 
         let mut scroll_content = column![Space::new().height(SPACE_XXS)]
             .spacing(0)
@@ -946,7 +949,14 @@ impl Component for Sidebar {
             scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
         }
 
-        if self.folders_expanded {
+        if header_row.is_none() {
+            scroll_content = scroll_content.push(if self.shows_tree() {
+                tree::tree_view(self)
+            } else {
+                tree::sole_scope_section(self)
+            });
+            scroll_content = scroll_content.push(widgets::section_break());
+        } else if self.folders_expanded {
             scroll_content = scroll_content.push(Space::new().height(SPACE_XS));
             scroll_content = scroll_content.push(if self.shows_tree() {
                 tree::tree_view(self)
@@ -987,11 +997,16 @@ impl Component for Sidebar {
                 .on_dismiss(SidebarMessage::CloseRowMenu);
         }
 
-        container(column![header_row, scroll_area].spacing(SPACE_XS))
-            .padding(PAD_SIDEBAR)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        container(
+            column![]
+                .push(header_row)
+                .push(scroll_area)
+                .spacing(SPACE_XS),
+        )
+        .padding(PAD_SIDEBAR)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 }
 
