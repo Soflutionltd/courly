@@ -79,6 +79,7 @@ account_setup.error.app_password_required_domain: "This provider requires an app
 account_setup.error.no_oauth_config: "No OAuth configuration found for provider '%{provider}'. Please enter credentials manually."
 account_setup.error.oidc_discovery_failed: "OIDC discovery failed for issuer '%{issuer}'"
 account_setup.error.no_oauth_config_available: "No OAuth configuration available"
+account_setup.error.wrong_identity: "You signed in as %{signed_in}, which does not receive mail for %{expected}. Sign in again with %{expected}."
 account_setup.error.no_public_clients: "Provider does not support public clients; supply a Client ID."
 account_setup.error.dyn_registration_failed: "Dynamic client registration failed; supply a Client ID manually."
 account_setup.error.no_registration_endpoint: "No Client ID supplied and the provider does not advertise a registration endpoint."

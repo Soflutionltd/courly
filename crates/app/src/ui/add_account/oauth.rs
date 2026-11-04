@@ -100,6 +100,7 @@ impl AddAccountWizard {
             return Task::none();
         };
         let reauth_account_id = self.reauth_account_id.clone();
+        let expected_email = self.email.clone();
         let task = Task::perform(
             async move {
                 // Resolve endpoints: either from the registry (built-in
@@ -196,6 +197,7 @@ impl AddAccountWizard {
                         use_pkce,
                         client_id: resolved_client_id,
                         client_secret: resolved_client_secret,
+                        expected_email,
                     },
                     reauth_account_id,
                 )
@@ -589,6 +591,8 @@ pub(super) struct OauthCaptureConfig {
     pub use_pkce: bool,
     pub client_id: String,
     pub client_secret: Option<String>,
+    /// Address being added or reconnected.
+    pub expected_email: String,
 }
 
 impl std::fmt::Debug for OauthCaptureConfig {
@@ -605,6 +609,7 @@ impl std::fmt::Debug for OauthCaptureConfig {
                 "client_secret",
                 &self.client_secret.as_ref().map(|_| "<redacted>"),
             )
+            .field("expected_email", &self.expected_email)
             .finish()
     }
 }
@@ -633,7 +638,15 @@ pub(super) async fn run_capture_then_exchange(
     };
     let provider = rtsk::oauth::GenericOAuthProvider::from_request(request);
     let open_url = |url: &str| -> Result<(), String> { open_browser_url(url) };
-    let auth_request = <rtsk::oauth::GenericOAuthProvider as rtsk::oauth::OAuthIdentityProvider>::authorization_request(&provider);
+    let mut auth_request = <rtsk::oauth::GenericOAuthProvider as rtsk::oauth::OAuthIdentityProvider>::authorization_request(&provider);
+    let expected_email = Some(config.expected_email.trim().to_string()).filter(|e| !e.is_empty());
+    if config.provider_id == "microsoft_graph"
+        && let Some(expected) = &expected_email
+    {
+        auth_request
+            .extra_auth_params
+            .push(("login_hint".to_string(), expected.clone()));
+    }
     let auth = rtsk::oauth::run_oauth_authorization_flow(auth_request, &open_url).await?;
 
     let params = service_api::OauthExchangeCodeParams {
@@ -648,11 +661,21 @@ pub(super) async fn run_capture_then_exchange(
         code: service_api::RedactedString::new(auth.code),
         code_verifier: auth.code_verifier,
         reauth_account_id,
+        expected_email: expected_email.clone(),
     };
-    client
+    let ack = client
         .exchange_oauth_code(params)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if ack.wrong_identity {
+        return Err(t!(
+            "account_setup.error.wrong_identity",
+            signed_in = ack.email,
+            expected = expected_email.unwrap_or_default()
+        )
+        .into_owned());
+    }
+    Ok(ack)
 }
 
 pub(super) fn open_browser_url(url: &str) -> Result<(), String> {

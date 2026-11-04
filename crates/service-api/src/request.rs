@@ -4716,6 +4716,7 @@ mod tests {
             code: crate::redacted::RedactedString::new("authcode"),
             code_verifier: Some("pkce".into()),
             reauth_account_id: None,
+            expected_email: None,
         }
     }
 

@@ -79,6 +79,7 @@ account_setup.error.app_password_required_domain: "Ce fournisseur exige un mot d
 account_setup.error.no_oauth_config: "Aucune configuration OAuth trouvée pour le fournisseur « %{provider} ». Veuillez saisir vos identifiants manuellement."
 account_setup.error.oidc_discovery_failed: "Échec de la découverte OIDC pour l'émetteur « %{issuer} »"
 account_setup.error.no_oauth_config_available: "Aucune configuration OAuth disponible"
+account_setup.error.wrong_identity: "Vous êtes connecté en tant que %{signed_in}, qui ne correspond pas à l'adresse %{expected}. Reconnectez-vous avec %{expected}."
 account_setup.error.no_public_clients: "Le fournisseur ne prend pas en charge les clients publics ; indiquez un ID client."
 account_setup.error.dyn_registration_failed: "L'enregistrement dynamique du client a échoué ; indiquez un ID client manuellement."
 account_setup.error.no_registration_endpoint: "Aucun ID client indiqué et le fournisseur ne propose pas de point de terminaison d'enregistrement."

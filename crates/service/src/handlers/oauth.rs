@@ -48,6 +48,11 @@ pub(crate) async fn handle_exchange_code(
     params: Box<OauthExchangeCodeParams>,
 ) -> Result<Value, ServiceError> {
     let p = *params;
+    // Only Microsoft Graph reports every alias of the mailbox; elsewhere a
+    // mailbox legitimately added under an alias would be refused.
+    let expected_email = p
+        .expected_email
+        .filter(|_| p.provider_id == "microsoft_graph");
 
     // Build the provider config for the token-exchange + userinfo
     // round-trips. The UI shipped the same fields it would have used
@@ -86,6 +91,28 @@ pub(crate) async fn handle_exchange_code(
     } else {
         Some(bundle.user_info.name.clone())
     };
+
+    // A browser already signed in to another Microsoft account completes
+    // the flow as that account: keeping its tokens would sync
+    // its mailbox under the address the user typed.
+    if let Some(expected) = expected_email.as_deref()
+        && !bundle.user_info.owns_address(expected)
+    {
+        log::warn!(
+            "oauth.exchange_code: signed in as another mailbox than the one being \
+             added or reconnected; tokens discarded"
+        );
+        return serde_json::to_value(OauthExchangeCodeAck {
+            email,
+            display_name,
+            access_token: None,
+            refresh_token: None,
+            token_expires_at: None,
+            wrong_identity: true,
+        })
+        .map_err(|e| ServiceError::Internal(e.to_string()));
+    }
+
     #[allow(clippy::cast_possible_wrap)]
     let token_expires_at = jiff::Timestamp::now().as_second() + bundle.tokens.expires_in as i64;
 
@@ -190,6 +217,7 @@ pub(crate) async fn handle_exchange_code(
             access_token: None,
             refresh_token: None,
             token_expires_at: None,
+            wrong_identity: false,
         })
         .map_err(|e| ServiceError::Internal(e.to_string()));
     }
@@ -203,6 +231,7 @@ pub(crate) async fn handle_exchange_code(
         access_token: Some(RedactedString::new(bundle.tokens.access_token)),
         refresh_token: bundle.tokens.refresh_token.map(RedactedString::new),
         token_expires_at: Some(token_expires_at),
+        wrong_identity: false,
     })
     .map_err(|e| ServiceError::Internal(e.to_string()))
 }

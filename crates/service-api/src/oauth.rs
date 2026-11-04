@@ -57,6 +57,11 @@ pub struct OauthExchangeCodeParams {
     pub code: RedactedString,
     pub code_verifier: Option<String>,
     pub reauth_account_id: Option<String>,
+    /// Address the user is adding or reconnecting. On Microsoft Graph, a
+    /// sign-in with a mailbox that does not receive mail at it is refused
+    /// before any token is kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_email: Option<String>,
 }
 
 /// `oauth.exchange_code` ack.
@@ -78,6 +83,10 @@ pub struct OauthExchangeCodeAck {
     pub refresh_token: Option<RedactedString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<i64>,
+    /// The sign-in was with another mailbox than `expected_email`; `email`
+    /// names it, no token is returned and nothing was persisted.
+    #[serde(default)]
+    pub wrong_identity: bool,
 }
 
 #[cfg(test)]
@@ -97,6 +106,7 @@ mod tests {
             code: RedactedString::new("authcode-xyz"),
             code_verifier: Some("pkce-verifier".into()),
             reauth_account_id: if reauth { Some("acct-1".into()) } else { None },
+            expected_email: Some("alice@example.com".into()),
         }
     }
 
@@ -134,6 +144,7 @@ mod tests {
             access_token: Some(RedactedString::new("at")),
             refresh_token: Some(RedactedString::new("rt")),
             token_expires_at: Some(1234567890),
+            wrong_identity: false,
         };
         let json = serde_json::to_value(&ack).expect("serialize");
         let recovered: OauthExchangeCodeAck = serde_json::from_value(json).expect("deserialize");
@@ -148,6 +159,7 @@ mod tests {
             access_token: None,
             refresh_token: None,
             token_expires_at: None,
+            wrong_identity: false,
         };
         let json = serde_json::to_value(&ack).expect("serialize");
         let object = json.as_object().expect("object");
@@ -164,6 +176,7 @@ mod tests {
             access_token: Some(RedactedString::new("supersecret-access-token")),
             refresh_token: Some(RedactedString::new("supersecret-refresh-token")),
             token_expires_at: Some(1234567890),
+            wrong_identity: false,
         };
         let formatted = format!("{ack:?}");
         assert!(

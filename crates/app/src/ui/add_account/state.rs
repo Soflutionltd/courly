@@ -839,6 +839,7 @@ impl AddAccountWizard {
                 let token_url_clone = token_url.clone();
                 let scopes_clone = scopes.clone();
                 let use_pkce_clone = *use_pkce;
+                let expected_email = self.email.clone();
                 let Some(client) = self.service_client.as_ref().cloned() else {
                     self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
                     return (Task::none(), None);
@@ -857,6 +858,7 @@ impl AddAccountWizard {
                                 use_pkce: use_pkce_clone,
                                 client_id: client_id_clone.clone(),
                                 client_secret: None,
+                                expected_email,
                             },
                             None,
                         )

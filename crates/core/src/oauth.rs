@@ -40,7 +40,7 @@ const MICROSOFT_GRAPH_AUTH_URL: &str =
 const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 const MICROSOFT_GRAPH_ME_URL: &str =
-    "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName";
+    "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName,proxyAddresses";
 const MICROSOFT_GRAPH_SCOPES: [&str; 13] = [
     "Mail.ReadWrite",
     "Mail.ReadWrite.Shared",
@@ -100,6 +100,20 @@ pub struct OAuthUserInfo {
     pub email: String,
     pub name: String,
     pub picture: Option<String>,
+    /// Other addresses of the signed-in mailbox (Microsoft sign-in name
+    /// and SMTP aliases).
+    pub aliases: Vec<String>,
+}
+
+impl OAuthUserInfo {
+    /// Whether the signed-in mailbox receives mail at `address`, ignoring
+    /// case.
+    pub fn owns_address(&self, address: &str) -> bool {
+        let address = address.trim();
+        std::iter::once(&self.email)
+            .chain(&self.aliases)
+            .any(|own| own.trim().eq_ignore_ascii_case(address))
+    }
 }
 
 pub struct OAuthAuthorizationBundle {
@@ -761,6 +775,7 @@ async fn fetch_google_userinfo(access_token: &str) -> Result<OAuthUserInfo, Stri
             email: user.email,
             name: user.name,
             picture: user.picture,
+            aliases: Vec::new(),
         })
         .map_err(|e| format!("Failed to parse Google user info: {e}"))
 }
@@ -825,6 +840,7 @@ async fn fetch_provider_userinfo(
             .get("picture")
             .and_then(serde_json::Value::as_str)
             .map(ToString::to_string),
+        aliases: Vec::new(),
     })
 }
 
@@ -863,11 +879,23 @@ fn microsoft_userinfo_from_me(data: MicrosoftGraphMe) -> Result<OAuthUserInfo, S
         })
         .ok_or("Microsoft user info did not contain a mail or userPrincipalName value")?
         .to_string();
+    let aliases = data
+        .user_principal_name
+        .into_iter()
+        .chain(data.proxy_addresses.iter().filter_map(|proxy| {
+            proxy
+                .split_once(':')
+                .filter(|(kind, _)| kind.eq_ignore_ascii_case("smtp"))
+                .map(|(_, address)| address.to_string())
+        }))
+        .filter(|alias| !alias.is_empty())
+        .collect();
 
     Ok(OAuthUserInfo {
         email,
         name: data.display_name.unwrap_or_default(),
         picture: None,
+        aliases,
     })
 }
 
@@ -884,16 +912,18 @@ fn microsoft_userinfo_from_id_token(id_token: Option<&str>) -> Result<OAuthUserI
         .map_err(|e| format!("Invalid Microsoft ID token: {e}"))?;
     let claims: MicrosoftIdTokenClaims =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid Microsoft ID token: {e}"))?;
+    let preferred_username = claims.preferred_username.filter(|s| !s.is_empty());
     let email = claims
         .email
         .filter(|s| !s.is_empty())
-        .or(claims.preferred_username.filter(|s| !s.is_empty()))
+        .or_else(|| preferred_username.clone())
         .ok_or("Microsoft ID token did not contain an email address")?;
 
     Ok(OAuthUserInfo {
         email,
         name: claims.name.unwrap_or_default(),
         picture: None,
+        aliases: preferred_username.into_iter().collect(),
     })
 }
 
@@ -917,6 +947,8 @@ struct MicrosoftGraphMe {
     mail: Option<String>,
     user_principal_name: Option<String>,
     display_name: Option<String>,
+    #[serde(default)]
+    proxy_addresses: Vec<String>,
 }
 
 pub fn random_base64url(size: usize) -> Result<String, String> {
@@ -1151,6 +1183,7 @@ mod tests {
             mail: Some("alice@example.com".to_string()),
             user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
             display_name: Some("Alice".to_string()),
+            proxy_addresses: Vec::new(),
         })
         .expect("userinfo should parse");
 
@@ -1164,6 +1197,7 @@ mod tests {
             mail: None,
             user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
             display_name: None,
+            proxy_addresses: Vec::new(),
         })
         .expect("userinfo should parse");
 
@@ -1177,9 +1211,32 @@ mod tests {
             mail: None,
             user_principal_name: None,
             display_name: Some("Alice".to_string()),
+            proxy_addresses: Vec::new(),
         })
         .expect_err("userinfo should fail without an email-like identity");
 
         assert!(err.contains("mail or userPrincipalName"));
+    }
+
+    #[test]
+    fn microsoft_userinfo_owns_its_aliases_only() {
+        let user = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: Some("alice@example.org".to_string()),
+            user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
+            display_name: None,
+            proxy_addresses: vec![
+                "SMTP:alice@example.org".to_string(),
+                "smtp:contact@example.org".to_string(),
+                "SIP:alice@example.org".to_string(),
+                "X500:/o=Example".to_string(),
+            ],
+        })
+        .expect("userinfo should parse");
+
+        assert!(user.owns_address("Contact@Example.org"));
+        assert!(user.owns_address("alice@tenant.onmicrosoft.com"));
+        assert!(user.owns_address(" alice@example.org "));
+        assert!(!user.owns_address("bob@example.org"));
+        assert!(!user.owns_address("/o=Example"));
     }
 }

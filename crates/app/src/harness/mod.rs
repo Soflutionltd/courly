@@ -2513,6 +2513,7 @@ fn request_params_from_lua(
                     code: RedactedString::new(code),
                     code_verifier: get_string_field(state, params_idx, "code_verifier")?,
                     reauth_account_id: get_string_field(state, params_idx, "reauth_account_id")?,
+                    expected_email: get_string_field(state, params_idx, "expected_email")?,
                 }),
             })
         }
