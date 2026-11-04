@@ -1078,14 +1078,14 @@ impl ChangeStreamConsumer {
     }
 
     fn scopes_backfill_completed(&self) -> bool {
-        self.observed_scopes.iter().all(|scope| {
-            matches!(
-                self.engine
-                    .backfill_registry()
-                    .snapshot(&self.account_id, scope),
-                None | Some(BackfillState::Completed)
-            )
-        })
+        let registry = self.engine.backfill_registry();
+        !registry.has_running(&self.account_id)
+            && self.observed_scopes.iter().all(|scope| {
+                matches!(
+                    registry.snapshot(&self.account_id, scope),
+                    None | Some(BackfillState::Completed)
+                )
+            })
     }
 
     fn completed_scope_count(&self) -> u32 {
