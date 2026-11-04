@@ -16,6 +16,7 @@ fn option_label(value: &str) -> Option<&'static str> {
         "Dark" => t!("settings.general.option.dark"),
         "Theme" => t!("settings.general.option.theme"),
         "Compact" => t!("settings.general.option.compact"),
+        "Comfortable" => t!("settings.general.option.comfortable"),
         "Default" => t!("settings.general.option.default"),
         "Spacious" => t!("settings.general.option.spacious"),
         "XSmall" => t!("settings.general.option.xsmall"),
@@ -64,7 +65,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
             setting_row(
                 tr(t!("settings.general.email_density")),
                 translated_select(
-                    &["Compact", "Default", "Spacious"],
+                    &Density::SETTINGS,
                     &state.density,
                     option_label,
                     state.open_select == Some(SelectField::Density),

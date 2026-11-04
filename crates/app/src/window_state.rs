@@ -1,4 +1,4 @@
-use crate::ui::layout::{SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH};
+use crate::ui::layout::{SIDEBAR_MIN_WIDTH_COMPACT, THREAD_LIST_MIN_WIDTH};
 use iced::{Point, Size, window};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -115,7 +115,9 @@ impl WindowState {
     fn sanitize(&mut self) {
         self.width = self.width.max(MIN_WIDTH);
         self.height = self.height.max(MIN_HEIGHT);
-        self.sidebar_width = self.sidebar_width.max(SIDEBAR_MIN_WIDTH);
+        // The narrowest density's minimum: the density, read later from the
+        // settings, raises it to its own minimum.
+        self.sidebar_width = self.sidebar_width.max(SIDEBAR_MIN_WIDTH_COMPACT);
         self.thread_list_width = self.thread_list_width.max(THREAD_LIST_MIN_WIDTH);
 
         // Reject negative positions (off-screen)

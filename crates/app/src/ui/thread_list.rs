@@ -253,6 +253,8 @@ pub struct ThreadList {
     pub bimi_cache: Arc<rtsk::bimi::BimiLruCache>,
     /// Show Today / Yesterday / ... headers. Mirrors the user preference.
     pub date_groups: bool,
+    /// Row density. Mirrors the user preference.
+    pub density: Density,
     /// Date headers folded by the user, for every folder of the session.
     pub collapsed_groups: HashSet<DateGroup>,
     /// Open right-click menu, if any.
@@ -280,6 +282,7 @@ impl ThreadList {
             typeahead: TypeaheadState::default(),
             bimi_cache,
             date_groups: true,
+            density: Density::default(),
             collapsed_groups: HashSet::new(),
             row_menu: None,
             pressed: None,
@@ -1030,6 +1033,7 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
                 bimi_logo: bimi_logo.as_deref(),
                 highlight_terms: &highlight_terms,
                 shows_recipients: state.shows_recipients,
+                density: state.density,
             },
             (
                 ThreadListMessage::RowPress,

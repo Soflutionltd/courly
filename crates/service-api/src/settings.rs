@@ -34,6 +34,9 @@ pub enum SettingValue {
     PhishingSensitivity(String),
     Theme(String),
     FontSize(String),
+    /// Row density of the folder column and the message list, as its
+    /// settings value ("Compact", "Comfortable", "Spacious").
+    EmailDensity(String),
     ReadingPanePosition(String),
     /// Attachments roadmap Phase 6: retention window in days. Drives
     /// both `sync_initial`'s walk-back depth (`sync_dispatch.rs`) and
@@ -81,6 +84,7 @@ impl SettingValue {
             Self::PhishingSensitivity(_) => "phishing_sensitivity",
             Self::Theme(_) => "theme",
             Self::FontSize(_) => "font_size",
+            Self::EmailDensity(_) => "email_density",
             Self::ReadingPanePosition(_) => "reading_pane_position",
             Self::SyncPeriodDays(_) => "sync_period_days",
             Self::CompressAttachments(_) => "compress_attachments",
@@ -117,6 +121,7 @@ impl SettingValue {
             Self::PhishingSensitivity(s)
             | Self::Theme(s)
             | Self::FontSize(s)
+            | Self::EmailDensity(s)
             | Self::ReadingPanePosition(s)
             | Self::SyncPeriodDays(s)
             | Self::OpenedFilesCleanupDays(s)
@@ -186,6 +191,7 @@ mod tests {
             SettingValue::PhishingSensitivity("medium".to_string()),
             SettingValue::Theme("light".to_string()),
             SettingValue::FontSize("medium".to_string()),
+            SettingValue::EmailDensity("Compact".to_string()),
             SettingValue::ReadingPanePosition("right".to_string()),
             SettingValue::MailCheckInterval("2".to_string()),
             SettingValue::EmailBodyBackground("Auto".to_string()),

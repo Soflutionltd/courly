@@ -7,7 +7,7 @@ use crate::ui;
 use crate::ui::add_account::AddAccountWizard;
 use crate::ui::layout::{
     APP_RAIL_WIDTH, DRAG_GHOST_MAX_WIDTH, ICON_MD, PAD_ICON_BTN, PANE_GAP, READING_PANE_MIN_WIDTH,
-    SIDE_PANEL_WIDTH, SIDEBAR_MIN_WIDTH, SPACE_SM, SPACE_XS, TEXT_MD, THREAD_LIST_MIN_WIDTH,
+    SIDE_PANEL_WIDTH, SPACE_SM, SPACE_XS, TEXT_MD, THREAD_LIST_MIN_WIDTH,
 };
 use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
@@ -419,9 +419,8 @@ impl ReadyApp {
             Some(Divider::Sidebar) => {
                 // max: leave room for thread list min + reading pane min
                 let max_sidebar = available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH;
-                self.sidebar_width = point
-                    .x
-                    .clamp(SIDEBAR_MIN_WIDTH, max_sidebar.max(SIDEBAR_MIN_WIDTH));
+                let min_sidebar = self.sidebar.density.sidebar_min_width();
+                self.sidebar_width = point.x.clamp(min_sidebar, max_sidebar.max(min_sidebar));
             }
             Some(Divider::ThreadList) => {
                 // max: leave room for reading pane min
@@ -449,9 +448,10 @@ impl ReadyApp {
 
         // 1. Ensure sidebar doesn't exceed what leaves room for the other
         //    two panels at their minimums.
+        let min_sidebar = self.sidebar.density.sidebar_min_width();
         let max_sidebar =
-            (available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH).max(SIDEBAR_MIN_WIDTH);
-        self.sidebar_width = self.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, max_sidebar);
+            (available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH).max(min_sidebar);
+        self.sidebar_width = self.sidebar_width.clamp(min_sidebar, max_sidebar);
 
         // 2. Ensure thread list doesn't exceed what leaves room for the
         //    reading pane at its minimum.

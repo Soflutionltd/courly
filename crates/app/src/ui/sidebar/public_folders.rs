@@ -49,7 +49,7 @@ pub(super) fn pinned_public_folders_section(sidebar: &Sidebar) -> Element<'_, Si
 
             button(
                 container(row_content)
-                    .padding(PAD_NAV_ITEM)
+                    .padding(sidebar.density.nav_item_padding())
                     .width(Length::Fill),
             )
             .on_press(SidebarMessage::SelectPublicFolder(

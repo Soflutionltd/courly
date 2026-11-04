@@ -12,9 +12,9 @@ use crate::font;
 use crate::icon;
 use crate::ui::label_paint::LabelPaint;
 use crate::ui::layout::{
-    AVATAR_MESSAGE_CARD, AVATAR_THREAD_CARD, ICON_SM, ICON_XS, PAD_BADGE, PAD_BODY, PAD_CARD,
-    PAD_HTML_BODY, PAD_ICON_BTN, PAD_THREAD_CARD, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS,
-    TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS, THREAD_CARD_HEIGHT, UNREAD_DOT_SIZE,
+    AVATAR_MESSAGE_CARD, Density, ICON_SM, ICON_XS, PAD_BADGE, PAD_BODY, PAD_CARD, PAD_HTML_BODY,
+    PAD_ICON_BTN, SPACE_SM, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_LG, TEXT_MD, TEXT_SM, TEXT_XS,
+    UNREAD_DOT_SIZE,
 };
 use crate::ui::theme::{self, RowActionTone};
 
@@ -85,6 +85,7 @@ pub struct ThreadCardMarks<'b> {
     pub highlight_terms: &'b [String],
     /// Name the row by its recipients, as Sent and Drafts do.
     pub shows_recipients: bool,
+    pub density: Density,
 }
 
 pub fn thread_card<'a, M: Clone + 'a>(
@@ -104,6 +105,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
         bimi_logo,
         highlight_terms,
         shows_recipients,
+        density,
     } = marks;
     let recipients = if shows_recipients {
         crate::ui::invite_card::display_names(thread.to_addresses.as_deref()).join(", ")
@@ -324,10 +326,10 @@ pub fn thread_card<'a, M: Clone + 'a>(
         .align_y(Alignment::Center);
 
     let text_content = column![top_row, subject_row, snippet_row]
-        .spacing(SPACE_XXXS)
+        .spacing(density.thread_card_line_gap())
         .width(Length::Fill);
 
-    let avatar = sender_avatar(&sender, bimi_logo, AVATAR_THREAD_CARD);
+    let avatar = sender_avatar(&sender, bimi_logo, density.thread_card_avatar());
 
     let unread_dot: Element<'a, M> = if thread.is_read {
         Space::new().width(UNREAD_DOT_SIZE).into()
@@ -350,13 +352,14 @@ pub fn thread_card<'a, M: Clone + 'a>(
 
     // The press goes to the inner area, so a row can start a drag; a click
     // is a release on the row pressed. The button only gives the styling.
+    let card_padding = density.thread_card_padding();
     let hit = mouse_area(
         container(content)
             .padding(iced::Padding {
-                left: PAD_THREAD_CARD.left - UNREAD_DOT_SIZE - SPACE_XXXS,
-                ..PAD_THREAD_CARD
+                left: card_padding.left - UNREAD_DOT_SIZE - SPACE_XXXS,
+                ..card_padding
             })
-            .height(THREAD_CARD_HEIGHT)
+            .height(density.thread_card_height())
             .width(Length::Fill),
     )
     .on_press(on_press(index))

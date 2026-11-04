@@ -514,6 +514,7 @@ impl ReadyApp {
             SettingValue::PhishingSensitivity(prefs.phishing_sensitivity.clone()),
             SettingValue::Theme(prefs.theme.clone()),
             SettingValue::FontSize(prefs.font_size.clone()),
+            SettingValue::EmailDensity(prefs.density.clone()),
             SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
             SettingValue::EmailZoom(prefs.email_zoom.clone()),
             SettingValue::ThreadDateGroups(prefs.thread_date_groups),

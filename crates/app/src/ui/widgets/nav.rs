@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use iced::widget::{Space, button, column, container, row, text};
-use iced::{Alignment, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Padding, Theme};
 use rtsk::db::types::UniversalUnreadCount;
 
 use crate::ui::label_paint::LabelPaint;
@@ -20,8 +20,8 @@ pub enum NavSize {
     Compact,
     /// Settings tabs - more spacious padding
     Regular,
-    /// Sidebar rows at the user's text size, compact padding
-    Sized { text: f32, icon: f32 },
+    /// Sidebar rows at the user's text size and density
+    Sized { text: f32, icon: f32, pad: Padding },
 }
 
 /// Count to render alongside a `nav_button`. Universal sidebar entries
@@ -86,8 +86,9 @@ pub fn nav_button_content<'a, M: 'a>(
         theme::TextClass::Muted.style()
     };
     let pad = match size {
-        NavSize::Compact | NavSize::Sized { .. } => PAD_NAV_ITEM,
+        NavSize::Compact => PAD_NAV_ITEM,
         NavSize::Regular => PAD_SETTINGS_ROW,
+        NavSize::Sized { pad, .. } => pad,
     };
     let icon_size = match size {
         NavSize::Compact => ICON_MD,

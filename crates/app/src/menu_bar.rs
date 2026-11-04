@@ -17,6 +17,7 @@ use crate::app::ReadyApp;
 use crate::message::Message;
 use crate::pop_out::compose::ComposeMessage;
 use crate::pop_out::{PopOutMessage, PopOutWindow};
+use crate::ui::layout::Density;
 use crate::ui::settings::{SettingsMessage, Tab};
 use crate::ui::sidebar::{FolderCommand, SelectedFolder, SidebarMessage};
 use crate::ui::toolbar::ToolbarMessage;
@@ -39,6 +40,7 @@ pub(crate) enum MenuAction {
     ImportContacts,
     CustomizeToolbar,
     Theme(&'static str),
+    Density(Density),
     Format(Format),
     AllAccounts,
     Account(usize),
@@ -406,6 +408,14 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
         A::Theme("System"),
         &tr("main.menu_bar.theme_system"),
     );
+    let density = submenu(&view, &tr("main.menu_bar.density"));
+    for (level, key) in [
+        (Density::Compact, "main.menu_bar.density_compact"),
+        (Density::Comfortable, "main.menu_bar.density_comfortable"),
+        (Density::Spacious, "main.menu_bar.density_spacious"),
+    ] {
+        b.check(&density, A::Density(level), &tr(key));
+    }
     b.check(
         &view,
         A::Command(C::ViewToggleSidePanel),
@@ -866,6 +876,9 @@ impl ReadyApp {
             }
             MenuAction::Format(_) => state.enabled &= snapshot.compose.is_some(),
             MenuAction::Theme(theme) => state.checked = self.settings.theme == theme,
+            MenuAction::Density(level) => {
+                state.checked = Density::from_setting(&self.settings.density) == level;
+            }
             MenuAction::AllAccounts => {
                 state.checked = matches!(self.sidebar.selected_scope, ViewScope::AllAccounts);
             }
@@ -932,6 +945,10 @@ impl ReadyApp {
                 self.update(Message::Toolbar(ToolbarMessage::Customize))
             }
             MenuAction::Theme(theme) => self.update(Message::SetTheme(theme.to_owned())),
+            MenuAction::Density(level) => {
+                self.settings.set_density(level);
+                Task::none()
+            }
             MenuAction::Format(format) => match self.active_compose() {
                 Some(window) => self.update(Message::PopOut(
                     window,

@@ -296,6 +296,8 @@ pub struct Sidebar {
     hovered_folder: Option<DropFolder>,
     /// Text size chosen in settings, copied by the App after each message.
     pub text_size: SidebarTextSize,
+    /// Row density chosen in settings, copied by the App after each message.
+    pub density: Density,
 }
 
 /// The sidebar's text size setting, as an offset from the default sizes.
@@ -322,10 +324,11 @@ impl SidebarTextSize {
     }
 
     /// Folder rows, as `nav_button_content` draws them.
-    pub fn nav(self) -> widgets::NavSize {
+    pub fn nav(self, density: Density) -> widgets::NavSize {
         widgets::NavSize::Sized {
             text: self.scale(TEXT_MD),
             icon: self.scale(ICON_MD),
+            pad: density.nav_item_padding(),
         }
     }
 }
@@ -394,6 +397,7 @@ impl Sidebar {
             message_drop: None,
             hovered_folder: None,
             text_size: SidebarTextSize::default(),
+            density: Density::default(),
         }
     }
 

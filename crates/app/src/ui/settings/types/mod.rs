@@ -18,6 +18,7 @@ use rust_i18n::t;
 
 use crate::db::DateDisplay;
 use crate::pop_out::RenderingMode;
+use crate::ui::layout::Density;
 use crate::ui::undoable::UndoableText;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -448,6 +449,9 @@ impl Settings {
         if let Some(canonical) = ui.font_size.as_deref().and_then(canonical_font_size) {
             self.font_size = canonical.into();
         }
+        if let Some(density) = ui.email_density.as_deref() {
+            self.density = Density::from_setting(density).setting().into();
+        }
         if let Some(canonical) = ui
             .reading_pane_position
             .as_deref()
@@ -522,6 +526,16 @@ impl Settings {
         self.theme = theme;
     }
 
+    /// Density picked outside the panel (menu bar), written like `set_theme`.
+    pub fn set_density(&mut self, density: Density) {
+        let value = density.setting();
+        value.clone_into(&mut self.committed_preferences.density);
+        if let Some(prefs) = self.editing_preferences.as_mut() {
+            value.clone_into(&mut prefs.density);
+        }
+        value.clone_into(&mut self.density);
+    }
+
     /// Whether the editing shadow differs from committed state.
     /// Returns `false` if no editing session is active.
     #[allow(dead_code)] // not yet consumed by close-without-save confirmation flow
@@ -584,7 +598,7 @@ impl Default for Settings {
         let initial_preferences = PreferencesState {
             theme: "Light".into(),
             scale: 1.0,
-            density: "Default".into(),
+            density: Density::default().setting().into(),
             font_size: "Default".into(),
             date_display: DateDisplay::RelativeOffset,
             reading_pane_position: "Right".into(),
@@ -608,7 +622,7 @@ impl Default for Settings {
             scale: 1.0,
             scale_preview: None,
             theme: "Light".into(),
-            density: "Default".into(),
+            density: Density::default().setting().into(),
             font_size: "Default".into(),
             reading_pane_position: "Right".into(),
             selected_theme: None,
@@ -961,5 +975,38 @@ mod tests {
 
         assert_eq!(settings.theme, "Dark");
         assert_eq!(settings.committed_preferences.theme, "Dark");
+    }
+
+    /// The middle density was stored as "Default" before it was named;
+    /// stored values read case-insensitively.
+    #[test]
+    fn apply_bootstrap_reads_density_including_the_legacy_value() {
+        for (stored, expected) in [
+            ("Default", "Comfortable"),
+            ("spacious", "Spacious"),
+            ("Compact", "Compact"),
+            ("unknown", "Comfortable"),
+        ] {
+            let mut settings = Settings::default();
+            let mut ui = empty_ui_snapshot();
+            ui.email_density = Some(stored.into());
+
+            settings.apply_bootstrap(&ui, &default_settings_snapshot());
+
+            assert_eq!(settings.density, expected, "stored {stored}");
+            assert_eq!(settings.committed_preferences.density, expected);
+        }
+    }
+
+    #[test]
+    fn set_density_outside_panel_is_committed_and_survives_the_panel() {
+        let mut settings = Settings::default();
+        settings.begin_editing();
+
+        settings.set_density(Density::Compact);
+        settings.discard_preferences();
+
+        assert_eq!(settings.density, "Compact");
+        assert_eq!(settings.committed_preferences.density, "Compact");
     }
 }

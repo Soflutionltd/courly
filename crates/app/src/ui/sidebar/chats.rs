@@ -100,7 +100,7 @@ fn chat_entry_card<'a>(
         .spacing(SPACE_XS)
         .align_y(Alignment::Center);
 
-    button(container(content).padding(PAD_NAV_ITEM))
+    button(container(content).padding(sidebar.density.nav_item_padding()))
         .on_press(SidebarMessage::SelectChat(contact.email.clone()))
         .padding(0)
         .style(theme::ButtonClass::PinnedSearch { active }.style())

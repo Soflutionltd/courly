@@ -76,7 +76,7 @@ pub(super) fn nav_items<'a>(
     let in_scope = sidebar.selected_scope == *scope;
     let shift = |index: usize| (index > 0, index + 1 < order.len());
 
-    let mut col = column![].spacing(SPACE_XXS);
+    let mut col = column![].spacing(sidebar.density.nav_row_gap());
     for (index, entry) in order.iter().enumerate() {
         match entry {
             SidebarEntry::Separator(id) => {
@@ -104,7 +104,7 @@ pub(super) fn nav_items<'a>(
                         Some(universal_folder_icon(&folder.id)),
                         folder_display_name(folder),
                         active,
-                        sidebar.text_size.nav(),
+                        sidebar.text_size.nav(sidebar.density),
                         folder
                             .universal_unread_count()
                             .map(widgets::NavBadge::Universal),
@@ -137,7 +137,7 @@ pub(super) fn nav_items<'a>(
                             Some(icon::outbox()),
                             folder_display_name(root.folder),
                             active,
-                            sidebar.text_size.nav(),
+                            sidebar.text_size.nav(sidebar.density),
                             Some(widgets::NavBadge::General(root.folder.unread_count())),
                         )
                     } else {
@@ -147,6 +147,7 @@ pub(super) fn nav_items<'a>(
                             forest.root_tree_state(sidebar, root),
                             active,
                             sidebar.text_size,
+                            sidebar.density,
                         )
                     };
                     col = col.push(reorderable_row(

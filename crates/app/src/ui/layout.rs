@@ -87,6 +87,10 @@ pub const AVATAR_DROPDOWN_ITEM: f32 = 20.0;
 pub const AVATAR_DROPDOWN_TRIGGER: f32 = 24.0;
 /// 28px - Thread list cards
 pub const AVATAR_THREAD_CARD: f32 = 28.0;
+/// 24px - Thread list cards at compact density
+pub const AVATAR_THREAD_CARD_COMPACT: f32 = 24.0;
+/// 32px - Thread list cards at spacious density
+pub const AVATAR_THREAD_CARD_SPACIOUS: f32 = 32.0;
 /// 32px - Message cards in reading pane
 pub const AVATAR_MESSAGE_CARD: f32 = 32.0;
 /// Avatar text size as a fraction of the circle diameter.
@@ -184,6 +188,10 @@ pub const UNREAD_DOT_SIZE: f32 = 8.0;
 
 /// Thread card fixed height (three lines + padding)
 pub const THREAD_CARD_HEIGHT: f32 = 68.0;
+/// Thread card height at compact density: three lines, no gaps.
+pub const THREAD_CARD_HEIGHT_COMPACT: f32 = 56.0;
+/// Thread card height at spacious density.
+pub const THREAD_CARD_HEIGHT_SPACIOUS: f32 = 82.0;
 /// Thickness of a user-added sidebar separator.
 pub const SIDEBAR_SEPARATOR_THICKNESS: f32 = 3.0;
 /// User-added separator line between sidebar folders.
@@ -254,6 +262,8 @@ pub const STARRED_BG_ALPHA: f32 = 0.25;
 // ── Per-pane minimum widths (for resize clamping) ──────
 
 pub const SIDEBAR_MIN_WIDTH: f32 = 220.0;
+pub const SIDEBAR_MIN_WIDTH_COMPACT: f32 = 180.0;
+pub const SIDEBAR_MIN_WIDTH_SPACIOUS: f32 = 240.0;
 /// Height of the sidebar header (mode button + dropdown + compose stack)
 pub const SIDEBAR_HEADER_HEIGHT: f32 = 76.0;
 pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
@@ -292,6 +302,20 @@ pub const PAD_NAV_ITEM: Padding = Padding {
     right: 8.0,
     bottom: 4.0,
     left: 8.0,
+};
+
+/// Sidebar folder row at compact density.
+pub const PAD_NAV_ITEM_COMPACT: Padding = Padding {
+    top: SPACE_XXXS,
+    bottom: SPACE_XXXS,
+    ..PAD_NAV_ITEM
+};
+
+/// Sidebar folder row at spacious density.
+pub const PAD_NAV_ITEM_SPACIOUS: Padding = Padding {
+    top: SPACE_XS,
+    bottom: SPACE_XS,
+    ..PAD_NAV_ITEM
 };
 
 /// Standard button (e.g. compose, reply).
@@ -349,6 +373,116 @@ pub const PAD_THREAD_CARD: Padding = Padding {
     bottom: 8.0,
     left: 12.0,
 };
+
+/// Thread card internal content at compact density.
+pub const PAD_THREAD_CARD_COMPACT: Padding = Padding {
+    top: SPACE_XXXS,
+    bottom: SPACE_XXXS,
+    ..PAD_THREAD_CARD
+};
+
+/// Thread card internal content at spacious density.
+pub const PAD_THREAD_CARD_SPACIOUS: Padding = Padding {
+    top: SPACE_SM,
+    bottom: SPACE_SM,
+    ..PAD_THREAD_CARD
+};
+
+// ── Density ─────────────────────────────────────────────
+
+/// How tightly the folder column and the message list pack their rows,
+/// picked in Settings > General and in View > Density.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+    Spacious,
+}
+
+impl Density {
+    /// Settings values, in menu order.
+    pub const SETTINGS: [&'static str; 3] = ["Compact", "Comfortable", "Spacious"];
+
+    /// Reads a stored value case-insensitively. Before the levels were
+    /// named, the middle one was stored as "Default"; it and any unknown
+    /// value read as `Comfortable`.
+    pub fn from_setting(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("Compact") {
+            Self::Compact
+        } else if value.eq_ignore_ascii_case("Spacious") {
+            Self::Spacious
+        } else {
+            Self::Comfortable
+        }
+    }
+
+    pub fn setting(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact",
+            Self::Comfortable => "Comfortable",
+            Self::Spacious => "Spacious",
+        }
+    }
+
+    /// Padding inside a folder row of the sidebar.
+    pub fn nav_item_padding(self) -> Padding {
+        match self {
+            Self::Compact => PAD_NAV_ITEM_COMPACT,
+            Self::Comfortable => PAD_NAV_ITEM,
+            Self::Spacious => PAD_NAV_ITEM_SPACIOUS,
+        }
+    }
+
+    /// Gap between two folder rows of the sidebar.
+    pub fn nav_row_gap(self) -> f32 {
+        match self {
+            Self::Compact => SPACE_XXXS,
+            Self::Comfortable | Self::Spacious => SPACE_XXS,
+        }
+    }
+
+    pub fn sidebar_min_width(self) -> f32 {
+        match self {
+            Self::Compact => SIDEBAR_MIN_WIDTH_COMPACT,
+            Self::Comfortable => SIDEBAR_MIN_WIDTH,
+            Self::Spacious => SIDEBAR_MIN_WIDTH_SPACIOUS,
+        }
+    }
+
+    pub fn thread_card_height(self) -> f32 {
+        match self {
+            Self::Compact => THREAD_CARD_HEIGHT_COMPACT,
+            Self::Comfortable => THREAD_CARD_HEIGHT,
+            Self::Spacious => THREAD_CARD_HEIGHT_SPACIOUS,
+        }
+    }
+
+    pub fn thread_card_padding(self) -> Padding {
+        match self {
+            Self::Compact => PAD_THREAD_CARD_COMPACT,
+            Self::Comfortable => PAD_THREAD_CARD,
+            Self::Spacious => PAD_THREAD_CARD_SPACIOUS,
+        }
+    }
+
+    /// Gap between the sender, subject and snippet lines of a thread card.
+    pub fn thread_card_line_gap(self) -> f32 {
+        match self {
+            Self::Compact => SPACE_0,
+            Self::Comfortable => SPACE_XXXS,
+            Self::Spacious => SPACE_XXS,
+        }
+    }
+
+    pub fn thread_card_avatar(self) -> f32 {
+        match self {
+            Self::Compact => AVATAR_THREAD_CARD_COMPACT,
+            Self::Comfortable => AVATAR_THREAD_CARD,
+            Self::Spacious => AVATAR_THREAD_CARD_SPACIOUS,
+        }
+    }
+}
 
 /// Search / text input field.
 pub const PAD_INPUT: Padding = Padding {

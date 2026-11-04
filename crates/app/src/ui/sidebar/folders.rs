@@ -217,6 +217,7 @@ pub(super) fn folder_row_content<'a>(
     tree_state: Option<(bool, bool)>,
     active: bool,
     text_size: SidebarTextSize,
+    density: Density,
 ) -> Element<'a, SidebarMessage> {
     let mut item_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
 
@@ -268,7 +269,7 @@ pub(super) fn folder_row_content<'a>(
     }
 
     container(item_row)
-        .padding(PAD_NAV_ITEM)
+        .padding(density.nav_item_padding())
         .width(Length::Fill)
         .into()
 }
@@ -289,6 +290,7 @@ fn folder_row<'a>(
         tree_state,
         active,
         sidebar.text_size,
+        sidebar.density,
     ))
     .on_press(SidebarMessage::SelectIn(
         scope.clone(),
