@@ -85,6 +85,9 @@ pub(crate) async fn dispatch(
         RequestParams::SyncResyncAccount { params } => {
             sync::handle_resync_account(&boot_state, params).await
         }
+        RequestParams::SyncServerSearch { params } => {
+            sync::handle_server_search(&boot_state, params).await
+        }
         RequestParams::SyncFocusFolder { params } => {
             sync::handle_focus_folder(&boot_state, params).await
         }

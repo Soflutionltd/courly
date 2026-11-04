@@ -460,6 +460,19 @@ impl SyncRuntime {
         self.inner.resident_engine.resync_account(account_id).await
     }
 
+    /// Store the older server mail `address` took part in; see
+    /// `ResidentEngine::fetch_participant_mail`.
+    pub async fn fetch_participant_mail(
+        &self,
+        account_id: Option<&str>,
+        address: &str,
+    ) -> Result<usize, String> {
+        self.inner
+            .resident_engine
+            .fetch_participant_mail(account_id, address)
+            .await
+    }
+
     /// Point the resident engine's fast cadence at the folder the user is
     /// looking at. Returns how many attached accounts hold it in focus.
     pub async fn focus_folder(&self, account_id: Option<&str>, folder_id: Option<&str>) -> u32 {

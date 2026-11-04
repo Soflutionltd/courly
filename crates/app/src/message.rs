@@ -305,6 +305,9 @@ pub enum Message {
     SearchQueryChanged(String),
     SearchExecute,
     SearchCompleted(crate::handlers::search::SearchExecutionResult),
+    /// The server search for a person ended: how many older messages it
+    /// stored, keyed by the address searched.
+    ServerSearchDone(String, Result<usize, String>),
     SearchClear,
     FocusSearchBar,
     SearchBlur,

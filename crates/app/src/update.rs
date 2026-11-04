@@ -692,6 +692,9 @@ impl ReadyApp {
             Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
             Message::SearchExecute => self.handle_search_execute(),
             Message::SearchCompleted(result) => self.handle_search_completed(result),
+            Message::ServerSearchDone(address, result) => {
+                self.handle_server_search_done(&address, result)
+            }
             Message::SearchClear => self.handle_search_clear(),
             Message::FocusSearchBar => self.handle_focus_search_bar(),
             Message::SearchBlur => {

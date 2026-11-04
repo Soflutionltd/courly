@@ -8,7 +8,7 @@ use crate::db::{self, Thread};
 use crate::ui::search_scope::{SearchScopeChoice, SearchScopeMessage};
 use crate::ui::search_suggest::{SearchSuggestMessage, SuggestRow};
 use crate::ui::sidebar::truncate_query;
-use crate::ui::thread_list::ThreadListMode;
+use crate::ui::thread_list::{ServerSearchStatus, ThreadListMode};
 use crate::{Message, ReadyApp};
 use rtsk::contacts::search::ContactOrigins;
 use rtsk::db::types::AccountScope;
@@ -119,6 +119,8 @@ pub struct SearchCompletionBehavior {
     pub(crate) pinned_state: SearchPinnedStateBehavior,
     pub(crate) post_success: SearchPostSuccessEffect,
     pub(crate) folder_restore: FolderRestoreBehavior,
+    /// Results refreshed under the reader: the open conversation stays.
+    pub(crate) keep_selection: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +134,13 @@ pub(crate) struct ResolvedSearch {
 pub(crate) enum SearchFreshness {
     Query(rtsk::generation::GenerationToken<rtsk::generation::Search>),
     Snapshot(rtsk::generation::GenerationToken<rtsk::generation::Nav>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ServerSearch {
+    pub(crate) address: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) status: ServerSearchStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +202,7 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                     pinned_state,
                     post_success: SearchPostSuccessEffect::RefreshPinnedSearchList,
                     folder_restore,
+                    keep_selection: false,
                 },
             }
         }
@@ -208,6 +218,7 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                 pinned_state: SearchPinnedStateBehavior::SmartFolder { id },
                 post_success: SearchPostSuccessEffect::None,
                 folder_restore,
+                keep_selection: false,
             },
         },
         SearchIntent::PinnedActivation { id } => ResolvedSearch {
@@ -223,6 +234,7 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                 },
                 post_success: SearchPostSuccessEffect::None,
                 folder_restore,
+                keep_selection: false,
             },
         },
         SearchIntent::PinnedRefresh { id } => {
@@ -262,6 +274,7 @@ fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> Resolve
                     },
                     post_success: SearchPostSuccessEffect::RefreshPinnedSearchList,
                     folder_restore: FolderRestoreBehavior::LeaveAsIs,
+                    keep_selection: false,
                 },
             }
         }
@@ -530,7 +543,10 @@ impl ReadyApp {
                 };
 
                 self.thread_list.set_threads(threads);
-                self.clear_thread_selection();
+                if !result.resolved.completion.keep_selection {
+                    self.clear_thread_selection();
+                }
+                self.show_server_search_status();
 
                 match &result.resolved.intent {
                     SearchIntent::PinnedActivation { id } | SearchIntent::PinnedRefresh { id } => {
@@ -803,6 +819,10 @@ impl ReadyApp {
     /// The typed query run into the list without saving it: Enter or a pick
     /// still goes through `handle_search_execute`, which saves it once.
     fn run_live_search(&mut self) -> Task<Message> {
+        self.search_without_saving(false)
+    }
+
+    fn search_without_saving(&mut self, keep_selection: bool) -> Task<Message> {
         let query = self.effective_search_query();
         if query.is_empty() {
             return Task::none();
@@ -827,6 +847,7 @@ impl ReadyApp {
         resolved.completion.persistence = SearchPersistenceBehavior::None;
         resolved.completion.pinned_state = pinned_state;
         resolved.completion.post_success = SearchPostSuccessEffect::None;
+        resolved.completion.keep_selection = keep_selection;
         self.dispatch_resolved_search(resolved)
     }
 
@@ -836,10 +857,97 @@ impl ReadyApp {
         let Some(contact) = self.search_suggest.contact(index) else {
             return Task::none();
         };
-        self.search_sender = Some(contact.insert_value.clone());
+        let address = contact.insert_value.clone();
+        self.search_sender = Some(address.clone());
         self.search_query.set_text(String::new());
         self.thread_list.search_query.clear();
-        Task::batch([self.handle_search_execute(), self.handle_focus_search_bar()])
+        Task::batch([
+            self.handle_search_execute(),
+            self.handle_focus_search_bar(),
+            self.start_server_search(address),
+        ])
+    }
+
+    /// Ask the Microsoft server for the person's mail older than the local
+    /// window, once per person and scope in a session.
+    fn start_server_search(&mut self, address: String) -> Task<Message> {
+        if !address.contains('@') {
+            return Task::none();
+        }
+        let account_id = match self.search_target().0 {
+            ViewScope::Account(id) => Some(id),
+            _ => None,
+        };
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("sync.server_search: no ServiceClient yet; searching local mail only");
+            return Task::none();
+        };
+        let key = (account_id.clone(), address.to_lowercase());
+        if !self.server_searched.insert(key) {
+            return Task::none();
+        }
+        self.server_search = Some(ServerSearch {
+            address: address.clone(),
+            account_id: account_id.clone(),
+            status: ServerSearchStatus::Running,
+        });
+        self.show_server_search_status();
+        let reply_address = address.clone();
+        Task::perform(
+            async move {
+                client
+                    .server_search(account_id, address)
+                    .await
+                    .map(|ack| ack.fetched)
+                    .map_err(|error| error.to_string())
+            },
+            move |result| Message::ServerSearchDone(reply_address.clone(), result),
+        )
+    }
+
+    pub(crate) fn handle_server_search_done(
+        &mut self,
+        address: &str,
+        result: Result<usize, String>,
+    ) -> Task<Message> {
+        let Some(search) = self
+            .server_search
+            .as_mut()
+            .filter(|search| search.address == address)
+        else {
+            return Task::none();
+        };
+        let refresh = match result {
+            Ok(fetched) => {
+                self.server_search = None;
+                fetched > 0
+            }
+            Err(error) => {
+                log::warn!("sync.server_search for {address} failed: {error}");
+                search.status = ServerSearchStatus::Failed;
+                let key = (search.account_id.clone(), address.to_lowercase());
+                self.server_searched.remove(&key);
+                false
+            }
+        };
+        self.show_server_search_status();
+        if refresh
+            && self.thread_list.mode == ThreadListMode::Search
+            && self.search_sender.as_deref() == Some(address)
+        {
+            return self.search_without_saving(true);
+        }
+        Task::none()
+    }
+
+    /// The server search note under the results, for the person in the pill.
+    fn show_server_search_status(&mut self) {
+        self.thread_list.server_search = match &self.server_search {
+            Some(search) if self.search_sender.as_deref() == Some(search.address.as_str()) => {
+                search.status
+            }
+            _ => ServerSearchStatus::Idle,
+        };
     }
 
     fn apply_search_pinned_state(

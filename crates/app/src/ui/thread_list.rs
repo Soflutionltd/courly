@@ -212,6 +212,14 @@ pub enum ThreadListMode {
     Search,
 }
 
+/// The Microsoft server search for the person in the search pill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerSearchStatus {
+    Idle,
+    Running,
+    Failed,
+}
+
 // ── State ──────────────────────────────────────────────
 
 pub struct ThreadList {
@@ -231,6 +239,7 @@ pub struct ThreadList {
     pub search_query: String,
     /// The search already covers every mailbox, so the widen link is hidden.
     pub search_covers_all: bool,
+    pub server_search: ServerSearchStatus,
     /// `updated_at` of the active pinned search (unix seconds), when the
     /// thread list is showing a pinned-search snapshot. Drives the
     /// "Last updated …" indicator under the search bar. `None` means
@@ -265,6 +274,7 @@ impl ThreadList {
             mode: ThreadListMode::Scope,
             search_query: String::new(),
             search_covers_all: true,
+            server_search: ServerSearchStatus::Idle,
             pinned_search_updated_at: None,
             auto_advance_direction: AutoAdvanceDirection::Next,
             typeahead: TypeaheadState::default(),
@@ -832,16 +842,7 @@ impl Component for ThreadList {
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, ThreadListMessage> {
-        let selection_count = self.selection_count();
-        let header = thread_list_header(
-            &self.folder_name,
-            &self.scope_name,
-            &self.mode,
-            self.threads.len(),
-            selection_count,
-            self.pinned_search_updated_at,
-            self.search_covers_all,
-        );
+        let header = thread_list_header(self);
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
             let (title, subtitle) = match self.mode {
@@ -869,15 +870,15 @@ impl Component for ThreadList {
 
 // ── View helpers ────────────────────────────────────────
 
-fn thread_list_header<'a>(
-    folder_name: &'a str,
-    scope_name: &'a str,
-    mode: &ThreadListMode,
-    thread_count: usize,
-    selection_count: usize,
-    pinned_search_updated_at: Option<i64>,
-    search_covers_all: bool,
-) -> Element<'a, ThreadListMessage> {
+fn thread_list_header<'a>(state: &'a ThreadList) -> Element<'a, ThreadListMessage> {
+    let folder_name = state.folder_name.as_str();
+    let scope_name = state.scope_name.as_str();
+    let mode = &state.mode;
+    let thread_count = state.threads.len();
+    let selection_count = state.selection_count();
+    let pinned_search_updated_at = state.pinned_search_updated_at;
+    let search_covers_all = state.search_covers_all;
+    let server_search = state.server_search;
     let staleness: Option<Element<'a, ThreadListMessage>> = pinned_search_updated_at.map(|ts| {
         text(t!(
             "main.search.last_updated",
@@ -928,7 +929,21 @@ fn thread_list_header<'a>(
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style());
 
-                let mut header = row![results_text, Space::new().width(Length::Fill)]
+                let server_note = match server_search {
+                    ServerSearchStatus::Idle => None,
+                    ServerSearchStatus::Running => Some(t!("main.search.server_running")),
+                    ServerSearchStatus::Failed => Some(t!("main.search.server_failed")),
+                };
+                let mut header = row![results_text].spacing(SPACE_XS);
+                if let Some(note) = server_note {
+                    header = header.push(
+                        text(note)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    );
+                }
+                let mut header = header
+                    .push(Space::new().width(Length::Fill))
                     .align_y(iced::Alignment::Center);
                 if !search_covers_all {
                     header = header.push(

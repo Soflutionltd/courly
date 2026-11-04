@@ -134,6 +134,22 @@ pub struct SyncFocusFolderAck {
     pub focused_accounts: u32,
 }
 
+/// `sync.server_search` request body: fetch from the Microsoft server the
+/// mail `address` sent or received that the local store does not hold.
+/// `account_id` is `None` to search every attached Microsoft account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncServerSearchParams {
+    pub account_id: Option<String>,
+    pub address: String,
+}
+
+/// Response to `sync.server_search`, sent once the fetched messages are
+/// stored and indexed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncServerSearchAck {
+    pub fetched: usize,
+}
+
 /// Synchronous response to `sync.resume_account`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncResumeAck {

@@ -488,6 +488,57 @@ impl ResidentEngine {
         focused
     }
 
+    /// Fetch from the server the mail `address` took part in that Courly
+    /// does not hold, on every attached Microsoft account or only on
+    /// `account_id`. Returns how many messages were stored. Fails only when
+    /// every searched account failed.
+    pub async fn fetch_participant_mail(
+        &self,
+        account_id: Option<&str>,
+        address: &str,
+    ) -> Result<usize, String> {
+        let slots: Vec<(String, Arc<ResidentSlot>)> = {
+            let slots = self.inner.slots.lock().await;
+            slots
+                .iter()
+                .filter(|(id, slot)| {
+                    slot.provider == BifrostProviderKind::Graph
+                        && account_id.is_none_or(|wanted| wanted == id.as_str())
+                })
+                .map(|(id, slot)| (id.clone(), Arc::clone(slot)))
+                .collect()
+        };
+        let mut fetched = 0;
+        let mut errors = Vec::new();
+        for (id, slot) in &slots {
+            match super::server_search::fetch_graph_participant_mail(
+                &self.inner.engine.engine(),
+                &self.inner.stores,
+                id,
+                slot.containers.folder_map(),
+                address,
+            )
+            .await
+            {
+                Ok(count) => {
+                    log::info!("server search on {id}: {count} older message(s) fetched");
+                    if count > 0 {
+                        slot.mutation_signal.notify_one();
+                    }
+                    fetched += count;
+                }
+                Err(error) => {
+                    log::warn!("server search on {id} failed: {error}");
+                    errors.push(error);
+                }
+            }
+        }
+        if !slots.is_empty() && errors.len() == slots.len() {
+            return Err(errors.join("; "));
+        }
+        Ok(fetched)
+    }
+
     pub async fn resume_account(&self, account_id: &str) -> Result<bool, String> {
         let slot = {
             let slots = self.inner.slots.lock().await;

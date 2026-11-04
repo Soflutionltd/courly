@@ -179,8 +179,13 @@ pub struct ReadyApp {
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     /// Sender picked from the suggestions, shown as a pill in front of the
-    /// field and searched as `from:` without appearing in the text.
+    /// field and searched as `with:` without appearing in the text.
     pub(crate) search_sender: Option<String>,
+    /// People (with the account searched, `None` for all) whose older mail
+    /// was already asked of the server this session.
+    pub(crate) server_searched: std::collections::HashSet<(Option<String>, String)>,
+    /// The server search running or failed for the latest person picked.
+    pub(crate) server_search: Option<crate::handlers::search::ServerSearch>,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
     /// Whether the user was in a sidebar-scoped view before entering search.
     /// When search is cleared, threads are reloaded from the current
@@ -483,6 +488,8 @@ impl ReadyApp {
             search_generation: GenerationCounter::new(),
             search_query: UndoableText::new(),
             search_sender: None,
+            server_searched: std::collections::HashSet::new(),
+            server_search: None,
             search_debounce_deadline: None,
             was_in_scope_view: false,
             search_history: Vec::new(),

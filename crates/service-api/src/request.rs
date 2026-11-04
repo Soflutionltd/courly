@@ -38,7 +38,7 @@ use crate::signature::{
 use crate::smart_folder::SmartFolderCreateParams;
 use crate::sync::{
     SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams,
-    SyncResyncAccountParams, SyncStartAccountParams,
+    SyncResyncAccountParams, SyncServerSearchParams, SyncStartAccountParams,
 };
 use crate::template::{TemplateDeleteParams, TemplateSaveParams};
 use crate::thread_ui_state::ThreadUiStateSetParams;
@@ -1162,6 +1162,14 @@ pub enum RequestParams {
     SyncFocusFolder {
         params: SyncFocusFolderParams,
     },
+    /// Fetch from the Microsoft server the older mail one person took part
+    /// in, so the local search finds it.
+    ///
+    /// 120 s timeout: up to a few search pages and a few hundred message
+    /// fetches against Graph.
+    SyncServerSearch {
+        params: SyncServerSearchParams,
+    },
     /// Phase 5: explicit-request calendar sync (manual "Sync now",
     /// post-account-add, RSVP-then-resync). The handler returns within
     /// microseconds: it acquires the per-account map, spawns or returns
@@ -1715,6 +1723,7 @@ impl RequestParams {
             Self::SyncResumeAccount { .. } => "sync.resume_account",
             Self::SyncResyncAccount { .. } => "sync.resync_account",
             Self::SyncFocusFolder { .. } => "sync.focus_folder",
+            Self::SyncServerSearch { .. } => "sync.server_search",
             Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
             Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
@@ -1852,6 +1861,7 @@ impl RequestParams {
             Self::SyncResumeAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::SyncResyncAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
             Self::SyncFocusFolder { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::SyncServerSearch { .. } => RequestTimeoutKind::Finite(Duration::from_secs(120)),
             // Handler-only budgets for the calendar request pair.
             // Same shape as the sync pair above.
             Self::CalendarStartAccountSync { .. } => {
@@ -1997,7 +2007,8 @@ impl RequestParams {
             // that the work succeeded.
             | Self::AttachmentClearCache { .. }
             | Self::ExtractStatus { .. }
-            | Self::AccountVerify { .. } => Idempotency::Idempotent,
+            | Self::AccountVerify { .. }
+            | Self::SyncServerSearch { .. } => Idempotency::Idempotent,
 
             Self::Shutdown
             | Self::ActionExecutePlan { .. }
@@ -2142,6 +2153,7 @@ impl RequestParams {
             Self::SyncResumeAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncResyncAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncFocusFolder { params } => serde_json::json!({ "params": params }),
+            Self::SyncServerSearch { params } => serde_json::json!({ "params": params }),
             Self::CalendarStartAccountSync { params } => serde_json::json!({ "params": params }),
             Self::CalendarCancelAccountSync { params } => {
                 serde_json::json!({ "params": params })
@@ -2365,6 +2377,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("sync.focus_folder params: {e}"))?;
                 Ok(Self::SyncFocusFolder { params: p.params })
+            }
+            "sync.server_search" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SyncServerSearchParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("sync.server_search params: {e}"))?;
+                Ok(Self::SyncServerSearch { params: p.params })
             }
             "calendar.start_account_sync" => {
                 #[derive(Deserialize)]
@@ -3443,6 +3464,23 @@ mod tests {
             },
         };
         assert_eq!(original.method_name(), "sync.focus_folder");
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn sync_server_search_round_trips_from_method_params() {
+        let original = RequestParams::SyncServerSearch {
+            params: SyncServerSearchParams {
+                account_id: Some("acc-1".into()),
+                address: "person@example.org".into(),
+            },
+        };
+        assert_eq!(original.method_name(), "sync.server_search");
         let parsed = RequestParams::from_method_params(
             original.method_name(),
             Some(original.params_value()),

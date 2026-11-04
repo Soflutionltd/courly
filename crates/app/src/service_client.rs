@@ -1310,6 +1310,20 @@ impl ServiceClient {
         .await
     }
 
+    pub async fn server_search(
+        &self,
+        account_id: Option<String>,
+        address: String,
+    ) -> Result<service_api::SyncServerSearchAck, ClientError> {
+        self.request(RequestParams::SyncServerSearch {
+            params: service_api::SyncServerSearchParams {
+                account_id,
+                address,
+            },
+        })
+        .await
+    }
+
     pub async fn resync_sync_account(
         &self,
         account_id: String,

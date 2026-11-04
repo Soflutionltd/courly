@@ -13,6 +13,7 @@ pub mod push_ingress;
 pub mod reconcile;
 pub mod resident;
 pub mod server_filters;
+pub mod server_search;
 pub mod settings;
 pub mod token_source;
 

@@ -18,7 +18,7 @@ use serde_json::Value;
 use service_api::{
     ServiceError, SyncCancelAccountParams, SyncFocusFolderAck, SyncFocusFolderParams,
     SyncResumeAccountParams, SyncResumeAck, SyncResyncAccountParams, SyncResyncAck,
-    SyncStartAccountParams,
+    SyncServerSearchAck, SyncServerSearchParams, SyncStartAccountParams,
 };
 use std::sync::Arc;
 
@@ -71,6 +71,41 @@ pub(crate) async fn handle_cancel_account(
     }
 
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_server_search(
+    boot_state: &Arc<BootSharedState>,
+    params: SyncServerSearchParams,
+) -> Result<Value, ServiceError> {
+    let address = params.address.trim();
+    if !is_plain_address(address) {
+        return Err(ServiceError::InvalidParams {
+            method: "sync.server_search".into(),
+            message: "address must be a single email address".into(),
+        });
+    }
+    let runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal(
+            "sync.server_search received before SyncRuntime was installed; \
+             UI must wait for boot.ready"
+                .into(),
+        )
+    })?;
+    let fetched = runtime
+        .fetch_participant_mail(params.account_id.as_deref(), address)
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(SyncServerSearchAck { fetched })
+        .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// One `local@domain` token, which Graph's KQL takes as a single value.
+fn is_plain_address(address: &str) -> bool {
+    address.split_once('@').is_some_and(|(local, domain)| {
+        !local.is_empty() && domain.contains('.') && !domain.contains('@')
+    }) && !address
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '"' | '(' | ')' | ':'))
 }
 
 pub(crate) async fn handle_focus_folder(
@@ -133,4 +168,19 @@ pub(crate) async fn handle_resync_account(
         account_id: params.account_id,
     })
     .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_plain_address;
+
+    #[test]
+    fn only_a_single_address_reaches_the_server_search() {
+        assert!(is_plain_address("person@example.org"));
+        assert!(!is_plain_address("person"));
+        assert!(!is_plain_address("@example.org"));
+        assert!(!is_plain_address("a@b@example.org"));
+        assert!(!is_plain_address("person@example.org OR subject:x"));
+        assert!(!is_plain_address("person@example.org\""));
+    }
 }

@@ -140,7 +140,7 @@ pub use sync::{
     AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCancelAccountParams,
     SyncCancelAck, SyncCompleted, SyncFocusFolderAck, SyncFocusFolderParams, SyncPauseReason,
     SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncResyncAccountParams, SyncResyncAck,
-    SyncRunId, SyncStartAccountParams, SyncStartAck,
+    SyncRunId, SyncServerSearchAck, SyncServerSearchParams, SyncStartAccountParams, SyncStartAck,
 };
 pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams};
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
