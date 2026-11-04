@@ -191,18 +191,21 @@ impl ReadyApp {
         self.dispatch_plan_advancing(plan)
     }
 
-    /// Dispatch, moving the selection on first when the plan took the
-    /// selected threads out of the list.
+    /// Dispatch, then move the selection on when the plan took the selected
+    /// threads out of the list. Dispatching invalidates in-flight loads, so
+    /// advancing first would drop the new selection's messages.
     pub(crate) fn dispatch_plan_advancing(
         &mut self,
         plan: crate::action_resolve::ActionExecutionPlan,
     ) -> Task<Message> {
-        let advance = if plan.hidden.held_selection {
+        let held_selection = plan.hidden.held_selection;
+        let dispatch = self.dispatch_plan(plan);
+        let advance = if held_selection {
             self.handle_thread_list(crate::ui::thread_list::ThreadListMessage::AutoAdvance)
         } else {
             Task::none()
         };
-        Task::batch([advance, self.dispatch_plan(plan)])
+        Task::batch([dispatch, advance])
     }
 
     /// Dispatch an execution plan via IPC to the Service-side action
