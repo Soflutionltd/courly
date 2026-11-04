@@ -31,14 +31,20 @@ pub(crate) fn local_dt(millis: i64) -> Option<jiff::Zoned> {
         .map(|ts| ts.to_zoned(jiff::tz::TimeZone::system()))
 }
 
-/// "Mar 12", "12 mars".
+/// "Mar 12", "12 mars"; "Mar 12, 2025", "12 mars 2025" before this year.
 pub(crate) fn short_date(dt: &jiff::Zoned) -> String {
-    t!(
-        "main.date.short",
-        month = crate::i18n::month_short(dt.month()),
-        day = dt.day()
-    )
-    .into_owned()
+    let month = crate::i18n::month_short(dt.month());
+    if dt.year() == jiff::Zoned::now().year() {
+        t!("main.date.short", month = month, day = dt.day()).into_owned()
+    } else {
+        t!(
+            "main.date.short_year",
+            month = month,
+            day = dt.day(),
+            year = dt.year()
+        )
+        .into_owned()
+    }
 }
 
 /// "Mar 12, 2026, 10:13 AM", "12 mars 2026, 10:13".
@@ -746,7 +752,17 @@ fn truncate_snippet(snippet: Option<&str>, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::local_dt;
+    use super::{local_dt, short_date};
+
+    #[test]
+    fn short_date_shows_the_year_only_before_this_year() {
+        let last_year = jiff::Zoned::now()
+            .checked_sub(jiff::Span::new().years(1))
+            .expect("a year ago");
+        assert!(short_date(&last_year).contains(&last_year.year().to_string()));
+        let today = jiff::Zoned::now();
+        assert!(!short_date(&today).contains(&today.year().to_string()));
+    }
 
     #[test]
     fn local_dt_reads_stored_milliseconds() {
