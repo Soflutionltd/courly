@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bifrost_sync::SyncEngine;
@@ -150,6 +150,29 @@ impl HydrateBatch {
         folder_map: &HashMap<String, FolderKind>,
         changes: &[Change],
     ) -> Result<Self, bifrost_sync::Error> {
+        Self::from_changes_skipping(
+            engine,
+            account_id,
+            provider,
+            folder_map,
+            changes,
+            &HashSet::new(),
+        )
+        .await
+    }
+
+    /// Like [`Self::from_changes`], but the `Created` changes whose provider
+    /// id is in `already_cached` keep their membership and are not fetched
+    /// again: re-enumerating a scope says nothing about a message the store
+    /// already holds in full.
+    pub async fn from_changes_skipping(
+        engine: &SyncEngine,
+        account_id: &AccountId,
+        provider: BifrostProviderKind,
+        folder_map: &HashMap<String, FolderKind>,
+        changes: &[Change],
+        already_cached: &HashSet<String>,
+    ) -> Result<Self, bifrost_sync::Error> {
         let mut batch = Self::default();
         // Record live/removed membership BEFORE hydration. The Graph
         // move-vs-purge reconcile is per-DRIVE, not per-batch: a move's
@@ -162,10 +185,14 @@ impl HydrateBatch {
         }
         let hydrations = changes
             .iter()
-            .map(|change| {
+            .map(|change| async move {
+                if is_cached_creation(change, already_cached) {
+                    return Ok(HydratedChange::ScopeOnly);
+                }
                 hydrate_change_to_message_insert_row(
                     engine, account_id, provider, folder_map, change,
                 )
+                .await
             })
             .collect::<Vec<_>>();
         let mut hydrated = futures::stream::iter(hydrations).buffered(HYDRATE_CONCURRENCY);
@@ -229,6 +256,28 @@ impl HydrateBatch {
         }
         batch
     }
+}
+
+/// Provider ids of the `Created` changes in `changes`: the only kind a
+/// scope re-enumeration produces.
+pub fn created_ids(changes: &[Change]) -> Vec<String> {
+    changes
+        .iter()
+        .filter_map(|change| match change {
+            Change::ObjectChange(object) if object.kind == ObjectChangeKind::Created => {
+                Some(object.id.0.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn is_cached_creation(change: &Change, already_cached: &HashSet<String>) -> bool {
+    matches!(
+        change,
+        Change::ObjectChange(object)
+            if object.kind == ObjectChangeKind::Created && already_cached.contains(&object.id.0)
+    )
 }
 
 /// Classify a single change into the drive's live / removed-candidate id sets
@@ -1543,6 +1592,38 @@ mod tests {
         assert_eq!(batch.rows[0].message.id, "keep");
         assert_eq!(batch.deleted_ids.len(), 1);
         assert!(!batch.blocked, "a deletion must not block the ack");
+    }
+
+    #[test]
+    fn only_a_cached_creation_skips_hydration() {
+        let created = |id: &str| {
+            Change::ObjectChange(ObjectChange {
+                id: ObjectId(id.to_string()),
+                kind: ObjectChangeKind::Created,
+            })
+        };
+        let changes = vec![
+            created("cached"),
+            created("fresh"),
+            Change::ObjectChange(ObjectChange {
+                id: ObjectId("cached".to_string()),
+                kind: ObjectChangeKind::Updated,
+            }),
+            Change::ObjectChange(ObjectChange {
+                id: ObjectId("cached".to_string()),
+                kind: ObjectChangeKind::Destroyed,
+            }),
+        ];
+        assert_eq!(
+            super::created_ids(&changes),
+            vec!["cached".to_string(), "fresh".to_string()]
+        );
+        let cached = HashSet::from(["cached".to_string()]);
+        let skipped: Vec<bool> = changes
+            .iter()
+            .map(|change| super::is_cached_creation(change, &cached))
+            .collect();
+        assert_eq!(skipped, vec![true, false, false, false]);
     }
 
     #[test]

@@ -699,13 +699,23 @@ impl ChangeStreamConsumer {
             SyncEvent::Batch(batch) => {
                 let attribution = self.resolve_attribution(&event.scope).await;
                 let unknown_attribution = attribution.is_none();
-                let mut hydrated = if attribution.is_some() && self.is_mail_scope(&event.scope) {
-                    HydrateBatch::from_changes(
+                let mut hydrated = if let Some(namespace) = attribution.as_ref()
+                    && self.is_mail_scope(&event.scope)
+                {
+                    let already_cached =
+                        if matches!(batch.checkpoint, Some(Checkpoint::Backfill(_))) {
+                            self.cached_message_ids(namespace, hydrate::created_ids(&batch.items))
+                                .await?
+                        } else {
+                            HashSet::new()
+                        };
+                    HydrateBatch::from_changes_skipping(
                         &self.engine,
                         &self.account_id,
                         self.provider,
                         &self.folder_map,
                         &batch.items,
+                        &already_cached,
                     )
                     .await?
                 } else {
@@ -954,6 +964,48 @@ impl ChangeStreamConsumer {
     /// snapshot. A newly discovered shared folder can race that snapshot, so
     /// refresh exactly once before failing closed. The skipped batch is left
     /// unacked and is consequently redelivered after the next healthy drive.
+    /// Provider ids among `ids` whose message is already stored with its
+    /// body. A message without a cached body is fetched again.
+    async fn cached_message_ids(
+        &self,
+        namespace: &common::types::NamespaceAttribution,
+        ids: Vec<String>,
+    ) -> Result<HashSet<String>, Error> {
+        if ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let account_id = self.account_id.0.clone();
+        let local_ids: Vec<(String, String)> = ids
+            .into_iter()
+            .map(|id| (namespace.qualified_id(&id), id))
+            .collect();
+        self.stores
+            .db
+            .with_read(move |conn| {
+                let mut statement = conn
+                    .prepare(
+                        "SELECT 1 FROM messages
+                         WHERE account_id = ?1 AND id = ?2 AND body_cached = 1",
+                    )
+                    .map_err(|error| format!("prepare cached ids: {error}"))?;
+                let mut cached = HashSet::new();
+                for (local_id, provider_id) in local_ids {
+                    let found = statement
+                        .query(rusqlite::params![account_id, local_id])
+                        .map_err(|error| format!("query cached ids: {error}"))?
+                        .next()
+                        .map_err(|error| format!("read cached ids: {error}"))?
+                        .is_some();
+                    if found {
+                        cached.insert(provider_id);
+                    }
+                }
+                Ok(cached)
+            })
+            .await
+            .map_err(|error| Error::Other(format!("bifrost cached ids: {error}")))
+    }
+
     async fn resolve_attribution(
         &mut self,
         scope: &CursorScope,
