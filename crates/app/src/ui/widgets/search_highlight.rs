@@ -20,6 +20,7 @@ pub fn query_terms(query: &str) -> Vec<String> {
         .free_text
         .split_whitespace()
         .chain(parsed.from.iter().map(String::as_str))
+        .chain(parsed.with.iter().map(String::as_str))
         .map(|word| word.trim_matches('"'))
         .filter(|word| word.chars().count() >= MIN_HIGHLIGHT_CHARS)
         .map(str::to_owned)

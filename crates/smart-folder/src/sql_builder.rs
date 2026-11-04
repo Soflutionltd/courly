@@ -174,6 +174,7 @@ fn build_message_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     build_free_text_clause(ctx, parsed);
     build_from_clause(ctx, parsed);
     build_to_clause(ctx, parsed);
+    build_with_clause(ctx, parsed);
     build_attachment_clause(ctx, parsed);
     build_date_clauses(ctx, parsed);
     build_folder_clause(ctx, parsed);
@@ -206,16 +207,34 @@ fn build_from_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     let parts: Vec<String> = parsed
         .from
         .iter()
-        .map(|from| {
-            let idx = ctx.push_param(Box::new(from.clone()));
-            format!(
-                "(m.from_address LIKE '%' || ?{idx} || '%' \
-                 OR m.from_name LIKE '%' || ?{idx} || '%' \
-                 OR EXISTS (\
-                   SELECT 1 FROM contacts c \
-                   WHERE c.display_name LIKE '%' || ?{idx} || '%' \
-                     AND (m.from_address = c.email OR m.from_address = c.email2)))"
-            )
+        .map(|from| sender_match(ctx.push_param(Box::new(from.clone()))))
+        .collect();
+    ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
+}
+
+fn sender_match(idx: usize) -> String {
+    format!(
+        "(m.from_address LIKE '%' || ?{idx} || '%' \
+         OR m.from_name LIKE '%' || ?{idx} || '%' \
+         OR EXISTS (\
+           SELECT 1 FROM contacts c \
+           WHERE c.display_name LIKE '%' || ?{idx} || '%' \
+             AND (m.from_address = c.email OR m.from_address = c.email2)))"
+    )
+}
+
+/// Build `with:` clause: the person sent the message or received it (to,
+/// cc or bcc), with the same contact expansion as `from:` and `to:`.
+fn build_with_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
+    if parsed.with.is_empty() {
+        return;
+    }
+    let parts: Vec<String> = parsed
+        .with
+        .iter()
+        .map(|with| {
+            let idx = ctx.push_param(Box::new(with.clone()));
+            format!("({} OR {})", sender_match(idx), recipient_match(idx))
         })
         .collect();
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
@@ -233,26 +252,27 @@ fn build_to_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     let parts: Vec<String> = parsed
         .to
         .iter()
-        .map(|to| {
-            let idx = ctx.push_param(Box::new(to.clone()));
-            format!(
-                "(m.to_addresses LIKE '%' || ?{idx} || '%' \
-                 OR m.cc_addresses LIKE '%' || ?{idx} || '%' \
-                 OR m.bcc_addresses LIKE '%' || ?{idx} || '%' \
-                 OR EXISTS (\
-                   SELECT 1 FROM contacts c \
-                   WHERE c.display_name LIKE '%' || ?{idx} || '%' \
-                     AND (m.to_addresses LIKE '%' || c.email || '%' \
-                       OR m.cc_addresses LIKE '%' || c.email || '%' \
-                       OR m.bcc_addresses LIKE '%' || c.email || '%' \
-                       OR (c.email2 IS NOT NULL AND (\
-                            m.to_addresses LIKE '%' || c.email2 || '%' \
-                         OR m.cc_addresses LIKE '%' || c.email2 || '%' \
-                         OR m.bcc_addresses LIKE '%' || c.email2 || '%')))))"
-            )
-        })
+        .map(|to| recipient_match(ctx.push_param(Box::new(to.clone()))))
         .collect();
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
+}
+
+fn recipient_match(idx: usize) -> String {
+    format!(
+        "(m.to_addresses LIKE '%' || ?{idx} || '%' \
+         OR m.cc_addresses LIKE '%' || ?{idx} || '%' \
+         OR m.bcc_addresses LIKE '%' || ?{idx} || '%' \
+         OR EXISTS (\
+           SELECT 1 FROM contacts c \
+           WHERE c.display_name LIKE '%' || ?{idx} || '%' \
+             AND (m.to_addresses LIKE '%' || c.email || '%' \
+               OR m.cc_addresses LIKE '%' || c.email || '%' \
+               OR m.bcc_addresses LIKE '%' || c.email || '%' \
+               OR (c.email2 IS NOT NULL AND (\
+                    m.to_addresses LIKE '%' || c.email2 || '%' \
+                 OR m.cc_addresses LIKE '%' || c.email2 || '%' \
+                 OR m.bcc_addresses LIKE '%' || c.email2 || '%')))))"
+    )
 }
 
 fn build_attachment_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
@@ -913,6 +933,29 @@ mod tests {
             .expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc1");
+    }
+
+    // -- with: operator --
+
+    #[test]
+    fn with_matches_the_sender_and_the_recipients() {
+        let conn = setup_test_db();
+        let thread_ids = |query: &str| -> Vec<String> {
+            query_threads_read(
+                &ReadConn::from_raw(&conn),
+                &parse_query(query),
+                &AccountScope::All,
+                None,
+                None,
+            )
+            .expect("query")
+            .into_iter()
+            .map(|thread| thread.id)
+            .collect()
+        };
+        assert_eq!(thread_ids("with:alice@work.com"), ["t1"]);
+        assert_eq!(thread_ids("with:carol@example.com"), ["t2"]);
+        assert!(thread_ids("with:nobody@example.org").is_empty());
     }
 
     // -- folder: operator --

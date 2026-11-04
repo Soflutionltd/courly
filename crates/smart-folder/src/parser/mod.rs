@@ -103,6 +103,8 @@ pub struct ParsedQuery {
     // Repeated operators = OR (Vec instead of Option)
     pub from: Vec<String>,
     pub to: Vec<String>,
+    /// Sender or any recipient.
+    pub with: Vec<String>,
     pub account: Vec<String>,
     pub label: Vec<String>,
     pub folder: Vec<String>,
@@ -137,6 +139,7 @@ impl ParsedQuery {
     pub fn has_any_operator(&self) -> bool {
         !self.from.is_empty()
             || !self.to.is_empty()
+            || !self.with.is_empty()
             || !self.account.is_empty()
             || !self.label.is_empty()
             || !self.folder.is_empty()

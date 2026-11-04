@@ -830,7 +830,7 @@ impl ReadyApp {
         self.dispatch_resolved_search(resolved)
     }
 
-    /// A person from the menu: every message they sent, with the person
+    /// A person from the menu: every message they sent or received, with the person
     /// as a pill and the field emptied for more words.
     fn pick_suggested_contact(&mut self, index: usize) -> Task<Message> {
         let Some(contact) = self.search_suggest.contact(index) else {
@@ -1037,7 +1037,7 @@ impl ReadyApp {
         Task::perform(
             async move {
                 match op.as_str() {
-                    "from" | "to" => db.search_contacts_for_typeahead(partial).await,
+                    "from" | "to" | "with" => db.search_contacts_for_typeahead(partial).await,
                     "label" | "folder" => db.search_labels_for_typeahead(partial).await,
                     "account" => db.search_accounts_for_typeahead(partial).await,
                     _ => Ok(Vec::new()),
@@ -1281,8 +1281,8 @@ pub(crate) async fn execute_search(
 fn sender_query(sender: Option<&str>, text: &str) -> String {
     let text = text.trim();
     match sender {
-        Some(email) if text.is_empty() => format!("from:{email}"),
-        Some(email) => format!("from:{email} {text}"),
+        Some(email) if text.is_empty() => format!("with:{email}"),
+        Some(email) => format!("with:{email} {text}"),
         None => text.to_string(),
     }
 }
@@ -1413,7 +1413,7 @@ mod tests {
     #[test]
     fn the_sender_pill_narrows_the_typed_words() {
         assert_eq!(sender_query(None, "  colis "), "colis");
-        assert_eq!(sender_query(Some("a@x.fr"), " "), "from:a@x.fr");
-        assert_eq!(sender_query(Some("a@x.fr"), "colis"), "from:a@x.fr colis");
+        assert_eq!(sender_query(Some("a@x.fr"), " "), "with:a@x.fr");
+        assert_eq!(sender_query(Some("a@x.fr"), "colis"), "with:a@x.fr colis");
     }
 }

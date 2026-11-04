@@ -91,6 +91,15 @@ fn or_semantics_to() {
 }
 
 #[test]
+fn with_matches_any_participant() {
+    let q = parse_query("with:alice@example.org facture");
+    assert_eq!(q.with, vec!["alice@example.org"]);
+    assert!(q.from.is_empty());
+    assert_eq!(q.free_text, "facture");
+    assert!(q.has_any_operator());
+}
+
+#[test]
 fn or_semantics_label() {
     let q = parse_query("label:Work label:Personal");
     assert_eq!(q.label, vec!["Work", "Personal"]);

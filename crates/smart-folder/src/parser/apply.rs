@@ -66,6 +66,7 @@ pub(super) fn apply_operator(result: &mut ParsedQuery, operator: &str, value: &s
     match operator {
         "from" => result.from.push(value.to_owned()),
         "to" => result.to.push(value.to_owned()),
+        "with" => result.with.push(value.to_owned()),
         "has" => return apply_has_operator(result, value),
         "is" => return apply_is_operator(result, value),
         "before" => {

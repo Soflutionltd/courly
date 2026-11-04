@@ -9,7 +9,8 @@ pub(super) struct OperatorSpan {
 
 /// Operators recognized by the parser.
 pub(super) const OPERATORS: &[&str] = &[
-    "from", "to", "has", "is", "before", "after", "label", "account", "folder", "in", "type",
+    "from", "to", "with", "has", "is", "before", "after", "label", "account", "folder", "in",
+    "type",
 ];
 
 // -- Span collection --
