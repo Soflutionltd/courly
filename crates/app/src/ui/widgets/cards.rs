@@ -208,6 +208,18 @@ pub fn thread_card<'a, M: Clone + 'a>(
     if thread.is_flag_complete && !thread.is_starred {
         indicators = indicators.push(icon::check().size(ICON_XS).style(text::success));
     }
+    if let Some(folder) = thread.folder_name.as_deref() {
+        indicators = indicators.push(
+            container(
+                text(folder)
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Tertiary.style())
+                    .wrapping(text::Wrapping::None),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
 
     let top_row = row![
         container(highlighted_line(

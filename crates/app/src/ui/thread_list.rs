@@ -1115,6 +1115,7 @@ mod tests {
             is_local_draft: false,
             match_kind: None,
             also_matched: Vec::new(),
+            folder_name: None,
         }
     }
 

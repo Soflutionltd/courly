@@ -1381,6 +1381,7 @@ pub(crate) async fn execute_search(
             .filter(|thread| thread_matches_scope(thread, &scope))
             .collect::<Vec<_>>();
         crate::helpers::apply_thread_decorations(conn, &mut threads)?;
+        crate::helpers::apply_thread_folder_names(conn, &mut threads)?;
         Ok(threads)
     })
     .await

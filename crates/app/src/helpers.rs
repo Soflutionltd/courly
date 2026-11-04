@@ -528,6 +528,37 @@ pub(crate) fn apply_thread_decorations(
     Ok(())
 }
 
+/// Name each search result by the folder of its latest message, as Outlook
+/// labels its results ("Boîte de réception", "Éléments supprimés").
+pub(crate) fn apply_thread_folder_names(
+    conn: &rtsk::db::ReadConn<'_>,
+    threads: &mut [Thread],
+) -> Result<(), String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT f.name
+             FROM messages m
+             JOIN message_folders mf ON mf.account_id = m.account_id AND mf.message_id = m.id
+             JOIN folders f ON f.account_id = mf.account_id AND f.id = mf.folder_id
+             WHERE m.account_id = ?1 AND m.thread_id = ?2
+             ORDER BY m.date DESC, f.sort_order
+             LIMIT 1",
+        )
+        .map_err(|e| format!("prepare thread folder names: {e}"))?;
+    for thread in threads {
+        let mut rows = statement
+            .query([&thread.account_id, &thread.id])
+            .map_err(|e| format!("query thread folder names: {e}"))?;
+        thread.folder_name = rows
+            .next()
+            .map_err(|e| format!("read thread folder names: {e}"))?
+            .map(|row| row.get::<_, String>(0))
+            .transpose()
+            .map_err(|e| format!("map thread folder names: {e}"))?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_namespace_threads(
     db: Arc<Db>,

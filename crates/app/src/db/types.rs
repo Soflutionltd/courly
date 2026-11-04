@@ -89,6 +89,8 @@ pub struct Thread {
     /// Phase 7-8: secondary matches above the 50%-of-top-score
     /// threshold, score-descending. Empty for non-search paths.
     pub also_matched: Vec<rtsk::search::MatchKind>,
+    /// Folder of the latest message, shown on search results only.
+    pub folder_name: Option<String>,
 }
 
 impl Thread {
@@ -116,6 +118,7 @@ impl Thread {
             // not a search hit - no field attribution to carry
             match_kind: None,
             also_matched: Vec::new(),
+            folder_name: None,
         }
     }
 
@@ -143,6 +146,7 @@ impl Thread {
             // not a search hit - no field attribution to carry
             match_kind: None,
             also_matched: Vec::new(),
+            folder_name: None,
         }
     }
 
@@ -169,6 +173,7 @@ impl Thread {
             is_local_draft: false,
             match_kind: r.match_kind,
             also_matched: r.also_matched,
+            folder_name: None,
         }
     }
 }
