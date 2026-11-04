@@ -182,7 +182,9 @@ pub struct MoveTarget {
 pub struct SidebarDrag {
     pub scope: ViewScope,
     pub from: SidebarEntry,
-    pub target: Option<SidebarEntry>,
+    /// The place the row is shown in while it moves, the rows in between
+    /// already shifted; release keeps it there.
+    pub to: Option<usize>,
     /// The cursor reached another row, so release drops instead of clicking.
     pub moved: bool,
 }
@@ -468,7 +470,7 @@ impl Sidebar {
     }
 
     fn entry_at(&self, scope: &ViewScope, index: usize) -> Option<SidebarEntry> {
-        nav::current_order(self, scope).into_iter().nth(index)
+        nav::displayed_order(self, scope).into_iter().nth(index)
     }
 
     fn save_order(
@@ -694,22 +696,20 @@ impl Component for Sidebar {
                 self.drag = self.entry_at(&scope, index).map(|from| SidebarDrag {
                     scope,
                     from,
-                    target: None,
+                    to: None,
                     moved: false,
                 });
                 (Task::none(), None)
             }
             SidebarMessage::RowHover(scope, index) => {
-                let entry = self
-                    .drag
-                    .as_ref()
-                    .filter(|drag| drag.scope == scope)
-                    .and_then(|_| self.entry_at(&scope, index));
-                if let (Some(drag), Some(entry)) = (self.drag.as_mut(), entry) {
-                    drag.moved |= entry != drag.from;
-                    if drag.moved {
-                        drag.target = Some(entry);
-                    }
+                let order = nav::current_order(self, &scope);
+                if let Some(drag) = self.drag.as_mut().filter(|drag| drag.scope == scope)
+                    && let Some(from) = order.iter().position(|entry| *entry == drag.from)
+                    && index < order.len()
+                    && index != drag.to.unwrap_or(from)
+                {
+                    drag.to = Some(index);
+                    drag.moved = true;
                 }
                 if let Some(SidebarEntry::Folder(id)) = self.entry_at(&scope, index) {
                     self.hover_folder(&scope, &id);
@@ -751,14 +751,12 @@ impl Component for Sidebar {
                 let Some(drag) = self.drag.take() else {
                     return (Task::none(), None);
                 };
-                let Some(target) = drag.target.filter(|_| drag.moved) else {
+                let Some(to) = drag.to.filter(|_| drag.moved) else {
                     return (Task::none(), None);
                 };
                 let mut order = nav::current_order(self, &drag.scope);
-                let from = order.iter().position(|e| *e == drag.from);
-                let to = order.iter().position(|e| *e == target);
-                match (from, to) {
-                    (Some(from), Some(to)) if from != to => {
+                match order.iter().position(|e| *e == drag.from) {
+                    Some(from) if from != to => {
                         order::move_entry(&mut order, from, to);
                         self.save_order(&drag.scope, order)
                     }
@@ -1203,6 +1201,43 @@ mod tests {
             panic!("expected LayoutChanged");
         };
         assert_eq!(order::SidebarLayouts::parse(Some(&json)), sidebar.layouts);
+    }
+
+    #[test]
+    fn a_dragged_row_shows_in_place_and_the_row_below_moves_up() {
+        let mut sidebar = sidebar();
+        let shown = |sidebar: &Sidebar| {
+            nav::displayed_order(sidebar, &acc())
+                .into_iter()
+                .map(|entry| match entry {
+                    SidebarEntry::Folder(id) => id,
+                    SidebarEntry::Separator(id) => format!("sep{id}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        let _ = sidebar.update(SidebarMessage::RowPress(acc(), 1));
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 1));
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 2));
+        assert_eq!(shown(&sidebar), ["INBOX", "TRASH", "SENT", "g-hotel"]);
+        assert_eq!(
+            ids(&sidebar),
+            ["INBOX", "SENT", "TRASH", "g-hotel"],
+            "nothing is saved before release"
+        );
+
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 2));
+        assert_eq!(shown(&sidebar), ["INBOX", "TRASH", "SENT", "g-hotel"]);
+
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 1));
+        let (_, event) = sidebar.update(SidebarMessage::DragEnd);
+        assert!(event.is_none(), "back in its own place, nothing to save");
+        assert_eq!(shown(&sidebar), ["INBOX", "SENT", "TRASH", "g-hotel"]);
+
+        let _ = sidebar.update(SidebarMessage::RowPress(acc(), 1));
+        let _ = sidebar.update(SidebarMessage::RowHover(acc(), 3));
+        let (_, event) = sidebar.update(SidebarMessage::DragEnd);
+        assert!(matches!(event, Some(SidebarEvent::LayoutChanged(_))));
+        assert_eq!(ids(&sidebar), ["INBOX", "TRASH", "g-hotel", "SENT"]);
     }
 
     #[test]

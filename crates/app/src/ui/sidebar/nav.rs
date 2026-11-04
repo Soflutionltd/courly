@@ -63,8 +63,28 @@ pub(super) fn current_order(sidebar: &Sidebar, scope: &ViewScope) -> Vec<Sidebar
     )
 }
 
+/// The section as drawn: a row being dragged already sits where release
+/// would leave it.
+pub(super) fn displayed_order(sidebar: &Sidebar, scope: &ViewScope) -> Vec<SidebarEntry> {
+    with_drag_preview(sidebar, scope, current_order(sidebar, scope))
+}
+
+fn with_drag_preview(
+    sidebar: &Sidebar,
+    scope: &ViewScope,
+    mut order: Vec<SidebarEntry>,
+) -> Vec<SidebarEntry> {
+    if let Some(drag) = sidebar.drag.as_ref().filter(|drag| drag.scope == *scope)
+        && let Some(to) = drag.to
+        && let Some(from) = order.iter().position(|entry| *entry == drag.from)
+    {
+        super::order::move_entry(&mut order, from, to);
+    }
+    order
+}
+
 /// System folders and the account's own folders in one reorderable list:
-/// drag a row onto another to take its place, right-click for the folder
+/// drag a row and the others make way for it, right-click for the folder
 /// operations, separators, search-here and reset.
 pub(super) fn nav_items<'a>(
     sidebar: &'a Sidebar,
@@ -72,7 +92,11 @@ pub(super) fn nav_items<'a>(
 ) -> Element<'a, SidebarMessage> {
     let universal = universal_folders(sidebar, scope);
     let forest = account_forest(sidebar, scope);
-    let order = order_for(sidebar, scope, &universal, &forest);
+    let order = with_drag_preview(
+        sidebar,
+        scope,
+        order_for(sidebar, scope, &universal, &forest),
+    );
     let in_scope = sidebar.selected_scope == *scope;
     let shift = |index: usize| (index > 0, index + 1 < order.len());
 
@@ -284,24 +308,15 @@ fn reorderable_row<'a>(
             .style(theme::ContainerClass::DropTarget.style())
             .width(Length::Fill)
             .into();
-    } else if let Some(drag) = sidebar
+    } else if sidebar
         .drag
         .as_ref()
-        .filter(|drag| drag.moved && drag.scope == *scope)
+        .is_some_and(|drag| drag.moved && drag.scope == *scope && drag.from == *entry)
     {
-        let class = if drag.from == *entry {
-            Some(theme::ContainerClass::DraggingRow)
-        } else if drag.target.as_ref() == Some(entry) {
-            Some(theme::ContainerClass::DropTarget)
-        } else {
-            None
-        };
-        if let Some(class) = class {
-            row_el = container(row_el)
-                .style(class.style())
-                .width(Length::Fill)
-                .into();
-        }
+        row_el = container(row_el)
+            .style(theme::ContainerClass::DraggingRow.style())
+            .width(Length::Fill)
+            .into();
     }
 
     if sidebar.row_menu != Some(RowMenuAnchor::Entry(scope.clone(), index)) {
