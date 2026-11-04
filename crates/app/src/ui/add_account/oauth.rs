@@ -6,7 +6,8 @@ use crate::font;
 use crate::ui::layout::*;
 
 use super::state::{
-    AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard, OAuthSuccess,
+    AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard, AdminConsentTarget,
+    OAuthSuccess,
 };
 use super::views::{ghost_button, primary_button};
 
@@ -81,6 +82,15 @@ impl AddAccountWizard {
 
         self.step = AddAccountStep::OAuthWaiting;
         self.error = None;
+        self.admin_consent = resolved.as_ref().and_then(|(_, _, scopes, _)| {
+            admin_consent_target(
+                &self.email,
+                &provider_id,
+                &client_id,
+                &merge_scopes(scopes, &extras),
+            )
+        });
+        self.admin_consent_running = false;
         let generation = self.generation.next();
         let provider_id_clone = provider_id.clone();
         let initial_client_id = client_id.clone();
@@ -340,13 +350,57 @@ impl AddAccountWizard {
         self.proceed_to_auth(option)
     }
 
+    /// Stop the sign-in and have an administrator approve Courly for the
+    /// organisation; the sign-in starts again once they have.
+    pub(super) fn handle_request_admin_consent(
+        &mut self,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        let Some(target) = self.admin_consent.clone() else {
+            return (Task::none(), None);
+        };
+        self.error = None;
+        self.admin_consent_running = true;
+        let generation = self.generation.next();
+        let task = Task::perform(
+            async move {
+                let open_url = |url: &str| -> Result<(), String> { open_browser_url(url) };
+                rtsk::oauth::run_microsoft_admin_consent_flow(
+                    &target.tenant,
+                    &target.client_id,
+                    &target.scopes,
+                    &open_url,
+                )
+                .await
+            },
+            move |result| AddAccountMessage::AdminConsentDone(generation, result),
+        );
+        (self.track_oauth(task), None)
+    }
+
+    pub(super) fn handle_admin_consent_done(
+        &mut self,
+        result: Result<(), String>,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        self.admin_consent_running = false;
+        match result {
+            Ok(()) => self.handle_retry_oauth(),
+            Err(error) => {
+                self.error =
+                    Some(t!("account_setup.admin_consent_failed", error = error).into_owned());
+                (Task::none(), None)
+            }
+        }
+    }
+
     pub(super) fn view_oauth_waiting(&self) -> Element<'_, AddAccountMessage> {
         let mut col = column![]
             .spacing(SPACE_XS)
             .align_x(Alignment::Center)
             .width(Length::Fill);
 
-        let heading = if self.reauth_account_id.is_some() {
+        let heading = if self.admin_consent_running {
+            t!("account_setup.admin_consent_in_browser")
+        } else if self.reauth_account_id.is_some() {
             t!("account_setup.reauthenticate_in_browser")
         } else {
             t!("account_setup.complete_sign_in_in_browser")
@@ -367,11 +421,39 @@ impl AddAccountWizard {
             col = col.push(text(&self.email).size(TEXT_LG).style(text::secondary));
         }
         col = col.push(Space::new().height(SPACE_MD));
-        col = col.push(
-            text(t!("account_setup.waiting_for_authorization"))
-                .size(TEXT_LG)
-                .style(text::secondary),
-        );
+        match &self.admin_consent {
+            Some(target) if self.admin_consent_running => {
+                col = col.push(
+                    text(t!(
+                        "account_setup.admin_consent_waiting",
+                        domain = target.tenant
+                    ))
+                    .size(TEXT_LG)
+                    .style(text::secondary)
+                    .align_x(Alignment::Center),
+                );
+            }
+            _ => {
+                col = col.push(
+                    text(t!("account_setup.waiting_for_authorization"))
+                        .size(TEXT_LG)
+                        .style(text::secondary),
+                );
+            }
+        }
+        if self.admin_consent.is_some() && !self.admin_consent_running {
+            col = col.push(Space::new().height(SPACE_MD));
+            col = col.push(
+                text(t!("account_setup.admin_consent_hint"))
+                    .size(TEXT_SM)
+                    .style(text::secondary)
+                    .align_x(Alignment::Center),
+            );
+            col = col.push(ghost_button(
+                t!("account_setup.admin_consent_request"),
+                AddAccountMessage::RequestAdminConsent,
+            ));
+        }
 
         if let Some(ref err) = self.error {
             col = col.push(Space::new().height(SPACE_SM));
@@ -391,6 +473,28 @@ impl AddAccountWizard {
 
         col.into()
     }
+}
+
+/// Microsoft 365 work addresses only: personal Outlook addresses have no
+/// administrator, and their domains are in the provider registry.
+pub(super) fn admin_consent_target(
+    email: &str,
+    provider_id: &str,
+    client_id: &str,
+    scopes: &[String],
+) -> Option<AdminConsentTarget> {
+    if provider_id != "microsoft_graph" {
+        return None;
+    }
+    let domain = email.rsplit_once('@')?.1.trim().to_ascii_lowercase();
+    if domain.is_empty() || !rtsk::discovery::registry::lookup(&domain).is_empty() {
+        return None;
+    }
+    Some(AdminConsentTarget {
+        tenant: domain,
+        client_id: client_id.to_owned(),
+        scopes: scopes.to_vec(),
+    })
 }
 
 /// Parse the space-separated `oauth_extra_scopes` DB column into a vector.
@@ -582,6 +686,18 @@ mod tests {
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn only_microsoft_365_work_addresses_can_ask_an_administrator() {
+        let scopes = v(&["Mail.ReadWrite"]);
+        let target = admin_consent_target("Jo@Example.org", "microsoft_graph", "id", &scopes)
+            .expect("work address");
+        assert_eq!(target.tenant, "example.org");
+        assert_eq!(target.scopes, scopes);
+        assert!(admin_consent_target("jo@outlook.com", "microsoft_graph", "id", &scopes).is_none());
+        assert!(admin_consent_target("jo@example.org", "google", "id", &scopes).is_none());
+        assert!(admin_consent_target("jo", "microsoft_graph", "id", &scopes).is_none());
     }
 
     #[test]

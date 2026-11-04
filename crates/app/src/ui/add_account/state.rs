@@ -240,6 +240,16 @@ pub struct AccountIdentity {
 
 // OAuth success
 
+/// The Microsoft 365 organisation an administrator can approve Courly for
+/// while one of its users signs in.
+#[derive(Debug, Clone)]
+pub struct AdminConsentTarget {
+    /// A domain of the organisation, which Microsoft accepts as its tenant.
+    pub tenant: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+}
+
 /// Successful OAuth result carrying the tokens and user info.
 #[derive(Debug, Clone)]
 pub struct OAuthSuccess {
@@ -296,6 +306,12 @@ pub enum AddAccountMessage {
     ),
     CancelOAuth,
     RetryOAuth,
+    /// Have an administrator approve Courly for the organisation instead.
+    RequestAdminConsent,
+    AdminConsentDone(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<(), String>,
+    ),
     OAuthValidationComplete(
         rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
         OAuthSuccess,
@@ -393,6 +409,9 @@ pub struct AddAccountWizard {
     pub(super) reauth_account_id: Option<String>,
     /// The browser sign-in in flight; dropping it stops it.
     oauth_task: Option<iced::task::Handle>,
+    pub(super) admin_consent: Option<AdminConsentTarget>,
+    /// The browser shows the administrator's approval page.
+    pub(super) admin_consent_running: bool,
 }
 
 impl AddAccountWizard {
@@ -557,6 +576,8 @@ impl AddAccountWizard {
             service_client,
             reauth_account_id: None,
             oauth_task: None,
+            admin_consent: None,
+            admin_consent_running: false,
         }
     }
 
@@ -704,6 +725,13 @@ impl Component for AddAccountWizard {
                 (Task::none(), None)
             }
             AddAccountMessage::RetryOAuth => self.handle_retry_oauth(),
+            AddAccountMessage::RequestAdminConsent => self.handle_request_admin_consent(),
+            AddAccountMessage::AdminConsentDone(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::AdminConsentDone(_, result) => {
+                self.handle_admin_consent_done(result)
+            }
             AddAccountMessage::SubmitIdentity => self.handle_submit_identity(),
             AddAccountMessage::AccountCreated(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
@@ -800,6 +828,13 @@ impl AddAccountWizard {
 
                 let provider_id_clone = provider_id.clone();
                 let client_id_clone = super::oauth::resolve_client_id(provider_id);
+                self.admin_consent = super::oauth::admin_consent_target(
+                    &self.email,
+                    provider_id,
+                    &client_id_clone,
+                    scopes,
+                );
+                self.admin_consent_running = false;
                 let auth_url_clone = auth_url.clone();
                 let token_url_clone = token_url.clone();
                 let scopes_clone = scopes.clone();

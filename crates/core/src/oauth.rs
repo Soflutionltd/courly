@@ -404,15 +404,21 @@ pub async fn exchange_code_with_provider<P: OAuthIdentityProvider>(
 /// Bind to a localhost port for an OAuth callback. Tries the given port first,
 /// falls back to nearby ports if taken. Returns the listener and the port it bound to.
 pub async fn bind_oauth_listener(port: u16) -> Result<(TcpListener, u16), String> {
+    // A sign-in that was just stopped can hold the port for a moment, and
+    // Microsoft only accepts the registered one.
     let mut listener = None;
-    for p in [port, port + 1, port + 2, port + 3] {
-        match TcpListener::bind(format!("127.0.0.1:{p}")).await {
-            Ok(l) => {
-                listener = Some(l);
-                break;
-            }
-            Err(_) => continue,
+    for _ in 0..5 {
+        if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{port}")).await {
+            listener = Some(l);
+            break;
         }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    for p in [port + 1, port + 2, port + 3] {
+        if listener.is_some() {
+            break;
+        }
+        listener = TcpListener::bind(format!("127.0.0.1:{p}")).await.ok();
     }
 
     let listener = listener.ok_or("Failed to bind to any port for OAuth callback")?;
@@ -423,6 +429,64 @@ pub async fn bind_oauth_listener(port: u16) -> Result<(TcpListener, u16), String
 
     log::info!("OAuth callback server listening on port {actual_port}");
     Ok((listener, actual_port))
+}
+
+/// Have a Microsoft 365 administrator approve Courly's Graph permissions for
+/// their whole organisation, so its users can then sign in without being
+/// asked for an admin. `tenant` is a domain of the organisation. Nothing is
+/// signed in: the admin's account is not added to Courly.
+pub async fn run_microsoft_admin_consent_flow(
+    tenant: &str,
+    client_id: &str,
+    scopes: &[String],
+    open_url: &(dyn Fn(&str) -> Result<(), String> + Send + Sync),
+) -> Result<(), String> {
+    let (listener, actual_port) = bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
+    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
+    let state = random_base64url(32)?;
+    open_url(&microsoft_admin_consent_url(
+        tenant,
+        client_id,
+        scopes,
+        &redirect_uri,
+        &state,
+    ))?;
+    await_callback(
+        listener,
+        |request| parse_admin_consent_callback(request, &state),
+        admin_consent_success_html(),
+    )
+    .await
+}
+
+fn microsoft_admin_consent_url(
+    tenant: &str,
+    client_id: &str,
+    scopes: &[String],
+    redirect_uri: &str,
+    state: &str,
+) -> String {
+    let scope = scopes
+        .iter()
+        .map(|scope| match scope.as_str() {
+            "openid" | "profile" | "email" | "offline_access" => scope.clone(),
+            graph => format!("https://graph.microsoft.com/{graph}"),
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut url = url::Url::parse("https://login.microsoftonline.com/")
+        .expect("static URL")
+        .join(&format!(
+            "{}/v2.0/adminconsent",
+            urlencoding::encode(tenant)
+        ))
+        .expect("encoded tenant");
+    url.query_pairs_mut()
+        .append_pair("client_id", client_id)
+        .append_pair("scope", &scope)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("state", state);
+    url.into()
 }
 
 /// Wait for the OAuth callback on an already-bound listener, validate the
@@ -438,6 +502,24 @@ pub async fn await_oauth_callback(
         .local_addr()
         .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?
         .port();
+    let code = await_callback(
+        listener,
+        |request| parse_callback(request, state),
+        oauth_success_html(),
+    )
+    .await?;
+    Ok(OAuthResult {
+        code,
+        state: state.to_string(),
+        actual_port,
+    })
+}
+
+async fn await_callback<T>(
+    listener: TcpListener,
+    parse: impl Fn(&str) -> CallbackOutcome<T>,
+    success_html: &str,
+) -> Result<T, String> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
 
     loop {
@@ -454,20 +536,15 @@ pub async fn await_oauth_callback(
             }
         };
 
-        match parse_callback(&request, state) {
-            CallbackOutcome::Code(code) => {
-                let html = oauth_success_html();
-                let html_len = html.len();
+        match parse(&request) {
+            CallbackOutcome::Done(value) => {
+                let html_len = success_html.len();
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {html_len}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{html}"
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {html_len}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{success_html}"
                 );
                 _ = stream.write_all(response.as_bytes()).await;
                 _ = stream.flush().await;
-                return Ok(OAuthResult {
-                    code,
-                    state: state.to_string(),
-                    actual_port,
-                });
+                return Ok(value);
             }
             CallbackOutcome::ProviderError(error) => {
                 _ = stream.write_all(CALLBACK_DONE_RESPONSE.as_bytes()).await;
@@ -511,32 +588,68 @@ async fn read_callback_request(stream: &mut tokio::net::TcpStream) -> Result<Str
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum CallbackOutcome {
-    Code(String),
+enum CallbackOutcome<T> {
+    Done(T),
     ProviderError(String),
     /// No state, or not ours: not the provider's redirect.
     Unrelated,
 }
 
-fn parse_callback(request: &str, expected_state: &str) -> CallbackOutcome {
+/// The query of a redirect carrying our state, or how to answer it.
+fn callback_params<T>(
+    request: &str,
+    expected_state: &str,
+) -> Result<HashMap<String, String>, CallbackOutcome<T>> {
     let Some(path) = request
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
     else {
-        return CallbackOutcome::Unrelated;
+        return Err(CallbackOutcome::Unrelated);
     };
     let params = parse_query_string(path);
     if params.get("state").map(String::as_str) != Some(expected_state) {
-        return CallbackOutcome::Unrelated;
+        return Err(CallbackOutcome::Unrelated);
     }
     if let Some(error) = params.get("error") {
-        return CallbackOutcome::ProviderError(error.clone());
+        return Err(CallbackOutcome::ProviderError(error.clone()));
     }
+    Ok(params)
+}
+
+fn parse_callback(request: &str, expected_state: &str) -> CallbackOutcome<String> {
+    let params = match callback_params(request, expected_state) {
+        Ok(params) => params,
+        Err(outcome) => return outcome,
+    };
     match params.get("code").filter(|code| !code.is_empty()) {
-        Some(code) => CallbackOutcome::Code(code.clone()),
+        Some(code) => CallbackOutcome::Done(code.clone()),
         None => CallbackOutcome::Unrelated,
     }
+}
+
+fn parse_admin_consent_callback(request: &str, expected_state: &str) -> CallbackOutcome<()> {
+    let params = match callback_params(request, expected_state) {
+        Ok(params) => params,
+        Err(outcome) => return outcome,
+    };
+    match params.get("admin_consent") {
+        Some(granted) if granted.eq_ignore_ascii_case("true") => CallbackOutcome::Done(()),
+        _ => CallbackOutcome::Unrelated,
+    }
+}
+
+fn admin_consent_success_html() -> &'static str {
+    r#"<!DOCTYPE html>
+<html>
+<head><title>Courly</title></head>
+<body style="font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0;">
+<div style="text-align: center;">
+<h1 style="margin-bottom: 8px;">Courly Approved</h1>
+<p style="opacity: 0.7;">Your organization can now use Courly. You can close this tab and return to Courly.</p>
+</div>
+</body>
+</html>"#
 }
 
 fn oauth_success_html() -> &'static str {
@@ -826,13 +939,64 @@ mod tests {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
     #[test]
+    fn admin_consent_callback_needs_our_state_and_the_grant() {
+        use super::{CallbackOutcome, parse_admin_consent_callback};
+
+        let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        assert_eq!(
+            parse_admin_consent_callback(&get("/?admin_consent=True&tenant=t&state=s1"), "s1"),
+            CallbackOutcome::Done(())
+        );
+        assert_eq!(
+            parse_admin_consent_callback(
+                &get("/?admin_consent=True&error=consent_required&state=s1"),
+                "s1"
+            ),
+            CallbackOutcome::ProviderError("consent_required".to_string())
+        );
+        for unrelated in [
+            "/?admin_consent=True&state=other",
+            "/?state=s1",
+            "/favicon.ico",
+        ] {
+            assert_eq!(
+                parse_admin_consent_callback(&get(unrelated), "s1"),
+                CallbackOutcome::Unrelated,
+                "{unrelated}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_consent_url_names_graph_permissions_for_the_organisation() {
+        let scopes = ["Mail.ReadWrite", "offline_access", "openid"].map(String::from);
+        let url = url::Url::parse(&super::microsoft_admin_consent_url(
+            "example.org",
+            "client",
+            &scopes,
+            "http://127.0.0.1:17248",
+            "s1",
+        ))
+        .expect("valid URL");
+        assert_eq!(url.path(), "/example.org/v2.0/adminconsent");
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            query["scope"],
+            "https://graph.microsoft.com/Mail.ReadWrite offline_access openid"
+        );
+        assert_eq!(query["client_id"], "client");
+        assert_eq!(query["redirect_uri"], "http://127.0.0.1:17248");
+        assert_eq!(query["state"], "s1");
+    }
+
+    #[test]
     fn callback_requests_without_our_state_are_unrelated() {
         use super::{CallbackOutcome, parse_callback};
 
         let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
         assert_eq!(
             parse_callback(&get("/?code=abc&state=s1"), "s1"),
-            CallbackOutcome::Code("abc".to_string())
+            CallbackOutcome::Done("abc".to_string())
         );
         assert_eq!(
             parse_callback(&get("/?error=access_denied&state=s1"), "s1"),
