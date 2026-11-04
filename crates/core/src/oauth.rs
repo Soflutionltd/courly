@@ -267,9 +267,13 @@ impl OAuthIdentityProvider for GoogleOAuthProvider {
 
 impl OAuthIdentityProvider for GenericOAuthProvider {
     fn authorization_request(&self) -> OAuthAuthorizationRequest {
+        // Microsoft hands out refresh tokens through `offline_access`, so it
+        // must not force `prompt=consent`: in organisations where users may
+        // not consent, that shows "admin approval required" even after an
+        // administrator approved the app.
         let extra_auth_params = if self.is_microsoft {
             vec![
-                ("prompt".to_string(), "consent".to_string()),
+                ("prompt".to_string(), "select_account".to_string()),
                 ("response_mode".to_string(), "query".to_string()),
             ]
         } else {
@@ -965,8 +969,8 @@ pub fn sha256_base64url(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, microsoft_userinfo_from_id_token,
-        microsoft_userinfo_from_me,
+        GenericOAuthProvider, MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, OAuthIdentityProvider,
+        microsoft_userinfo_from_id_token, microsoft_userinfo_from_me,
     };
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
@@ -1238,5 +1242,23 @@ mod tests {
         assert!(user.owns_address(" alice@example.org "));
         assert!(!user.owns_address("bob@example.org"));
         assert!(!user.owns_address("/o=Example"));
+    }
+
+    #[test]
+    fn microsoft_sign_in_never_forces_user_consent() {
+        let provider = GenericOAuthProvider::microsoft_graph_default();
+        let request = provider.authorization_request();
+
+        assert!(
+            request
+                .extra_auth_params
+                .contains(&("prompt".to_string(), "select_account".to_string()))
+        );
+        assert!(
+            !request
+                .extra_auth_params
+                .iter()
+                .any(|(key, value)| key == "prompt" && value == "consent")
+        );
     }
 }
