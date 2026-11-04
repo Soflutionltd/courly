@@ -643,9 +643,7 @@ pub(super) async fn run_capture_then_exchange(
     if config.provider_id == "microsoft_graph"
         && let Some(expected) = &expected_email
     {
-        auth_request
-            .extra_auth_params
-            .push(("login_hint".to_string(), expected.clone()));
+        hint_microsoft_account(&mut auth_request.extra_auth_params, expected);
     }
     let auth = rtsk::oauth::run_oauth_authorization_flow(auth_request, &open_url).await?;
 
@@ -676,6 +674,13 @@ pub(super) async fn run_capture_then_exchange(
         .into_owned());
     }
     Ok(ack)
+}
+
+/// Sends Microsoft straight to `address`: a `prompt` would make it show its
+/// account picker even though it already knows which account is meant.
+fn hint_microsoft_account(params: &mut Vec<(String, String)>, address: &str) {
+    params.retain(|(key, _)| key != "prompt");
+    params.push(("login_hint".to_string(), address.to_string()));
 }
 
 pub(super) fn open_browser_url(url: &str) -> Result<(), String> {
@@ -709,6 +714,22 @@ mod tests {
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn a_known_address_skips_microsofts_account_picker() {
+        let mut params = vec![
+            ("prompt".to_string(), "select_account".to_string()),
+            ("response_mode".to_string(), "query".to_string()),
+        ];
+        hint_microsoft_account(&mut params, "jo@example.org");
+        assert_eq!(
+            params,
+            vec![
+                ("response_mode".to_string(), "query".to_string()),
+                ("login_hint".to_string(), "jo@example.org".to_string()),
+            ]
+        );
     }
 
     #[test]
