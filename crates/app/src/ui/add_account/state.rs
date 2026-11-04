@@ -391,6 +391,8 @@ pub struct AddAccountWizard {
     /// Re-auth mode: when set, the wizard skips email/discovery/identity
     /// and goes straight to the auth step for this existing account.
     pub(super) reauth_account_id: Option<String>,
+    /// The browser sign-in in flight; dropping it stops it.
+    oauth_task: Option<iced::task::Handle>,
 }
 
 impl AddAccountWizard {
@@ -554,7 +556,17 @@ impl AddAccountWizard {
             db,
             service_client,
             reauth_account_id: None,
+            oauth_task: None,
         }
+    }
+
+    /// Run a browser sign-in. Starting another one, or closing the wizard,
+    /// stops it, which frees the callback port: Microsoft only accepts the
+    /// first one.
+    pub(super) fn track_oauth(&mut self, task: Task<AddAccountMessage>) -> Task<AddAccountMessage> {
+        let (task, handle) = task.abortable();
+        self.oauth_task = Some(handle.abort_on_drop());
+        task
     }
 
     /// Get the selected color hex, or fallback to first preset.
@@ -836,7 +848,7 @@ impl AddAccountWizard {
                     },
                     |(g, result)| AddAccountMessage::OAuthComplete(g, result),
                 );
-                (task, None)
+                (self.track_oauth(task), None)
             }
 
             AuthMethod::Password => {

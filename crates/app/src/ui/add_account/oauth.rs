@@ -90,7 +90,7 @@ impl AddAccountWizard {
             return Task::none();
         };
         let reauth_account_id = self.reauth_account_id.clone();
-        Task::perform(
+        let task = Task::perform(
             async move {
                 // Resolve endpoints: either from the registry (built-in
                 // providers - Gmail / Microsoft 365) or from OIDC
@@ -214,7 +214,8 @@ impl AddAccountWizard {
                 Ok(inner) => AddAccountMessage::OAuthComplete(generation, inner),
                 Err(e) => AddAccountMessage::OAuthComplete(generation, Err(e)),
             },
-        )
+        );
+        self.track_oauth(task)
     }
 
     pub(super) fn handle_oauth_success(
