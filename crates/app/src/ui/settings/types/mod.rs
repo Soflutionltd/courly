@@ -511,6 +511,17 @@ impl Settings {
         self.apply_preferences(&committed);
     }
 
+    /// Theme picked outside the panel (menu bar, command palette). Written
+    /// to the committed preferences, so it is persisted, and to an open
+    /// editing shadow, so closing the panel does not revert it.
+    pub fn set_theme(&mut self, theme: String) {
+        self.committed_preferences.theme.clone_from(&theme);
+        if let Some(prefs) = self.editing_preferences.as_mut() {
+            prefs.theme.clone_from(&theme);
+        }
+        self.theme = theme;
+    }
+
     /// Whether the editing shadow differs from committed state.
     /// Returns `false` if no editing session is active.
     #[allow(dead_code)] // not yet consumed by close-without-save confirmation flow
@@ -935,5 +946,20 @@ mod tests {
         assert_eq!(settings.font_size, original_font_size);
         assert_eq!(settings.reading_pane_position, original_pane);
         assert_eq!(settings.phishing_sensitivity, original_sensitivity);
+    }
+
+    /// A theme picked from the menu bar must reach the committed shadow
+    /// (what gets persisted) and survive an open panel being closed or
+    /// cancelled.
+    #[test]
+    fn set_theme_outside_panel_is_committed_and_survives_the_panel() {
+        let mut settings = Settings::default();
+        settings.begin_editing();
+
+        settings.set_theme("Dark".into());
+        settings.discard_preferences();
+
+        assert_eq!(settings.theme, "Dark");
+        assert_eq!(settings.committed_preferences.theme, "Dark");
     }
 }

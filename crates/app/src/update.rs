@@ -595,7 +595,7 @@ impl ReadyApp {
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {
-                self.settings.theme = theme;
+                self.settings.set_theme(theme);
                 Task::none()
             }
             Message::ToggleSidebar => Task::none(),
