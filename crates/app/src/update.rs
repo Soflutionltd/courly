@@ -592,6 +592,10 @@ impl ReadyApp {
                 window_id,
                 ref outcome,
             } => self.handle_send_completed(window_id, outcome),
+            Message::SendDispatchFailed { send_id, error } => {
+                self.handle_send_dispatch_failed(send_id, &error)
+            }
+            Message::DelayedSendDue(send_id) => self.dispatch_delayed_send(send_id),
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {

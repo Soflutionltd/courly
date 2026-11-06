@@ -110,6 +110,7 @@ main.status.accounts_need_attention: "%{count} accounts need attention \u2014 %{
 main.status.syncing_one: "Syncing %{email} (%{current} / %{total})"
 main.status.syncing_many: "Syncing %{count} accounts... (%{email}: %{current} / %{total})"
 main.status.auto_reply_active: "Out of Office auto-reply is active"
+main.status.undo_send: "Undo"
 main.status.service_starting: "Service starting: %{phase}"
 main.status.service_respawning: "Service respawning after crash (attempt %{attempt}, retry in %{seconds}s)"
 main.status.service_cannot_restart: "Service cannot restart: %{reason}"

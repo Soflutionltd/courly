@@ -466,6 +466,11 @@ impl Settings {
         }
         self.thread_date_groups = ui.thread_date_groups;
         self.compose_always_show_cc = ui.compose_always_show_cc;
+        if let Some(seconds) = settings.undo_send_delay_seconds.as_deref()
+            && UNDO_SEND_DELAYS.contains(&seconds)
+        {
+            self.undo_delay = seconds.into();
+        }
         if let Some(canonical) = ui
             .mark_as_read_behavior
             .as_deref()
@@ -564,6 +569,7 @@ impl Settings {
             thread_date_groups: self.thread_date_groups,
             compose_always_show_cc: self.compose_always_show_cc,
             mark_as_read: self.mark_as_read.clone(),
+            undo_delay: self.undo_delay.clone(),
             mail_check_interval: self.mail_check_interval.clone(),
         }
     }
@@ -589,6 +595,7 @@ impl Settings {
         self.thread_date_groups = prefs.thread_date_groups;
         self.compose_always_show_cc = prefs.compose_always_show_cc;
         self.mark_as_read = prefs.mark_as_read.clone();
+        self.undo_delay = prefs.undo_delay.clone();
         self.mail_check_interval = prefs.mail_check_interval.clone();
         if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
@@ -616,6 +623,7 @@ impl Default for Settings {
             thread_date_groups: true,
             compose_always_show_cc: false,
             mark_as_read: "After 2 Seconds".into(),
+            undo_delay: "5".into(),
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
         };
         Self {
@@ -644,7 +652,7 @@ impl Default for Settings {
             thread_date_groups: true,
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
             compose_always_show_cc: false,
-            undo_delay: "5 seconds".into(),
+            undo_delay: "5".into(),
             mark_as_read: "After 2 Seconds".into(),
             notifications_enabled: true,
             smart_notifications: true,

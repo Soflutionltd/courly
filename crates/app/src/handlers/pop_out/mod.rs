@@ -10,6 +10,7 @@ pub const DRAFT_AUTO_SAVE_INTERVAL: Duration = Duration::from_secs(30);
 mod compose_clipboard;
 mod compose_draft;
 mod compose_send;
+pub(crate) use compose_send::{DelayedSend, SendOrigin, submit_held_sends};
 mod compose_signature;
 mod dispatcher;
 mod message_view;

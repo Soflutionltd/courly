@@ -263,7 +263,7 @@ impl ReadyApp {
     }
 
     /// Open a compose window holding `state`.
-    fn open_compose_window_for(
+    pub(super) fn open_compose_window_for(
         &mut self,
         mut state: ComposeState,
     ) -> (iced::window::Id, Task<Message>) {

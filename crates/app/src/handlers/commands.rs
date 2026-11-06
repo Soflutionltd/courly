@@ -717,7 +717,7 @@ impl ReadyApp {
         // `send_id`. Route to the compose window if we have one
         // tracking this id; the worker's PlanSummary tells us
         // success vs failure.
-        if let Some(window_id) = self.in_flight_sends.remove(&completion.plan_id) {
+        if let Some(origin) = self.in_flight_sends.remove(&completion.plan_id) {
             let outcome = if completion.summary.remote_succeeded > 0 {
                 service_api::actions::ActionOutcome::Success
             } else {
@@ -727,7 +727,7 @@ impl ReadyApp {
                     )),
                 }
             };
-            return Task::done(Message::SendCompleted { window_id, outcome });
+            return self.finish_send(origin, &outcome);
         }
         let Some(state) = self.pending_action_plans.remove(&completion.plan_id) else {
             log::debug!(

@@ -28,10 +28,10 @@ fn option_label(value: &str) -> Option<&'static str> {
         "Auto" => t!("settings.general.option.auto"),
         "Relative Offset" => t!("settings.general.option.relative_offset"),
         "Absolute" => t!("settings.general.option.absolute"),
-        "None" => t!("settings.general.option.none"),
-        "5 seconds" => t!("settings.general.option.seconds_5"),
-        "10 seconds" => t!("settings.general.option.seconds_10"),
-        "30 seconds" => t!("settings.general.option.seconds_30"),
+        "0" => t!("settings.general.option.none"),
+        "5" => t!("settings.general.option.seconds_5"),
+        "10" => t!("settings.general.option.seconds_10"),
+        "30" => t!("settings.general.option.seconds_30"),
         "Instantly" => t!("settings.general.option.instantly"),
         "After 2 Seconds" => t!("settings.general.option.after_2_seconds"),
         "Manually" => t!("settings.general.option.manually"),
@@ -155,7 +155,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
             setting_row(
                 tr(t!("settings.general.undo_send_delay")),
                 translated_select(
-                    &["None", "5 seconds", "10 seconds", "30 seconds"],
+                    UNDO_SEND_DELAYS,
                     &state.undo_delay,
                     option_label,
                     state.open_select == Some(SelectField::UndoDelay),

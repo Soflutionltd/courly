@@ -525,6 +525,7 @@ impl ReadyApp {
                 crate::ui::settings::types::date_display_setting(prefs.date_display).into(),
             ),
             SettingValue::MarkAsReadBehavior(prefs.mark_as_read.clone()),
+            SettingValue::UndoSendDelaySeconds(prefs.undo_delay.clone()),
         ];
         Task::perform(async move { client.set_settings(values).await }, |result| {
             if let Err(e) = result {
@@ -661,6 +662,7 @@ impl ReadyApp {
             StatusBarEvent::RequestReauth { account_id } => {
                 self.handle_open_reauth_wizard(account_id)
             }
+            StatusBarEvent::UndoSend => self.undo_delayed_send(),
         }
     }
 
@@ -1189,9 +1191,12 @@ impl ReadyApp {
                 .collect();
             self.pop_out_windows.clear();
             tasks.push(iced::window::close(id));
+            let held_sends = self.take_delayed_sends_for_shutdown();
             if let Some(service_client) = self.service_client.clone() {
                 tasks.push(Task::perform(
                     async move {
+                        crate::handlers::pop_out::submit_held_sends(&service_client, held_sends)
+                            .await;
                         service_client
                             .shutdown()
                             .await

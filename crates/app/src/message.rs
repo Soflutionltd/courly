@@ -283,6 +283,13 @@ pub enum Message {
         window_id: iced::window::Id,
         outcome: service_api::actions::ActionOutcome,
     },
+    /// The `action.send` request itself failed (no ack).
+    SendDispatchFailed {
+        send_id: service_api::PlanId,
+        error: String,
+    },
+    /// A sent message's undo delay ran out: hand it to the Service.
+    DelayedSendDue(service_api::PlanId),
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
     SetTheme(String),

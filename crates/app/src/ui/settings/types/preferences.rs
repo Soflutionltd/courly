@@ -79,6 +79,14 @@ pub fn step_email_zoom(label: &str, step: i32) -> &'static str {
     EMAIL_ZOOM_LEVELS[target]
 }
 
+/// Undo-send delays in seconds; "0" sends at once.
+pub const UNDO_SEND_DELAYS: &[&str] = &["0", "5", "10", "30"];
+
+/// How long a sent message waits so it can still be cancelled.
+pub fn undo_send_delay(seconds: &str) -> std::time::Duration {
+    std::time::Duration::from_secs(seconds.parse().unwrap_or(0))
+}
+
 /// Settings values for when an opened message is marked as read.
 pub const MARK_AS_READ_OPTIONS: &[&str] = &["Instantly", "After 2 Seconds", "Manually"];
 
@@ -125,6 +133,8 @@ pub struct PreferencesState {
     pub compose_always_show_cc: bool,
     /// One of `MARK_AS_READ_OPTIONS`.
     pub mark_as_read: String,
+    /// One of `UNDO_SEND_DELAYS`.
+    pub undo_delay: String,
     /// Seconds between new-mail checks, one of `MAIL_CHECK_INTERVALS`.
     pub mail_check_interval: String,
 }

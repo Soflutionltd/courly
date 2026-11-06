@@ -251,7 +251,11 @@ pub struct ReadyApp {
     /// back). Maps to the compose window so the completion handler
     /// can fire `Message::SendCompleted` against the right window.
     /// Entries are removed on completion arrival.
-    pub(crate) in_flight_sends: std::collections::HashMap<service_api::PlanId, iced::window::Id>,
+    pub(crate) in_flight_sends:
+        std::collections::HashMap<service_api::PlanId, crate::handlers::pop_out::SendOrigin>,
+
+    /// Sent messages still inside their undo delay, oldest first.
+    pub(crate) delayed_sends: Vec<crate::handlers::pop_out::DelayedSend>,
 
     /// Client-side action throttle keyed by `(account_id, thread_id)`.
     ///
@@ -508,6 +512,7 @@ impl ReadyApp {
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),
             in_flight_sends: std::collections::HashMap::new(),
+            delayed_sends: Vec::new(),
             action_throttle: std::collections::HashMap::new(),
             updater: crate::updater::UpdaterState::default(),
         };

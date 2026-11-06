@@ -5,7 +5,7 @@ use iced::advanced::graphics::futures::subscription;
 use iced::advanced::subscription::Hasher;
 use iced::futures::StreamExt;
 use iced::futures::stream::BoxStream;
-use iced::widget::{Space, container, mouse_area, row, text};
+use iced::widget::{Space, button, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length, Subscription};
 use rust_i18n::t;
 
@@ -90,6 +90,10 @@ enum ResolvedContent {
     },
     /// At least one account has an active auto-reply / out-of-office.
     AutoReplyActive,
+    /// A sent message is waiting out its undo delay.
+    PendingSend {
+        text: String,
+    },
 }
 
 // ── Sync event pipeline ─────────────────────────────────
@@ -258,12 +262,16 @@ pub enum StatusBarMessage {
     CycleTick(iced::time::Instant),
     /// User clicked a clickable warning.
     WarningClicked,
+    /// User cancelled the message waiting out its undo delay.
+    UndoSendClicked,
 }
 
 #[derive(Debug, Clone)]
 pub enum StatusBarEvent {
     /// User clicked a token expiry warning.
     RequestReauth { account_id: String },
+    /// Cancel the message waiting out its undo delay.
+    UndoSend,
 }
 
 // ── State ───────────────────────────────────────────────
@@ -285,6 +293,9 @@ pub struct StatusBar {
     /// mail arrived" indicator. Coalesce semantics on the wire mean
     /// the entry always reflects the latest event for the account.
     last_push_at: HashMap<String, std::time::Instant>,
+    /// Text of the banner offering to cancel a message still in its
+    /// undo delay. Outranks every other status.
+    pending_send: Option<String>,
 }
 
 impl StatusBar {
@@ -298,7 +309,21 @@ impl StatusBar {
             sync_generations: HashMap::new(),
             auto_reply_active: false,
             last_push_at: HashMap::new(),
+            pending_send: None,
         }
+    }
+
+    /// Offer to cancel a message waiting out its undo delay.
+    pub fn show_pending_send(&mut self, text: String) {
+        self.pending_send = Some(text);
+    }
+
+    pub fn clear_pending_send(&mut self) {
+        self.pending_send = None;
+    }
+
+    pub fn has_pending_send(&self) -> bool {
+        self.pending_send.is_some()
     }
 
     /// Record a JMAP push event for `account_id`.
@@ -434,6 +459,10 @@ impl StatusBar {
     ) -> ResolvedContent {
         if let Some(content) = resolve_service_health(service_health) {
             return content;
+        }
+
+        if let Some(ref text) = self.pending_send {
+            return ResolvedContent::PendingSend { text: text.clone() };
         }
 
         // 1. Warnings win over normal activity.
@@ -604,6 +633,31 @@ impl StatusBar {
                 &t!("main.status.auto_reply_active"),
                 TextClass::Accent,
             ),
+            ResolvedContent::PendingSend { text: send_text } => {
+                let cancel = button(
+                    text(t!("main.status.undo_send"))
+                        .size(TEXT_SM)
+                        .style(TextClass::Accent.style()),
+                )
+                .on_press(StatusBarMessage::UndoSendClicked)
+                .padding(0)
+                .style(crate::ui::theme::ButtonClass::BareIcon.style());
+                container(
+                    row![
+                        icon::send().size(ICON_MD).style(TextClass::Accent.style()),
+                        text(send_text).size(TEXT_SM).style(TextClass::Accent.style()),
+                        cancel,
+                    ]
+                    .spacing(SPACE_SM)
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_STATUS_BAR)
+                .width(Length::Fill)
+                .height(STATUS_BAR_HEIGHT)
+                .align_y(Alignment::Center)
+                .style(ContainerClass::StatusBar.style())
+                .into()
+            }
         }
     }
 }
@@ -647,6 +701,9 @@ impl Component for StatusBar {
                     }
                     WarningKind::ConnectionFailure { .. } => (iced::Task::none(), None),
                 }
+            }
+            StatusBarMessage::UndoSendClicked => {
+                (iced::Task::none(), Some(StatusBarEvent::UndoSend))
             }
         }
     }

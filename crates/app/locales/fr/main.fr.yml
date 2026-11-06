@@ -110,6 +110,7 @@ main.status.accounts_need_attention: "%{count} comptes nécessitent votre attent
 main.status.syncing_one: "Synchronisation de %{email} (%{current} / %{total})"
 main.status.syncing_many: "Synchronisation de %{count} comptes\u2026 (%{email}\u00A0: %{current} / %{total})"
 main.status.auto_reply_active: "La réponse automatique d'absence est active"
+main.status.undo_send: "Annuler"
 main.status.service_starting: "Démarrage du service\u00A0: %{phase}"
 main.status.service_respawning: "Redémarrage du service après un plantage (tentative %{attempt}, nouvel essai dans %{seconds}\u00A0s)"
 main.status.service_cannot_restart: "Le service ne peut pas redémarrer\u00A0: %{reason}"

@@ -78,6 +78,8 @@ pub enum SettingValue {
     /// When an opened message is marked as read
     /// ("Instantly", "After 2 Seconds", "Manually").
     MarkAsReadBehavior(String),
+    /// Seconds a sent message waits so it can be cancelled ("0" to "30").
+    UndoSendDelaySeconds(String),
 }
 
 impl SettingValue {
@@ -107,6 +109,7 @@ impl SettingValue {
             Self::EmailBodyBackground(_) => "email_body_background",
             Self::DateDisplay(_) => "date_display",
             Self::MarkAsReadBehavior(_) => "mark_as_read_behavior",
+            Self::UndoSendDelaySeconds(_) => "undo_send_delay_seconds",
         }
     }
 
@@ -143,7 +146,8 @@ impl SettingValue {
             | Self::MailCheckInterval(s)
             | Self::EmailBodyBackground(s)
             | Self::DateDisplay(s)
-            | Self::MarkAsReadBehavior(s) => s.clone(),
+            | Self::MarkAsReadBehavior(s)
+            | Self::UndoSendDelaySeconds(s) => s.clone(),
         }
     }
 }
@@ -212,6 +216,7 @@ mod tests {
             SettingValue::ComposeAlwaysShowCc(true),
             SettingValue::DateDisplay("Absolute".to_string()),
             SettingValue::MarkAsReadBehavior("Manually".to_string()),
+            SettingValue::UndoSendDelaySeconds("10".to_string()),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();

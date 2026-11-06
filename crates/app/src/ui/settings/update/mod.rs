@@ -617,6 +617,9 @@ impl Settings {
                 }
             }
             SettingsMessage::UndoDelayChanged(v) => {
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.undo_delay.clone_from(&v);
+                }
                 self.undo_delay = v;
                 self.open_select = None;
             }

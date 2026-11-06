@@ -494,7 +494,7 @@ impl ReadyApp {
     /// Render the status bar, respecting the `sync_status_bar` setting.
     /// When the setting is off, returns an empty zero-height element.
     pub(crate) fn status_bar_view(&self) -> Element<'_, Message> {
-        if self.settings.sync_status_bar {
+        if self.settings.sync_status_bar || self.status_bar.has_pending_send() {
             self.status_bar
                 .view_with_system_status(&self.service_health, self.index_rebuild_progress.as_ref())
                 .map(Message::StatusBar)
