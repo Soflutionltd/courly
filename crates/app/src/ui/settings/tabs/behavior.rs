@@ -52,7 +52,7 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
 
     if state.smart_notifications {
         let chips: Vec<Element<'_, SettingsMessage>> =
-            ["Primary", "Updates", "Promotions", "Social", "Newsletters"]
+            NOTIFY_CATEGORIES
                 .iter()
                 .map(|cat| {
                     let active = state.notify_categories.contains(&(*cat).to_string());

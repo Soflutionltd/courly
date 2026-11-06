@@ -54,6 +54,7 @@ impl ReadyApp {
         ];
         #[cfg(target_os = "macos")]
         subs.push(crate::menu_bar::events());
+        subs.push(crate::desktop_notifications::clicks());
 
         // Follow the pointer anywhere in the window while the toolbar is
         // being customized, including over the panel, which captures the

@@ -67,7 +67,7 @@ impl ReadyApp {
                 log::info!("Loaded {} threads", threads.len());
                 self.status = format!("{} threads", threads.len());
                 self.thread_list.set_threads(threads);
-                Task::none()
+                self.select_pending_notified_thread()
             }
             Message::ThreadsLoaded(_, Err(e)) => {
                 log::error!("ThreadsLoaded error: {e}");
@@ -332,9 +332,9 @@ impl ReadyApp {
                         });
                         Task::none()
                     }
-                    service_api::Notification::MailboxChanged(_) => {
+                    service_api::Notification::MailboxChanged(changed) => {
                         self.pending_mailbox_reload = Some(std::time::Instant::now());
-                        Task::none()
+                        self.look_for_new_mail(Some(&changed.account_id))
                     }
                     service_api::Notification::IndexCommitted(_) => {
                         // Phase 3 task 17: stamp the pending reload
@@ -596,6 +596,13 @@ impl ReadyApp {
                 self.handle_send_dispatch_failed(send_id, &error)
             }
             Message::DelayedSendDue(send_id) => self.dispatch_delayed_send(send_id),
+            Message::NewMailLoaded(result) => {
+                self.handle_new_mail_loaded(result);
+                Task::none()
+            }
+            Message::DesktopNotificationClicked(identifier) => {
+                self.open_notified_thread(&identifier)
+            }
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {
@@ -1127,7 +1134,7 @@ impl ReadyApp {
             }
             Message::BootstrapSnapshotsLoaded(result) => {
                 self.handle_bootstrap_snapshots_loaded(result);
-                Task::none()
+                self.look_for_new_mail(None)
             }
         }
     }

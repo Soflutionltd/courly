@@ -35,6 +35,7 @@ mod command_resolver;
 mod component;
 mod data_dir;
 mod db;
+mod desktop_notifications;
 mod display;
 mod draft_wal;
 mod font;
@@ -47,6 +48,7 @@ mod main_view;
 #[cfg(target_os = "macos")]
 mod menu_bar;
 mod message;
+mod new_mail;
 pub mod notification_queue;
 mod pop_out;
 pub mod service_client;

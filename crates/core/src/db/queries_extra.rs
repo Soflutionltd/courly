@@ -11,6 +11,7 @@ pub(crate) use db_read::db::queries_extra::label_intent::user_visible_label_grou
 pub use db_read::db::queries_extra::load_recent_rule_bundled_threads;
 pub use db_read::db::queries_extra::message_queries;
 pub use db_read::db::queries_extra::message_queries::*;
+pub use db_read::db::queries_extra::new_mail;
 pub(crate) use db_read::db::queries_extra::scoped_queries;
 pub(crate) use db_read::db::queries_extra::search_fallback;
 pub(crate) use db_read::db::queries_extra::send_identity::*;

@@ -87,6 +87,28 @@ pub fn undo_send_delay(seconds: &str) -> std::time::Duration {
     std::time::Duration::from_secs(seconds.parse().unwrap_or(0))
 }
 
+/// Inbox categories a notification can be limited to, in display order.
+pub const NOTIFY_CATEGORIES: &[&str] = &["Primary", "Updates", "Promotions", "Social", "Newsletters"];
+
+/// Categories stored as "Primary,Updates", keeping only known ones.
+pub fn notify_categories_from_setting(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|category| NOTIFY_CATEGORIES.contains(category))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// VIP senders stored one address per line, lowercased.
+pub fn vip_senders_from_setting(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(|line| line.trim().to_lowercase())
+        .filter(|email| !email.is_empty())
+        .collect()
+}
+
 /// Settings values for when an opened message is marked as read.
 pub const MARK_AS_READ_OPTIONS: &[&str] = &["Instantly", "After 2 Seconds", "Manually"];
 
@@ -137,6 +159,12 @@ pub struct PreferencesState {
     pub undo_delay: String,
     /// Seconds between new-mail checks, one of `MAIL_CHECK_INTERVALS`.
     pub mail_check_interval: String,
+    pub notifications_enabled: bool,
+    pub smart_notifications: bool,
+    /// Subset of `NOTIFY_CATEGORIES`.
+    pub notify_categories: Vec<String>,
+    /// Lowercased addresses that always notify.
+    pub vip_senders: Vec<String>,
 }
 
 #[cfg(test)]
@@ -149,6 +177,18 @@ mod tests {
         assert_eq!(email_zoom_factor("100%"), Some(1.0));
         assert_eq!(email_zoom_factor("93%"), None);
         assert_eq!(email_zoom_factor(DEFAULT_EMAIL_ZOOM), Some(0.9));
+    }
+
+    #[test]
+    fn notification_lists_parse_their_stored_form() {
+        assert_eq!(
+            notify_categories_from_setting("Primary, Social,Unknown,"),
+            vec!["Primary".to_string(), "Social".to_string()]
+        );
+        assert_eq!(
+            vip_senders_from_setting(" Boss@Example.com \n\nceo@example.com"),
+            vec!["boss@example.com".to_string(), "ceo@example.com".to_string()]
+        );
     }
 
     #[test]

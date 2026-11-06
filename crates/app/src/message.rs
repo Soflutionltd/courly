@@ -290,6 +290,10 @@ pub enum Message {
     },
     /// A sent message's undo delay ran out: hand it to the Service.
     DelayedSendDue(service_api::PlanId),
+    /// Unread inbox mail read to decide on desktop notifications.
+    NewMailLoaded(Result<Vec<rtsk::db::queries_extra::new_mail::NewMailRow>, String>),
+    /// A desktop notification was clicked; carries its identifier.
+    DesktopNotificationClicked(String),
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
     SetTheme(String),

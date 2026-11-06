@@ -80,6 +80,14 @@ pub enum SettingValue {
     MarkAsReadBehavior(String),
     /// Seconds a sent message waits so it can be cancelled ("0" to "30").
     UndoSendDelaySeconds(String),
+    /// Desktop notifications for new mail.
+    NotificationsEnabled(bool),
+    /// Notify only for VIP senders and the categories below.
+    SmartNotifications(bool),
+    /// Inbox categories that notify, comma-separated ("Primary,Updates").
+    NotifyCategories(String),
+    /// Senders that always notify, one address per line, for every account.
+    NotificationVipSenders(String),
 }
 
 impl SettingValue {
@@ -110,6 +118,10 @@ impl SettingValue {
             Self::DateDisplay(_) => "date_display",
             Self::MarkAsReadBehavior(_) => "mark_as_read_behavior",
             Self::UndoSendDelaySeconds(_) => "undo_send_delay_seconds",
+            Self::NotificationsEnabled(_) => "notifications_enabled",
+            Self::SmartNotifications(_) => "smart_notifications",
+            Self::NotifyCategories(_) => "notify_categories",
+            Self::NotificationVipSenders(_) => "notification_vip_senders",
         }
     }
 
@@ -125,7 +137,9 @@ impl SettingValue {
             | Self::CompressAttachments(v)
             | Self::AllowLossyCompression(v)
             | Self::ThreadDateGroups(v)
-            | Self::ComposeAlwaysShowCc(v) => {
+            | Self::ComposeAlwaysShowCc(v)
+            | Self::NotificationsEnabled(v)
+            | Self::SmartNotifications(v) => {
                 if *v {
                     "true".to_string()
                 } else {
@@ -147,7 +161,9 @@ impl SettingValue {
             | Self::EmailBodyBackground(s)
             | Self::DateDisplay(s)
             | Self::MarkAsReadBehavior(s)
-            | Self::UndoSendDelaySeconds(s) => s.clone(),
+            | Self::UndoSendDelaySeconds(s)
+            | Self::NotifyCategories(s)
+            | Self::NotificationVipSenders(s) => s.clone(),
         }
     }
 }
@@ -217,6 +233,10 @@ mod tests {
             SettingValue::DateDisplay("Absolute".to_string()),
             SettingValue::MarkAsReadBehavior("Manually".to_string()),
             SettingValue::UndoSendDelaySeconds("10".to_string()),
+            SettingValue::NotificationsEnabled(true),
+            SettingValue::SmartNotifications(true),
+            SettingValue::NotifyCategories("Primary".to_string()),
+            SettingValue::NotificationVipSenders(String::new()),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();

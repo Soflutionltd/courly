@@ -357,3 +357,7 @@ main.side_panel.templates.save_failed: "Impossible d'enregistrer le modèle\u00A
 main.side_panel.templates.delete_failed: "Impossible de supprimer le modèle\u00A0: %{error}"
 main.side_panel.templates.service_unavailable: "Le service de Courly n'est pas encore prêt. Réessayez dans un instant."
 main.menu_bar.side_panel: "Volet de droite"
+main.notifications.new_messages: "%{count} nouveaux messages"
+main.notifications.latest_from: "Dernier de %{sender} : %{subject}"
+main.notifications.unknown_sender: "Expéditeur inconnu"
+main.notifications.no_subject: "(Sans objet)"

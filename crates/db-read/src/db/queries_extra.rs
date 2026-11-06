@@ -12,6 +12,7 @@ pub mod extract_reindex;
 pub mod label_intent;
 pub mod message_queries;
 mod misc;
+pub mod new_mail;
 pub mod scoped_queries;
 pub mod search_fallback;
 pub mod send_identity;

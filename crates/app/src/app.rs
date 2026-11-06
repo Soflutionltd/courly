@@ -174,6 +174,10 @@ pub struct ReadyApp {
     /// Stamped on `Notification::MailboxChanged`; cleared by the 250 ms
     /// `MailboxReloadTick` handler once it reloads the list and counts.
     pub(crate) pending_mailbox_reload: Option<std::time::Instant>,
+    /// What new inbox mail has already been considered for notifications.
+    pub(crate) new_mail: crate::new_mail::NewMailWatch,
+    /// Thread a notification click opens once its inbox has loaded.
+    pub(crate) pending_notified_thread: Option<(String, String)>,
     /// When the last window-focus re-read of every account ran.
     pub(crate) last_focus_sync: Option<std::time::Instant>,
     pub(crate) search_generation: GenerationCounter<Search>,
@@ -485,6 +489,8 @@ impl ReadyApp {
             pending_reader_reload: None,
             pending_calendar_reload: None,
             pending_mailbox_reload: None,
+            new_mail: crate::new_mail::NewMailWatch::new(jiff::Timestamp::now().as_millisecond()),
+            pending_notified_thread: None,
             last_focus_sync: None,
             chat_timeline: None,
             chat_generation: GenerationCounter::new(),

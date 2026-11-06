@@ -489,6 +489,14 @@ impl Settings {
         if let Some(display) = ui.date_display.as_deref().and_then(date_display_from_setting) {
             self.date_display = display;
         }
+        self.notifications_enabled = settings.notifications_enabled;
+        self.smart_notifications = settings.smart_notifications;
+        if let Some(categories) = settings.notify_categories.as_deref() {
+            self.notify_categories = notify_categories_from_setting(categories);
+        }
+        if let Some(senders) = settings.notification_vip_senders.as_deref() {
+            self.vip_senders = vip_senders_from_setting(senders);
+        }
         crate::ui::theme::set_email_body_background(self.email_body_background);
         if let Some(zoom) = email_zoom_factor(&self.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
@@ -571,6 +579,10 @@ impl Settings {
             mark_as_read: self.mark_as_read.clone(),
             undo_delay: self.undo_delay.clone(),
             mail_check_interval: self.mail_check_interval.clone(),
+            notifications_enabled: self.notifications_enabled,
+            smart_notifications: self.smart_notifications,
+            notify_categories: self.notify_categories.clone(),
+            vip_senders: self.vip_senders.clone(),
         }
     }
 
@@ -597,6 +609,10 @@ impl Settings {
         self.mark_as_read = prefs.mark_as_read.clone();
         self.undo_delay = prefs.undo_delay.clone();
         self.mail_check_interval = prefs.mail_check_interval.clone();
+        self.notifications_enabled = prefs.notifications_enabled;
+        self.smart_notifications = prefs.smart_notifications;
+        self.notify_categories = prefs.notify_categories.clone();
+        self.vip_senders = prefs.vip_senders.clone();
         if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
         }
@@ -625,6 +641,10 @@ impl Default for Settings {
             mark_as_read: "After 2 Seconds".into(),
             undo_delay: "5".into(),
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
+            notifications_enabled: true,
+            smart_notifications: true,
+            notify_categories: vec!["Primary".into()],
+            vip_senders: Vec::new(),
         };
         Self {
             active_tab: Tab::General,
@@ -853,6 +873,7 @@ mod tests {
             auto_archive_categories: None,
             smart_notifications: true,
             notify_categories: None,
+            notification_vip_senders: None,
             attachment_cache_max_mb: None,
             compress_attachments: true,
             allow_lossy_compression: false,
@@ -1061,6 +1082,35 @@ mod tests {
         settings.commit_preferences();
         assert_eq!(settings.committed_preferences.mark_as_read, "Manually");
         assert_eq!(MarkAsRead::from_setting("junk"), MarkAsRead::AfterDelay);
+    }
+
+    #[test]
+    fn notification_preferences_are_read_at_boot_and_committed_from_the_panel() {
+        let mut settings = Settings::default();
+        let mut snapshot = default_settings_snapshot();
+        snapshot.smart_notifications = false;
+        snapshot.notify_categories = Some("Primary,Social".into());
+        snapshot.notification_vip_senders = Some("Boss@Example.com".into());
+        settings.apply_bootstrap(&empty_ui_snapshot(), &snapshot);
+        assert!(!settings.committed_preferences.smart_notifications);
+        assert_eq!(settings.notify_categories, ["Primary", "Social"]);
+        assert_eq!(settings.vip_senders, ["boss@example.com"]);
+
+        settings.begin_editing();
+        for message in [
+            SettingsMessage::ToggleNotifications(false),
+            SettingsMessage::ToggleNotifyCategory("Social".into()),
+            SettingsMessage::VipEmailChanged("ceo@example.com".into()),
+            SettingsMessage::AddVipSender,
+            SettingsMessage::RemoveVipSender("boss@example.com".into()),
+        ] {
+            let _ = crate::component::Component::update(&mut settings, message);
+        }
+        settings.commit_preferences();
+        let committed = &settings.committed_preferences;
+        assert!(!committed.notifications_enabled);
+        assert_eq!(committed.notify_categories, ["Primary"]);
+        assert_eq!(committed.vip_senders, ["ceo@example.com"]);
     }
 
     #[test]

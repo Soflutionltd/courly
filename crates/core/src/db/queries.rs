@@ -100,6 +100,7 @@ pub struct SettingsBootstrapSnapshot {
     pub auto_archive_categories: Option<String>,
     pub smart_notifications: bool,
     pub notify_categories: Option<String>,
+    pub notification_vip_senders: Option<String>,
     pub attachment_cache_max_mb: Option<String>,
     // Attachments roadmap Phase 6:
     pub compress_attachments: bool,
@@ -294,6 +295,7 @@ pub fn get_settings_bootstrap_snapshot(
         auto_archive_categories: get("auto_archive_categories"),
         smart_notifications: get_bool("smart_notifications", true),
         notify_categories: get("notify_categories"),
+        notification_vip_senders: get("notification_vip_senders"),
         attachment_cache_max_mb: get("attachment_cache_max_mb"),
         compress_attachments: get_bool("compress_attachments", true),
         allow_lossy_compression: get_bool("allow_lossy_compression", false),

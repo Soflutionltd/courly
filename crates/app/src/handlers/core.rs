@@ -505,6 +505,15 @@ impl ReadyApp {
             log::warn!("settings.set: no ServiceClient yet; preferences not persisted");
             return Task::none();
         };
+        let notifications_turned_on = prefs.notifications_enabled
+            && self
+                .settings
+                .persisted_preferences
+                .as_ref()
+                .is_some_and(|persisted| !persisted.notifications_enabled);
+        if notifications_turned_on {
+            crate::desktop_notifications::request_authorization();
+        }
         self.settings.persisted_preferences = Some(prefs.clone());
         let values = vec![
             SettingValue::ShowSyncStatus(prefs.sync_status_bar),
@@ -526,6 +535,10 @@ impl ReadyApp {
             ),
             SettingValue::MarkAsReadBehavior(prefs.mark_as_read.clone()),
             SettingValue::UndoSendDelaySeconds(prefs.undo_delay.clone()),
+            SettingValue::NotificationsEnabled(prefs.notifications_enabled),
+            SettingValue::SmartNotifications(prefs.smart_notifications),
+            SettingValue::NotifyCategories(prefs.notify_categories.join(",")),
+            SettingValue::NotificationVipSenders(prefs.vip_senders.join("\n")),
         ];
         Task::perform(async move { client.set_settings(values).await }, |result| {
             if let Err(e) = result {

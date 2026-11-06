@@ -18,6 +18,7 @@ mod keyboard;
 pub mod labels;
 mod move_menu;
 mod navigation;
+mod new_mail;
 mod palette;
 pub(crate) mod pop_out;
 pub(crate) mod provider;

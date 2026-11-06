@@ -636,24 +636,45 @@ impl Settings {
 
     fn handle_remaining_message(&mut self, message: SettingsMessage) {
         match message {
-            SettingsMessage::ToggleNotifications(v) => self.notifications_enabled = v,
-            SettingsMessage::ToggleSmartNotifications(v) => self.smart_notifications = v,
+            SettingsMessage::ToggleNotifications(v) => {
+                self.notifications_enabled = v;
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.notifications_enabled = v;
+                }
+            }
+            SettingsMessage::ToggleSmartNotifications(v) => {
+                self.smart_notifications = v;
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.smart_notifications = v;
+                }
+            }
             SettingsMessage::ToggleNotifyCategory(cat) => {
                 if let Some(pos) = self.notify_categories.iter().position(|c| c == &cat) {
                     self.notify_categories.remove(pos);
                 } else {
                     self.notify_categories.push(cat);
                 }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.notify_categories.clone_from(&self.notify_categories);
+                }
             }
             SettingsMessage::VipEmailChanged(v) => self.vip_email_input.set_text(v),
             SettingsMessage::AddVipSender => {
-                let email = self.vip_email_input.text().trim().to_string();
-                if !email.is_empty() && !self.vip_senders.contains(&email) {
+                let email = self.vip_email_input.text().trim().to_lowercase();
+                if email.contains('@') && !self.vip_senders.contains(&email) {
                     self.vip_senders.push(email);
                     self.vip_email_input.set_text(String::new());
+                    if let Some(ref mut prefs) = self.editing_preferences {
+                        prefs.vip_senders.clone_from(&self.vip_senders);
+                    }
                 }
             }
-            SettingsMessage::RemoveVipSender(email) => self.vip_senders.retain(|e| e != &email),
+            SettingsMessage::RemoveVipSender(email) => {
+                self.vip_senders.retain(|e| e != &email);
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.vip_senders.clone_from(&self.vip_senders);
+                }
+            }
             SettingsMessage::AiProviderChanged(v) => {
                 self.ai_provider = v;
                 self.open_select = None;
