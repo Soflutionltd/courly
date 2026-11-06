@@ -99,7 +99,7 @@ impl ReadyApp {
                 if self.show_settings {
                     self.close_settings();
                 } else {
-                    return self.open_settings(crate::ui::settings::Tab::General);
+                    return self.open_settings(crate::ui::settings::Tab::Accounts);
                 }
                 Task::none()
             }

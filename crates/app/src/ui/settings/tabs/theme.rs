@@ -13,6 +13,8 @@ pub(super) fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .spacing(SPACE_LG)
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
+    col = col.push(super::general::appearance_section(state));
+
     let mut grid = column![].spacing(SPACE_XS);
     let mut current_row = row![].spacing(SPACE_XS);
     let mut col_count = 0;

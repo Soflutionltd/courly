@@ -42,12 +42,8 @@ fn option_label(value: &str) -> Option<&'static str> {
     }))
 }
 
-pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage> {
-    let mut col = column![]
-        .spacing(SPACE_LG)
-        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
-
-    col = col.push(section(
+pub(super) fn appearance_section(state: &Settings) -> iced::Element<'_, SettingsMessage> {
+    section(
         tr(t!("settings.general.appearance")),
         vec![
             setting_row(
@@ -63,18 +59,6 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::Theme),
             ),
             setting_row(
-                tr(t!("settings.general.email_density")),
-                translated_select(
-                    &Density::SETTINGS,
-                    &state.density,
-                    option_label,
-                    state.open_select == Some(SelectField::Density),
-                    SettingsMessage::ToggleSelect(SelectField::Density),
-                    SettingsMessage::DensityChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::Density),
-            ),
-            setting_row(
                 tr(t!("settings.general.font_size")),
                 translated_select(
                     &["XSmall", "Small", "Default", "Large", "XLarge"],
@@ -86,6 +70,88 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 ),
                 SettingsMessage::ToggleSelect(SelectField::FontSize),
             ),
+            slider_row(
+                tr(t!("settings.general.scale")),
+                None,
+                None,
+                1.0..=4.0,
+                state.scale_preview.unwrap_or(state.scale),
+                1.0,
+                0.125,
+                SettingsMessage::ScaleDragged,
+                Some(SettingsMessage::ScaleReleased),
+            ),
+        ],
+    )
+}
+
+pub(super) fn layout_tab(state: &Settings) -> iced::Element<'_, SettingsMessage> {
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
+
+    col = col.push(section(
+        tr(t!("settings.general.reading_pane")),
+        radio_group(
+            &[
+                (tr(t!("settings.general.pane_right")), None, "Right"),
+                (tr(t!("settings.general.pane_bottom")), None, "Bottom"),
+                (tr(t!("settings.general.pane_hidden")), None, "Hidden"),
+            ],
+            Some(state.reading_pane_position.as_str()),
+            |v| SettingsMessage::ReadingPaneChanged(v.to_string()),
+        ),
+    ));
+
+
+    col = col.push(section(
+        tr(t!("settings.general.message_list")),
+        vec![
+            setting_row(
+                tr(t!("settings.general.email_density")),
+                translated_select(
+                    &Density::SETTINGS,
+                    &state.density,
+                    option_label,
+                    state.open_select == Some(SelectField::Density),
+                    SettingsMessage::ToggleSelect(SelectField::Density),
+                    SettingsMessage::DensityChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::Density),
+            ),
+            setting_row_with_description(
+                tr(t!("settings.general.message_dates")),
+                Some(tr(t!("settings.general.message_dates_description"))),
+                translated_select(
+                    &["Relative Offset", "Absolute"],
+                    date_display_setting(state.date_display),
+                    option_label,
+                    state.open_select == Some(SelectField::DateDisplay),
+                    SettingsMessage::ToggleSelect(SelectField::DateDisplay),
+                    SettingsMessage::DateDisplayChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::DateDisplay),
+            ),
+            toggle_row(
+                tr(t!("settings.general.group_by_date")),
+                t!("settings.general.group_by_date_description"),
+                state.thread_date_groups,
+                SettingsMessage::ToggleThreadDateGroups,
+            ),
+        ],
+    ));
+
+    col.into()
+}
+
+pub(super) fn reading_tab(state: &Settings) -> iced::Element<'_, SettingsMessage> {
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
+
+    col = col.push(section(
+        tr(t!("settings.general.message_display")),
+        vec![
             setting_row(
                 tr(t!("settings.general.email_body_background")),
                 translated_select(
@@ -110,60 +176,6 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 ),
                 SettingsMessage::ToggleSelect(SelectField::EmailZoom),
             ),
-            slider_row(
-                tr(t!("settings.general.scale")),
-                None,
-                None,
-                1.0..=4.0,
-                state.scale_preview.unwrap_or(state.scale),
-                1.0,
-                0.125,
-                SettingsMessage::ScaleDragged,
-                Some(SettingsMessage::ScaleReleased),
-            ),
-            setting_row_with_description(
-                tr(t!("settings.general.message_dates")),
-                Some(tr(t!("settings.general.message_dates_description"))),
-                translated_select(
-                    &["Relative Offset", "Absolute"],
-                    date_display_setting(state.date_display),
-                    option_label,
-                    state.open_select == Some(SelectField::DateDisplay),
-                    SettingsMessage::ToggleSelect(SelectField::DateDisplay),
-                    SettingsMessage::DateDisplayChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::DateDisplay),
-            ),
-            toggle_row(
-                tr(t!("settings.general.group_by_date")),
-                t!("settings.general.group_by_date_description"),
-                state.thread_date_groups,
-                SettingsMessage::ToggleThreadDateGroups,
-            ),
-            toggle_row(
-                tr(t!("settings.general.show_status_bar")),
-                t!("settings.general.show_status_bar_description"),
-                state.sync_status_bar,
-                SettingsMessage::ToggleSyncStatusBar,
-            ),
-        ],
-    ));
-
-    col = col.push(section(
-        tr(t!("settings.general.behavior")),
-        vec![
-            setting_row(
-                tr(t!("settings.general.undo_send_delay")),
-                translated_select(
-                    UNDO_SEND_DELAYS,
-                    &state.undo_delay,
-                    option_label,
-                    state.open_select == Some(SelectField::UndoDelay),
-                    SettingsMessage::ToggleSelect(SelectField::UndoDelay),
-                    SettingsMessage::UndoDelayChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::UndoDelay),
-            ),
             setting_row(
                 tr(t!("settings.general.mark_as_read")),
                 translated_select(
@@ -176,46 +188,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 ),
                 SettingsMessage::ToggleSelect(SelectField::MarkAsRead),
             ),
-            setting_row_with_description(
-                tr(t!("settings.general.mail_check")),
-                Some(tr(t!("settings.general.mail_check_description"))),
-                translated_select(
-                    MAIL_CHECK_INTERVALS,
-                    &state.mail_check_interval,
-                    option_label,
-                    state.open_select == Some(SelectField::MailCheckInterval),
-                    SettingsMessage::ToggleSelect(SelectField::MailCheckInterval),
-                    SettingsMessage::MailCheckIntervalChanged,
-                ),
-                SettingsMessage::ToggleSelect(SelectField::MailCheckInterval),
-            ),
         ],
-    ));
-
-    col = col.push(section(
-        tr(t!("settings.general.reading_pane")),
-        radio_group(
-            &[
-                (tr(t!("settings.general.pane_right")), None, "Right"),
-                (tr(t!("settings.general.pane_bottom")), None, "Bottom"),
-                (tr(t!("settings.general.pane_hidden")), None, "Hidden"),
-            ],
-            Some(state.reading_pane_position.as_str()),
-            |v| SettingsMessage::ReadingPaneChanged(v.to_string()),
-        ),
-    ));
-
-    col = col.push(section(
-        tr(t!("settings.general.updates")),
-        vec![toggle_row(
-            tr(t!("settings.general.auto_update")),
-            t!(
-                "settings.general.auto_update_description",
-                version = env!("CARGO_PKG_VERSION")
-            ),
-            state.auto_update,
-            SettingsMessage::ToggleAutoUpdate,
-        )],
     ));
 
     let privacy_help_id = "privacy-security";
@@ -248,6 +221,60 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 t!("settings.general.phishing_detection_description"),
                 state.phishing_detection,
                 SettingsMessage::TogglePhishingDetection,
+            ),
+        ],
+    ));
+
+
+    col.into()
+}
+
+pub(super) fn sending_section(state: &Settings) -> iced::Element<'_, SettingsMessage> {
+    section(
+        tr(t!("settings.general.sending")),
+        vec![
+            setting_row(
+                tr(t!("settings.general.undo_send_delay")),
+                translated_select(
+                    UNDO_SEND_DELAYS,
+                    &state.undo_delay,
+                    option_label,
+                    state.open_select == Some(SelectField::UndoDelay),
+                    SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+                    SettingsMessage::UndoDelayChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+            ),
+        ],
+    )
+}
+
+pub(super) fn sync_tab(state: &Settings) -> iced::Element<'_, SettingsMessage> {
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
+
+    col = col.push(section(
+        tr(t!("settings.general.sync")),
+        vec![
+            setting_row_with_description(
+                tr(t!("settings.general.mail_check")),
+                Some(tr(t!("settings.general.mail_check_description"))),
+                translated_select(
+                    MAIL_CHECK_INTERVALS,
+                    &state.mail_check_interval,
+                    option_label,
+                    state.open_select == Some(SelectField::MailCheckInterval),
+                    SettingsMessage::ToggleSelect(SelectField::MailCheckInterval),
+                    SettingsMessage::MailCheckIntervalChanged,
+                ),
+                SettingsMessage::ToggleSelect(SelectField::MailCheckInterval),
+            ),
+            toggle_row(
+                tr(t!("settings.general.show_status_bar")),
+                t!("settings.general.show_status_bar_description"),
+                state.sync_status_bar,
+                SettingsMessage::ToggleSyncStatusBar,
             ),
         ],
     ));

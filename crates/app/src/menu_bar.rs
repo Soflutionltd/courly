@@ -231,7 +231,7 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
     separator(&app);
     b.item(
         &app,
-        A::Settings(Tab::General),
+        A::Settings(Tab::Accounts),
         &tr("main.menu_bar.settings"),
         shortcut("cmd+,"),
     );

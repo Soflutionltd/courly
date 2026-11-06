@@ -13,7 +13,13 @@ use crate::ui::theme;
 use crate::ui::theme::RowPosition;
 use crate::ui::widgets;
 
-pub(super) fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
+pub(super) fn signatures_tab(state: &Settings) -> Element<'_, SettingsMessage> {
+    column![signature_list_section(state)]
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH))
+        .into()
+}
+
+fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
     if state.managed_accounts.is_empty() {
         return section(
             tr(t!("settings.signatures.title")),

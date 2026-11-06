@@ -29,14 +29,17 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     let nav = tab_nav(state.active_tab);
     let content = match state.active_tab {
         Tab::Accounts => accounts::accounts_tab(state),
-        Tab::General => general::general_tab(state),
-        Tab::Theme => theme_panel::theme_tab(state),
+        Tab::Appearance => theme_panel::theme_tab(state),
         Tab::Notifications => behavior::notifications_tab(state),
-        Tab::Composing => behavior::composing_tab(state),
-        Tab::Labels => labels::labels_tab(state),
-        Tab::People => people::people_tab(state),
-        Tab::Shortcuts => reference::shortcuts_tab(),
         Tab::Ai => ai::ai_tab(state),
+        Tab::Shortcuts => reference::shortcuts_tab(),
+        Tab::Layout => general::layout_tab(state),
+        Tab::Reading => general::reading_tab(state),
+        Tab::Composing => behavior::composing_tab(state),
+        Tab::Signatures => signatures::signatures_tab(state),
+        Tab::Labels => labels::labels_tab(state),
+        Tab::Sync => general::sync_tab(state),
+        Tab::People => people::people_tab(state),
         Tab::About => reference::about_tab(state),
     };
 
@@ -211,16 +214,18 @@ fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
     ));
     col = col.push(Space::new().height(SPACE_XS));
 
-    for tab in Tab::ALL {
-        let is_active = *tab == active;
-        col = col.push(widgets::nav_button(
-            Some(tab.icon()),
-            tab.label(),
-            is_active,
-            widgets::NavSize::Regular,
-            None,
-            SettingsMessage::SelectTab(*tab),
-        ));
+    for (header, tabs) in Tab::GROUPS {
+        col = col.push(widgets::section_header(tr(t!(*header))));
+        for tab in *tabs {
+            col = col.push(widgets::nav_button(
+                Some(tab.icon()),
+                tab.label(),
+                *tab == active,
+                widgets::NavSize::Regular,
+                None,
+                SettingsMessage::SelectTab(*tab),
+            ));
+        }
     }
 
     container(

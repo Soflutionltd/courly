@@ -24,42 +24,60 @@ use crate::ui::undoable::UndoableText;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Accounts,
-    General,
-    Theme,
+    Appearance,
     Notifications,
-    Composing,
-    Labels,
-    People,
-    Shortcuts,
     Ai,
+    Shortcuts,
+    Layout,
+    Reading,
+    Composing,
+    Signatures,
+    Labels,
+    Sync,
+    People,
     About,
 }
 
 impl Tab {
-    pub(super) const ALL: &[Tab] = &[
-        Tab::Accounts,
-        Tab::General,
-        Tab::Theme,
-        Tab::Notifications,
-        Tab::Composing,
-        Tab::Labels,
-        Tab::People,
-        Tab::Shortcuts,
-        Tab::Ai,
-        Tab::About,
+    /// Sidebar sections in display order, each with its header label key.
+    pub(super) const GROUPS: &[(&'static str, &'static [Tab])] = &[
+        (
+            "settings.tabs.general",
+            &[
+                Tab::Accounts,
+                Tab::Appearance,
+                Tab::Notifications,
+                Tab::Ai,
+                Tab::Shortcuts,
+            ],
+        ),
+        (
+            "settings.tabs.mail",
+            &[
+                Tab::Layout,
+                Tab::Reading,
+                Tab::Composing,
+                Tab::Signatures,
+                Tab::Labels,
+            ],
+        ),
+        ("settings.tabs.data", &[Tab::Sync, Tab::People, Tab::About]),
     ];
 
     pub(super) fn label(self) -> &'static str {
         super::row_widgets::tr(match self {
             Tab::Accounts => t!("settings.tabs.accounts"),
-            Tab::General => t!("settings.tabs.general"),
-            Tab::Theme => t!("settings.tabs.theme"),
+            Tab::Appearance => t!("settings.tabs.appearance"),
             Tab::Notifications => t!("settings.tabs.notifications"),
-            Tab::Composing => t!("settings.tabs.composing"),
-            Tab::Labels => t!("settings.tabs.labels"),
-            Tab::People => t!("settings.tabs.people"),
-            Tab::Shortcuts => t!("settings.tabs.shortcuts"),
             Tab::Ai => t!("settings.tabs.ai"),
+            Tab::Shortcuts => t!("settings.tabs.shortcuts"),
+            Tab::Layout => t!("settings.tabs.layout"),
+            Tab::Reading => t!("settings.tabs.reading"),
+            Tab::Composing => t!("settings.tabs.composing"),
+            Tab::Signatures => t!("settings.tabs.signatures"),
+            Tab::Labels => t!("settings.tabs.labels"),
+            Tab::Sync => t!("settings.tabs.sync"),
+            Tab::People => t!("settings.tabs.people"),
             Tab::About => t!("settings.tabs.about"),
         })
     }
@@ -68,14 +86,17 @@ impl Tab {
         use crate::icon;
         match self {
             Tab::Accounts => icon::users(),
-            Tab::General => icon::settings(),
-            Tab::Theme => icon::palette(),
+            Tab::Appearance => icon::palette(),
             Tab::Notifications => icon::bell(),
-            Tab::Composing => icon::pencil(),
-            Tab::Labels => icon::tag(),
-            Tab::People => icon::users(),
-            Tab::Shortcuts => icon::zap(),
             Tab::Ai => icon::globe(),
+            Tab::Shortcuts => icon::zap(),
+            Tab::Layout => icon::layout_template(),
+            Tab::Reading => icon::eye(),
+            Tab::Composing => icon::pencil(),
+            Tab::Signatures => icon::edit(),
+            Tab::Labels => icon::tag(),
+            Tab::Sync => icon::refresh(),
+            Tab::People => icon::user(),
             Tab::About => icon::info(),
         }
     }
@@ -647,7 +668,7 @@ impl Default for Settings {
             vip_senders: Vec::new(),
         };
         Self {
-            active_tab: Tab::General,
+            active_tab: Tab::Accounts,
             open_select: None,
             committed_preferences: initial_preferences,
             editing_preferences: None,
