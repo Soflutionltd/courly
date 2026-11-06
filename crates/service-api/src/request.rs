@@ -1095,6 +1095,12 @@ pub enum RequestParams {
     ActionMarkChatRead {
         chat_email: String,
     },
+    /// Read-on-open side effect for one mail thread, journaled as a quiet
+    /// job like `ActionMarkChatRead`: no toast, no undo entry.
+    ActionMarkThreadRead {
+        account_id: String,
+        thread_id: String,
+    },
     /// Phase 2 plan scope item 5: compose-send relocates as a quiet
     /// journal job. Handler validates the request, transfers each
     /// attachment from `<app_data>/staging/<send_id>/` into a
@@ -1715,6 +1721,7 @@ impl RequestParams {
             Self::CalActionExecutePlan { .. } => "cal_action.execute_plan",
             Self::ActionJobStatus { .. } => "action.job_status",
             Self::ActionMarkChatRead { .. } => "action.mark_chat_read",
+            Self::ActionMarkThreadRead { .. } => "action.mark_thread_read",
             Self::ActionSend { .. } => "action.send",
             Self::ActionCancelScheduledSend { .. } => "action.cancel_scheduled_send",
             Self::ActionRescheduleSend { .. } => "action.reschedule_send",
@@ -1826,7 +1833,9 @@ impl RequestParams {
             Self::ActionJobStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
-            Self::ActionMarkChatRead { .. } => RequestTimeoutKind::Finite(Duration::from_secs(10)),
+            Self::ActionMarkChatRead { .. } | Self::ActionMarkThreadRead { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(10))
+            }
             Self::FolderMarkAllRead { .. } | Self::FolderEmpty { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(300))
             }
@@ -2042,6 +2051,7 @@ impl RequestParams {
             | Self::PinnedSearchCreateOrUpdate { .. } => Idempotency::Mutating,
 
             Self::ActionMarkChatRead { .. }
+            | Self::ActionMarkThreadRead { .. }
             | Self::SyncStartAccount { .. }
             | Self::SyncFocusFolder { .. }
             | Self::CalendarStartAccountSync { .. }
@@ -2145,6 +2155,10 @@ impl RequestParams {
             Self::ActionMarkChatRead { chat_email } => {
                 serde_json::json!({ "chat_email": chat_email })
             }
+            Self::ActionMarkThreadRead {
+                account_id,
+                thread_id,
+            } => serde_json::json!({ "account_id": account_id, "thread_id": thread_id }),
             Self::ActionSend { request } => serde_json::json!({ "request": request }),
             Self::ActionCancelScheduledSend { params } => serde_json::json!({ "params": params }),
             Self::ActionRescheduleSend { params } => serde_json::json!({ "params": params }),
@@ -2302,6 +2316,19 @@ impl RequestParams {
                     .map_err(|e| format!("action.mark_chat_read params: {e}"))?;
                 Ok(Self::ActionMarkChatRead {
                     chat_email: p.chat_email,
+                })
+            }
+            "action.mark_thread_read" => {
+                #[derive(Deserialize)]
+                struct P {
+                    account_id: String,
+                    thread_id: String,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.mark_thread_read params: {e}"))?;
+                Ok(Self::ActionMarkThreadRead {
+                    account_id: p.account_id,
+                    thread_id: p.thread_id,
                 })
             }
             "action.send" => {

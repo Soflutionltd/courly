@@ -621,6 +621,9 @@ impl Settings {
                 self.open_select = None;
             }
             SettingsMessage::MarkAsReadChanged(v) => {
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.mark_as_read.clone_from(&v);
+                }
                 self.mark_as_read = v;
                 self.open_select = None;
             }

@@ -79,6 +79,30 @@ pub fn step_email_zoom(label: &str, step: i32) -> &'static str {
     EMAIL_ZOOM_LEVELS[target]
 }
 
+/// Settings values for when an opened message is marked as read.
+pub const MARK_AS_READ_OPTIONS: &[&str] = &["Instantly", "After 2 Seconds", "Manually"];
+
+/// When an opened message is marked as read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkAsRead {
+    Instantly,
+    AfterDelay,
+    Manually,
+}
+
+impl MarkAsRead {
+    /// How long a message stays open before `AfterDelay` marks it read.
+    pub const DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+    pub fn from_setting(value: &str) -> Self {
+        match value {
+            "Instantly" => Self::Instantly,
+            "Manually" => Self::Manually,
+            _ => Self::AfterDelay,
+        }
+    }
+}
+
 /// Snapshot of user-facing preferences that support live preview.
 /// Compared with `PartialEq` for change detection.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +123,8 @@ pub struct PreferencesState {
     pub email_zoom: String,
     pub thread_date_groups: bool,
     pub compose_always_show_cc: bool,
+    /// One of `MARK_AS_READ_OPTIONS`.
+    pub mark_as_read: String,
     /// Seconds between new-mail checks, one of `MAIL_CHECK_INTERVALS`.
     pub mail_check_interval: String,
 }

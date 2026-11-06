@@ -414,6 +414,16 @@ pub enum Message {
     ),
     ChatOlderLoaded(String, Result<Vec<rtsk::chat::ChatMessage>, String>),
     ChatReadMarked,
+    /// The read-on-open delay ran out for this thread.
+    MarkOpenedThreadRead {
+        account_id: String,
+        thread_id: String,
+    },
+    /// The Service flipped this opened thread to read.
+    OpenedThreadReadMarked {
+        account_id: String,
+        thread_id: String,
+    },
     ChatContactsLoaded(
         GenerationToken<rtsk::generation::ChatList>,
         Result<Vec<rtsk::chat::ChatContactSummary>, String>,

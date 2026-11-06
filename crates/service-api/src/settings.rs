@@ -75,6 +75,9 @@ pub enum SettingValue {
     EmailBodyBackground(String),
     /// Message date format in the reading pane ("Relative Offset", "Absolute").
     DateDisplay(String),
+    /// When an opened message is marked as read
+    /// ("Instantly", "After 2 Seconds", "Manually").
+    MarkAsReadBehavior(String),
 }
 
 impl SettingValue {
@@ -103,6 +106,7 @@ impl SettingValue {
             Self::MailCheckInterval(_) => "mail_check_interval",
             Self::EmailBodyBackground(_) => "email_body_background",
             Self::DateDisplay(_) => "date_display",
+            Self::MarkAsReadBehavior(_) => "mark_as_read_behavior",
         }
     }
 
@@ -138,7 +142,8 @@ impl SettingValue {
             | Self::SearchScope(s)
             | Self::MailCheckInterval(s)
             | Self::EmailBodyBackground(s)
-            | Self::DateDisplay(s) => s.clone(),
+            | Self::DateDisplay(s)
+            | Self::MarkAsReadBehavior(s) => s.clone(),
         }
     }
 }
@@ -206,6 +211,7 @@ mod tests {
             SettingValue::ThreadDateGroups(true),
             SettingValue::ComposeAlwaysShowCc(true),
             SettingValue::DateDisplay("Absolute".to_string()),
+            SettingValue::MarkAsReadBehavior("Manually".to_string()),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();

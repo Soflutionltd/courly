@@ -167,7 +167,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
             setting_row(
                 tr(t!("settings.general.mark_as_read")),
                 translated_select(
-                    &["Instantly", "After 2 Seconds", "Manually"],
+                    MARK_AS_READ_OPTIONS,
                     &state.mark_as_read,
                     option_label,
                     state.open_select == Some(SelectField::MarkAsRead),

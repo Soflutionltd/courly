@@ -944,6 +944,25 @@ impl ReadyApp {
                 log::error!("ChatOlderLoaded error: {e}");
                 Task::none()
             }
+            Message::MarkOpenedThreadRead {
+                account_id,
+                thread_id,
+            } => self.finish_read_on_open(account_id, thread_id),
+            Message::OpenedThreadReadMarked {
+                account_id,
+                thread_id,
+            } => {
+                if let Some(thread) = self
+                    .thread_list
+                    .threads
+                    .iter_mut()
+                    .find(|t| t.account_id == account_id && t.id == thread_id)
+                {
+                    thread.is_read = true;
+                }
+                let nav = self.nav_generation.next();
+                self.fire_navigation_load(nav)
+            }
             Message::ChatReadMarked => {
                 let token = self.chat_list_generation.next();
                 self.fire_chat_contacts_load(token)

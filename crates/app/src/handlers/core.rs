@@ -524,6 +524,7 @@ impl ReadyApp {
             SettingValue::DateDisplay(
                 crate::ui::settings::types::date_display_setting(prefs.date_display).into(),
             ),
+            SettingValue::MarkAsReadBehavior(prefs.mark_as_read.clone()),
         ];
         Task::perform(async move { client.set_settings(values).await }, |result| {
             if let Err(e) = result {
@@ -1271,6 +1272,11 @@ impl ReadyApp {
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
             let load_gen = thread_gen;
+            let read_on_open = if thread.is_read {
+                Task::none()
+            } else {
+                self.schedule_read_on_open(account_id.clone(), thread_id.clone())
+            };
 
             // Use core's thread detail if body store is available,
             // otherwise fall back to the old separate queries.
@@ -1291,10 +1297,68 @@ impl ReadyApp {
                         (load_gen, r)
                     },
                     |(g, result)| Message::ThreadDetailLoaded(g, result),
-                );
+                )
+                .chain(read_on_open);
             }
+            return read_on_open;
         }
         Task::none()
+    }
+
+    /// Start the read-on-open timer for a freshly opened unread thread,
+    /// following the "Mark as read" preference.
+    fn schedule_read_on_open(&self, account_id: String, thread_id: String) -> Task<Message> {
+        use crate::ui::settings::types::MarkAsRead;
+        match MarkAsRead::from_setting(&self.settings.mark_as_read) {
+            MarkAsRead::Manually => Task::none(),
+            MarkAsRead::Instantly => self.mark_opened_thread_read(account_id, thread_id),
+            MarkAsRead::AfterDelay => Task::perform(
+                async move {
+                    tokio::time::sleep(MarkAsRead::DELAY).await;
+                    (account_id, thread_id)
+                },
+                |(account_id, thread_id)| Message::MarkOpenedThreadRead {
+                    account_id,
+                    thread_id,
+                },
+            ),
+        }
+    }
+
+    /// The delay ran out: mark the thread read if it is still the one open.
+    pub(crate) fn finish_read_on_open(&mut self, account_id: String, thread_id: String) -> Task<Message> {
+        let still_open = self
+            .thread_list
+            .selected_thread
+            .and_then(|idx| self.thread_list.threads.get(idx))
+            .is_some_and(|t| t.account_id == account_id && t.id == thread_id && !t.is_read)
+            && self.thread_list.selected_threads.len() <= 1;
+        if !still_open {
+            return Task::none();
+        }
+        self.mark_opened_thread_read(account_id, thread_id)
+    }
+
+    fn mark_opened_thread_read(&self, account_id: String, thread_id: String) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        Task::future(async move {
+            match client
+                .mark_thread_read(account_id.clone(), thread_id.clone())
+                .await
+            {
+                Ok(ack) if ack.journaled => Message::OpenedThreadReadMarked {
+                    account_id,
+                    thread_id,
+                },
+                Ok(_) => Message::Noop,
+                Err(error) => {
+                    log::warn!("mark_thread_read failed for {account_id}/{thread_id}: {error}");
+                    Message::Noop
+                }
+            }
+        })
     }
 
     /// Phase 6a-part-2 (encryption-key handle): apply the cold-boot

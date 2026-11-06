@@ -2,6 +2,7 @@ mod account;
 mod account_verify;
 mod action;
 mod action_mark_chat_read;
+mod action_mark_thread_read;
 mod action_scheduled_send;
 mod action_send;
 mod action_status;
@@ -60,6 +61,10 @@ pub(crate) async fn dispatch(
         RequestParams::ActionMarkChatRead { chat_email } => {
             action_mark_chat_read::handle(&boot_state, chat_email).await
         }
+        RequestParams::ActionMarkThreadRead {
+            account_id,
+            thread_id,
+        } => action_mark_thread_read::handle(&boot_state, account_id, thread_id).await,
         RequestParams::ActionSend { request } => action_send::handle(&boot_state, *request).await,
         RequestParams::TestDiscardDraft { params } => {
             test_helpers::discard_draft_handle(&boot_state, params).await

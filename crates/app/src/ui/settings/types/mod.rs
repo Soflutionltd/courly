@@ -466,6 +466,13 @@ impl Settings {
         }
         self.thread_date_groups = ui.thread_date_groups;
         self.compose_always_show_cc = ui.compose_always_show_cc;
+        if let Some(canonical) = ui
+            .mark_as_read_behavior
+            .as_deref()
+            .and_then(|value| canonical_match(value, MARK_AS_READ_OPTIONS))
+        {
+            self.mark_as_read = canonical.into();
+        }
         if let Some(seconds) = ui.mail_check_interval.as_deref()
             && MAIL_CHECK_INTERVALS.contains(&seconds)
         {
@@ -556,6 +563,7 @@ impl Settings {
             email_zoom: self.email_zoom.clone(),
             thread_date_groups: self.thread_date_groups,
             compose_always_show_cc: self.compose_always_show_cc,
+            mark_as_read: self.mark_as_read.clone(),
             mail_check_interval: self.mail_check_interval.clone(),
         }
     }
@@ -580,6 +588,7 @@ impl Settings {
         self.email_zoom = prefs.email_zoom.clone();
         self.thread_date_groups = prefs.thread_date_groups;
         self.compose_always_show_cc = prefs.compose_always_show_cc;
+        self.mark_as_read = prefs.mark_as_read.clone();
         self.mail_check_interval = prefs.mail_check_interval.clone();
         if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
@@ -606,6 +615,7 @@ impl Default for Settings {
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
             compose_always_show_cc: false,
+            mark_as_read: "After 2 Seconds".into(),
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
         };
         Self {
@@ -1024,6 +1034,25 @@ mod tests {
             date_display_setting(settings.committed_preferences.date_display),
             "Absolute"
         );
+    }
+
+    #[test]
+    fn mark_as_read_is_read_at_boot_and_committed_from_the_panel() {
+        let mut settings = Settings::default();
+        let mut ui = empty_ui_snapshot();
+        ui.mark_as_read_behavior = Some("instantly".into());
+        settings.apply_bootstrap(&ui, &default_settings_snapshot());
+        assert_eq!(settings.mark_as_read, "Instantly");
+        assert_eq!(MarkAsRead::from_setting(&settings.mark_as_read), MarkAsRead::Instantly);
+
+        settings.begin_editing();
+        let _ = crate::component::Component::update(
+            &mut settings,
+            SettingsMessage::MarkAsReadChanged("Manually".into()),
+        );
+        settings.commit_preferences();
+        assert_eq!(settings.committed_preferences.mark_as_read, "Manually");
+        assert_eq!(MarkAsRead::from_setting("junk"), MarkAsRead::AfterDelay);
     }
 
     #[test]

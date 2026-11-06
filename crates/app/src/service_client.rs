@@ -1183,6 +1183,20 @@ impl ServiceClient {
             .await
     }
 
+    /// Mark one opened mail thread read, locally and then on the provider
+    /// through a quiet job (no toast, no undo entry).
+    pub async fn mark_thread_read(
+        &self,
+        account_id: String,
+        thread_id: String,
+    ) -> Result<service_api::MarkChatReadAck, ClientError> {
+        self.request(RequestParams::ActionMarkThreadRead {
+            account_id,
+            thread_id,
+        })
+        .await
+    }
+
     /// Submit a compose-send for execution (Phase 2 task 13).
     ///
     /// Bytes-ownership transfer: the UI must have already written each
