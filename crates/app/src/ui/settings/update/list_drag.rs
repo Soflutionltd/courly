@@ -38,51 +38,23 @@ impl Settings {
             }
         }
 
-        // Different lists use different row heights. The +1.0 accounts
-        // for the divider rule between rows.
-        let row_step = if list_id == "label-groups" {
-            SETTINGS_TOGGLE_ROW_HEIGHT + 1.0
-        } else {
-            SETTINGS_ROW_HEIGHT + 1.0
-        };
+        // The only reorderable list is Settings > Labels > groups. The +1.0
+        // accounts for the divider rule between rows.
+        let row_step = SETTINGS_TOGGLE_ROW_HEIGHT + 1.0;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let raw_target = (point.y / row_step).max(0.0) as usize;
 
-        // Label-groups list (Settings > Labels top section).
-        if list_id == "label-groups" {
-            let count = self.label_groups.len();
-            if from >= count {
-                return Task::none();
-            }
-            let target = raw_target.min(count.saturating_sub(1));
-            if target != from {
-                self.label_groups.swap(from, target);
-                if let Some(ref mut drag) = self.drag_state {
-                    drag.dragging_index = target;
-                }
-            }
-            return Task::none();
-        }
-
-        let count = self.list_items_mut(list_id).len();
+        let count = self.label_groups.len();
         if from >= count {
             return Task::none();
         }
         let target = raw_target.min(count.saturating_sub(1));
-
         if target != from {
-            self.list_items_mut(list_id).swap(from, target);
+            self.label_groups.swap(from, target);
             if let Some(ref mut drag) = self.drag_state {
                 drag.dragging_index = target;
             }
         }
         Task::none()
-    }
-
-    pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
-        match list_id {
-            "filters" => &mut self.demo_filters,
-            _ => &mut self.demo_filters,
-        }
     }
 }

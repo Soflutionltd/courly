@@ -63,11 +63,6 @@ pub enum SettingsMessage {
     ListGripPress(String, usize), // grip pressed - start potential drag
     ListDragMove(String, Point),  // cursor moved while grip held
     ListDragEnd(String),          // grip released - end drag
-    ListRowClick(String, usize),  // row clicked (not grip) - toggle
-    ListRemove(String, usize),    // (list_id, item index)
-    ListAdd(String),              // (list_id)
-    ListToggle(String, usize, bool), // (list_id, item index, new value)
-    ListMenu(String, usize),      // (list_id, item index)
     // Input/info rows
     FocusInput(String),
     CopyToClipboard(String),

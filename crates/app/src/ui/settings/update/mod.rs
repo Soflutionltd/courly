@@ -1,6 +1,5 @@
 use iced::Task;
 use iced::time::Instant;
-use rust_i18n::t;
 
 use crate::component::Component;
 use crate::db::DateDisplay;
@@ -689,33 +688,6 @@ impl Settings {
                 });
             }
             SettingsMessage::ListDragEnd(_) => self.drag_state = None,
-            SettingsMessage::ListRowClick(list_id, index) if self.drag_state.is_none() => {
-                let items = self.list_items_mut(&list_id);
-                if let Some(item) = items.get_mut(index)
-                    && let Some(ref mut enabled) = item.enabled
-                {
-                    *enabled = !*enabled;
-                }
-            }
-            SettingsMessage::ListRemove(list_id, index) => {
-                let items = self.list_items_mut(&list_id);
-                if index < items.len() {
-                    items.remove(index);
-                }
-            }
-            SettingsMessage::ListAdd(list_id) => {
-                let items = self.list_items_mut(&list_id);
-                items.push(EditableItem {
-                    label: t!("settings.filters.new_item", number = items.len() + 1).into_owned(),
-                    enabled: None,
-                });
-            }
-            SettingsMessage::ListToggle(list_id, index, value) => {
-                if let Some(item) = self.list_items_mut(&list_id).get_mut(index) {
-                    item.enabled = Some(value);
-                }
-            }
-            SettingsMessage::ListMenu(_, _) => {}
             SettingsMessage::AccountNameEditorChanged(v) => {
                 if let Some(ref mut editor) = self.editing_account {
                     editor.account_name.set_text(v);

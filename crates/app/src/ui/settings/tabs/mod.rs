@@ -15,7 +15,6 @@ mod accounts;
 mod ai;
 mod behavior;
 mod contacts;
-mod filters;
 mod general;
 mod groups;
 mod import;
@@ -35,7 +34,6 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         Tab::Notifications => behavior::notifications_tab(state),
         Tab::Composing => behavior::composing_tab(state),
         Tab::Labels => labels::labels_tab(state),
-        Tab::Filters => filters::filters_tab(state),
         Tab::People => people::people_tab(state),
         Tab::Shortcuts => reference::shortcuts_tab(),
         Tab::Ai => ai::ai_tab(state),

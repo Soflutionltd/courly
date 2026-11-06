@@ -631,12 +631,6 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
     separator(&tools);
     b.item(
         &tools,
-        A::Settings(Tab::Filters),
-        &tr("main.menu_bar.rules"),
-        None,
-    );
-    b.item(
-        &tools,
         A::Settings(Tab::Labels),
         &tr("main.menu_bar.categories"),
         None,

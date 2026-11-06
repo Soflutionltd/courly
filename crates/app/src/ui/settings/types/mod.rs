@@ -29,7 +29,6 @@ pub enum Tab {
     Notifications,
     Composing,
     Labels,
-    Filters,
     People,
     Shortcuts,
     Ai,
@@ -44,7 +43,6 @@ impl Tab {
         Tab::Notifications,
         Tab::Composing,
         Tab::Labels,
-        Tab::Filters,
         Tab::People,
         Tab::Shortcuts,
         Tab::Ai,
@@ -59,7 +57,6 @@ impl Tab {
             Tab::Notifications => t!("settings.tabs.notifications"),
             Tab::Composing => t!("settings.tabs.composing"),
             Tab::Labels => t!("settings.tabs.labels"),
-            Tab::Filters => t!("settings.tabs.filters"),
             Tab::People => t!("settings.tabs.people"),
             Tab::Shortcuts => t!("settings.tabs.shortcuts"),
             Tab::Ai => t!("settings.tabs.ai"),
@@ -76,7 +73,6 @@ impl Tab {
             Tab::Notifications => icon::bell(),
             Tab::Composing => icon::pencil(),
             Tab::Labels => icon::tag(),
-            Tab::Filters => icon::filter(),
             Tab::People => icon::users(),
             Tab::Shortcuts => icon::zap(),
             Tab::Ai => icon::globe(),
@@ -136,13 +132,6 @@ pub struct DragState {
 
 /// Minimum Y movement before a grip press becomes a drag.
 pub(super) const DRAG_START_THRESHOLD: f32 = 4.0;
-
-/// An item in an editable list.
-#[derive(Debug, Clone)]
-pub struct EditableItem {
-    pub label: String,
-    pub enabled: Option<bool>,
-}
 
 /// State for the per-account label editor sheet.
 ///
@@ -375,8 +364,6 @@ pub struct Settings {
     pub label_groups: Vec<rtsk::db::queries_extra::navigation::SettingsLabelGroupRow>,
     /// Label group editor sheet state (Settings > Labels top section).
     pub editing_label_group: Option<LabelGroupEditorState>,
-    // Demo data for Mail Rules > Filters (placeholder until filters land).
-    pub demo_filters: Vec<EditableItem>,
     // Accounts tab
     pub managed_accounts: Vec<ManagedAccount>,
     pub account_drag: Option<AccountDragState>,
@@ -675,16 +662,6 @@ impl Default for Settings {
             labels_by_account: Vec::new(),
             label_groups: Vec::new(),
             editing_label_group: None,
-            demo_filters: vec![
-                EditableItem {
-                    label: t!("settings.filters.demo_auto_archive_promotions").into_owned(),
-                    enabled: Some(true),
-                },
-                EditableItem {
-                    label: t!("settings.filters.demo_star_vips").into_owned(),
-                    enabled: Some(true),
-                },
-            ],
             managed_accounts: Vec::new(),
             account_drag: None,
             editing_account: None,
