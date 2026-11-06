@@ -126,10 +126,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 Some(tr(t!("settings.general.message_dates_description"))),
                 translated_select(
                     &["Relative Offset", "Absolute"],
-                    match state.date_display {
-                        crate::db::DateDisplay::RelativeOffset => "Relative Offset",
-                        crate::db::DateDisplay::Absolute => "Absolute",
-                    },
+                    date_display_setting(state.date_display),
                     option_label,
                     state.open_select == Some(SelectField::DateDisplay),
                     SettingsMessage::ToggleSelect(SelectField::DateDisplay),

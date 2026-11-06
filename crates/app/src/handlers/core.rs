@@ -521,6 +521,9 @@ impl ReadyApp {
             SettingValue::ComposeAlwaysShowCc(prefs.compose_always_show_cc),
             SettingValue::MailCheckInterval(prefs.mail_check_interval.clone()),
             SettingValue::EmailBodyBackground(prefs.email_body_background.label().into()),
+            SettingValue::DateDisplay(
+                crate::ui::settings::types::date_display_setting(prefs.date_display).into(),
+            ),
         ];
         Task::perform(async move { client.set_settings(values).await }, |result| {
             if let Err(e) = result {
@@ -1331,6 +1334,7 @@ impl ReadyApp {
                 }
             };
         self.settings.apply_bootstrap(&ui_snap, &settings_snap);
+        self.reading_pane.date_display = self.settings.date_display;
         self.sidebar.layouts =
             crate::ui::sidebar::order::SidebarLayouts::parse(ui_snap.sidebar_layout.as_deref());
         self.toolbar.layout =

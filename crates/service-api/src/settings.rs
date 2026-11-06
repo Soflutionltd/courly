@@ -73,6 +73,8 @@ pub enum SettingValue {
     MailCheckInterval(String),
     /// Email body background mode, as its settings label ("Auto").
     EmailBodyBackground(String),
+    /// Message date format in the reading pane ("Relative Offset", "Absolute").
+    DateDisplay(String),
 }
 
 impl SettingValue {
@@ -100,6 +102,7 @@ impl SettingValue {
             Self::SearchScope(_) => "search_scope",
             Self::MailCheckInterval(_) => "mail_check_interval",
             Self::EmailBodyBackground(_) => "email_body_background",
+            Self::DateDisplay(_) => "date_display",
         }
     }
 
@@ -134,7 +137,8 @@ impl SettingValue {
             | Self::ToolbarLayout(s)
             | Self::SearchScope(s)
             | Self::MailCheckInterval(s)
-            | Self::EmailBodyBackground(s) => s.clone(),
+            | Self::EmailBodyBackground(s)
+            | Self::DateDisplay(s) => s.clone(),
         }
     }
 }
@@ -201,6 +205,7 @@ mod tests {
             SettingValue::EmailBodyBackground("Auto".to_string()),
             SettingValue::ThreadDateGroups(true),
             SettingValue::ComposeAlwaysShowCc(true),
+            SettingValue::DateDisplay("Absolute".to_string()),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();

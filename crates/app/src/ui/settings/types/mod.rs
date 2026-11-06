@@ -474,6 +474,9 @@ impl Settings {
         if let Some(label) = ui.email_body_background.as_deref() {
             self.email_body_background = EmailBodyBackground::from_label(label);
         }
+        if let Some(display) = ui.date_display.as_deref().and_then(date_display_from_setting) {
+            self.date_display = display;
+        }
         crate::ui::theme::set_email_body_background(self.email_body_background);
         if let Some(zoom) = email_zoom_factor(&self.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
@@ -755,6 +758,21 @@ fn canonical_phishing_sensitivity(value: &str) -> Option<&'static str> {
     canonical_match(value, &["Low", "Default", "High"])
 }
 
+/// Settings value stored for a message date format.
+pub fn date_display_setting(display: DateDisplay) -> &'static str {
+    match display {
+        DateDisplay::RelativeOffset => "Relative Offset",
+        DateDisplay::Absolute => "Absolute",
+    }
+}
+
+fn date_display_from_setting(value: &str) -> Option<DateDisplay> {
+    match canonical_match(value, &["Relative Offset", "Absolute"])? {
+        "Absolute" => Some(DateDisplay::Absolute),
+        _ => Some(DateDisplay::RelativeOffset),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -790,6 +808,7 @@ mod tests {
             search_scope: None,
             mail_check_interval: None,
             email_body_background: None,
+            date_display: None,
         }
     }
 
@@ -992,6 +1011,19 @@ mod tests {
 
         assert_eq!(settings.density, "Compact");
         assert_eq!(settings.committed_preferences.density, "Compact");
+    }
+
+    #[test]
+    fn date_display_is_read_at_boot_and_written_back_under_the_same_value() {
+        let mut settings = Settings::default();
+        let mut ui = empty_ui_snapshot();
+        ui.date_display = Some("absolute".into());
+        settings.apply_bootstrap(&ui, &default_settings_snapshot());
+        assert_eq!(settings.date_display, DateDisplay::Absolute);
+        assert_eq!(
+            date_display_setting(settings.committed_preferences.date_display),
+            "Absolute"
+        );
     }
 
     #[test]
