@@ -44,7 +44,7 @@ pub fn get_auto_response_sync(
 
 pub fn any_auto_response_active_sync(conn: &ReadConn<'_>) -> Result<bool, String> {
     conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM auto_responses WHERE is_active = 1)",
+        "SELECT EXISTS(SELECT 1 FROM auto_responses WHERE enabled = 1)",
         [],
         |row| Ok(row.get::<_, i64>(0)? != 0),
     )
