@@ -518,6 +518,7 @@ impl ReadyApp {
             SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
             SettingValue::EmailZoom(prefs.email_zoom.clone()),
             SettingValue::ThreadDateGroups(prefs.thread_date_groups),
+            SettingValue::ComposeAlwaysShowCc(prefs.compose_always_show_cc),
             SettingValue::MailCheckInterval(prefs.mail_check_interval.clone()),
             SettingValue::EmailBodyBackground(prefs.email_body_background.label().into()),
         ];

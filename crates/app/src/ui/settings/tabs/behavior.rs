@@ -13,6 +13,15 @@ pub(super) fn composing_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .spacing(SPACE_LG)
         .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
 
+    col = col.push(section(
+        tr(t!("settings.behavior.recipients")),
+        vec![toggle_row(
+            tr(t!("settings.behavior.always_show_cc")),
+            t!("settings.behavior.always_show_cc_description"),
+            state.compose_always_show_cc,
+            SettingsMessage::ToggleComposeAlwaysShowCc,
+        )],
+    ));
     col = col.push(super::signatures::signature_list_section(state));
 
     col.into()

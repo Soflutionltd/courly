@@ -153,6 +153,7 @@ impl ReadyApp {
             return Task::none();
         }
         state.inline = true;
+        state.show_cc |= self.settings.compose_always_show_cc;
         let id = iced::window::Id::unique();
         self.pop_out_windows
             .insert(id, PopOutWindow::Compose(Box::new(state)));
@@ -264,8 +265,9 @@ impl ReadyApp {
     /// Open a compose window holding `state`.
     fn open_compose_window_for(
         &mut self,
-        state: ComposeState,
+        mut state: ComposeState,
     ) -> (iced::window::Id, Task<Message>) {
+        state.show_cc |= self.settings.compose_always_show_cc;
         let settings = iced::window::Settings {
             size: Size::new(COMPOSE_DEFAULT_WIDTH, COMPOSE_DEFAULT_HEIGHT),
             min_size: Some(Size::new(COMPOSE_MIN_WIDTH, COMPOSE_MIN_HEIGHT)),

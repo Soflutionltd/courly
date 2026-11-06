@@ -580,6 +580,12 @@ impl Settings {
                     prefs.thread_date_groups = v;
                 }
             }
+            SettingsMessage::ToggleComposeAlwaysShowCc(v) => {
+                self.compose_always_show_cc = v;
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.compose_always_show_cc = v;
+                }
+            }
             SettingsMessage::ToggleSyncStatusBar(v) => {
                 self.sync_status_bar = v;
                 if let Some(ref mut prefs) = self.editing_preferences {

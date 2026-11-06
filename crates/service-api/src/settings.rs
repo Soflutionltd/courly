@@ -60,6 +60,8 @@ pub enum SettingValue {
     EmailZoom(String),
     /// Group the thread list under Today / Yesterday / ... headers.
     ThreadDateGroups(bool),
+    /// Open every compose with the Cc field shown.
+    ComposeAlwaysShowCc(bool),
     /// Sidebar folder order and separators per scope, as JSON.
     SidebarLayout(String),
     /// Toolbar buttons in order and label mode, as JSON.
@@ -92,6 +94,7 @@ impl SettingValue {
             Self::OpenedFilesCleanupDays(_) => "opened_files_cleanup_days",
             Self::EmailZoom(_) => "email_zoom",
             Self::ThreadDateGroups(_) => "thread_date_groups",
+            Self::ComposeAlwaysShowCc(_) => "compose_always_show_cc",
             Self::SidebarLayout(_) => "sidebar_layout",
             Self::ToolbarLayout(_) => "toolbar_layout",
             Self::SearchScope(_) => "search_scope",
@@ -111,7 +114,8 @@ impl SettingValue {
             | Self::PhishingDetectionEnabled(v)
             | Self::CompressAttachments(v)
             | Self::AllowLossyCompression(v)
-            | Self::ThreadDateGroups(v) => {
+            | Self::ThreadDateGroups(v)
+            | Self::ComposeAlwaysShowCc(v) => {
                 if *v {
                     "true".to_string()
                 } else {
@@ -195,6 +199,8 @@ mod tests {
             SettingValue::ReadingPanePosition("right".to_string()),
             SettingValue::MailCheckInterval("2".to_string()),
             SettingValue::EmailBodyBackground("Auto".to_string()),
+            SettingValue::ThreadDateGroups(true),
+            SettingValue::ComposeAlwaysShowCc(true),
         ];
         let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
         keys.sort_unstable();

@@ -200,6 +200,7 @@ impl ReadyApp {
         state.height = height;
         state.x = x;
         state.y = y;
+        state.show_cc |= self.settings.compose_always_show_cc;
 
         self.pop_out_windows
             .insert(window_id, PopOutWindow::Compose(Box::new(state)));

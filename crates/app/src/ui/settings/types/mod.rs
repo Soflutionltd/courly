@@ -332,6 +332,7 @@ pub struct Settings {
     pub thread_date_groups: bool,
     pub mail_check_interval: String,
     // Composing
+    pub compose_always_show_cc: bool,
     pub undo_delay: String,
     pub mark_as_read: String,
     // Notifications
@@ -477,6 +478,7 @@ impl Settings {
             self.email_zoom = zoom.into();
         }
         self.thread_date_groups = ui.thread_date_groups;
+        self.compose_always_show_cc = ui.compose_always_show_cc;
         if let Some(seconds) = ui.mail_check_interval.as_deref()
             && MAIL_CHECK_INTERVALS.contains(&seconds)
         {
@@ -563,6 +565,7 @@ impl Settings {
             email_body_background: self.email_body_background,
             email_zoom: self.email_zoom.clone(),
             thread_date_groups: self.thread_date_groups,
+            compose_always_show_cc: self.compose_always_show_cc,
             mail_check_interval: self.mail_check_interval.clone(),
         }
     }
@@ -586,6 +589,7 @@ impl Settings {
         crate::ui::theme::set_email_body_background(prefs.email_body_background);
         self.email_zoom = prefs.email_zoom.clone();
         self.thread_date_groups = prefs.thread_date_groups;
+        self.compose_always_show_cc = prefs.compose_always_show_cc;
         self.mail_check_interval = prefs.mail_check_interval.clone();
         if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
             crate::ui::mail_body::set_reading_zoom(zoom);
@@ -611,6 +615,7 @@ impl Default for Settings {
             email_body_background: EmailBodyBackground::default(),
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
+            compose_always_show_cc: false,
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
         };
         Self {
@@ -638,6 +643,7 @@ impl Default for Settings {
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
+            compose_always_show_cc: false,
             undo_delay: "5 seconds".into(),
             mark_as_read: "After 2 Seconds".into(),
             notifications_enabled: true,
@@ -801,6 +807,7 @@ mod tests {
             sidebar_nav_config: None,
             email_zoom: None,
             thread_date_groups: true,
+            compose_always_show_cc: false,
             sidebar_layout: None,
             toolbar_layout: None,
             search_scope: None,
@@ -1008,5 +1015,24 @@ mod tests {
 
         assert_eq!(settings.density, "Compact");
         assert_eq!(settings.committed_preferences.density, "Compact");
+    }
+
+    #[test]
+    fn always_show_cc_is_read_at_boot_and_committed_from_the_panel() {
+        let mut settings = Settings::default();
+        let mut ui = empty_ui_snapshot();
+        ui.compose_always_show_cc = true;
+        settings.apply_bootstrap(&ui, &default_settings_snapshot());
+        assert!(settings.compose_always_show_cc);
+        assert!(settings.committed_preferences.compose_always_show_cc);
+
+        settings.begin_editing();
+        let _ = crate::component::Component::update(
+            &mut settings,
+            SettingsMessage::ToggleComposeAlwaysShowCc(false),
+        );
+        settings.commit_preferences();
+        assert!(!settings.compose_always_show_cc);
+        assert!(!settings.committed_preferences.compose_always_show_cc);
     }
 }

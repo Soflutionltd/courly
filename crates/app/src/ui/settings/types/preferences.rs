@@ -98,6 +98,7 @@ pub struct PreferencesState {
     pub email_body_background: EmailBodyBackground,
     pub email_zoom: String,
     pub thread_date_groups: bool,
+    pub compose_always_show_cc: bool,
     /// Seconds between new-mail checks, one of `MAIL_CHECK_INTERVALS`.
     pub mail_check_interval: String,
 }

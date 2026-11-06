@@ -28,6 +28,7 @@ pub enum SettingsMessage {
     EmailBodyBgChanged(String),
     EmailZoomChanged(String),
     ToggleThreadDateGroups(bool),
+    ToggleComposeAlwaysShowCc(bool),
     MailCheckIntervalChanged(String),
     ToggleSelect(SelectField),
     // About
