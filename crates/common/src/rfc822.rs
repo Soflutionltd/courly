@@ -108,6 +108,16 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
         }
         Some(html.to_string())
     });
+    // Some senders write markup in their plain text part, a whole HTML page
+    // at times. That part is what search indexes and the list previews, so
+    // its tags and style rules matched searches ("meta", "table") the mail
+    // says nothing about. The text is then taken from the HTML part.
+    let body_text = match (body_text, body_html.as_deref()) {
+        (Some(text), Some(html)) if holds_markup(&text) => {
+            Some(mail_parser::decoders::html::html_to_text(html))
+        }
+        (text, _) => text,
+    };
 
     let attachments = message
         .attachments
@@ -156,6 +166,25 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
         body_text,
         body_html,
         attachments,
+    })
+}
+
+/// Whether `text`, given as plain text, is written with HTML tags.
+fn holds_markup(text: &str) -> bool {
+    const TAGS: [&str; 12] = [
+        "!doctype", "html", "head", "body", "meta", "style", "table", "div", "span", "td", "p",
+        "br",
+    ];
+    text.match_indices('<').any(|(at, _)| {
+        let rest = &text[at + 1..];
+        TAGS.iter().any(|tag| {
+            rest.get(..tag.len())
+                .is_some_and(|name| name.eq_ignore_ascii_case(tag))
+                && rest[tag.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|after| after == '>' || after == '/' || after.is_whitespace())
+        })
     })
 }
 
@@ -293,6 +322,73 @@ Body.";
             parsed.list_unsubscribe.as_deref(),
             Some("<https://example.test/u>")
         );
+    }
+
+    /// A newsletter with no plain text part: its text is what a reader sees
+    /// of the HTML, none of the markup around it. A search for "meta" or
+    /// "style" must not find it through its tags.
+    #[test]
+    fn the_text_of_an_html_only_message_holds_no_markup() {
+        let raw: &[u8] = b"Subject: receipt\r\n\
+Content-Type: text/html; charset=utf-8\r\n\
+\r\n\
+<html><head><!--[if !mso]><!--> <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"> <!--<![endif]-->\r\n\
+<meta name=\"viewport\" content=\"width=device-width\">\r\n\
+<title>Receipt</title>\r\n\
+<style>a, a:link { color:#007eff; }</style></head>\r\n\
+<body><!-- hidden note --><p>Your receipt &amp; total: 12&nbsp;EUR</p>\r\n\
+<div style=\"display:none\">x</div><p>Thanks</p></body></html>";
+        let parsed = parse_rfc822(&MessageParser::default(), raw).unwrap();
+        let text = parsed.body_text.unwrap();
+        for markup in ["meta", "viewport", "color", "hidden note", "<", "Receipt<"] {
+            assert!(!text.contains(markup), "{markup:?} left in {text:?}");
+        }
+        assert!(text.contains("Your receipt & total: 12"), "{text:?}");
+        assert!(text.contains("Thanks"), "{text:?}");
+    }
+
+    /// What Apple, Meta and AWS notices send: a plain text alternative that
+    /// is itself an HTML page.
+    #[test]
+    fn markup_sent_as_plain_text_is_replaced_by_the_text_of_the_html() {
+        let raw: &[u8] = b"Subject: notice\r\n\
+Content-Type: multipart/alternative; boundary=\"b\"\r\n\
+\r\n\
+--b\r\n\
+Content-Type: text/plain; charset=utf-8\r\n\
+\r\n\
+<!DOCTYPE html><html><head><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">\r\n\
+<style>a, a:link { color:#007eff; }</style></head><body><p>Setup done</p></body></html>\r\n\
+--b\r\n\
+Content-Type: text/html; charset=utf-8\r\n\
+\r\n\
+<html><head><meta name=\"viewport\" content=\"width=device-width\">\r\n\
+<style>a { color:#007eff; }</style></head><body><p>Setup done</p></body></html>\r\n\
+--b--\r\n";
+        let parsed = parse_rfc822(&MessageParser::default(), raw).unwrap();
+        let text = parsed.body_text.unwrap();
+        for markup in ["meta", "viewport", "color", "<"] {
+            assert!(!text.contains(markup), "{markup:?} left in {text:?}");
+        }
+        assert!(text.contains("Setup done"), "{text:?}");
+    }
+
+    #[test]
+    fn plain_text_that_only_uses_angle_brackets_is_kept() {
+        let raw: &[u8] = b"Subject: hi\r\n\
+Content-Type: multipart/alternative; boundary=\"b\"\r\n\
+\r\n\
+--b\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Write to Ann <ann@example.test>, price < 5 and > 2, see <https://example.test/path>.\r\n\
+--b\r\n\
+Content-Type: text/html\r\n\
+\r\n\
+<p>Other words</p>\r\n\
+--b--\r\n";
+        let parsed = parse_rfc822(&MessageParser::default(), raw).unwrap();
+        assert!(parsed.body_text.unwrap().starts_with("Write to Ann <ann@"));
     }
 
     #[test]
