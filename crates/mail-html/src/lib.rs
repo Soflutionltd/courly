@@ -26,7 +26,7 @@ use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_dom::util::{Color, ToColorColor as _};
 use blitz_dom::{
-    BaseDocument, DocumentConfig, NodeId, QualName, UserAgentStylesheet, local_name, ns,
+    BaseDocument, DocumentConfig, LocalName, NodeId, QualName, UserAgentStylesheet, local_name, ns,
 };
 use blitz_html::DocumentHtmlParser;
 use blitz_paint::paint_scene;
@@ -64,6 +64,8 @@ const REMOTE_POLL: Duration = Duration::from_millis(15);
 /// relative `src`; `.invalid` never resolves, so those resources are skipped
 /// while protocol-relative URLs (`//cdn...`) still resolve to https.
 const BASE_HOST: &str = "mail.invalid";
+/// Marks a picture declared wider than the page: see `fit_wide_images`.
+const FIT_ATTRIBUTE: &str = "data-courly-fit";
 
 thread_local! {
     static RENDERING: Cell<bool> = const { Cell::new(false) };
@@ -113,6 +115,11 @@ table[align=center] { margin-left: auto; margin-right: auto; }
    (`border-collapse: collapse` inline). The separate model with no spacing
    draws the same lines; two touching bordered cells show both borders. */
 table[style*="collapse" i] { border-collapse: separate !important; border-spacing: 0 !important; }
+/* A picture declared wider than the page (a screenshot pasted into Outlook)
+   is scaled down to the page like other mail clients do, instead of widening
+   the whole message. `fit_wide_images` marks them and gives them their
+   proportions. */
+img[data-courly-fit] { max-width: 100% !important; height: auto !important; }
 
 /* An earlier message quoted in a reply is told apart from the reply above
    it, instead of running on under an indent. The quotes are found and marked
@@ -351,6 +358,43 @@ fn parse_mail(html: &str, config: DocumentConfig) -> BaseDocument {
     document
 }
 
+/// Mark the pictures declared wider than a page `width` CSS px wide, so the
+/// user-agent sheet scales them down to it. Each keeps the proportions it
+/// declares, which also holds its place while the picture is not loaded.
+fn fit_wide_images(document: &mut BaseDocument, width: f32) {
+    let Ok(images) = document.query_selector_all("img[width]") else {
+        return;
+    };
+    let pixels = |value: &str| value.trim().parse::<f32>().ok().filter(|px| *px > 0.0);
+    let wide: Vec<(NodeId, Option<String>)> = images
+        .into_iter()
+        .filter_map(|id| {
+            let node = document.get_node(id)?;
+            let declared = node.attr(local_name!("width")).and_then(pixels)?;
+            if declared <= width {
+                return None;
+            }
+            let style = node
+                .attr(local_name!("height"))
+                .and_then(pixels)
+                .map(|height| {
+                    let written = node.attr(local_name!("style")).unwrap_or_default();
+                    format!("{written};aspect-ratio:{declared}/{height}")
+                });
+            Some((id, style))
+        })
+        .collect();
+    let mark = QualName::new(None, ns!(), LocalName::from(FIT_ATTRIBUTE));
+    let style_attribute = QualName::new(None, ns!(), local_name!("style"));
+    let mut mutator = document.mutate();
+    for (id, style) in wide {
+        mutator.set_attribute(id, mark.clone(), "");
+        if let Some(style) = style {
+            mutator.set_attribute(id, style_attribute.clone(), &style);
+        }
+    }
+}
+
 /// Width and height of the laid out page in display px.
 fn content_size(document: &BaseDocument, width: f32, zoom: f32) -> (f32, f32) {
     let layout = document.root_element().final_layout();
@@ -408,6 +452,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
         },
     );
     let (quote_cards, lead_header) = quotes::frame_quotes(&mut document, request.quote_only);
+    fit_wide_images(&mut document, width);
 
     let deadline = Instant::now() + REMOTE_DEADLINE;
     loop {
@@ -746,6 +791,32 @@ mod tests {
         let covered: f32 = mail.tiles.iter().map(|t| t.height).sum();
         assert!((covered - mail.height).abs() < 1.0);
         assert!(mail.links[0].height < 15.0);
+    }
+
+    /// A screenshot pasted into Outlook is written at its full size, in a
+    /// message and in every reply quoting it.
+    #[test]
+    fn a_picture_wider_than_the_page_is_scaled_down_to_it() {
+        let mail = render_html(
+            r#"<body style="margin:0"><p>Before</p>
+               <p><img width="1647" height="398" style="width:17.1562in;height:4.1458in"
+                       src="cid:missing"></p></body>"#,
+        );
+        assert!(mail.width <= 601.0, "width was {}", mail.width);
+        // 600 px wide at 1647:398 is 145 px tall, under the line before it.
+        assert!(
+            (150.0..260.0).contains(&mail.height),
+            "height was {}",
+            mail.height
+        );
+    }
+
+    #[test]
+    fn a_picture_that_fits_the_page_keeps_its_size() {
+        let mail = render_html(
+            r#"<body style="margin:0"><img width="300" height="400" src="cid:missing"></body>"#,
+        );
+        assert!(mail.height >= 400.0, "height was {}", mail.height);
     }
 
     const DARK_PAGE: [u8; 3] = [31, 31, 31];
