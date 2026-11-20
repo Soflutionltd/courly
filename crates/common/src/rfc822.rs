@@ -113,9 +113,7 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
     // its tags and style rules matched searches ("meta", "table") the mail
     // says nothing about. The text is then taken from the HTML part.
     let body_text = match (body_text, body_html.as_deref()) {
-        (Some(text), Some(html)) if holds_markup(&text) => {
-            Some(mail_parser::decoders::html::html_to_text(html))
-        }
+        (Some(text), Some(html)) => Some(text_free_of_markup(&text, html).unwrap_or(text)),
         (text, _) => text,
     };
 
@@ -167,6 +165,14 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
         body_html,
         attachments,
     })
+}
+
+/// The text of a message whose plain text part is written with HTML tags,
+/// taken from its HTML part instead. `None` when `text` holds no markup and
+/// stands as it is.
+#[must_use]
+pub fn text_free_of_markup(text: &str, html: &str) -> Option<String> {
+    holds_markup(text).then(|| mail_parser::decoders::html::html_to_text(html))
 }
 
 /// Whether `text`, given as plain text, is written with HTML tags.

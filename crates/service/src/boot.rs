@@ -1378,6 +1378,33 @@ async fn run_boot_sequence_inner(
     // into SyncRuntime below); ExtractRuntime gets a separate clone.
     state.install_search_write(search_write.clone());
 
+    // Texts stored with markup in them, from before plain text parts written
+    // in HTML were read from the HTML part: rewritten once, in the background
+    // so a large mailbox does not hold the boot.
+    match store::body_store::BodyStoreReadState::init(&app_data_dir) {
+        Ok(body_read) => {
+            let (db, body_write, search_write) =
+                (db_write.clone(), body_write.clone(), search_write.clone());
+            let cancel = state.shutdown_token().clone();
+            tokio::spawn(async move {
+                match crate::body_text_repair::run(
+                    &db,
+                    &body_write,
+                    &body_read,
+                    &search_write,
+                    &cancel,
+                )
+                .await
+                {
+                    Ok(0) => {}
+                    Ok(count) => log::info!("body text repair: {count} stored texts rewritten"),
+                    Err(e) => log::warn!("body text repair: {e}"),
+                }
+            });
+        }
+        Err(e) => log::warn!("body text repair: body store reader: {e}"),
+    }
+
     // Phase 3 task 11: invariant pass. Skipped on clean shutdown.
     boot_progress::emit(&out_tx, BootPhase::RunningInvariantPass, None);
     if !had_clean_shutdown {

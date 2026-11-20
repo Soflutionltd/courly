@@ -3,6 +3,7 @@ pub mod actions;
 mod attachment_compress;
 mod attachment_materialize;
 pub mod conduit;
+mod body_text_repair;
 mod boot;
 mod boot_progress;
 pub(crate) mod cal_actions;

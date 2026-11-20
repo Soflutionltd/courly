@@ -347,7 +347,7 @@ async fn emit_rebuild_completed(
 /// `WriterCommand::Index`. Mirrors `extract::fan_out_reindex` shape
 /// but operates on an arbitrary set of (account_id, message_id)
 /// pairs rather than the per-content_hash fan-out.
-async fn rebuild_chunk(
+pub(crate) async fn rebuild_chunk(
     db: &service_state::WriteDbState,
     search_write: &SearchWriteHandle,
     body_read: &BodyStoreReadState,
