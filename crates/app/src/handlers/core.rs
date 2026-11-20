@@ -304,6 +304,9 @@ impl ReadyApp {
             ReadingPaneEvent::PreviewAttachment(params) => self.handle_preview_attachment(params),
             ReadingPaneEvent::OpenAttachment(params) => self.handle_open_attachment(params),
             ReadingPaneEvent::SaveAttachment(params) => self.handle_save_attachment(params),
+            ReadingPaneEvent::SaveAllAttachments(params) => {
+                self.handle_save_all_attachments(params)
+            }
             ReadingPaneEvent::ReplyToMessage { message_index } => self.handle_reading_pane_compose(
                 message_index,
                 ComposeMode::Reply {

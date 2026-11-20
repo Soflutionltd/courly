@@ -30,6 +30,8 @@ pub enum ReadingPaneMessage {
     OpenAttachment(String),
     /// Save the attachment with this id through a file picker.
     SaveAttachment(String),
+    /// Save every attachment of the message with this id into one folder.
+    SaveAllAttachments(String),
     PopOut(usize),
     /// Reply to the message at the given index.
     Reply(usize),
@@ -127,6 +129,7 @@ pub enum ReadingPaneEvent {
     OpenAttachment(crate::handlers::attachments::OpenAttachmentParams),
     /// User clicked Download on an attachment chip.
     SaveAttachment(crate::handlers::attachments::SaveAttachmentParams),
+    SaveAllAttachments(crate::handlers::attachments::SaveAllAttachmentsParams),
 }
 
 // ── State ──────────────────────────────────────────────
@@ -232,6 +235,32 @@ impl ReadingPane {
                     item,
                 },
             ),
+        })
+    }
+
+    /// Every attachment of one message of the open conversation, to save
+    /// them into one folder. `None` when nothing is loaded or it has none.
+    fn build_save_all_event(&self, message_id: &str) -> Option<ReadingPaneEvent> {
+        let thread = self.current_thread.as_ref()?;
+        let items: Vec<_> = self
+            .thread_attachments
+            .iter()
+            .filter(|attachment| attachment.message_id == message_id)
+            .map(|attachment| crate::handlers::attachments::AttachmentRef {
+                account_id: thread.account_id.clone(),
+                message_id: attachment.message_id.clone(),
+                attachment_id: attachment.id.clone(),
+                filename: attachment.filename.clone(),
+                mime_type: attachment.mime_type.clone(),
+            })
+            .collect();
+        (!items.is_empty()).then(|| {
+            ReadingPaneEvent::SaveAllAttachments(
+                crate::handlers::attachments::SaveAllAttachmentsParams {
+                    thread_id: thread.id.clone(),
+                    items,
+                },
+            )
         })
     }
 
@@ -644,6 +673,10 @@ impl Component for ReadingPane {
                 self.attachment_menu = None;
                 let event = self.build_attachment_event(&att_id, AttachmentAction::Save);
                 (Task::none(), event)
+            }
+            ReadingPaneMessage::SaveAllAttachments(message_id) => {
+                self.attachment_menu = None;
+                (Task::none(), self.build_save_all_event(&message_id))
             }
             ReadingPaneMessage::PopOut(index) => {
                 let event = ReadingPaneEvent::OpenMessagePopOut {
@@ -1136,13 +1169,13 @@ fn message_attachments<'a>(
     message_id: &str,
 ) -> Option<Element<'a, ReadingPaneMessage>> {
     let mut chips = row![].spacing(SPACE_XS).align_y(Alignment::Center);
-    let mut any = false;
+    let mut count = 0_usize;
     for attachment in pane
         .thread_attachments
         .iter()
         .filter(|attachment| attachment.message_id == message_id)
     {
-        any = true;
+        count += 1;
         let id = &attachment.id;
         chips = chips.push(widgets::attachment_chip(
             attachment,
@@ -1156,17 +1189,46 @@ fn message_attachments<'a>(
             },
         ));
     }
-    any.then(|| {
-        scrollable(chips)
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new()
-                    .width(TOOLBAR_SCROLLBAR_WIDTH)
-                    .scroller_width(TOOLBAR_SCROLLBAR_WIDTH)
-                    .spacing(SCROLLBAR_SPACING),
-            ))
-            .width(Length::Fill)
-            .into()
-    })
+    if count == 0 {
+        return None;
+    }
+    let strip = scrollable(chips)
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::new()
+                .width(TOOLBAR_SCROLLBAR_WIDTH)
+                .scroller_width(TOOLBAR_SCROLLBAR_WIDTH)
+                .spacing(SCROLLBAR_SPACING),
+        ))
+        .width(Length::Fill);
+    if count < 2 {
+        return Some(strip.into());
+    }
+    // Several attachments: one quiet button saves them all. It sits outside
+    // the scrolling strip, so it stays in reach however many chips there are.
+    let save_all = button(
+        row![
+            icon::download()
+                .size(ICON_SM)
+                .style(theme::TextClass::Tertiary.style()),
+            text(t!("main.attachments.save_all"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style())
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(ReadingPaneMessage::SaveAllAttachments(
+        message_id.to_owned(),
+    ))
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
+    Some(
+        row![strip, save_all]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .into(),
+    )
 }
 
 /// Open a URL in the system default browser.
