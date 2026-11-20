@@ -1,0 +1,89 @@
+// Feature-scoped handler modules. Each file contains `impl App` blocks
+// with methods that `main.rs::update()` dispatches to. Add new handler
+// methods in the appropriate file - do NOT put handler logic in main.rs.
+//
+// All `App` fields are accessible from these modules (they are
+// descendant modules of the crate root where `App` is defined).
+// Import types with `use crate::` paths.
+
+mod accounts;
+pub(crate) mod attachments;
+mod calendar;
+mod category_menu;
+mod chat;
+pub(crate) mod commands;
+mod contacts;
+mod core;
+mod folders;
+mod keyboard;
+pub mod labels;
+mod move_menu;
+mod navigation;
+mod new_mail;
+mod palette;
+pub(crate) mod pop_out;
+pub(crate) mod provider;
+pub(crate) mod row_menu;
+pub(crate) mod search;
+mod side_panel;
+pub mod signatures;
+pub(crate) mod thread_drag;
+mod toolbar;
+mod unsubscribe;
+mod updater;
+
+use crate::ui::settings::SignatureEntry;
+use rtsk::db::queries_extra::navigation::{AccountLabelsGroup, SettingsLabelGroupRow};
+
+/// Result variants for per-account label operations driven from the
+/// Mail Rules > Labels settings section.
+///
+/// Each IPC-bound variant maps 1:1 to a Service action (create, delete,
+/// recolor, rename). `Loaded` is the only purely-local variant.
+#[derive(Debug, Clone)]
+pub enum LabelOp {
+    /// Re-listed labels grouped by account (`query_labels_by_account`).
+    Loaded(Result<Vec<AccountLabelsGroup>, String>),
+    /// Ack of a `label.save` / `label.delete` from the label editor
+    /// sheet. A create fans out to every account; the error lists the
+    /// accounts that failed.
+    WriteAck(Result<(), String>),
+    /// User-visible label groups for the Settings > Labels top section.
+    /// Loaded via `query_label_groups_for_settings`. Writes (create /
+    /// rename / recolor / delete / member changes) will get their own
+    /// ack variants once the action service grows the matching ops.
+    GroupsLoaded(Result<Vec<SettingsLabelGroupRow>, String>),
+    /// `label_group.reorder` ack. Triggers a `label_groups` reload so
+    /// any consumer of the settings list sees the persisted order.
+    ReorderAck(Result<(), String>),
+}
+
+/// Result variants for signature operations, used as the output type
+/// of `Task::perform` so the caller can map them to `Message`
+/// variants.
+///
+/// Phase 6a: each IPC method gets its own ack variant, per the
+/// per-surface checklist. The Task 6 fixup caught the conflation
+/// pattern (one variant serving an IPC ack and an unrelated UI
+/// workflow with divergent side effects) - here every variant maps
+/// 1:1 to a Service IPC method (create / update / delete / reorder)
+/// or to the UI-only read path (`Loaded`). `Loaded` is the only
+/// variant that does not correspond to an IPC.
+#[derive(Debug, Clone)]
+pub enum SignatureResult {
+    /// `signature.create` ack. Carries the new id on success so a
+    /// future caller can reference it without re-listing first; the
+    /// `handle_signature_op` arm currently just triggers a re-list
+    /// because the settings UI is the only consumer.
+    CreatedAck(Result<String, String>),
+    /// `signature.update` ack.
+    UpdatedAck(Result<(), String>),
+    /// `signature.delete` ack.
+    DeletedAck(Result<(), String>),
+    /// `signature.reorder` ack.
+    ReorderedAck(Result<(), String>),
+    /// Local-read result from `db_get_all_signatures` - not an IPC
+    /// surface, but routed through this enum because it shares the
+    /// same `Message::SignatureOp` dispatch path.
+    Loaded(Result<Vec<SignatureEntry>, String>),
+}

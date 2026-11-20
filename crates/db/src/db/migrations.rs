@@ -1,0 +1,499 @@
+use rusqlite::Connection;
+
+struct Migration {
+    version: u32,
+    description: &'static str,
+    sql: &'static str,
+}
+
+// Schema collapsed from incremental migrations on 2026-03-30, with subsequent
+// schema additions folded back in on 2026-05-02 (was v100 + v101 pinned-search
+// tables + v102 caldav_event_map). The schema itself lives in `schema/*.sql`
+// files split by domain; this file just glues them together and runs them.
+// No releases have been made, so there are no databases in the wild that need
+// incremental migration. If you have an existing dev database, delete it and
+// re-seed (run_all will detect stale DBs and error).
+const SCHEMA_V100: &str = concat!(
+    // accounts, settings (+ defaults INSERT)
+    include_str!("schema/01_core.sql"),
+    "\n",
+    // folders, labels, label groups, threads, folder/label junctions, thread_bundles,
+    // messages, attachments, cloud_attachments, thread_ui_state
+    include_str!("schema/02_mail.sql"),
+    "\n",
+    // contacts (+ FTS + triggers), seen_addresses (+ FTS + triggers),
+    // contact_groups, contact_group_members, contact_photo_cache, gal_cache,
+    // contact_claims (remote identity ledger)
+    include_str!("schema/03_contacts.sql"),
+    "\n",
+    // signatures, send_as_aliases, send_identities, local_drafts, scheduled_emails
+    include_str!("schema/04_compose.sql"),
+    "\n",
+    // calendars, calendar_events, calendar_attendees, calendar_reminders, caldav_event_map
+    include_str!("schema/05_calendar.sql"),
+    "\n",
+    // tasks, task_tags
+    include_str!("schema/06_tasks.sql"),
+    "\n",
+    // smart_folders (+ defaults), quick_steps, pinned_searches,
+    // pinned_search_threads, ai_cache, smart_label_rules, writing_style_profiles
+    include_str!("schema/07_smart.sql"),
+    "\n",
+    // follow_up_reminders, notification_vips, unsubscribe_actions, bundle_rules,
+    // bundled_threads, auto_responses
+    include_str!("schema/08_notifications.sql"),
+    "\n",
+    // link_scan_results, phishing_allowlist, bimi_cache, message_reactions,
+    // read_receipt_policy, filter_rules, image_allowlist
+    include_str!("schema/09_security.sql"),
+    "\n",
+    // sync_cursors, seen_ingest_markers, shared_mailboxes, pending_operations
+    include_str!("schema/10_sync.sql"),
+    "\n",
+    // public_folder_pins, chat_contacts, thread_participants
+    include_str!("schema/11_collaboration.sql"),
+    "\n",
+    // action_jobs, action_job_ops (Phase 2 sibling-job journal)
+    include_str!("schema/12_actions.sql"),
+);
+
+// v100 is frozen: released databases are already on it, so editing
+// `schema/*.sql` would never reach them. Every schema change is a new
+// incremental migration below that existing databases apply in place.
+static MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 100,
+        description: "Initial schema",
+        sql: SCHEMA_V100,
+    },
+    Migration {
+        version: 101,
+        description: "Per-message provider pin state",
+        sql: "ALTER TABLE messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;",
+    },
+    Migration {
+        version: 102,
+        description: "Provider flag-complete state",
+        sql: "ALTER TABLE messages ADD COLUMN is_flag_complete INTEGER NOT NULL DEFAULT 0;
+              ALTER TABLE threads ADD COLUMN is_flag_complete INTEGER NOT NULL DEFAULT 0;",
+    },
+    Migration {
+        version: 103,
+        description: "Pinned search folder scope",
+        sql: "ALTER TABLE pinned_searches ADD COLUMN scope_folder_id TEXT;",
+    },
+    Migration {
+        version: 104,
+        description: "Email templates",
+        sql: "CREATE TABLE templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                subject TEXT,
+                body_html TEXT NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+              );",
+    },
+    Migration {
+        version: 105,
+        description: "Mac address-book contact claims",
+        sql: "CREATE TABLE device_contact_claims (
+                server_id TEXT NOT NULL,
+                email TEXT NOT NULL,
+                PRIMARY KEY (server_id, email)
+              );
+              CREATE INDEX idx_device_contact_claims_email ON device_contact_claims(email);
+              INSERT OR IGNORE INTO device_contact_claims (server_id, email)
+                SELECT server_id, email FROM contacts
+                WHERE source = 'macos' AND server_id IS NOT NULL;",
+    },
+    Migration {
+        version: 106,
+        description: "Thread paperclip ignores inline images",
+        sql: "UPDATE threads SET has_attachments = EXISTS (
+                SELECT 1 FROM attachments a
+                JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id
+                WHERE m.thread_id = threads.id AND m.account_id = threads.account_id
+                  AND m.is_reaction = 0 AND a.is_inline = 0
+              )
+              WHERE has_attachments = 1;",
+    },
+];
+
+/// Run all pending migrations. Called once at startup.
+///
+/// Convenience wrapper for `run_all_with_progress` with a no-op callback.
+/// Returns the number of migrations actually applied (0 if the DB was
+/// already up to date).
+pub fn run_all(conn: &Connection) -> Result<u32, String> {
+    run_all_with_progress(conn, &mut |_, _| {})
+}
+
+/// Run all pending migrations, invoking the `progress(current, total)`
+/// callback at two points per applied migration:
+/// - `progress(index, total)` BEFORE the migration's transaction begins,
+///   where `index` is 0-based for the first migration, 1-based thereafter.
+///   This produces the "now applying N/total" frame the UI splash needs to
+///   render the `Migrating` phase even when the migration itself completes
+///   before the post-commit frame can race other phase notifications.
+/// - `progress(current, total)` AFTER the COMMIT, where `current` is the
+///   1-based count of migrations that have completed in this run. Emitting
+///   the completion frame post-commit means the user-visible "applied N
+///   of M" never overstates: a crash mid-migration rolls back via SQLite
+///   WAL recovery and the next boot re-runs from the same starting count.
+///
+/// Net: `total` callbacks for `total` migrations, where the first frame
+/// carries `(0, total)` ("starting migration 1") and subsequent frames
+/// carry `(N, total)` ("migration N committed"). The wire-side per-phase
+/// `CoalesceKey::BootProgress(BootPhaseKind::Migrating)` collapses these
+/// to the latest, so the user experience is monotonic.
+///
+/// Phase 1.5 ships with a single v100 migration, so a fresh DB sees frames
+/// `(0, 1)` then `(1, 1)`; the per-step callback exists for future multi-
+/// migration releases.
+///
+/// Contract for migration authors:
+/// - Each migration must wrap in a single SQLite transaction; the runner's
+///   BEGIN / COMMIT around `m.sql` is the canonical shape.
+/// - If a future migration MUST batch into multiple committed transactions
+///   (per-row backfills), each batch must be idempotent and resumable, AND
+///   the `_migrations` row must NOT be inserted until every batch has
+///   committed - a partial-apply that lacks the row will be re-run from
+///   scratch on the next boot.
+/// - `progress(current, total)` may emit values that go BACKWARDS on
+///   respawn (first run got to 4/10, second run starts at 0/10). The wire-
+///   side per-phase coalesce key handles compaction; the splash UX of
+///   "moving backwards on respawn" is an accepted user-visible behaviour.
+pub fn run_all_with_progress(
+    conn: &Connection,
+    progress: &mut dyn FnMut(u32, u32),
+) -> Result<u32, String> {
+    // Ensure migrations table exists
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _migrations (
+           version INTEGER PRIMARY KEY,
+           description TEXT,
+           applied_at INTEGER DEFAULT (unixepoch())
+         )",
+    )
+    .map_err(|e| format!("create _migrations: {e}"))?;
+
+    // Collect applied versions
+    let mut stmt = conn
+        .prepare("SELECT version FROM _migrations ORDER BY version")
+        .map_err(|e| format!("prepare: {e}"))?;
+    let applied: std::collections::HashSet<u32> = stmt
+        .query_map([], |row| row.get::<_, u32>("version"))
+        .map_err(|e| format!("query: {e}"))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(stmt);
+
+    // Detect stale pre-collapse databases. The old schema had versions 1-80;
+    // the collapsed schema starts fresh at version 1 with different content.
+    // If we see any version not in our MIGRATIONS array, this DB predates
+    // the collapse and must be recreated.
+    let known_versions: std::collections::HashSet<u32> =
+        MIGRATIONS.iter().map(|m| m.version).collect();
+    let stale_versions: Vec<u32> = applied
+        .iter()
+        .filter(|v| !known_versions.contains(v))
+        .copied()
+        .collect();
+    if !stale_versions.is_empty() {
+        return Err(format!(
+            "Database was created with a previous schema version \
+             (found migration versions {stale_versions:?} which are not in \
+             the current schema). Delete courly.db and re-seed."
+        ));
+    }
+
+    // ── Run pending migrations ─────────────────────────────────
+    let pending: Vec<&Migration> = MIGRATIONS
+        .iter()
+        .filter(|m| !applied.contains(&m.version))
+        .collect();
+    let total = u32::try_from(pending.len()).unwrap_or(u32::MAX);
+    let mut applied_count: u32 = 0;
+    for (index, m) in pending.iter().enumerate() {
+        // Emit a "starting" frame BEFORE the transaction begins so the
+        // splash gets a Migrating event even on a sub-second migration that
+        // would otherwise complete before a post-commit notification could
+        // race other phases through the writer queue. `current` here is
+        // 0-based for the first migration; subsequent migrations carry the
+        // number of already-committed migrations as their starting count.
+        let starting = u32::try_from(index).unwrap_or(u32::MAX);
+        progress(starting, total);
+
+        log::info!("Running migration v{}: {}", m.version, m.description);
+
+        conn.execute_batch("BEGIN")
+            .map_err(|e| format!("begin: {e}"))?;
+
+        if let Err(e) = conn.execute_batch(m.sql) {
+            log::error!("Migration v{} failed: {e}", m.version);
+            drop(conn.execute_batch("ROLLBACK"));
+            return Err(format!("migration v{}: {e}", m.version));
+        }
+
+        conn.execute(
+            "INSERT OR IGNORE INTO _migrations (version, description) VALUES (?1, ?2)",
+            rusqlite::params![m.version, m.description],
+        )
+        .map_err(|e| format!("record migration: {e}"))?;
+        conn.execute_batch("COMMIT")
+            .map_err(|e| format!("commit: {e}"))?;
+
+        applied_count = applied_count.saturating_add(1);
+        let current = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1);
+        progress(current, total);
+    }
+
+    log::info!("All migrations applied.");
+    Ok(applied_count)
+}
+
+/// Read the highest applied schema version from the `_migrations` table.
+/// Returns 0 if the table doesn't exist or has no rows. Used by the Service
+/// boot sequence to populate `BootReadyResponse.schema_version`.
+pub fn current_schema_version(conn: &Connection) -> Result<u32, String> {
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_migrations'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("query schema version: {e}"))?;
+    if exists == 0 {
+        return Ok(0);
+    }
+    let max_version: Option<u32> = conn
+        .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
+        .map_err(|e| format!("query max version: {e}"))?;
+    Ok(max_version.unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrations_run_on_fresh_db() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("migrations should succeed");
+
+        // Verify key tables exist
+        let count: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table' AND name='threads'",
+                [],
+                |row| row.get("cnt"),
+            )
+            .expect("query");
+        assert_eq!(count, 1);
+
+        // Verify latest migration recorded
+        let max_ver: u32 = conn
+            .query_row(
+                "SELECT MAX(version) AS max_ver FROM _migrations",
+                [],
+                |row| row.get("max_ver"),
+            )
+            .expect("query");
+        let expected = MIGRATIONS.last().expect("at least one migration").version;
+        assert_eq!(max_ver, expected);
+    }
+
+    #[test]
+    fn a_released_v100_database_upgrades_in_place() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        conn.execute_batch(SCHEMA_V100).expect("v100 schema");
+        conn.execute_batch(
+            "CREATE TABLE _migrations (
+               version INTEGER PRIMARY KEY,
+               description TEXT,
+               applied_at INTEGER DEFAULT (unixepoch())
+             );
+             INSERT INTO _migrations (version, description) VALUES (100, 'Initial schema');",
+        )
+        .expect("mark v100 applied");
+
+        let applied = run_all(&conn).expect("upgrade from v100");
+        let expected = u32::try_from(MIGRATIONS.len() - 1).expect("migration count fits u32");
+        assert_eq!(applied, expected, "every migration after v100 runs");
+        let column = |table: &str, name: &str| -> u32 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+                [table, name],
+                |row| row.get(0),
+            )
+            .expect("query")
+        };
+        assert_eq!(column("messages", "is_pinned"), 1);
+        assert_eq!(column("messages", "is_flag_complete"), 1);
+        assert_eq!(column("threads", "is_flag_complete"), 1);
+        assert_eq!(column("templates", "body_html"), 1);
+        assert_eq!(column("device_contact_claims", "server_id"), 1);
+    }
+
+    #[test]
+    fn the_paperclip_migration_keeps_only_threads_with_real_attachments() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE _migrations (
+               version INTEGER PRIMARY KEY,
+               description TEXT,
+               applied_at INTEGER DEFAULT (unixepoch())
+             );",
+        )
+        .expect("migrations table");
+        for migration in MIGRATIONS.iter().filter(|m| m.version < 106) {
+            conn.execute_batch(migration.sql)
+                .expect("earlier migration");
+            conn.execute(
+                "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                rusqlite::params![migration.version, migration.description],
+            )
+            .expect("record earlier migration");
+        }
+        // Three threads flagged as having attachments: one whose only parts
+        // are signature images, one with a real file, one with both.
+        conn.execute_batch(
+            "INSERT INTO accounts (id, email) VALUES ('acc', 'me@example.com');
+             INSERT INTO threads (id, account_id, has_attachments) VALUES
+               ('signature', 'acc', 1), ('file', 'acc', 1), ('both', 'acc', 1);
+             INSERT INTO messages (id, account_id, thread_id, date) VALUES
+               ('m1', 'acc', 'signature', 1), ('m2', 'acc', 'file', 1), ('m3', 'acc', 'both', 1);
+             INSERT INTO attachments (id, message_id, account_id, filename, is_inline) VALUES
+               ('a1', 'm1', 'acc', 'image001.png', 1),
+               ('a2', 'm2', 'acc', 'invoice.pdf', 0),
+               ('a3', 'm3', 'acc', 'image001.png', 1),
+               ('a4', 'm3', 'acc', 'invoice.pdf', 0);",
+        )
+        .expect("seed threads");
+
+        run_all(&conn).expect("apply the paperclip migration");
+
+        let flagged = |thread: &str| -> bool {
+            conn.query_row(
+                "SELECT has_attachments FROM threads WHERE id = ?1",
+                [thread],
+                |row| row.get(0),
+            )
+            .expect("query thread")
+        };
+        assert!(
+            !flagged("signature"),
+            "signature images are not attachments"
+        );
+        assert!(flagged("file"));
+        assert!(flagged("both"));
+    }
+
+    #[test]
+    fn sync_cursors_table_exists() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("migrations should succeed");
+
+        let count: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table' AND name='sync_cursors'",
+                [],
+                |row| row.get("cnt"),
+            )
+            .expect("query");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn retired_sync_tables_and_account_columns_are_absent() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("migrations should succeed");
+
+        for table in [
+            "jmap_push_state",
+            "graph_subscriptions",
+            "jmap_sync_state",
+            "folder_sync_state",
+            "graph_folder_delta_tokens",
+            "public_folder_sync_state",
+            "graph_shared_mailbox_delta_tokens",
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("query schema");
+            assert!(!exists, "retired table {table} remains in the schema");
+        }
+
+        let columns = conn
+            .prepare("PRAGMA table_info(accounts)")
+            .expect("prepare table info")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect account columns");
+        assert!(!columns.iter().any(|column| column == "history_id"));
+        assert!(!columns.iter().any(|column| column == "supports_keywords"));
+    }
+
+    /// Locks in the per-migration progress contract: each migration produces
+    /// exactly two callback invocations - one BEFORE the transaction begins
+    /// (current=index, 0-based) and one AFTER the commit completes
+    /// (current=index+1, 1-based). A fresh DB sees `(0, n) (1, n)` for
+    /// the first migration, then `(1, n) (2, n)`, and so on.
+    #[test]
+    fn run_all_with_progress_emits_before_and_after_commit() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+
+        let mut frames: Vec<(u32, u32)> = Vec::new();
+        let applied = run_all_with_progress(&conn, &mut |current, total| {
+            frames.push((current, total));
+        })
+        .expect("migrations should succeed");
+
+        let total = u32::try_from(MIGRATIONS.len()).expect("migration count fits u32");
+        assert_eq!(applied, total);
+        let expected: Vec<(u32, u32)> = (0..total)
+            .flat_map(|index| [(index, total), (index + 1, total)])
+            .collect();
+        assert_eq!(
+            frames, expected,
+            "expected a before-COMMIT and an after-COMMIT frame per migration, got {frames:?}"
+        );
+    }
+
+    /// On a DB that's already at the latest schema, the runner must not call
+    /// `progress` at all. Locks in "no spurious frames" - the splash would
+    /// otherwise tick a Migrating phase on every UI launch even when no
+    /// migration is actually running.
+    #[test]
+    fn run_all_with_progress_emits_nothing_on_up_to_date_db() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("first run applies migrations");
+
+        let mut frames: Vec<(u32, u32)> = Vec::new();
+        let applied = run_all_with_progress(&conn, &mut |current, total| {
+            frames.push((current, total));
+        })
+        .expect("second run should be a no-op");
+
+        assert_eq!(applied, 0);
+        assert!(frames.is_empty(), "no frames expected, got {frames:?}");
+    }
+}

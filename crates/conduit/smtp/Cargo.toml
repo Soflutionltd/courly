@@ -1,0 +1,110 @@
+[package]
+name = "conduit-smtp"
+description = "SMTP client for Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+authors.workspace = true
+keywords = ["email", "smtp", "mailer", "message"]
+categories = ["email", "network-programming"]
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+email_address = { version = "0.2.1", default-features = false }
+nom = { workspace = true }
+futures = { workspace = true }
+idna = "1"
+
+conduit-types = { path = "../types", optional = true }
+conduit-sasl = { path = "../sasl" }
+conduit-net = { path = "../net" }
+getrandom = { workspace = true }
+
+tracing = { workspace = true, features = ["std"], optional = true }
+
+httpdate = "1"
+mime = "0.3.4"
+fastrand = "2.0"
+quoted_printable = "0.5"
+base64 = { workspace = true }
+email-encoding = "0.4"
+
+serde = { workspace = true, optional = true }
+
+hostname = "0.4"
+socket2 = { workspace = true }
+url = "2.4"
+percent-encoding = { workspace = true }
+zeroize = { workspace = true, features = ["serde"] }
+
+native-tls = { workspace = true }
+
+tokio = { workspace = true, optional = true }
+tokio-native-tls = { workspace = true, optional = true }
+
+sha2 = { workspace = true, features = ["oid"], optional = true }
+rsa = { version = "0.10.0-rc.18", optional = true }
+ed25519-compact = { version = "2", optional = true }
+
+[dev-dependencies]
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+serde_json = { workspace = true }
+
+[features]
+default = ["account-error"]
+
+account-error = ["dep:conduit-types"]
+
+tokio = [
+    "dep:tokio",
+    "tokio/rt",
+    "tokio/time",
+    "tokio/net",
+    "tokio/io-util",
+    "tokio/sync",
+    "dep:tokio-native-tls",
+]
+
+dkim = ["dep:sha2", "dep:rsa", "dep:ed25519-compact"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "autoconfigure"
+
+[[example]]
+name = "smtp"
+
+[[example]]
+name = "lmtp"
+
+[[example]]
+name = "smtp_tls"
+
+[[example]]
+name = "smtp_starttls"
+
+[[example]]
+name = "smtp_oauth2"
+
+[[example]]
+name = "smtp_selfsigned"
+
+[[example]]
+name = "tokio_smtp_tls"
+required-features = ["tokio"]
+
+[[example]]
+name = "tokio_smtp_starttls"
+required-features = ["tokio"]

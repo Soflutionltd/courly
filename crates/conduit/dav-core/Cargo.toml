@@ -1,0 +1,36 @@
+[package]
+name = "conduit-dav-core"
+publish = false
+description = "Private shared WebDAV layer for the conduit CalDAV and CardDAV clients"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+conduit-net = { path = "../net" }
+conduit-types = { path = "../types" }
+bytes = { workspace = true }
+futures = { workspace = true }
+quick-xml = "0.42.0"
+reqwest = { workspace = true, features = ["native-tls"] }
+
+[features]
+# Scripted DAV wire seam for the CalDAV and CardDAV test suites.
+test-support = ["conduit-net/test-support"]
+
+[dev-dependencies]
+# The crate's own tests script the wire seam through `test_support`, which is
+# feature-gated for consumers and `cfg(test)`-enabled here; the seam it fronts
+# lives behind `conduit-net/test-support`.
+conduit-net = { path = "../net", features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

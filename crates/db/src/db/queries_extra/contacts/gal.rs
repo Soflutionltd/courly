@@ -1,0 +1,76 @@
+use crate::db::WriteConn;
+
+pub use db_read::db::queries_extra::contacts::gal::GalEntry;
+
+/// Clear and refill the GAL cache for an account.
+pub fn cache_gal_entries_sync(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    entries: &[GalEntry],
+) -> Result<usize, String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("begin gal tx: {e}"))?;
+
+    tx.execute(
+        "DELETE FROM gal_cache WHERE account_id = ?1",
+        rusqlite::params![account_id],
+    )
+    .map_err(|e| format!("clear gal cache: {e}"))?;
+
+    let mut stmt = tx
+        .prepare(
+            "INSERT OR REPLACE INTO gal_cache \
+             (email, display_name, phone, company, title, department, account_id, cached_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())",
+        )
+        .map_err(|e| format!("prepare gal insert: {e}"))?;
+
+    for entry in entries {
+        stmt.execute(rusqlite::params![
+            entry.email,
+            entry.display_name,
+            entry.phone,
+            entry.company,
+            entry.title,
+            entry.department,
+            account_id,
+        ])
+        .map_err(|e| format!("insert gal entry: {e}"))?;
+    }
+
+    drop(stmt);
+    tx.commit().map_err(|e| format!("commit gal tx: {e}"))?;
+    Ok(entries.len())
+}
+
+/// Get the timestamp of the last GAL refresh for an account.
+pub fn gal_cache_age_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+) -> Result<Option<i64>, String> {
+    let key = format!("gal_refresh_{account_id}");
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        rusqlite::params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .map(|v| {
+        v.parse::<i64>()
+            .map_err(|e| format!("parse gal timestamp: {e}"))
+    })
+    .transpose()
+}
+
+/// Record that a GAL refresh was performed for an account.
+pub fn record_gal_refresh_sync(conn: &WriteConn<'_>, account_id: &str) -> Result<(), String> {
+    let now = jiff::Timestamp::now().as_second().to_string();
+    let key = format!("gal_refresh_{account_id}");
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![key, now],
+    )
+    .map_err(|e| format!("record gal refresh: {e}"))?;
+    Ok(())
+}

@@ -1,0 +1,373 @@
+use std::collections::HashMap;
+
+use super::{ReadConn, Row, params};
+
+use super::ReadDbState;
+use super::types::DbMessage;
+use crate::body_store::{BodyStoreReadState, MessageBody};
+use crate::provider::crypto::{decrypt_value, is_encrypted};
+
+// Re-export everything from db::queries so existing callers keep working.
+pub use db_read::db::queries::{
+    get_attachments_for_message, get_bundle_unread_counts, get_categories_for_threads,
+    get_contact_by_email, get_folders, get_labels, get_provider_type, get_setting,
+    get_thread_by_id, get_thread_count, get_thread_folder_ids, get_thread_label_ids, get_threads,
+    get_threads_for_bundle, get_unread_count, search_contacts,
+};
+// Re-export FTS5/LIKE helpers.
+pub use db_read::db::sql_fragments::{build_fts_query, make_like_pattern};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageFlag {
+    Read,
+    Starred,
+    Replied,
+    Forwarded,
+}
+
+impl MessageFlag {
+    fn column(self) -> &'static str {
+        match self {
+            Self::Read => "is_read",
+            Self::Starred => "is_starred",
+            Self::Replied => "is_replied",
+            Self::Forwarded => "is_forwarded",
+        }
+    }
+
+    fn read_from(self, row: &Row<'_>) -> std::result::Result<bool, super::SqlError> {
+        Ok(row.get::<_, i64>(self.column())? != 0)
+    }
+}
+
+pub(crate) fn row_to_message(row: &Row<'_>) -> std::result::Result<DbMessage, super::SqlError> {
+    Ok(DbMessage {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        thread_id: row.get("thread_id")?,
+        from_address: row.get("from_address")?,
+        from_name: row.get("from_name")?,
+        to_addresses: row.get("to_addresses")?,
+        cc_addresses: row.get("cc_addresses")?,
+        bcc_addresses: row.get("bcc_addresses")?,
+        reply_to: row.get("reply_to")?,
+        subject: row.get("subject")?,
+        snippet: row.get("snippet")?,
+        date: row.get("date")?,
+        is_read: MessageFlag::Read.read_from(row)?,
+        is_starred: MessageFlag::Starred.read_from(row)?,
+        is_replied: MessageFlag::Replied.read_from(row)?,
+        is_forwarded: MessageFlag::Forwarded.read_from(row)?,
+        body_html: None,
+        body_text: None,
+        body_cached: row
+            .get::<_, Option<i64>>("body_cached")?
+            .map(|value| value != 0),
+        raw_size: row.get("raw_size")?,
+        internal_date: row.get("internal_date")?,
+        list_unsubscribe: row.get("list_unsubscribe")?,
+        list_unsubscribe_post: row.get("list_unsubscribe_post")?,
+        auth_results: row.get("auth_results")?,
+        message_id_header: row.get("message_id_header")?,
+        references_header: row.get("references_header")?,
+        in_reply_to_header: row.get("in_reply_to_header")?,
+        imap_uid: row.get("imap_uid")?,
+        imap_folder: row.get("imap_folder")?,
+    })
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsBootstrapSnapshot {
+    pub notifications_enabled: bool,
+    pub undo_send_delay_seconds: Option<String>,
+    pub block_remote_images: bool,
+    pub phishing_detection_enabled: bool,
+    pub phishing_sensitivity: Option<String>,
+    pub sync_period_days: Option<String>,
+    pub ai_provider: Option<String>,
+    pub ollama_server_url: Option<String>,
+    pub ollama_model: Option<String>,
+    pub claude_model: Option<String>,
+    pub openai_model: Option<String>,
+    pub gemini_model: Option<String>,
+    pub copilot_model: Option<String>,
+    pub ai_enabled: bool,
+    pub ai_auto_categorize: bool,
+    pub ai_auto_summarize: bool,
+    pub ai_auto_draft_enabled: bool,
+    pub ai_writing_style_enabled: bool,
+    pub auto_archive_categories: Option<String>,
+    pub smart_notifications: bool,
+    pub notify_categories: Option<String>,
+    pub notification_vip_senders: Option<String>,
+    pub attachment_cache_max_mb: Option<String>,
+    // Attachments roadmap Phase 6:
+    pub compress_attachments: bool,
+    pub allow_lossy_compression: bool,
+    pub opened_files_cleanup_days: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSecretsSnapshot {
+    pub claude_api_key: Option<String>,
+    pub openai_api_key: Option<String>,
+    pub gemini_api_key: Option<String>,
+    pub copilot_api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiBootstrapSnapshot {
+    pub active_account_id: Option<String>,
+    pub language: Option<String>,
+    pub global_compose_shortcut: Option<String>,
+    pub custom_shortcuts: Option<String>,
+    pub search_index_version: Option<String>,
+    pub theme: Option<String>,
+    pub sidebar_collapsed: bool,
+    pub contact_sidebar_visible: bool,
+    pub reading_pane_position: Option<String>,
+    pub read_filter: Option<String>,
+    pub email_list_width: Option<String>,
+    pub email_density: Option<String>,
+    pub mark_as_read_behavior: Option<String>,
+    pub font_size: Option<String>,
+    pub color_theme: Option<String>,
+    pub inbox_view_mode: Option<String>,
+    pub show_sync_status: bool,
+    pub auto_update: bool,
+    pub task_sidebar_visible: bool,
+    pub sidebar_nav_config: Option<String>,
+    pub email_zoom: Option<String>,
+    pub thread_date_groups: bool,
+    /// Show the brand logo of known senders.
+    pub sender_logos: bool,
+    pub compose_always_show_cc: bool,
+    pub compose_request_read_receipt: bool,
+    pub sidebar_layout: Option<String>,
+    pub toolbar_layout: Option<String>,
+    pub search_scope: Option<String>,
+    pub mail_check_interval: Option<String>,
+    pub email_body_background: Option<String>,
+    pub date_display: Option<String>,
+    pub favorite_contacts: Option<String>,
+    /// Sections taken out of the folder column, as comma-separated keys.
+    pub sidebar_hidden: Option<String>,
+}
+
+const SECURE_SETTING_KEYS: &[&str] = &[
+    "claude_api_key",
+    "openai_api_key",
+    "gemini_api_key",
+    "copilot_api_key",
+];
+
+/// An encrypted value that fails to decrypt becomes empty, never the
+/// ciphertext: that string would otherwise be sent as an API key.
+fn decode_secure_setting_value(raw: String, encryption_key: &[u8; 32]) -> String {
+    if is_encrypted(&raw) {
+        decrypt_value(encryption_key, &raw).unwrap_or_else(|error| {
+            log::warn!("secure setting could not be decrypted: {error}");
+            String::new()
+        })
+    } else {
+        raw
+    }
+}
+
+fn read_setting_map(
+    conn: &ReadConn<'_>,
+    encryption_key: &[u8; 32],
+    secure_keys: &[&str],
+) -> Result<HashMap<String, String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM settings")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>("key")?, row.get::<_, String>("value")?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(key, raw)| {
+            let value = if secure_keys.contains(&key.as_str()) {
+                decode_secure_setting_value(raw, encryption_key)
+            } else {
+                raw
+            };
+            (key, value)
+        })
+        .collect())
+}
+
+fn get_setting_read(conn: &ReadConn<'_>, key: &str) -> Result<Option<String>, String> {
+    match conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(value) => Ok(Some(value)),
+        Err(super::ReadError::Sql(::db_read::db::SqlError::QueryReturnedNoRows)) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub async fn get_messages_for_thread(
+    db: &ReadDbState,
+    body_store: &BodyStoreReadState,
+    account_id: String,
+    thread_id: String,
+) -> Result<Vec<DbMessage>, String> {
+    let mut messages = db
+        .with_read(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT * FROM messages WHERE account_id = ?1 AND thread_id = ?2 ORDER BY date ASC",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![account_id, thread_id], row_to_message)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        })
+        .await?;
+
+    let ids_needing_bodies: Vec<String> =
+        messages.iter().map(|message| message.id.clone()).collect();
+    if ids_needing_bodies.is_empty() {
+        return Ok(messages);
+    }
+
+    let bodies = body_store.get_batch(ids_needing_bodies).await?;
+    let body_map: HashMap<String, MessageBody> = bodies
+        .into_iter()
+        .map(|body| (body.message_id.clone(), body))
+        .collect();
+
+    for message in &mut messages {
+        if let Some(body) = body_map.get(&message.id) {
+            message.body_html = body.body_html.clone();
+            message.body_text = body.body_text.clone();
+        }
+    }
+
+    Ok(messages)
+}
+
+pub fn get_secure_setting(
+    conn: &ReadConn<'_>,
+    encryption_key: &[u8; 32],
+    key: &str,
+) -> Result<Option<String>, String> {
+    let result = get_setting_read(conn, key)?;
+    Ok(result.map(|raw| decode_secure_setting_value(raw, encryption_key)))
+}
+
+pub fn get_settings_bootstrap_snapshot(
+    conn: &ReadConn<'_>,
+    encryption_key: &[u8; 32],
+) -> Result<SettingsBootstrapSnapshot, String> {
+    let settings = read_setting_map(conn, encryption_key, &[])?;
+    let get = |key: &str| settings.get(key).cloned();
+    let get_bool = |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
+
+    Ok(SettingsBootstrapSnapshot {
+        notifications_enabled: get_bool("notifications_enabled", true),
+        undo_send_delay_seconds: get("undo_send_delay_seconds"),
+        block_remote_images: get_bool("block_remote_images", true),
+        phishing_detection_enabled: get_bool("phishing_detection_enabled", true),
+        phishing_sensitivity: get("phishing_sensitivity"),
+        sync_period_days: get("sync_period_days"),
+        ai_provider: get("ai_provider"),
+        ollama_server_url: get("ollama_server_url"),
+        ollama_model: get("ollama_model"),
+        claude_model: get("claude_model"),
+        openai_model: get("openai_model"),
+        gemini_model: get("gemini_model"),
+        copilot_model: get("copilot_model"),
+        ai_enabled: get_bool("ai_enabled", true),
+        ai_auto_categorize: get_bool("ai_auto_categorize", true),
+        ai_auto_summarize: get_bool("ai_auto_summarize", true),
+        ai_auto_draft_enabled: get_bool("ai_auto_draft_enabled", true),
+        ai_writing_style_enabled: get_bool("ai_writing_style_enabled", true),
+        auto_archive_categories: get("auto_archive_categories"),
+        smart_notifications: get_bool("smart_notifications", true),
+        notify_categories: get("notify_categories"),
+        notification_vip_senders: get("notification_vip_senders"),
+        attachment_cache_max_mb: get("attachment_cache_max_mb"),
+        compress_attachments: get_bool("compress_attachments", true),
+        allow_lossy_compression: get_bool("allow_lossy_compression", false),
+        opened_files_cleanup_days: get("opened_files_cleanup_days"),
+    })
+}
+
+pub fn get_settings_secrets_snapshot(
+    conn: &ReadConn<'_>,
+    encryption_key: &[u8; 32],
+) -> Result<SettingsSecretsSnapshot, String> {
+    let settings = read_setting_map(conn, encryption_key, SECURE_SETTING_KEYS)?;
+    let get = |key: &str| settings.get(key).cloned();
+
+    Ok(SettingsSecretsSnapshot {
+        claude_api_key: get("claude_api_key"),
+        openai_api_key: get("openai_api_key"),
+        gemini_api_key: get("gemini_api_key"),
+        copilot_api_key: get("copilot_api_key"),
+    })
+}
+
+pub fn get_ui_bootstrap_snapshot(
+    conn: &ReadConn<'_>,
+    encryption_key: &[u8; 32],
+) -> Result<UiBootstrapSnapshot, String> {
+    let settings = read_setting_map(conn, encryption_key, &[])?;
+    let get = |key: &str| settings.get(key).cloned();
+    let get_bool = |key: &str, default: bool| get(key).map_or(default, |value| value != "false");
+
+    Ok(UiBootstrapSnapshot {
+        active_account_id: get("active_account_id"),
+        language: get("language"),
+        global_compose_shortcut: get("global_compose_shortcut"),
+        custom_shortcuts: get("custom_shortcuts"),
+        search_index_version: get("search_index_version"),
+        theme: get("theme"),
+        sidebar_collapsed: get("sidebar_collapsed").is_some_and(|value| value == "true"),
+        contact_sidebar_visible: get_bool("contact_sidebar_visible", true),
+        reading_pane_position: get("reading_pane_position"),
+        read_filter: get("read_filter"),
+        email_list_width: get("email_list_width"),
+        email_density: get("email_density"),
+        mark_as_read_behavior: get("mark_as_read_behavior"),
+        font_size: get("font_size"),
+        color_theme: get("color_theme"),
+        inbox_view_mode: get("inbox_view_mode"),
+        show_sync_status: get_bool("show_sync_status", true),
+        auto_update: get_bool("auto_update", false),
+        task_sidebar_visible: get("task_sidebar_visible").is_some_and(|value| value == "true"),
+        sidebar_nav_config: get("sidebar_nav_config"),
+        email_zoom: get("email_zoom"),
+        thread_date_groups: get_bool("thread_date_groups", true),
+        sender_logos: get_bool("sender_logos", true),
+        compose_always_show_cc: get_bool("compose_always_show_cc", false),
+        compose_request_read_receipt: get_bool("compose_request_read_receipt", false),
+        sidebar_layout: get("sidebar_layout"),
+        toolbar_layout: get("toolbar_layout"),
+        search_scope: get("search_scope"),
+        mail_check_interval: get("mail_check_interval"),
+        email_body_background: get("email_body_background"),
+        date_display: get("date_display"),
+        favorite_contacts: get("favorite_contacts"),
+        sidebar_hidden: get("sidebar_hidden"),
+    })
+}
+
+// Remaining functions (set_thread_bool_field through get_unread_count)
+// moved to db::queries in Phase E step 4 and re-exported above.

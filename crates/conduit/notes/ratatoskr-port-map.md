@@ -1,0 +1,673 @@
+# Ratatoskr -> conduit port map
+
+Companion to `notes/ratatoskr-adoption.md`. That plan lays the bricks; this doc
+records, per brick, what already exists in the cloned ratatoskr tree
+(`research/ratatoskr/`) and how it ports. It is the evidence base for sizing and
+sequencing each brick's spec. The adoption plan stays the source-of-record; this
+is a working map, not a commitment.
+
+## Governing fact: presence = needed
+
+ratatoskr is mid-migration and unfinished. **If code exists in the clone, it is
+required surface that simply has not been wired yet** - not dead code, not
+abandoned scaffolding. Several provider features (cloud-attachment upload,
+scheduled send + cancel + reschedule, send-as/on-behalf, raw-message fetch, GAL)
+are present but have zero internal callers in the clone. The correct reading is:
+these are the roadmap. ratatoskr will wire them against conduit's uniform
+surface, so conduit must provide the ideal primitive for each. The one genuine
+upside of "unwired" is freedom: with no consumer depending on the old shape,
+conduit can define the *ideal* uniform surface with no back-compat constraint.
+
+Concrete confirmations from the user: ratatoskr will ship a "show raw message
+source" action (drives A3), and large-attachment hosting is a real feature
+(drives A6).
+
+## Method
+
+Seven read-only agents, one per brick group, each grounded in
+`reference/error-model.md` + `reference/sync.md` plus the relevant per-crate
+reference, cross-reading both trees. Classification legend used throughout:
+
+- **COPY-DIRECT** - lift nearly verbatim (pure parsers, tested helpers).
+- **COPY-AND-ADAPT** - lift, then reshape error boundary / transport / types.
+- **RESHAPE** - concept reusable, code rewritten onto conduit's uniform surface.
+- **ALREADY-IN-CONDUIT** - conduit already has it (sometimes ahead of ratatoskr).
+- **RATATOSKR-KEEPS** - lives above the seam (DB, policy, UX); conduit persists
+  nothing.
+
+The structural through-line: ratatoskr already has the uniform seam conduit is
+replacing. `crates/common/src/ops.rs::ProviderOps` is the analog of conduit's
+`Account`; `crates/{gmail,graph,imap,jmap}` ops are the analogs of the per-crate
+`Account` impls. So most absorption is "the wart already lives behind a trait
+method; conduit needs the matching capability flag or primitive." The warts that
+most force consumer `match provider` are the ones that escaped that trait: cloud
+attachments, GAL, scheduled send, auto-responses, the `LabelKind` taxonomy.
+
+---
+
+## A1 - Uniform token rotation (first domino) - LANDED
+
+The whole mechanism exists in both trees, split around a seam A1 preserved.
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `common/src/token.rs:refresh_oauth_token` (RFC 6749 refresh POST) | body of a ratatoskr `TokenSource::refresh()` impl | RESHAPE |
+| `common/src/token.rs:TokenState`/`needs_refresh` | `conduit_net::auth::AccessToken` (richer) | ALREADY-IN-CONDUIT |
+| `common/src/token.rs:get_refresh_lock` global registry | `OAuthRefresher` single-flight | ALREADY-IN-CONDUIT |
+| per-provider `ensure_valid_token`/`do_refresh` (gmail/graph/jmap/imap) | `OAuthRefresher` wrapping the injected source | RESHAPE (collapses) |
+| `jmap:rebuild_client_with_token` (reconnect on rotate) | conduit reads the live token from the shared `Arc<dyn TokenSource>` in place (no reconnect, no crate-internal setter) | DELETE (obsolete) |
+| `db/queries.rs:persist_refreshed_token`, encrypt+write, read+decrypt | DB write-back | RATATOSKR-KEEPS |
+| `core/src/oauth.rs` (PKCE, callback listener, initial grant) | initial authorization | RATATOSKR-KEEPS |
+
+**Where the seam falls.** `conduit_net::TokenSource` *is* the seam. ratatoskr
+supplies an `Arc<dyn TokenSource>` whose `refresh()` does lock -> read+decrypt ->
+POST token endpoint -> encrypt+persist -> return `AccessToken`. conduit
+single-flights it in exactly one `OAuthRefresher` and consumes `current()` /
+`force_refresh()`. The refresh network call and the persist both live inside
+ratatoskr's impl; conduit only ever sees the trait. **A1's deliverable is the
+trait ingress on every factory, not the refresh logic.**
+
+**Reshaping demands.** Every concrete factory accepts `Arc<dyn TokenSource>` at
+construction (none does today; all three HTTP providers bury a private
+`StaticTokenSource` built from a raw token string, and IMAP/SMTP bake a static
+token into opaque `Credentials`). HTTP providers feed it to `AccountNet`;
+IMAP/SMTP call `source.current()` at the auth leg of each new connection. The one
+genuinely new code ratatoskr must write: classify a refresh failure into
+`conduit_net::Error` (transient -> `RefreshFailed` -> `Retry(AfterAuthRefresh)`;
+invalid_grant 401/403 -> `AuthLost`, terminal). Its current `Result<_, String>`
+loses that distinction the engine needs.
+
+**Order within A1 (lowest blast radius first):** JMAP (bearer swap already in
+place) -> Graph/Google (swap private `StaticTokenSource` ctor for injected
+source) -> IMAP (new OAuth2-via-`TokenSource` credential kind, per-connection
+resolve) -> SMTP (transport-builder ingress, no Account surface yet, pairs with
+A2).
+
+**Depends on:** nothing. **Blocks:** A2 and all of Track B.
+
+**Bugs / cautions found (resolved at landing):**
+- **Stale-token bug (the one the plan alluded to):** conduit IMAP/SMTP
+  `Credentials::oauth2` froze the token at construction, so a long-lived factory
+  authenticated new pooled connections with an expired token until the consumer
+  rebuilt the whole factory. A1 closed it: IMAP/SMTP now hold an
+  `Arc<dyn TokenSource>` and re-read `current()` at each connection's auth leg.
+- **Cross-provider single-flight:** ratatoskr serializes IMAP+SMTP refresh for
+  one account under a single global lock. The A1 ingress lets ratatoskr hand the
+  *same* `Arc<dyn TokenSource>` (one `OAuthRefresher`) to both transports of a
+  composed IMAP+SMTP account, so the two legs single-flight together rather than
+  racing - the consumer-side discipline A2 relies on.
+- **Earlier framing, now moot:** the originating TODO and the spec draft once
+  framed this as "expose `set_access_token` on every factory"; no factory ever
+  did, and A1 took the other branch (every factory accepts an
+  `Arc<dyn TokenSource>` at construction; no crate-internal setter survives).
+
+---
+
+## A2 - IMAP send - LANDED
+
+The composition that "leaks up" is real and lands almost directly.
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `imap/ops.rs:send_email` (send -> APPEND-to-Sent -> return id) | imap `account/pim.rs` `send_message` | COPY-AND-ADAPT |
+| `smtp/client.rs:build_transport` (lettre from config) | conduit-smtp transport built inside the imap account | RESHAPE (conduit-smtp is stronger) |
+| `smtp/client.rs:extract_envelope` (re-parse raw to find recipients) | envelope from the structured `SendRequest` | RESHAPE (step disappears) |
+| `imap/ops.rs:create/delete_draft` | conduit `draft_create`/`draft_discard` | ALREADY-IN-CONDUIT |
+| `imap/ops.rs:mark_send_intent` (Reply->Answered, Fwd->$Forwarded) | existing `mark_replied`/`mark_forwarded` conveniences | RATATOSKR-KEEPS |
+| `imap/ops.rs:test_connection` SMTP leg | validate at open/first-send | RATATOSKR-KEEPS |
+
+**Reshaping demands.** Add an SMTP config + the A1 `Arc<dyn TokenSource>` to
+`ImapAccountConfig`; construct the transport inside the account (SMTP XOAUTH2
+reuses the *same* rotated token as IMAP). Gate `pim_methods.send_message` /
+`draft_send` true iff an SMTP config is present (mirrors how caldav/carddav/sieve
+gate their flags). Build RFC822 from the structured `SendRequest`, send, optional
+APPEND-to-Sent honoring `save_to_sent`, return the Sent-folder `ObjectId`. Error
+mapping is already end-to-end (conduit-smtp's `account_error.rs` yields
+`AccountError`).
+
+**Depends on:** A1. conduit-smtp is otherwise feature-complete for this.
+
+**As landed.** `ImapAccountConfig::with_submission(SmtpSubmissionConfig)` builds
+an owned `conduit-smtp` transport inside the IMAP account; `send_message` /
+`draft_send` are real and the capability flags report `true` only when submission
+is configured, else `Unsupported` and `false`. Submission auth reuses the IMAP
+`Credentials` (the A1 `Arc<dyn TokenSource>` threads straight across) unless
+`SubmissionCredentials` overrides it. RFC822 assembly did **not** route through
+`conduit_smtp::Message::builder` (which consumes its own `Mailbox`/`Address`
+types, forcing a header-level `conduit_types::Address -> Mailbox` conversion onto
+the critical path). Instead Google's `MailDocument` serializer was lifted into a
+shared `conduit-types::mime` assembler (`send_request_to_rfc5322` /
+`render_rfc5322`) that operates on `conduit_types::Address` natively; Google, IMAP
+send, and IMAP `draft_create`/`draft_patch` now share that one composition path,
+and the narrow bare-addr-spec conversion to SMTP's `Envelope` is confined to the
+submission boundary.
+
+**Cautions (resolved at landing):**
+- Synthetic message id avoided: `send_message` returns the real APPENDUID-derived
+  `ObjectId` from the Sent APPEND (UIDPLUS) when available, falling back to an
+  explicitly-built controlled-domain `Message-ID` only when no Sent APPEND
+  succeeded - never ratatoskr's `imap-sent-{ts}-{hex}` synthetic id.
+- A failed Sent-APPEND after a committed SMTP send is non-fatal (the send is
+  authoritative, never resend) but **not** silent: it logs an uncertain-Sent
+  reconcile warning rather than a bare log-and-drop.
+- `draft_update` was left out of scope deliberately (ratatoskr's delete+recreate
+  is not on the send surface A2/A4/B5 need); it stays `Unsupported` in conduit
+  IMAP. If later implemented it is a clean delete+recreate on the Drafts APPEND
+  primitive.
+- Read-receipt / MDN injection was left above the seam: A2 did not grow
+  `SendRequest` with an MDN field (a cross-provider `types` change out of A2's
+  blast radius), so ratatoskr injects `Disposition-Notification-To` above this
+  seam, or a follow-up adds the field for all providers at once. The capability is
+  preserved, not silently dropped.
+- `draft_send` adds a net-new raw `BODY[]` full-message fetch (hydration returns a
+  parsed projection, not verbatim octets) plus deliberate Bcc-into-envelope /
+  strip-from-body handling so blind recipients are delivered without leaking the
+  `Bcc:` header.
+- `attachment_upload` stays `Unsupported` (A6 territory); uploaded-attachment
+  handles in a `SendRequest` are rejected. `smtp-M1` (raw-socket bandwidth
+  metering parity) was not folded in - it stays in `TODO.md`.
+
+---
+
+## A3 - Raw RFC822 hydration - LANDED
+
+Recalibrated for presence=needed: ratatoskr's `common/ops.rs:fetch_raw_message`
+is an IMAP-only impl behind an otherwise-`Unsupported` trait default, currently
+unwired. That is the **required "show raw message source" primitive**, not dead
+code - it exists precisely because ratatoskr will wire that action. A3 builds the
+uniform version.
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `imap/client/mod.rs:fetch_raw_message` (`BODY.PEEK[]`) | imap `account/get.rs` raw arm | COPY-AND-ADAPT |
+| `common/ops.rs:fetch_raw_message` (trait default = unsupported) | new `Account` primitive + capability flag | RESHAPE |
+| Gmail/Graph/JMAP raw reads | each crate's `account/get.rs` | NET-NEW (single endpoint each) |
+
+**The de-risk.** The plan's "JMAP/Google/Graph assemble from parts" is wrong:
+*all four* providers expose a server-assembled whole-message endpoint - IMAP
+`BODY[]`, JMAP `Email.blobId` download, Gmail `messages.get?format=raw`, Graph
+`GET /messages/{id}/$value`. **There is no client-side MIME assembler to build.**
+conduit's `get_stream` already issues `format=raw` for Gmail and already fetches
+JMAP `BlobId`, so two of the four wire calls exist; Graph `$value` and the JMAP
+blob-download primitive are the only new endpoints.
+
+**Surface shape.** Mirror `open_blob`:
+`fn open_raw_rfc822(&self, message: ObjectId) -> AccountStream<SyncEvent<Bytes>>`.
+**`Bytes`, never `String`** - the IMAP path's `from_utf8_lossy` corrupts 8-bit /
+binary parts and would render garbage in the raw-source viewer and break dedup
+hashes. Streaming serves the body-store/dedup consumers; a viewer can buffer.
+Capability flag `pim_methods.open_raw_rfc822`: true for all four mail providers,
+false only for CalDAV/CardDAV-only composed accounts (which gates the UI button).
+
+**Depends on:** A1 (landed after).
+
+**As landed.** The uniform `open_raw_rfc822` primitive ships on all four mail
+protocols (IMAP `BODY.PEEK[]`, Gmail `format=raw`, JMAP `Email/get blobId` +
+`client.download`, Graph `$value`); the two DAV crates return
+`Unsupported(OpenRawRfc822)` with the `open_raw_rfc822` flag `false`. `Bytes`
+throughout - no `from_utf8_lossy`. The de-risk held: no client-side MIME
+assembler was built.
+
+**Bugs fixed at landing:**
+- **Graph contract violation (fixed):** conduit Graph no longer puts serialized
+  JSON into `HydratedObjectKind::RawMime`. `hydrated_from_value`'s body-bearing
+  projections (`Headers`/`Preview`/`TextOnly`/`Full`/`FullWithBlobs`) now degrade
+  to `Metadata` (falling back to `FlagsOnly`); the assembled bytes come solely
+  through `open_raw_rfc822` (`GET /messages/{id}/$value`). The degradation is a
+  recorded stopgap until A1 owns Graph's body-projection path.
+- **JMAP self-block (left in place by design):** the `hydrate.rs` raw-projection
+  fatal was NOT removed - it belongs to A1. A3 instead opened the dedicated raw
+  read (`Email/get blobId` + `client.download`), the cheapest provider to wire,
+  leaving the hydration fatal untouched.
+
+---
+
+## A4 - Scheduled send [LANDED]
+
+Landed decisions worth recording:
+
+- **IMAP one-shot.** IMAP scheduled send is fire-and-submit via SMTP
+  FUTURERELEASE (`HOLDUNTIL`, absolute-time so the boundary never races
+  `now()`). RFC 4865 has no recall verb, so `cancel_scheduled_send` /
+  `reschedule_send` are `Unsupported` for IMAP and `scheduled_send` is a
+  per-connection truth defaulted `false` (the relay EHLO at send time is
+  authoritative, no probe-at-open).
+- **smtp discriminator (4.6a).** conduit-smtp gained
+  `ErrorKind::{FeatureUnsupported, ParameterOverLimit}`: FUTURERELEASE-
+  unsupported maps to `Unsupported(Send)`, HOLDFOR-over-limit to
+  `Request(Malformed)`, so the IMAP boundary can tell them apart without
+  string-matching a consent-gated diagnostic.
+- **JMAP submission-id handle contract.** A scheduled JMAP send returns the
+  EmailSubmission id (the undo-addressable object) as the cancel/reschedule
+  handle; an immediate send still returns the email id. Reschedule is
+  cancel-and-resubmit (JMAP has no in-place reschedule).
+- **Graph in-place reschedule.** Cancel = DELETE the deferred draft;
+  reschedule = PATCH `PidTagDeferredSendTime`, returning the same id.
+
+Every wire primitive already exists in **conduit** (smtp FUTURERELEASE,
+JMAP `holduntil`, Graph `PidTagDeferredSendTime`). A4 is a `SendRequest`
+field + a flag.
+
+Native support matrix: **JMAP** yes (RFC 4865, gated by `maxDelayedSend > 0`),
+**Graph** yes (`PidTagDeferredSendTime` 0x3FEF), **Gmail** no (flag false),
+**IMAP** yes iff the relay advertises FUTURERELEASE (else false).
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `jmap/ops.rs:schedule_send_jmap` (`holduntil` + maxDelayedSend check) | fold into jmap `send_message` `submit.envelope` | COPY-AND-ADAPT |
+| `graph/ops:create_draft_with_deferred_time` + `schedule_send` | graph `send_message` (already draft-then-send) | COPY-AND-ADAPT |
+| SMTP FUTURERELEASE | imap `send_message` via existing `SendOptions::hold_until` | RESHAPE / NEW |
+| Gmail | flag false | nothing to port |
+
+**Reshaping demands.** Add `scheduled: Option<SystemTime>` to `SendRequest`, a
+`scheduled_send: bool` capability flag, validation at the provider boundary
+(future + within `maxDelayedSend`/`future_release_max_interval` -> over-limit/past
+map to `Request(Malformed)`; unsupported -> `Unsupported(Send)`).
+
+**Scope gap, now firm given presence=needed.** ratatoskr ships **cancel** and
+**reschedule** for both JMAP and Graph scheduled sends
+(`cancel_scheduled_send_jmap` via `undoStatus`, Graph delete/patch). These are
+required surface ratatoskr wires. A4 landed `cancel_scheduled_send` and
+`reschedule_send` primitives gated by the same flag (not fire-and-forget),
+which is why no provider special-case is needed.
+
+**IMAP capability is post-EHLO.** Unlike JMAP (`maxDelayedSend` in the session
+object) and Graph (always-on), the IMAP flag depends on the relay's EHLO
+FUTURERELEASE advertisement, unknown until connect, while `AccountCapabilities`
+is an open-time snapshot. Landed resolution: default the flag false and surface
+a runtime `Unsupported` (no probe-at-open), per the IMAP one-shot decision
+above.
+
+**Depends on:** A2 (uniform send surface settled first).
+
+---
+
+## A5 - Shared mailboxes + public folders (largest brick) - LANDED (A5a/A5b/A5c)
+
+Substantial ratatoskr code (~110 KB / 6 files) but most is CRUD + ad-hoc
+poll-loop-into-SQLite - the shape the plan warns against. The hard, novel work is
+reshaping that onto `CursorScope`/`changes_stream`, which has no ratatoskr
+analog. Splits **three** ways, not two. **All three (A5c, A5a, A5b) are LANDED,
+so A5 overall is LANDED.**
+
+**Gating fork - RESOLVED by A5c (option (a)-lite, no new variant).** ratatoskr
+models a shared mailbox as a *cloned client* (`for_shared_mailbox`), not a scope.
+The fork was (a) new `CursorScope` variants vs (b) a separate `Account` instance
+per shared mailbox. **Settled model (decided during A5c; A5a/A5b inherit it):**
+neither extreme. A shared mailbox is **cursor-resident** and surfaces as an
+**ordinary `CursorScope::Folder`** - NO new `CursorScope` variant (a new variant
+would be silently mis-serviced by `route_typed_scope` / IMAP's `route_scope`,
+the s34-G1 class). The protocol routing detail rides the opaque cursor payload,
+never inspected by the engine. The **owner tag is the existing `MailboxId`**,
+emitted as a `MembershipScope::Mailbox(owner)` on each shared item's memberships
+(no new consumer surface); the consumer maps it to `shared_mailbox_id` and
+treats an unknown tag as a hard error. Per-scope recovery isolation is
+**`EngineDirective::DisableScope` quarantine** (delete that scope's cursor +
+broadcast a scoped warning; siblings keep syncing; NOT account-wide auth loss).
+A5a (Graph/JMAP) carries the foreign-mailbox routing in the same cursor-resident
+shape; A5b (EWS public folders) likewise.
+
+### A5c - IMAP NAMESPACE/ACL shared folders (size M) - LANDED
+
+Highest value-to-effort: shared IMAP folders are ordinary folders behind a
+NAMESPACE prefix, so once scoped they reuse the entire CONDSTORE/QRESYNC
+`changes_stream` with **no new sync code**. Landed; the spec was retired at
+landing, so the durable record is git history (the A5c landing commit) and the
+reference docs: `reference/imap.md` "Shared / other-user folders (A5c)",
+`reference/sync.md` `DisableScope`, `reference/error-model.md` `ScopeRevoked`.
+
+**Codec table correction (was stale).** The port-map originally listed
+`parse_rights` / `discover_namespaces` / `discover_myrights` as COPY/ADAPT codec
+work. The IMAP codec was **already done** before A5c began (`Command::Namespace`
+/ `MyRights` / `GetAcl` with full encode/decode and typed responses); A5c was
+account-layer glue, not codec porting. What actually landed:
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| RFC 4314 rights parse | `imap/src/types/acl.rs` `MailboxRights` (new, `pub(crate)`) | DONE |
+| NAMESPACE + MYRIGHTS issue/gate | `discover_shared_folders` in `account/factory.rs` (codec already existed) | DONE |
+| owner derivation | `mailbox_owner_for` / `mailbox_owner_from_other_user_path` (per-principal for `#user/`) | DONE |
+| `list_shared_folders` | `account/scopes.rs` `memberships_for_entry` + `FolderRegistry::from_lists` owner tag | DONE |
+| shared-folder sync | existing `changes_stream` (ordinary `CursorScope::Folder`, no new sync code) | DONE |
+| revocation recovery | `SyncState(ScopeRevoked)` -> `EngineDirective::DisableScope` quarantine | DONE |
+| `build_uid_set` | conduit typed `UidSet` | ALREADY-IN-CONDUIT |
+
+### A5a - Shared mailboxes, Graph delegate + JMAP shared accounts (size S-M) - LANDED
+
+Landed as planned: the foreign-mailbox identity rides inside the scope's
+`FolderId` (per-crate `foreign.rs` codec, `\u{1f}` separator), discovery emits
+those scopes, inventory/changes route through the right `api_path_prefix()`
+(Graph) / foreign `accountId` handle (JMAP), and a foreign-scope 403 quarantines
+that scope only (`graph_scope_revoked` / `jmap_scope_revoked` -> `ScopeRevoked`
+-> `DisableScope`) while a primary 403 stays terminal. Graph foreign mailboxes
+are **config-supplied** (`with_shared_mailbox`; no Graph REST "list my delegated
+mailboxes" call - EWS `GetDelegate` / Autodiscover is A5b); JMAP
+**auto-discovers** non-personal mail accounts from the session. JMAP carried one
+internal refactor: the three scalar `*_state` caches became per-accountId maps
+(`state_cache.rs`) and `JmapScopeRepr` gained an additive `Folder` envelope
+variant (`SCOPE_TAG_FOLDER`, no version bump). Durable record: git history (the
+A5a landing commit) + `reference/graph.md` / `reference/jmap.md`; the spec was
+retired at landing.
+
+**Named A5a-scoped-out follow-ups** (read/sync only): foreign-account
+*mutations* (the JMAP per-accountId state store is shaped for `ifInState` but the
+mutation path is unwired - mirrors Graph's C-3 send-as exclusion) and live
+foreign *mailbox lifecycle* (discovery seeded once at open; a foreign mailbox
+added afterwards surfaces at the next reopen).
+
+### A5b - Graph EWS public folders + Autodiscover (size L, the real unknown) - LANDED
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `graph/ews/parsers.rs`, `xml_helpers.rs` (quick-xml) | graph `ews/` (exists, streaming-only today) | COPY-DIRECT |
+| `autodiscover.rs` parsers (`parse_alternative_mailboxes`, `parse_user_settings`) | new graph `autodiscover.rs` | COPY-DIRECT |
+| `ews/client.rs` FindFolder/FindItem/GetItem/CreateItem | graph `ews/` | COPY-AND-ADAPT (-> AccountNet + `ews_error_to_account_error`) |
+| `autodiscover.rs` HTTP entry points | same | COPY-AND-ADAPT |
+| `public_folder_sync.rs` poll loop + SQLite | new conduit sync strategy + `CheckpointStore` | RESHAPE / RATATOSKR-KEEPS (DB) |
+
+LANDED (three sub-specs; see `reference/graph.md` and the A5b entry in
+`ratatoskr-adoption.md`). Public folders have **no delta token**, so the
+timestamp-poll-plus-throttled-full-deletion-scan is now a first-class conduit
+cursor strategy: `establish_initial_cursor -> EstablishViaInventory` for a
+routing-map-member `CursorScope::Folder`, `changes_stream` re-polls by
+`DateTimeReceived` since the watermark and periodically full-id-reconciles. The
+throttle state (`last_full_scan_at`), the routing pair
+(`X-AnchorMailbox`/`X-PublicFolderMailbox`), and the deletion baseline (`live_ids`,
+capped at 10_000) all live **inside the opaque cursor** (`PublicFolderCursor`),
+reconstructable on a cold resume. EWS gained the read ops
+(`FindFolder`/`GetFolder`/`FindItem`/`GetItem` over `AccountNet`); `CreateItem`
+was deliberately NOT ported (C-3 write surface). The error-mapping path
+(`ews_error_to_account_error`, `SoapFaultCode`) was reused verbatim.
+
+**Top risks (all retired - A5 landed):** (1) the scope-vs-Account fork -
+**RESOLVED** (cursor-resident `CursorScope::Folder`, no new variant; see the
+gating-fork note above); (2) the no-delta-token strategy - **LANDED** as the
+`PublicFolderCursor` watermark-poll + throttled deletion reconcile;
+(3) routing context must be cursor-resident - **settled as the model** (the
+opaque cursor payload carries protocol routing; the engine never inspects it);
+(4) shared rights/permission type - **resolved as advisory**: A5c's
+`MailboxRights` (`imap/src/types/acl.rs`) and A5b's `EwsEffectiveRights` each
+gate discovery (skip unreadable folders) but neither pre-flight-rejects
+mutations; the live `NO [ACL]` / `ErrorAccessDenied` stays authoritative
+per-operation, with no shared `conduit-types` rights type; (5) EWS operation
+surface maturity - **landed** (`FindFolder`/`GetFolder`/`FindItem`/`GetItem`
+parsers; non-Message item classes are a named follow-up); (6) no push for
+shared/public scopes - for A5c a shared folder is an ordinary `Folder` scope so
+IDLE on the most-active scope covers it, and A5b public folders are poll-only by
+design.
+
+**Re-home:** `group_sync.rs` (Graph distribution-list membership) is **not** A5 -
+it is contact-group membership, shares no machinery, belongs in the contacts work.
+
+**Depends on:** the scope-model decision. Otherwise structurally independent.
+
+---
+
+## A6 - Cloud-storage attachments - LANDED
+
+Recalibrated for presence=needed: ratatoskr's `gmail/gdrive.rs` and
+`graph/onedrive.rs` are complete upload+share-link modules that are present but
+unwired in the clone. That is the **confirmed large-attachment-hosting feature**,
+not dead code; the lack of callers is just ratatoskr's incompleteness.
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `gmail/gdrive.rs` (Drive resumable upload, sharing permission, webViewLink) | new google `account/cloud.rs` | COPY-AND-ADAPT |
+| `graph/onedrive.rs` (OneDrive resumable upload, createLink) | new graph `account/cloud.rs` | COPY-AND-ADAPT |
+| share-link scope vocab (Anyone/Domain vs anonymous/organization) | shared `ShareScope { Anyone, Organization }` | RESHAPE |
+| `core/cloud_attachments.rs:supports_cloud_upload` (match provider) | `capabilities.host_attachment` flag | RESHAPE (also closes A8 wart) |
+| 25 MB threshold + warn-vs-host UX + `UploadStatus` state machine | consumer | RATATOSKR-KEEPS |
+| `detect_cloud_links` / inbound enrichment | consumer (enrichment optionally a thin Account method later) | RATATOSKR-KEEPS |
+
+**Surface shape (upload + link in one call** - a stray uploaded-but-unlinked file
+is the worst failure mode):
+`fn host_attachment(&self, bytes, meta: CloudUploadMeta) -> Result<HostedAttachment, AccountError>`
+with `CloudUploadMeta { file_name, mime, size, scope: ShareScope }` and
+`HostedAttachment { share_url, provider_file_id }`. Behind it stays
+all provider divergence (256 vs 320 KiB chunk alignment, `Location` header vs JSON
+body, 308 vs 202 resume, one vs two round-trips for the link). The net-new
+non-idempotent `AccountOperation::HostAttachment` lets the error model classify an
+interrupted upload correctly. (No `web_view_link` field landed: for Drive the
+`share_url` *is* the `webViewLink` and for OneDrive it is the sole `createLink`
+`webUrl`, so a second URL field would be redundant-or-absent; the
+`#[non_exhaustive]` struct can gain it later if a provider yields a distinct URL.)
+
+**Seam.** conduit owns the mechanism (can-host flag, upload/link wire protocol,
+error classification). ratatoskr owns the policy (the 25 MB threshold, warn-vs-host
+UX, inserting `share_url` into the body, the `UploadStatus` persistence).
+
+**Depends on:** A1 (must route through the shared `TokenSource` + conduit-net, not
+ratatoskr's bare `reqwest` + hand-built Bearer). Otherwise independent of A2/A4.
+
+**Cautions (resolved at landing):**
+- New shared types landed in `types` first (the `cloud` module: trait
+  method, `ShareScope`, `HostedAttachment`, `CloudUploadMeta`, `host_attachment`
+  flag, the `AccountOperation` variant) - both impls depend on them.
+- The hardcoded `"Ratatoskr Attachments"` OneDrive folder name was de-branded to
+  a neutral `"Attachments"`, with the seam documented for a future
+  consumer-configurable folder.
+- **Latent upload-corruption bug** in `gdrive.rs:upload_file_chunked` (on a 308
+  with an unparseable Range header it fell back to `offset = end`, silently
+  skipping a gap): the conduit Drive chunk loop fails instead, never advancing on
+  an unparseable resume cursor. (OneDrive's 202 sibling never had the bug.)
+- **Load-bearing net obstacle:** default redirect-following converted Drive's
+  `308 Resume Incomplete` (no `Location` header, only `Range`) into
+  `MalformedRedirect`, failing every multi-chunk upload. Resolved by a conduit-net
+  change: `classify_redirect` returns `PassThrough` when a followed-redirect
+  status carries no `Location`; a present-but-malformed `Location` stays a hard
+  error. OneDrive's 202 resume was unaffected.
+- The COPY-AND-ADAPT chunk-range / serde / scope-mapping behavior is pinned by
+  new conduit unit tests in each `cloud.rs`.
+
+---
+
+## A7 - DAV as first-class synced accounts - LANDED
+
+Landed as the composition + robustness bricks: scope router
+(`route_scope`/`ScopeHandler`) and discovery fan-in extracted to
+`conduit_types::account_compose`, the four sync entry points delegate to the
+sub-account, capabilities copy the sub's real `pim_methods`, fail-soft
+`DavAttach` open, the empty-207 destroy-suppression + failed-uri-preservation
+guards in the caldav/carddav PROPFIND-snapshot diffs, and the CardDAV ctag
+short-circuit. The TZID-as-UTC fix (s34-S1) was deliberately scoped out to a
+standalone item (needs `chrono-tz`, absent from `Cargo.lock`); JMAP/Graph DAV
+composition and full CardDAV `sync-collection` parity are named follow-ups. The
+section below is the as-planned record.
+
+Almost no port: the DAV protocol clients and iCal/vCard projection **already
+moved** into conduit, which is **ahead** of ratatoskr (conduit added WebDAV
+`sync-collection` to CalDAV; ratatoskr never had it). A7 is net-new conduit
+*composition wiring* inside the IMAP account. ratatoskr never composed DAV under
+IMAP (it branched on a provider string column), so there is no composition
+mechanism to copy.
+
+| ratatoskr | conduit dest | class |
+|---|---|---|
+| `core/{caldav,carddav}/client*`, parse | `crates/{caldav,carddav}` clients/projection | ALREADY-IN-CONDUIT (conduit ahead) |
+| `calendar/src/sync.rs` orchestration loop + DB | engine + consumer | RATATOSKR-KEEPS |
+| empty-207 deletion-suppression guard (`sync.rs:670,685`) | DAV `changes_stream` diff | COPY-AND-ADAPT |
+| stale-URL clear+rediscover recovery (`sync.rs:407`) | DAV factory `open` + `RestartAccount` | COPY-AND-ADAPT (shape only) |
+| IMAP scope fan-in + scope router | `imap/account/{scopes,mod,changes,inventory}.rs` | RESHAPE (net-new) |
+| fail-soft DAV open | `imap/account/factory.rs` | RESHAPE (net-new) |
+
+**The dead-end (s34-G1).** `imap/account/scopes.rs:discover_cursor_scopes` builds
+scopes only from the IMAP folder registry, never touching `inner.contacts`/
+`inner.calendars`; and `folder_from_scope` matches only `CursorScope::Folder(_)`,
+returning `Unsupported` for `Type(Contact)`/`Type(CalendarEvent)` - which
+`changes_stream`/`inventory_stream` call first thing. So composed DAV scopes are
+rejected before any work.
+
+**The fix.** (1) `discover_cursor_scopes` concatenates IMAP folder scopes with the
+sub-accounts' `discover_cursor_scopes()` (drain, merge, single terminal `Done`);
+same for memberships/lifecycle. (2) Replace the `folder_from_scope` gate with a
+scope **router**: `Folder/FolderType` -> self; `Type(Contact)` -> `inner.contacts`;
+`Type(CalendarEvent)` -> `inner.calendars`; each of `establish_initial_cursor`/
+`inventory_stream`/`changes_stream`/`describe_cursor` dispatches through it and
+delegates the whole call to the sub-account `Arc<dyn Account>` (already a full
+Account - no new trait surface). The engine already namespaces cursors by
+`ProtocolKind`, so CalDav/CardDav cursors cannot collide with IMAP's. Push is
+poll-only for DAV (`push_subscribe` Unsupported) - the multiplexer just polls.
+Capabilities should read the sub-account's real `pim_methods` (s34-S4), not
+`sub.is_some()`. For "compose beyond IMAP," extract the router + fan-in as a
+reusable helper rather than copy-pasting into JMAP/Graph.
+
+**Fail-soft vs fail-hard (s34-S5).** Today `factory.rs:open` does
+`open_caldav(...).await?` - a transient DAV outage fails the *entire* IMAP account
+open, taking mail down. That is accidental, not designed. **Recommend fail-soft:**
+attach IMAP-only degraded, omit the DAV scopes from discovery; the engine re-runs
+`discover_cursor_scopes` on every reopen, so a later reopen picks DAV up by
+design. Distinguish transient (`Transport`/`Unavailable` -> retry on reopen) from
+permanent (`Authorization`/`NotFound` -> still attach, but surface a terminal
+warning to fix config). Requires the factory to hold the DAV *config*, not just
+the opened handle. Mirrors ratatoskr's own clear-and-rediscover recovery intent.
+
+**Robustness catches (the most important COPY-AND-ADAPT in A7):**
+- **Empty-207 deletion suppression.** ratatoskr's DAV sync skips deletes when the
+  server returns zero hrefs but the local cache is non-empty (suspected transient).
+  conduit's snapshot-diff lacks this - a flaky DAV server returning an empty
+  multistatus makes conduit emit a `Destroyed` change for every contact/event and
+  the consumer wipes its store. Port the guard into the diff.
+- **Failed-uri preservation** (`sync.rs:685`): same destroy-on-transient risk
+  class; preserve local copies for hrefs the server reported failed within a 207.
+
+**Carried-forward bug:** s34-S1 - CalDAV `ical.rs` reads TZID datetimes as
+wall-clock digits with `Z` appended, so `EventTime.value` (documented UTC) holds
+local time off by the zone offset. Real correctness bug; same files.
+
+**Other:** s34-S6 - CardDAV `changes_stream` encodes the ctag into the cursor but
+never compares it (always full PROPFIND + diff). CalDAV already does proper
+`sync-collection`; CardDAV is the laggard. Fold in either a ctag short-circuit or
+full `sync-collection` parity while the code is open.
+
+**Depends on:** nothing structurally.
+
+---
+
+## A8 - Provider-wart absorption sweep
+
+ratatoskr's `ProviderOps` already hides most warts behind a trait method, so most
+of A8 is "add the matching capability flag / primitive in conduit." The warts that
+escaped the trait force a consumer `match provider` and carry the highest adoption
+value. Group A below is that high-value set.
+
+### Group A - provider identity leaking ABOVE the seam (consumer `match`)
+
+| # | ratatoskr leak | absorption | status | brick |
+|---|---|---|---|---|
+| A-2 | `handlers/gal.rs` `match provider` for GAL | directory/GAL primitive + `directory_search` flag | RESOLVED - landed as brick A9 | A9 (split out of A8) |
+| A-3 | `auto_responses.rs` six per-provider free fns | `vacation_get`/`set` flags exist; audience+date model-mapping into impls | RESOLVED (conduit) - consumer rewrite is Track B B6 | A8 |
+| A-4 | `actions/contacts.rs` `match source:&str` + two body builders | `contact_*` flags exist; per-provider mapping into impls | RESOLVED (conduit, post-A7) - consumer rewrite is Track B B4 | A8 + A7 (CardDAV) |
+| A-5 | `calendar/actions.rs` `match CalendarProvider` | `event_*` flags exist; mapping into impls | RESOLVED (conduit, post-A7) - consumer rewrite is Track B B8 | A8 + A7 (CalDAV) |
+| A-6 | `bundling.rs` Gmail CATEGORY_* top priority | surface ML categories uniformly; heuristic stays consumer | POLICY | A8 |
+
+GAL (A-2) is under-served by "just a flag" - ratatoskr has real Graph and Google
+directory impls that need a home, so it was split out of A8 into its own brick
+(A9 in `ratatoskr-adoption.md`): a `directory_search` primitive with two
+asymmetric backends over a different corpus from personal `contact_search`, plus
+a `directory_search` flag. RESOLVED - landed as brick A9: Graph `/users` and
+Google People backends, `Unsupported(DirectorySearch)` on the other four (the
+CardDAV directory-gateway leg is a named follow-up, not part of A9).
+
+### Group B - model-mapping warts already behind `ProviderOps`
+
+| # | ratatoskr wart | absorption | status |
+|---|---|---|---|
+| B-1 | `LabelKind` provider-typed taxonomy; Graph importance is single-valued/exclusive so `actions/label.rs` **expands one add into two intents** | uniform `Importance` enum + `set_importance` primitive (exclusive overwrite inside each impl); consumer never expands. `Message.importance` read field populated by all four mail crates | RESOLVED (A8) |
+| B-2 | Graph `remove_from_container` move-only | `Unsupported(RemoveFromContainer)` + flag false (`graph-N1`); method behavior pinned by test | RESOLVED (A8) |
+| B-3 | Graph draft update = delete+recreate, "returns possibly-new id" | `draft_update` returns `Result<(), _>` - no post-update id is surfaced, so the new-id contract is uniform by construction across all four (the consumer keeps its `DraftHandle`; impls remap internally) | RESOLVED (A8) |
+| B-4 | MDN `$MDNSent` - JMAP/IMAP only (Graph `isReadReceiptRequested` read-only) | `mark_mdn_sent` via `set_keyword` gated by `ConvenienceShape.mdn_sent_via_keyword`; JMAP/IMAP true, Gmail/Graph false (reports `Unsupported(UpdateFlags)`) | RESOLVED (A8) |
+| B-5 | replied/forwarded send-intent (`PR_LAST_VERB`) | `ConvenienceShape.replied_via_*`/`forwarded_via_*` | ALREADY |
+
+### Group C - send-path warts
+
+C-1 IMAP-send-via-SMTP = **A2**. C-2 scheduled send (three unwired provider entry
+points off the uniform trait; JMAP `maxDelayedSend` gate is the textbook
+"immutable limit -> flag") = **A4**, including the cancel/reschedule gap above.
+C-3 Graph shared-mailbox send (`send_as_shared_mailbox`, `send_on_behalf_of`) =
+**RESOLVED (A8 tail, gated on A5a's foreign-mailbox routing)**. Landed as a typed
+`SendAs::{As, OnBehalfOf}(MailboxId)` identity on `SendRequest::send_as` +
+`PimMethodSupport.send_as` flag; the Graph backend routes the
+create/deferred-stamp/send cycle through the shared mailbox's `shared_clients`
+`&GraphClient` and `apply_send_as` stamps `from`/`sender`. The
+inline-only-attachments constraint on `/users/{id}/sendMail` never applies because
+conduit keeps the draft-backed path (`POST /messages` then `.../send`), which
+accepts attachments uniformly with a primary-mailbox send. IMAP/Google reject a
+`Some(send_as)` with `Unsupported(Send)`. JMAP now honors `send_as` natively by
+routing the draft `Email/set` + `EmailSubmission/set` to a seeded, submission-
+capable foreign account (see `reference/jmap.md`). Scoped-out follow-up: `c3-2`
+(shared-mailbox send over SMTP for IMAP-shaped accounts) in `TODO.md`.
+
+### Group D - transport quirks, mostly ALREADY absorbed
+
+Graph `$batch <= 20` -> `BatchingPolicy`; `If-Match` -> `MutationConcurrency::StateBased`;
+webhook/EWS-stream/Autodiscover -> `PushCapability`; 429/Retry-After -> `QuotaSignal`
+(`graph-N3` HTTP-date polish); per-client `Semaphore` -> `graph-S1` (delete if a
+per-account limiter lands in net/sync); blob range per-handle -> `BlobRangeSupport`.
+Gmail historyId expiry / batchDelete-403 TRASH fallback / flat-labels / synthetic
+Archive / Pub/Sub topic -> all ALREADY in conduit-google. IMAP UIDVALIDITY /
+QRESYNC-CONDSTORE-Basic / IDLE / client-side threads -> ALREADY (shared mailboxes
+= A5). JMAP `ifInState` / WebSocket / Sieve -> ALREADY.
+
+### A8 priority (most forces a consumer `match provider`)
+
+1. GAL (A-2) - split out to its own brick A9, RESOLVED (landed). 2. `LabelKind` +
+Graph-importance intent expansion (B-1, densest) - RESOLVED (A8): uniform
+`Importance` + `set_importance`. 3. Scheduled send (C-2 / A4) - landed. 4. IMAP
+send (C-1 / A2) - landed. 5. Contacts/calendar/auto-response dispatch (A-3/4/5) -
+RESOLVED on the conduit side once the primitives + A7 landed; consumer rewrite is
+Track B. 6. Graph send-as (C-3 / A8 tail, gated on A5a) - RESOLVED (landed); the
+last A8 brick. (Cloud attachments, the former top priority A-1 / A6, has landed.)
+**A8 is now closed.** Residue (not A8 deliverables): A-6 (consumer policy),
+graph-S1/graph-N3 (`TODO.md` cleanups).
+
+**Independence:** standalone now - graph-S1, graph-N3, A-6 (policy). RESOLVED -
+A-2 (brick A9, landed). RESOLVED (A8) - B-1 (importance), B-2 (`graph-N1`),
+B-3 (draft-update new-id confirm), B-4 (MDN), C-3 (Graph send-as). Needs A1 - A6,
+A3, A2. Chained - A4 needs A2; C-3 built on A5a (landed); A-4/A-5 CalDAV/CardDAV
+legs needed A7 (landed, so A-3/4/5 are RESOLVED on the conduit side).
+
+---
+
+## Cross-cutting findings
+
+**The scope-vs-Account fork (A5) is the one decision that gates the most.** Resolve
+how a foreign/shared mailbox is modeled before any A5 porting.
+
+**Unwired-but-required surface (the roadmap).** Present in the clone, zero callers,
+all things ratatoskr will wire against conduit's ideal surface: cloud-attachment
+upload (A6), scheduled send + cancel + reschedule (A4), send-as / on-behalf (C-3,
+landed - `SendRequest::send_as`), raw-message fetch (A3), GAL (A8 A-2). All now
+landed on the conduit side. Upside: no back-compat constraint - the ideal uniform
+surface was designed free of any old shape.
+
+**Bugs worth fixing inside the relevant brick (not separate work):**
+- IMAP/SMTP stale-token-at-construction (A1).
+- Graph `RawMime` carrying JSON (A3, fixed - body projections degrade to
+  `Metadata`); JMAP raw fatal left to A1 (A3 added the dedicated raw read).
+- DAV empty-207 destroy-everything + failed-uri loss (A7, fixed).
+- CalDAV TZID-as-UTC offset bug, s34-S1 (scoped out of A7 to its own standalone
+  item; needs `chrono-tz`, absent from `Cargo.lock`).
+- gdrive 308-resume gap-skip corruption (A6, fixed - the Drive chunk loop fails
+  on an unparseable resume cursor instead of advancing past a gap).
+- Graph `add_label` category read-modify-write lost-update window (A8/B-1).
+
+**Duplicate/loose typing conduit already fixes:** ratatoskr's `CalendarProvider`
+enum parallels `MailProviderKind` (divergence risk); contact dispatch keys on a
+`&str` source. conduit's single typed `Provider`/scope/provenance model removes both.
+
+## Suggested sequencing (refines plan section 6)
+
+1. **A1** - first domino, JMAP -> Graph/Google -> IMAP -> SMTP.
+2. **A2** then **A4** (A4 includes cancel/reschedule).
+3. **A3** and **A6** after A1, independent of each other.
+4. **A5** - scope-vs-Account decision RESOLVED (cursor-resident `Folder`, no new
+   variant). **A5c (IMAP NAMESPACE)**, **A5a (Graph delegate + JMAP shared)**, and
+   **A5b (EWS public folders)** all LANDED.
+5. **A7** - independent; fold the DAV robustness guards in. LANDED.
+6. **A8** - standalone warts landed first; the send-path tail **C-3** (Graph
+   send-as, gated on A5a) landed last and closes A8. **GAL (A-2)** was pulled out
+   as its own brick **A9** - RESOLVED, landed.
+
+**All Track A bricks (A1-A9) are LANDED.** C-3 was the final brick; conduit is
+adoptable. The next work is Track B (the ratatoskr-side rewrite), tracked in
+ratatoskr's `plans/conduit-migration.md`, not here.

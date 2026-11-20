@@ -1,0 +1,606 @@
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use rusqlite::{Connection, params};
+
+/// Separate SQLite database for compressed email bodies.
+///
+/// Bodies are stored as zlib-compressed BLOBs, keeping the metadata DB small.
+/// Same `Mutex<Connection>` + `spawn_blocking` pattern as `ReadDbState`.
+#[derive(Clone)]
+pub struct BodyStoreReadState {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl std::fmt::Debug for BodyStoreReadState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BodyStoreReadState").finish_non_exhaustive()
+    }
+}
+
+/// A single body record returned to callers.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageBody {
+    pub message_id: String,
+    pub body_html: Option<String>,
+    pub body_text: Option<String>,
+}
+
+/// Zlib compression level - 3 gives a good ratio/speed trade-off.
+const ZLIB_LEVEL: u32 = 3;
+
+/// Open (or create) the on-disk body store database. Phase 3 task 2
+/// extracts this so `service-state::BodyStoreWriteState` can open its
+/// own writer-side connection against the same file without
+/// duplicating the pragma + schema-init logic.
+pub fn open_body_store_connection(app_data_dir: &Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
+
+    let db_path = app_data_dir.join("bodies.db");
+    log::info!("Initializing body store at {}", db_path.display());
+    let conn = Connection::open(&db_path).map_err(|e| format!("open body store: {e}"))?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA mmap_size = 2147483648;
+         PRAGMA cache_size = -32000;
+         PRAGMA busy_timeout = 15000;",
+    )
+    .map_err(|e| format!("body store pragmas: {e}"))?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS bodies (
+            message_id  TEXT PRIMARY KEY,
+            body_html   BLOB,
+            body_text   BLOB,
+            inserted_at INTEGER NOT NULL DEFAULT 0
+         );",
+    )
+    .map_err(|e| format!("create bodies table: {e}"))?;
+
+    // Phase 8-2 in-place migration. SQLite forbids non-constant DEFAULT
+    // on ALTER TABLE ADD COLUMN, so existing-row backfill happens with a
+    // follow-up UPDATE. Idempotent: the column-presence check skips both
+    // statements once the column exists.
+    let has_inserted_at = conn
+        .prepare("SELECT 1 FROM pragma_table_info('bodies') WHERE name = 'inserted_at'")
+        .and_then(|mut s| s.exists([]))
+        .unwrap_or(false);
+    if !has_inserted_at {
+        conn.execute_batch(
+            "ALTER TABLE bodies ADD COLUMN inserted_at INTEGER NOT NULL DEFAULT 0;
+             UPDATE bodies SET inserted_at = unixepoch() WHERE inserted_at = 0;",
+        )
+        .map_err(|e| format!("body store inserted_at migration: {e}"))?;
+    }
+
+    Ok(conn)
+}
+
+/// Zlib-compress a body string. Phase 3 task 2 exposes this so
+/// `service-state::BodyStoreWriteState::put_batch` can drive its own
+/// connection without duplicating the compression code path.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+pub fn compress_body(data: &str) -> Result<Vec<u8>, String> {
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(ZLIB_LEVEL));
+    encoder.write_all(data.as_bytes()).map_err(|e| {
+        log::error!("zlib compression failed: {e}");
+        format!("zlib compress: {e}")
+    })?;
+    encoder.finish().map_err(|e| {
+        log::error!("zlib compression finish failed: {e}");
+        format!("zlib compress finish: {e}")
+    })
+}
+
+// Internal alias used by the existing read-state methods. The pub
+// helper above is the canonical API for cross-crate consumers.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn compress(data: &str) -> Result<Vec<u8>, String> {
+    compress_body(data)
+}
+
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn decompress(data: &[u8]) -> Result<String, String> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let mut decoder = ZlibDecoder::new(data);
+    let mut bytes = Vec::new();
+    decoder.read_to_end(&mut bytes).map_err(|e| {
+        log::error!("zlib decompression failed: {e}");
+        format!("zlib decompress: {e}")
+    })?;
+    String::from_utf8(bytes).map_err(|e| {
+        log::error!("UTF-8 decode failed after decompression: {e}");
+        format!("utf8 decode: {e}")
+    })
+}
+
+impl BodyStoreReadState {
+    /// Access the underlying connection Arc for synchronous use.
+    pub fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
+    /// Open (or create) the body store database. The Service writer
+    /// half (Phase 3) opens its own connection against the same on-disk
+    /// file via `open_body_store_connection`; SQLite's WAL handles
+    /// multi-reader-single-writer concurrency. The Rust types enforce
+    /// the read/write split at the API surface.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn init(app_data_dir: &Path) -> Result<Self, String> {
+        let conn = open_body_store_connection(app_data_dir)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    /// Run a closure on the body store connection via `spawn_blocking`.
+    pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("body store lock poisoned: {e}"))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Store a message body (compressed).
+    pub async fn put(
+        &self,
+        message_id: String,
+        body_html: Option<String>,
+        body_text: Option<String>,
+    ) -> Result<(), String> {
+        log::debug!("Storing body for message_id={message_id}");
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Compress outside the lock - CPU-intensive work.
+            let html_blob = body_html.as_deref().map(compress).transpose()?;
+            let text_blob = body_text.as_deref().map(compress).transpose()?;
+
+            // Lock only for the DB write.
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("body store lock poisoned: {e}"))?;
+            conn.execute(
+                "INSERT INTO bodies (message_id, body_html, body_text, inserted_at)
+                 VALUES (?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(message_id) DO UPDATE SET
+                     body_html   = excluded.body_html,
+                     body_text   = excluded.body_text,
+                     inserted_at = unixepoch()",
+                params![message_id, html_blob, text_blob],
+            )
+            .map_err(|e| format!("body store put: {e}"))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Store multiple message bodies in a single transaction.
+    pub async fn put_batch(&self, bodies: Vec<MessageBody>) -> Result<(), String> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Compress all bodies outside the lock - CPU-intensive work.
+            // TODO(refactor): introduce a CompressedBody struct.
+            #[allow(clippy::type_complexity)]
+            let compressed: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = bodies
+                .iter()
+                .map(|body| {
+                    let html_blob = body.body_html.as_deref().map(compress).transpose()?;
+                    let text_blob = body.body_text.as_deref().map(compress).transpose()?;
+                    Ok((body.message_id.clone(), html_blob, text_blob))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            // Lock only for the DB writes.
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("body store lock poisoned: {e}"))?;
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("body store tx: {e}"))?;
+
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO bodies (message_id, body_html, body_text, inserted_at)
+                         VALUES (?1, ?2, ?3, unixepoch())
+                         ON CONFLICT(message_id) DO UPDATE SET
+                             body_html   = excluded.body_html,
+                             body_text   = excluded.body_text,
+                             inserted_at = unixepoch()",
+                    )
+                    .map_err(|e| format!("prepare batch put: {e}"))?;
+
+                for (message_id, html_blob, text_blob) in &compressed {
+                    stmt.execute(params![message_id, html_blob, text_blob])
+                        .map_err(|e| format!("batch put row: {e}"))?;
+                }
+            }
+
+            tx.commit().map_err(|e| format!("body store commit: {e}"))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Retrieve a single message body (decompressed).
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub async fn get(&self, message_id: String) -> Result<Option<MessageBody>, String> {
+        log::debug!("Retrieving body for message_id={message_id}");
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Lock only for the DB read.
+            let blobs = {
+                let conn = conn
+                    .lock()
+                    .map_err(|e| format!("body store lock poisoned: {e}"))?;
+                let mut stmt = conn
+                    .prepare("SELECT body_html, body_text FROM bodies WHERE message_id = ?1")
+                    .map_err(|e| format!("prepare get: {e}"))?;
+
+                stmt.query_row(params![message_id], |row| {
+                    let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                    let text_blob: Option<Vec<u8>> = row.get("body_text")?;
+                    Ok((html_blob, text_blob))
+                })
+                .ok()
+            };
+            // Lock released - decompress outside the lock.
+
+            match blobs {
+                Some((html_blob, text_blob)) => {
+                    let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
+                    let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
+                    Ok(Some(MessageBody {
+                        message_id,
+                        body_html,
+                        body_text,
+                    }))
+                }
+                None => Ok(None),
+            }
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Synchronous variant of `get_batch` for callers already on a
+    /// blocking thread (e.g. inside `db::Db::with_conn`'s spawn_blocking
+    /// closure where calling another async API would require a nested
+    /// runtime). Same contract: returns a `MessageBody` per message_id
+    /// that has a row in `bodies`; missing rows are silently dropped.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub fn get_batch_sync(&self, message_ids: &[String]) -> Result<Vec<MessageBody>, String> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("body store lock poisoned: {e}"))?;
+        type RawBodyRow = (String, Option<Vec<u8>>, Option<Vec<u8>>);
+        let mut rows_out: Vec<RawBodyRow> = Vec::with_capacity(message_ids.len());
+        for chunk in message_ids.chunks(100) {
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT message_id, body_html, body_text FROM bodies WHERE message_id IN ({placeholders})"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| format!("prepare batch get: {e}"))?;
+            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
+                .iter()
+                .map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>)
+                .collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(AsRef::as_ref).collect();
+            let rows = stmt
+                .query_map(param_refs.as_slice(), |row| {
+                    let mid: String = row.get("message_id")?;
+                    let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                    let text_blob: Option<Vec<u8>> = row.get("body_text")?;
+                    Ok((mid, html_blob, text_blob))
+                })
+                .map_err(|e| format!("query batch get: {e}"))?;
+            for row in rows {
+                rows_out.push(row.map_err(|e| format!("map row: {e}"))?);
+            }
+        }
+        drop(conn);
+        let mut results = Vec::with_capacity(rows_out.len());
+        for (mid, html_blob, text_blob) in rows_out {
+            let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
+            let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
+            results.push(MessageBody {
+                message_id: mid,
+                body_html,
+                body_text,
+            });
+        }
+        Ok(results)
+    }
+
+    /// Retrieve multiple message bodies in a single query.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub async fn get_batch(&self, message_ids: Vec<String>) -> Result<Vec<MessageBody>, String> {
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Lock only for the DB reads - collect compressed blobs.
+            // TODO(refactor): introduce a CompressedBody struct.
+            #[allow(clippy::type_complexity)]
+            let compressed_rows: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = {
+                let conn = conn
+                    .lock()
+                    .map_err(|e| format!("body store lock poisoned: {e}"))?;
+                let mut rows_out = Vec::with_capacity(message_ids.len());
+
+                for chunk in message_ids.chunks(100) {
+                    let placeholders: String = chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    let sql =
+                        format!("SELECT message_id, body_html, body_text FROM bodies WHERE message_id IN ({placeholders})");
+
+                    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare batch get: {e}"))?;
+
+                    let param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                        chunk.iter().map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>).collect();
+                    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                        param_values.iter().map(AsRef::as_ref).collect();
+
+                    let rows = stmt
+                        .query_map(param_refs.as_slice(), |row| {
+                            let mid: String = row.get("message_id")?;
+                            let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                            let text_blob: Option<Vec<u8>> = row.get("body_text")?;
+                            Ok((mid, html_blob, text_blob))
+                        })
+                        .map_err(|e| format!("query batch get: {e}"))?;
+
+                    for row in rows {
+                        rows_out.push(row.map_err(|e| format!("map row: {e}"))?);
+                    }
+                }
+
+                Ok::<_, String>(rows_out)
+            }?;
+            // Lock released - decompress outside the lock.
+
+            let mut results = Vec::with_capacity(compressed_rows.len());
+            for (mid, html_blob, text_blob) in compressed_rows {
+                let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
+                let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
+                results.push(MessageBody {
+                    message_id: mid,
+                    body_html,
+                    body_text,
+                });
+            }
+
+            Ok(results)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
+    }
+
+    /// Delete bodies for given message IDs.
+    pub async fn delete(&self, message_ids: Vec<String>) -> Result<u64, String> {
+        if message_ids.is_empty() {
+            return Ok(0);
+        }
+
+        log::debug!("Pruning {} bodies from body store", message_ids.len());
+        self.with_conn(move |conn| {
+            let mut deleted: u64 = 0;
+
+            for chunk in message_ids.chunks(100) {
+                let placeholders: String = chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                let sql = format!("DELETE FROM bodies WHERE message_id IN ({placeholders})");
+                let mut stmt = conn
+                    .prepare(&sql)
+                    .map_err(|e| format!("prepare delete: {e}"))?;
+
+                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
+                    .iter()
+                    .map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    param_values.iter().map(AsRef::as_ref).collect();
+
+                let count = stmt
+                    .execute(param_refs.as_slice())
+                    .map_err(|e| format!("delete bodies: {e}"))?;
+
+                #[allow(clippy::cast_sign_loss)]
+                {
+                    deleted += count as u64;
+                }
+            }
+
+            Ok(deleted)
+        })
+        .await
+    }
+
+    /// Get storage statistics.
+    pub async fn stats(&self) -> Result<BodyStoreStats, String> {
+        self.with_conn(|conn| {
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) AS cnt FROM bodies", [], |row| {
+                    row.get("cnt")
+                })
+                .map_err(|e| format!("count: {e}"))?;
+
+            let total_html_bytes: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(LENGTH(body_html)), 0) AS total FROM bodies",
+                    [],
+                    |row| row.get("total"),
+                )
+                .map_err(|e| format!("html size: {e}"))?;
+
+            let total_text_bytes: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(LENGTH(body_text)), 0) AS total FROM bodies",
+                    [],
+                    |row| row.get("total"),
+                )
+                .map_err(|e| format!("text size: {e}"))?;
+
+            #[allow(clippy::cast_sign_loss)]
+            Ok(BodyStoreStats {
+                message_count: count as u64,
+                compressed_html_bytes: total_html_bytes as u64,
+                compressed_text_bytes: total_text_bytes as u64,
+            })
+        })
+        .await
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BodyStoreStats {
+    pub message_count: u64,
+    pub compressed_html_bytes: u64,
+    pub compressed_text_bytes: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Phase 8-2: an existing `bodies.db` with the pre-`inserted_at`
+    /// schema must gain the column and have all rows backfilled to
+    /// non-zero `inserted_at` on next open. Idempotent: a second open
+    /// must not double-update.
+    #[test]
+    fn open_migrates_existing_db_to_inserted_at_column() {
+        let dir = tempdir().expect("tempdir");
+
+        // Simulate the old schema: open a connection and create the
+        // pre-Phase-8-2 `bodies` table directly, then close.
+        {
+            let conn = Connection::open(dir.path().join("bodies.db")).expect("open");
+            conn.execute_batch(
+                "CREATE TABLE bodies (
+                    message_id TEXT PRIMARY KEY,
+                    body_html  BLOB,
+                    body_text  BLOB
+                 );",
+            )
+            .expect("create old schema");
+            conn.execute(
+                "INSERT INTO bodies (message_id, body_html, body_text) \
+                 VALUES ('m1', NULL, NULL), ('m2', NULL, NULL)",
+                [],
+            )
+            .expect("seed rows");
+        }
+
+        // Now run open_body_store_connection - the migration should add
+        // the column and backfill the seeded rows.
+        let conn = open_body_store_connection(dir.path()).expect("open migrated");
+        let column_exists: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('bodies') WHERE name = 'inserted_at'")
+            .and_then(|mut s| s.exists([]))
+            .expect("column check");
+        assert!(column_exists, "inserted_at column was added");
+
+        let zero_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM bodies WHERE inserted_at = 0",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count zero");
+        assert_eq!(
+            zero_count, 0,
+            "all backfilled rows have non-zero inserted_at"
+        );
+        drop(conn);
+
+        // Open again. The check should see the column, skip the ALTER,
+        // and leave existing values alone.
+        let conn = open_body_store_connection(dir.path()).expect("re-open");
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM bodies", [], |r| r.get(0))
+            .expect("count total");
+        assert_eq!(total, 2);
+    }
+
+    /// Phase 8-2: a fresh `open_body_store_connection` call against a
+    /// non-existent dir creates the table with `inserted_at` already
+    /// present (no migration needed).
+    #[test]
+    fn fresh_open_creates_table_with_inserted_at() {
+        let dir = tempdir().expect("tempdir");
+        let conn = open_body_store_connection(dir.path()).expect("open");
+        let column_exists: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('bodies') WHERE name = 'inserted_at'")
+            .and_then(|mut s| s.exists([]))
+            .expect("column check");
+        assert!(column_exists);
+    }
+
+    /// Phase 8-2: `BodyStoreReadState::put` sets `inserted_at` to a
+    /// non-zero unix epoch.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn put_writes_non_zero_inserted_at() {
+        let dir = tempdir().expect("tempdir");
+        let store = BodyStoreReadState::init(dir.path()).expect("init");
+        store
+            .put("m1".to_string(), Some("<p>hi</p>".to_string()), None)
+            .await
+            .expect("put");
+        let conn = Connection::open(dir.path().join("bodies.db")).expect("open");
+        let inserted_at: i64 = conn
+            .query_row(
+                "SELECT inserted_at FROM bodies WHERE message_id = 'm1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query");
+        assert!(inserted_at > 0, "put set inserted_at to current epoch");
+    }
+}

@@ -1,0 +1,27 @@
+[package]
+name = "search"
+publish = false
+description = "Tantivy-based full-text search for Courly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+types = { path = "../types" }
+tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
+log = "0.4"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
+
+[dev-dependencies]
+cargo_toml = "1.0.0"
+tempfile = "3"

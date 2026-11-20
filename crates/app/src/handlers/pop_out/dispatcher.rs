@@ -1,0 +1,691 @@
+use std::sync::Arc;
+
+use iced::Task;
+use rust_i18n::t;
+
+use crate::handlers::attachments::{
+    AttachmentRef, OpenAttachmentParams, SaveAllAttachmentsParams, SaveAttachmentParams,
+};
+use crate::pop_out::compose::{ComposeAttachment, ComposeMessage};
+use crate::pop_out::message_view::{MessageViewMessage, MessageViewState, RenderingMode};
+use crate::pop_out::{PopOutMessage, PopOutWindow};
+use crate::{Message, ReadyApp};
+
+use super::compose_clipboard::{
+    dispatch_paste_group_match, field_token_count, handle_compose_copy_or_cut,
+    paste_field_for_message,
+};
+use super::message_view::handle_message_view_update;
+
+impl ReadyApp {
+    /// Route a `PopOutMessage` to the correct pop-out window handler.
+    pub(crate) fn handle_pop_out_message(
+        &mut self,
+        window_id: iced::window::Id,
+        pop_out_msg: PopOutMessage,
+    ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        // Phase 6a: clone the service_client up front so the
+        // GroupSaveConfirm arm (which fires the contacts.group_save
+        // IPC) does not need to borrow `self` mid-match - the
+        // pop_out_windows.get_mut below already holds a mutable
+        // borrow of self.
+        let service_client = self.service_client.clone();
+        let Some(window) = self.pop_out_windows.get_mut(&window_id) else {
+            return Task::none();
+        };
+        match (window, &pop_out_msg) {
+            // Reply / ReplyAll / Forward from message view -> open compose
+            (
+                PopOutWindow::MessageView(_),
+                PopOutMessage::MessageView(
+                    MessageViewMessage::Reply
+                    | MessageViewMessage::ReplyAll
+                    | MessageViewMessage::Forward,
+                ),
+            ) => {
+                let mv_msg = match pop_out_msg {
+                    PopOutMessage::MessageView(m) => m,
+                    _ => return Task::none(),
+                };
+                self.open_compose_from_message_view(window_id, &mv_msg)
+            }
+            // Save As - needs db access from App
+            (
+                PopOutWindow::MessageView(_),
+                PopOutMessage::MessageView(MessageViewMessage::SaveAs),
+            ) => self.handle_save_as(window_id),
+            // SetRenderingMode to Source - may need lazy load
+            (
+                PopOutWindow::MessageView(_),
+                PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(
+                    RenderingMode::Source,
+                )),
+            ) => self.handle_set_source_mode(window_id),
+            // Archive - route through action service for DB + provider dispatch
+            (
+                PopOutWindow::MessageView(_),
+                PopOutMessage::MessageView(MessageViewMessage::Archive),
+            ) => self.dispatch_pop_out_action(
+                window_id,
+                crate::action_resolve::MailActionIntent::Archive,
+            ),
+            // Delete - route through action service for DB + provider dispatch
+            (
+                PopOutWindow::MessageView(_),
+                PopOutMessage::MessageView(MessageViewMessage::Delete),
+            ) => self
+                .dispatch_pop_out_action(window_id, crate::action_resolve::MailActionIntent::Trash),
+            // Attachments roadmap Phase 5: Open / Save / Save All
+            // wire through the App-level shared handler so the
+            // reading-pane and pop-out surfaces produce identical
+            // behaviour (last-folder cache, sanitization, OS open).
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::OpenAttachment(att_id)),
+            ) => {
+                let Some(params) = build_open_params(state, att_id.as_str()) else {
+                    return Task::none();
+                };
+                self.handle_open_attachment(params)
+            }
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::SaveAttachment(att_id)),
+            ) => {
+                let Some(params) = build_save_params(state, att_id.as_str()) else {
+                    return Task::none();
+                };
+                self.handle_save_attachment(params)
+            }
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::SaveAllAttachments),
+            ) => {
+                let params = build_save_all_params(state);
+                if params.items.is_empty() {
+                    return Task::none();
+                }
+                self.handle_save_all_attachments(params)
+            }
+            (
+                PopOutWindow::MessageView(state),
+                PopOutMessage::MessageView(MessageViewMessage::BodyLink(
+                    crate::ui::mail_body::LinkAction::Compose(address),
+                )),
+            ) => {
+                state.html_body.close_link_menu();
+                self.open_new_message_to(address.clone())
+            }
+            // All other message view messages
+            (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
+                let PopOutMessage::MessageView(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                handle_message_view_update(window_id, state, msg)
+            }
+            // Compose discard: close the window and delete what auto-save
+            // kept of it. Nothing was saved without a sending account.
+            (PopOutWindow::Compose(state), PopOutMessage::Compose(ComposeMessage::Discard)) => {
+                let saved = state
+                    .from_account
+                    .as_ref()
+                    .map(|account| (account.id.clone(), state.draft_id.clone()));
+                let close = self.close_compose(window_id);
+                match saved {
+                    Some((account_id, draft_id)) => {
+                        Task::batch([close, self.delete_draft(account_id, draft_id)])
+                    }
+                    None => close,
+                }
+            }
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::PopOut)) => {
+                self.pop_out_inline_compose(window_id)
+            }
+            // Compose send - build MIME, queue for outbox, close window
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Send)) => {
+                self.handle_compose_send(window_id)
+            }
+            // Compose manual save - flush draft immediately
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::SaveDraftNow)) => {
+                self.save_compose_draft(window_id)
+            }
+            // Compose from-account changed - swap signature for new account
+            (
+                PopOutWindow::Compose(_),
+                PopOutMessage::Compose(ComposeMessage::FromAccountChanged(_)),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                self.handle_compose_from_account_changed(window_id, msg)
+            }
+            // Compose attach files - launch async file picker
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::AttachFiles)) => {
+                handle_compose_attach_files(window_id)
+            }
+            // Compose insert image - launch async file picker
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::InsertImage)) => {
+                Task::perform(crate::ui::widgets::pick_image(), move |picked| {
+                    Message::PopOut(
+                        window_id,
+                        PopOutMessage::Compose(ComposeMessage::ImagePicked(picked)),
+                    )
+                })
+            }
+            // Compose expand group - needs DB access
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup { .. }),
+            ) => {
+                let PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup {
+                    field,
+                    token_id,
+                }) = pop_out_msg
+                else {
+                    return Task::none();
+                };
+                // Find the group_id from the token
+                let group_id = {
+                    let tokens = match field {
+                        crate::pop_out::compose::RecipientField::To => &state.to.tokens,
+                        crate::pop_out::compose::RecipientField::Cc => &state.cc.tokens,
+                        crate::pop_out::compose::RecipientField::Bcc => &state.bcc.tokens,
+                    };
+                    tokens
+                        .iter()
+                        .find(|t| t.id == token_id)
+                        .and_then(|t| t.group_id.clone())
+                };
+                let Some(gid) = group_id else {
+                    return Task::none();
+                };
+                let db_clone = Arc::clone(&db);
+                Task::perform(
+                    async move { db_clone.expand_contact_group(gid).await },
+                    move |result| {
+                        Message::PopOut(
+                            window_id,
+                            PopOutMessage::Compose(ComposeMessage::GroupExpanded {
+                                field,
+                                token_id,
+                                members: result,
+                            }),
+                        )
+                    },
+                )
+            }
+            // Compose save-as-group confirm - DB write + state update
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
+            ) => {
+                crate::pop_out::compose::update_compose(state, ComposeMessage::GroupSaveConfirm);
+                if !state.save_group_in_flight {
+                    return Task::none();
+                }
+                let Some(banner) = state.bulk_paste_banner.as_ref() else {
+                    return Task::none();
+                };
+                let field_tokens = match banner.field {
+                    crate::pop_out::compose::RecipientField::To => &state.to.tokens,
+                    crate::pop_out::compose::RecipientField::Cc => &state.cc.tokens,
+                    crate::pop_out::compose::RecipientField::Bcc => &state.bcc.tokens,
+                };
+                let pasted: std::collections::HashSet<_> =
+                    banner.token_ids.iter().copied().collect();
+                let emails: Vec<String> = field_tokens
+                    .iter()
+                    .filter(|t| pasted.contains(&t.id))
+                    .map(|t| t.email.clone())
+                    .filter(|e| !e.is_empty())
+                    .collect();
+                if emails.is_empty() {
+                    return Task::done(Message::PopOut(
+                        window_id,
+                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(t!(
+                            "compose.no_valid_addresses"
+                        )
+                        .into_owned()))),
+                    ));
+                }
+                let name = state.save_group_name.trim().to_string();
+                let group_id = uuid::Uuid::new_v4().to_string();
+                let now = jiff::Timestamp::now().as_second();
+                #[allow(clippy::cast_possible_wrap)]
+                let member_count = emails.len() as i64;
+                let entry = crate::db::GroupEntry {
+                    id: group_id.clone(),
+                    name: name.clone(),
+                    member_count,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let success = crate::pop_out::compose::GroupSaveSuccess {
+                    group_id,
+                    name,
+                    member_count,
+                };
+                // Phase 6a: contacts.group_save IPC.
+                let Some(client) = service_client else {
+                    log::warn!("contacts.group_save: no ServiceClient yet; surfacing error");
+                    return Task::done(Message::PopOut(
+                        window_id,
+                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(t!(
+                            "compose.service_not_ready"
+                        )
+                        .into_owned()))),
+                    ));
+                };
+                let emails_for_save = emails.clone();
+                let params = service_api::ContactGroupSaveParams {
+                    id: entry.id,
+                    name: entry.name,
+                    member_emails: emails_for_save,
+                    created_at: entry.created_at,
+                    updated_at: entry.updated_at,
+                    member_count: entry.member_count,
+                };
+                Task::perform(
+                    async move {
+                        client
+                            .save_contact_group(params)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    move |result| {
+                        let payload = result.map(|()| success.clone());
+                        Message::PopOut(
+                            window_id,
+                            PopOutMessage::Compose(ComposeMessage::GroupSaveResult(payload)),
+                        )
+                    },
+                )
+            }
+            // Compose context-menu Copy / Cut / Paste - clipboard side
+            // effects, plus the standard reducer for state changes.
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuCopy { .. }),
+            )
+            | (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuCut { .. }),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                let (field, token_id, is_cut) = match &msg {
+                    ComposeMessage::ContextMenuCopy { field, token_id } => {
+                        (*field, *token_id, false)
+                    }
+                    ComposeMessage::ContextMenuCut { field, token_id } => (*field, *token_id, true),
+                    _ => return Task::none(),
+                };
+                handle_compose_copy_or_cut(state, &db, field, token_id, is_cut)
+            }
+            // Ctrl+X / Ctrl+C from the token input - same path as the
+            // context-menu Copy/Cut entries; figure out which field the
+            // message came from and forward to the shared helper.
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ToTokenInput(
+                    crate::ui::token_input::TokenInputMessage::CopyToken(_)
+                    | crate::ui::token_input::TokenInputMessage::CutToken(_),
+                )),
+            )
+            | (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::CcTokenInput(
+                    crate::ui::token_input::TokenInputMessage::CopyToken(_)
+                    | crate::ui::token_input::TokenInputMessage::CutToken(_),
+                )),
+            )
+            | (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::BccTokenInput(
+                    crate::ui::token_input::TokenInputMessage::CopyToken(_)
+                    | crate::ui::token_input::TokenInputMessage::CutToken(_),
+                )),
+            ) => {
+                use crate::pop_out::compose::RecipientField;
+                use crate::ui::token_input::TokenInputMessage;
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                let (field, inner) = match msg {
+                    ComposeMessage::ToTokenInput(inner) => (RecipientField::To, inner),
+                    ComposeMessage::CcTokenInput(inner) => (RecipientField::Cc, inner),
+                    ComposeMessage::BccTokenInput(inner) => (RecipientField::Bcc, inner),
+                    _ => return Task::none(),
+                };
+                let (token_id, is_cut) = match inner {
+                    TokenInputMessage::CopyToken(id) => (id, false),
+                    TokenInputMessage::CutToken(id) => (id, true),
+                    _ => return Task::none(),
+                };
+                handle_compose_copy_or_cut(state, &db, field, token_id, is_cut)
+            }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuPaste { .. }),
+            ) => {
+                let PopOutMessage::Compose(ComposeMessage::ContextMenuPaste { field }) =
+                    pop_out_msg
+                else {
+                    return Task::none();
+                };
+                crate::pop_out::compose::update_compose(
+                    state,
+                    ComposeMessage::ContextMenuPaste { field },
+                );
+                iced::clipboard::read_text().map(move |result| {
+                    let Ok(content) = result else {
+                        return Message::PopOut(
+                            window_id,
+                            PopOutMessage::Compose(ComposeMessage::Noop),
+                        );
+                    };
+                    let inner =
+                        crate::ui::token_input::TokenInputMessage::Paste(content.as_ref().clone());
+                    let outer = match field {
+                        crate::pop_out::compose::RecipientField::To => {
+                            ComposeMessage::ToTokenInput(inner)
+                        }
+                        crate::pop_out::compose::RecipientField::Cc => {
+                            ComposeMessage::CcTokenInput(inner)
+                        }
+                        crate::pop_out::compose::RecipientField::Bcc => {
+                            ComposeMessage::BccTokenInput(inner)
+                        }
+                    };
+                    Message::PopOut(window_id, PopOutMessage::Compose(outer))
+                })
+            }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(
+                    ComposeMessage::PreviewResized(..)
+                    | ComposeMessage::PreviewRendered { .. }
+                    | ComposeMessage::PreviewLinkClicked(_)
+                    | ComposeMessage::PreviewLink(_)
+                    | ComposeMessage::PreviewSelect(_)
+                    | ComposeMessage::PreviewShowRemote(_),
+                ),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                handle_compose_preview(window_id, state, msg)
+            }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::SignatureResolved { .. }),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                crate::pop_out::compose::update_compose(state, msg);
+                start_compose_preview(
+                    window_id,
+                    state,
+                    crate::pop_out::compose::ComposePreview::Signature,
+                )
+            }
+            // All other compose messages
+            (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                let trigger_autocomplete =
+                    crate::handlers::contacts::should_trigger_autocomplete(&msg);
+                let paste_field = paste_field_for_message(&msg);
+                let tokens_before = paste_field.map(|f| field_token_count(state, f));
+                crate::pop_out::compose::update_compose(state, msg);
+                let group_match_task =
+                    if let (Some(field), Some(before)) = (paste_field, tokens_before) {
+                        dispatch_paste_group_match(state, &db, window_id, field, before)
+                    } else {
+                        Task::none()
+                    };
+                let autocomplete_task = if trigger_autocomplete {
+                    crate::handlers::contacts::dispatch_autocomplete_search(&db, window_id, state)
+                } else {
+                    Task::none()
+                };
+                Task::batch([group_match_task, autocomplete_task])
+            }
+            _ => Task::none(),
+        }
+    }
+}
+
+/// Keep the read-only signature and quote previews rendered at the width
+/// they are laid out at.
+fn handle_compose_preview(
+    window_id: iced::window::Id,
+    state: &mut crate::pop_out::compose::ComposeState,
+    msg: ComposeMessage,
+) -> Task<Message> {
+    use crate::pop_out::compose::ComposePreview;
+
+    let which = match msg {
+        ComposeMessage::PreviewResized(which, _)
+        | ComposeMessage::PreviewShowRemote(which)
+        | ComposeMessage::PreviewRendered { which, .. } => which,
+        ComposeMessage::PreviewLinkClicked(url) => {
+            crate::ui::reading_pane::open_url_in_browser(&url);
+            return Task::none();
+        }
+        ComposeMessage::PreviewLink(action) => return quote_link(state, action),
+        // The quoted messages cannot be changed, but their text is read,
+        // selected and copied like that of any message.
+        ComposeMessage::PreviewSelect(action) => {
+            let copied = state
+                .quote
+                .as_mut()
+                .and_then(|quote| quote.preview.select(action));
+            return copied.map_or_else(Task::none, |text| iced::clipboard::write(text).discard());
+        }
+        _ => return Task::none(),
+    };
+    let block = match which {
+        ComposePreview::Signature => state.signature.as_mut(),
+        ComposePreview::Quote => state.quote.as_mut(),
+    };
+    let Some(block) = block else {
+        return Task::none();
+    };
+    let start = match msg {
+        ComposeMessage::PreviewResized(_, width) => block.preview.set_width(width),
+        ComposeMessage::PreviewShowRemote(_) => block.preview.allow_remote(),
+        ComposeMessage::PreviewRendered { inputs, body, .. } => block.preview.finish(inputs, body),
+        _ => false,
+    };
+    if !start {
+        return Task::none();
+    }
+    start_compose_preview(window_id, state, which)
+}
+
+/// A link of the quoted messages under a reply: a click opens it, a
+/// right-click shows its menu.
+fn quote_link(
+    state: &mut crate::pop_out::compose::ComposeState,
+    action: crate::ui::mail_body::LinkAction,
+) -> Task<Message> {
+    use crate::ui::mail_body::LinkAction;
+
+    let Some(quote) = state.quote.as_mut() else {
+        return Task::none();
+    };
+    quote.preview.close_link_menu();
+    match action {
+        LinkAction::Open(url) => {
+            crate::ui::reading_pane::open_url_in_browser(&url);
+            Task::none()
+        }
+        LinkAction::ShowMenu { href, at } => {
+            quote.preview.show_link_menu(href, at);
+            Task::none()
+        }
+        LinkAction::CloseMenu => Task::none(),
+        LinkAction::Copy(value) => iced::clipboard::write(value).discard(),
+        // A new message is started from the main window, as from a link of
+        // the message being read.
+        LinkAction::Compose(address) => Task::done(Message::ReadingPane(
+            crate::ui::reading_pane::ReadingPaneMessage::BodyLink(0, LinkAction::Compose(address)),
+        )),
+    }
+}
+
+/// Re-render the signature and quote previews on a new page appearance.
+pub(super) fn set_compose_preview_appearance(
+    window_id: iced::window::Id,
+    state: &mut crate::pop_out::compose::ComposeState,
+    appearance: mail_html::Appearance,
+) -> Task<Message> {
+    use crate::pop_out::compose::ComposePreview;
+
+    let mut tasks = Vec::new();
+    for which in [ComposePreview::Signature, ComposePreview::Quote] {
+        let block = match which {
+            ComposePreview::Signature => state.signature.as_mut(),
+            ComposePreview::Quote => state.quote.as_mut(),
+        };
+        if block.is_some_and(|block| block.preview.set_appearance(appearance)) {
+            tasks.push(start_compose_preview(window_id, state, which));
+        }
+    }
+    Task::batch(tasks)
+}
+
+/// Render a signature or quote preview if its width is known.
+fn start_compose_preview(
+    window_id: iced::window::Id,
+    state: &mut crate::pop_out::compose::ComposeState,
+    which: crate::pop_out::compose::ComposePreview,
+) -> Task<Message> {
+    use crate::pop_out::compose::ComposePreview;
+
+    let block = match which {
+        ComposePreview::Signature => state.signature.as_mut(),
+        ComposePreview::Quote => state.quote.as_mut(),
+    };
+    let Some(block) = block else {
+        return Task::none();
+    };
+    let Some(inputs) = block.preview.start() else {
+        return Task::none();
+    };
+    Task::perform(
+        crate::ui::mail_body::render(block.html.clone(), inputs, Default::default()),
+        move |body| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::PreviewRendered {
+                    which,
+                    inputs,
+                    body,
+                }),
+            )
+        },
+    )
+}
+
+/// Launch an async file picker and return the selected files as attachments.
+fn handle_compose_attach_files(window_id: iced::window::Id) -> Task<Message> {
+    Task::perform(
+        async {
+            let handles = rfd::AsyncFileDialog::new()
+                .set_title(t!("compose.attach_files"))
+                .pick_files()
+                .await;
+
+            let Some(handles) = handles else {
+                return Vec::new();
+            };
+
+            let mut attachments = Vec::new();
+            for handle in handles {
+                let name = handle.file_name();
+                let data = handle.read().await;
+                let mime_type = crate::pop_out::compose::mime_from_extension(&name);
+                attachments.push(ComposeAttachment {
+                    name,
+                    mime_type,
+                    data: Arc::new(data),
+                });
+            }
+            attachments
+        },
+        move |files| {
+            if files.is_empty() {
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(Vec::new())),
+                )
+            } else {
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(files)),
+                )
+            }
+        },
+    )
+}
+
+/// Attachments roadmap Phase 5: bridge from pop-out attachment id to
+/// `OpenAttachmentParams`. Returns `None` if the row isn't in the
+/// pop-out's loaded attachment list (defensive - the UI emits ids
+/// from that same list).
+fn build_open_params(
+    state: &MessageViewState,
+    attachment_id: &str,
+) -> Option<OpenAttachmentParams> {
+    let row = state.attachments.iter().find(|a| a.id == attachment_id)?;
+    Some(OpenAttachmentParams {
+        item: AttachmentRef {
+            account_id: state.account_id.clone(),
+            message_id: state.message_id.clone(),
+            attachment_id: row.id.clone(),
+            filename: row.filename.clone(),
+            mime_type: row.mime_type.clone(),
+        },
+    })
+}
+
+fn build_save_params(
+    state: &MessageViewState,
+    attachment_id: &str,
+) -> Option<SaveAttachmentParams> {
+    let row = state.attachments.iter().find(|a| a.id == attachment_id)?;
+    Some(SaveAttachmentParams {
+        thread_id: state.thread_id.clone(),
+        item: AttachmentRef {
+            account_id: state.account_id.clone(),
+            message_id: state.message_id.clone(),
+            attachment_id: row.id.clone(),
+            filename: row.filename.clone(),
+            mime_type: row.mime_type.clone(),
+        },
+    })
+}
+
+fn build_save_all_params(state: &MessageViewState) -> SaveAllAttachmentsParams {
+    let items = state
+        .attachments
+        .iter()
+        .map(|a| AttachmentRef {
+            account_id: state.account_id.clone(),
+            message_id: state.message_id.clone(),
+            attachment_id: a.id.clone(),
+            filename: a.filename.clone(),
+            mime_type: a.mime_type.clone(),
+        })
+        .collect();
+    SaveAllAttachmentsParams {
+        thread_id: state.thread_id.clone(),
+        items,
+    }
+}

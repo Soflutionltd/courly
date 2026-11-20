@@ -1,0 +1,1209 @@
+pub mod accounts;
+pub mod contacts;
+pub mod import_wizard;
+pub mod messages;
+pub mod preferences;
+pub mod signatures;
+
+pub use accounts::*;
+pub use contacts::*;
+pub use import_wizard::*;
+pub use messages::*;
+pub use preferences::*;
+pub use signatures::*;
+
+use iced::animation::{self, Easing};
+use iced::time::Duration;
+use rust_i18n::t;
+
+use crate::db::DateDisplay;
+use crate::pop_out::RenderingMode;
+use crate::ui::layout::Density;
+use crate::ui::undoable::UndoableText;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Accounts,
+    Appearance,
+    Notifications,
+    Ai,
+    Shortcuts,
+    Layout,
+    Reading,
+    Composing,
+    Signatures,
+    Labels,
+    Sync,
+    People,
+    About,
+}
+
+impl Tab {
+    /// Sidebar sections in display order, each with its header label key.
+    pub(super) const GROUPS: &[(&'static str, &'static [Tab])] = &[
+        (
+            "settings.tabs.general",
+            &[
+                Tab::Accounts,
+                Tab::Appearance,
+                Tab::Notifications,
+                Tab::Ai,
+                Tab::Shortcuts,
+            ],
+        ),
+        (
+            "settings.tabs.mail",
+            &[
+                Tab::Layout,
+                Tab::Reading,
+                Tab::Composing,
+                Tab::Signatures,
+                Tab::Labels,
+            ],
+        ),
+        ("settings.tabs.data", &[Tab::Sync, Tab::People, Tab::About]),
+    ];
+
+    pub(super) fn label(self) -> &'static str {
+        super::row_widgets::tr(match self {
+            Tab::Accounts => t!("settings.tabs.accounts"),
+            Tab::Appearance => t!("settings.tabs.appearance"),
+            Tab::Notifications => t!("settings.tabs.notifications"),
+            Tab::Ai => t!("settings.tabs.ai"),
+            Tab::Shortcuts => t!("settings.tabs.shortcuts"),
+            Tab::Layout => t!("settings.tabs.layout"),
+            Tab::Reading => t!("settings.tabs.reading"),
+            Tab::Composing => t!("settings.tabs.composing"),
+            Tab::Signatures => t!("settings.tabs.signatures"),
+            Tab::Labels => t!("settings.tabs.labels"),
+            Tab::Sync => t!("settings.tabs.sync"),
+            Tab::People => t!("settings.tabs.people"),
+            Tab::About => t!("settings.tabs.about"),
+        })
+    }
+
+    pub(super) fn icon(self) -> iced::widget::Text<'static> {
+        use crate::icon;
+        match self {
+            Tab::Accounts => icon::users(),
+            Tab::Appearance => icon::palette(),
+            Tab::Notifications => icon::bell(),
+            Tab::Ai => icon::globe(),
+            Tab::Shortcuts => icon::zap(),
+            Tab::Layout => icon::layout_template(),
+            Tab::Reading => icon::eye(),
+            Tab::Composing => icon::pencil(),
+            Tab::Signatures => icon::edit(),
+            Tab::Labels => icon::tag(),
+            Tab::Sync => icon::refresh(),
+            Tab::People => icon::user(),
+            Tab::About => icon::info(),
+        }
+    }
+}
+
+/// Identifies a filter input so Escape / X-button handlers know which
+/// filter to clear and which one currently owns focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterId {
+    Contacts,
+    Groups,
+    GroupAddMembers,
+    GroupMembers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputField {
+    VipEmail,
+    AiApiKey,
+    OllamaUrl,
+    OllamaModel,
+    SignatureName,
+    // Account editor
+    AccountName,
+    AccountDisplayName,
+    CaldavUrl,
+    CaldavUsername,
+    CaldavPassword,
+    // Group editor
+    GroupName,
+    // Label editor
+    LabelName,
+    LabelColorBg,
+    LabelColorFg,
+    // Contact editor
+    ContactDisplayName,
+    ContactEmail,
+    ContactEmail2,
+    ContactPhone,
+    ContactCompany,
+    ContactNotes,
+}
+
+/// State for an active drag operation.
+#[derive(Debug, Clone)]
+pub struct DragState {
+    pub list_id: String,
+    pub dragging_index: usize,
+    /// Y coordinate when the grip was pressed (list-relative, set on first move).
+    pub start_y: f32,
+    /// Whether the mouse has moved far enough to count as a real drag.
+    pub is_dragging: bool,
+}
+
+/// Minimum Y movement before a grip press becomes a drag.
+pub(super) const DRAG_START_THRESHOLD: f32 = 4.0;
+
+/// State for the per-account label editor sheet.
+///
+/// Edits target one specific `(account_id, label_id)` pair. Create mode
+/// leaves both blank and writes the new label to every account on save
+/// (cross-account fan-out happens at the action layer, not here).
+#[derive(Debug, Clone)]
+pub struct LabelEditorState {
+    /// Account whose label is being edited. Empty in create mode.
+    pub account_id: String,
+    /// Label being edited. Empty in create mode.
+    pub label_id: String,
+    /// User-editable display name.
+    pub name: String,
+    /// User-selected background color hex (or the resolved current).
+    pub color_bg: String,
+    /// User-selected foreground color hex (or the resolved current).
+    pub color_fg: String,
+    /// True if `color_bg`/`color_fg` came from an existing user color.
+    pub has_override: bool,
+    /// Index into `label_colors::preset_colors::all_presets()` for the
+    /// currently selected swatch. None if no preset matches.
+    pub color_index: Option<usize>,
+    /// `labels.is_undeletable = 1`. When true, hide the Delete button
+    /// in the editor sheet - name and colour stay editable. Today this
+    /// covers Graph importance synth tags.
+    pub is_undeletable: bool,
+    /// Show the destructive delete confirmation modal.
+    pub show_delete_confirmation: bool,
+    /// True once the user has edited any field.
+    pub dirty: bool,
+    /// A save or delete is in flight; the buttons are disabled.
+    pub pending: bool,
+    /// Error from the last save or delete, shown under the buttons.
+    pub error: Option<String>,
+}
+
+impl LabelEditorState {
+    pub fn new_create() -> Self {
+        let presets = label_colors::preset_colors::all_presets();
+        let (color_bg, color_fg) = presets
+            .first()
+            .map(|(_, bg, fg)| ((*bg).to_owned(), (*fg).to_owned()))
+            .unwrap_or_else(|| ("#999999".to_owned(), "#ffffff".to_owned()));
+        Self {
+            account_id: String::new(),
+            label_id: String::new(),
+            name: String::new(),
+            color_bg,
+            color_fg,
+            has_override: false,
+            color_index: Some(0),
+            is_undeletable: false,
+            show_delete_confirmation: false,
+            dirty: false,
+            pending: false,
+            error: None,
+        }
+    }
+
+    /// Outlook categories cannot be renamed through Microsoft Graph.
+    pub fn name_is_locked(&self) -> bool {
+        self.label_id.starts_with("cat:")
+    }
+
+    pub fn from_row(row: &rtsk::db::queries_extra::navigation::AccountLabelRow) -> Self {
+        let presets = label_colors::preset_colors::all_presets();
+        let color_index = label_colors::preset_colors::nearest_exchange_preset(&row.color_bg)
+            .and_then(|name| presets.iter().position(|(n, _, _)| *n == name));
+        Self {
+            account_id: row.account_id.clone(),
+            label_id: row.label_id.clone(),
+            name: row.name.clone(),
+            color_bg: row.color_bg.clone(),
+            color_fg: row.color_fg.clone(),
+            has_override: row.has_color_override,
+            color_index,
+            is_undeletable: row.is_undeletable,
+            show_delete_confirmation: false,
+            dirty: false,
+            pending: false,
+            error: None,
+        }
+    }
+}
+
+/// State for the label-group editor sheet.
+///
+/// Edits target one `label_groups` row. Create mode leaves `group_id` as
+/// None and the row is inserted on save. Member edits stage adds/removes
+/// locally and commit atomically with the save.
+#[derive(Debug, Clone)]
+pub struct LabelGroupEditorState {
+    /// Group being edited. None in create mode.
+    pub group_id: Option<i64>,
+    /// User-editable display name.
+    pub name: String,
+    /// User-selected background colour hex.
+    pub color_bg: String,
+    /// User-selected foreground colour hex.
+    pub color_fg: String,
+    /// Index into `label_colors::preset_colors::all_presets()` for the
+    /// currently selected swatch. None if no preset matches (e.g. legacy
+    /// hex). Drives the colour grid's selected ring.
+    pub color_index: Option<usize>,
+    /// Staged member set: `(account_id, label_id)` pairs the group will
+    /// contain on save. Loaded from `label_group_members` on open;
+    /// mutated by the picker.
+    pub members: Vec<(String, String)>,
+    /// Whether `members` holds what is stored: true from the start for a
+    /// new group, and once the stored list has arrived for an existing one.
+    /// A save before that leaves the membership alone.
+    pub members_loaded: bool,
+    /// Show the destructive delete confirmation modal.
+    pub show_delete_confirmation: bool,
+    /// True once the user has edited any field.
+    pub dirty: bool,
+    /// A save or delete is on its way to the Service.
+    pub pending: bool,
+    /// What the Service answered when the last write failed.
+    pub error: Option<String>,
+}
+
+impl LabelGroupEditorState {
+    pub fn new_create() -> Self {
+        // Default to the first preset so the colour grid has a sensible
+        // selection from the start. Matches the account-editor pattern.
+        let presets = label_colors::preset_colors::all_presets();
+        let (color_bg, color_fg) = presets
+            .first()
+            .map(|(_, bg, fg)| ((*bg).to_owned(), (*fg).to_owned()))
+            .unwrap_or_else(|| ("#999999".to_owned(), "#ffffff".to_owned()));
+        Self {
+            group_id: None,
+            name: String::new(),
+            color_bg,
+            color_fg,
+            color_index: Some(0),
+            members: Vec::new(),
+            members_loaded: true,
+            show_delete_confirmation: false,
+            dirty: false,
+            pending: false,
+            error: None,
+        }
+    }
+
+    pub fn from_row(row: &rtsk::db::queries_extra::navigation::SettingsLabelGroupRow) -> Self {
+        // Snap the stored hex to the nearest preset so the grid has a
+        // selected swatch even for legacy / arbitrary hex values.
+        let presets = label_colors::preset_colors::all_presets();
+        let color_index = label_colors::preset_colors::nearest_exchange_preset(&row.color_bg)
+            .and_then(|name| presets.iter().position(|(n, _, _)| *n == name));
+        Self {
+            group_id: Some(row.id),
+            name: row.name.clone(),
+            color_bg: row.color_bg.clone(),
+            color_fg: row.color_fg.clone(),
+            color_index,
+            members: Vec::new(),
+            members_loaded: false,
+            show_delete_confirmation: false,
+            dirty: false,
+            pending: false,
+            error: None,
+        }
+    }
+}
+
+pub struct Settings {
+    pub active_tab: Tab,
+    pub open_select: Option<SelectField>,
+    // General - preferences shadow pattern
+    /// The committed (persisted) preferences. Updated only on explicit save.
+    pub committed_preferences: PreferencesState,
+    /// The editing shadow. `Some` when settings panel is open. All preference
+    /// edits go here. Save commits it to `committed_preferences`, cancel
+    /// discards it and restores the committed values.
+    pub editing_preferences: Option<PreferencesState>,
+    /// Preferences as last written to the database. `None` until the boot
+    /// snapshot is applied.
+    pub persisted_preferences: Option<PreferencesState>,
+    pub scale: f32,
+    pub scale_preview: Option<f32>,
+    pub theme: String,
+    pub density: String,
+    pub font_size: String,
+    pub reading_pane_position: String,
+    pub selected_theme: Option<usize>,
+    pub sync_status_bar: bool,
+    pub auto_update: bool,
+    /// Outcome of the last "Check for updates" press, shown in its row.
+    pub update_check_note: Option<String>,
+    pub block_remote_images: bool,
+    pub phishing_detection: bool,
+    pub phishing_sensitivity: String,
+    pub date_display: DateDisplay,
+    pub default_rendering_mode: RenderingMode,
+    pub email_body_background: EmailBodyBackground,
+    pub email_zoom: String,
+    pub thread_date_groups: bool,
+    /// Show the brand logo of known senders.
+    pub sender_logos: bool,
+    pub mail_check_interval: String,
+    // Composing
+    pub compose_always_show_cc: bool,
+    pub compose_request_read_receipt: bool,
+    /// Parts of the folder column taken out of it. Applied as it changes.
+    pub sidebar_hidden: crate::sidebar_sections::HiddenSections,
+    pub undo_delay: String,
+    pub mark_as_read: String,
+    // Notifications
+    pub notifications_enabled: bool,
+    pub smart_notifications: bool,
+    pub notify_categories: Vec<String>,
+    pub vip_email_input: UndoableText,
+    pub vip_senders: Vec<String>,
+    // AI
+    pub ai_provider: String,
+    pub ai_api_key: UndoableText,
+    pub ai_model: String,
+    pub ai_ollama_url: UndoableText,
+    pub ai_ollama_model: UndoableText,
+    pub ai_enabled: bool,
+    pub ai_auto_categorize: bool,
+    pub ai_auto_summarize: bool,
+    pub ai_auto_draft: bool,
+    pub ai_writing_style: bool,
+    pub ai_auto_archive_updates: bool,
+    pub ai_auto_archive_promotions: bool,
+    pub ai_auto_archive_social: bool,
+    pub ai_auto_archive_newsletters: bool,
+    // Filter focus tracking
+    pub focused_filter: Option<FilterId>,
+    // Sheet
+    pub active_sheet: Option<SettingsSheetPage>,
+    pub sheet_anim: animation::Animation<bool>,
+    // Help tooltips
+    pub hovered_help: Option<String>,
+    // Editable lists
+    pub drag_state: Option<DragState>,
+    // Mail Rules > Labels (raw per-account provider labels).
+    // Loaded from `query_labels_by_account` on boot and after any label mutation.
+    pub labels_by_account: Vec<rtsk::db::queries_extra::navigation::AccountLabelsGroup>,
+    /// Label editor sheet state (Mail Rules > Labels).
+    pub editing_label: Option<LabelEditorState>,
+    /// User-visible label groups, top section of Settings > Labels.
+    /// Loaded from `query_label_groups_for_settings`.
+    pub label_groups: Vec<rtsk::db::queries_extra::navigation::SettingsLabelGroupRow>,
+    /// Label group editor sheet state (Settings > Labels top section).
+    pub editing_label_group: Option<LabelGroupEditorState>,
+    // Accounts tab
+    pub managed_accounts: Vec<ManagedAccount>,
+    pub account_drag: Option<AccountDragState>,
+    pub editing_account: Option<AccountEditor>,
+    // Signatures
+    pub signatures: Vec<SignatureEntry>,
+    pub signature_editor: Option<SignatureEditorState>,
+    /// Signature ID pending delete confirmation.
+    pub confirm_delete_signature: Option<String>,
+    // Contacts management
+    pub contact_filter: String,
+    pub contact_origin_filter: rtsk::db::queries_extra::ContactOriginFilter,
+    pub contacts: Vec<crate::db::ContactEntry>,
+    pub contact_editor: Option<ContactEditorState>,
+    /// Why the last contact write did not reach every address book.
+    pub contact_issue: Option<String>,
+    /// Pending contact delete ID awaiting confirmation.
+    pub confirm_delete_contact: Option<String>,
+    // Groups management
+    pub group_filter: String,
+    pub groups: Vec<crate::db::GroupEntry>,
+    pub group_editor: Option<GroupEditorState>,
+    /// Pending group delete ID awaiting confirmation.
+    pub confirm_delete_group: Option<String>,
+    // Contact import wizard
+    pub import_wizard: Option<ImportWizardState>,
+    /// Deferred dismissal target awaiting "Discard unsaved changes?" confirmation.
+    /// `Some` while the confirm dialog is visible; `None` otherwise.
+    pub pending_discard: Option<PendingDiscard>,
+}
+
+/// What dismissal action the user requested while an editor was dirty.
+/// Applied verbatim once the user confirms via the discard-changes dialog.
+#[derive(Debug, Clone, Copy)]
+pub enum PendingDiscard {
+    /// Close the slide-in sheet entirely (Back button, Escape, etc.).
+    CloseSheet,
+    /// Switch to a different settings tab.
+    SwitchTab(Tab),
+}
+
+impl Settings {
+    pub fn with_scale(scale: f32) -> Self {
+        let mut s = Self {
+            scale,
+            ..Self::default()
+        };
+        s.committed_preferences.scale = scale;
+        s
+    }
+
+    /// Apply persisted preferences from the DB bootstrap snapshots, called
+    /// once at app startup. Mirrors the writes performed by the commit
+    /// handler so a launch round-trip preserves what the user saved.
+    /// Only fields tracked by `Settings` are pulled in; other snapshot
+    /// fields are owned by other components.
+    ///
+    /// String values are matched case-insensitively against their canonical
+    /// option lists - early DBs were seeded with lowercase values that
+    /// don't match the dropdowns, and reading those literally would leave
+    /// the dropdown displaying an unselectable string. Unknown values are
+    /// dropped, leaving the existing `Settings::default()` value in place.
+    pub fn apply_bootstrap(
+        &mut self,
+        ui: &rtsk::db::queries::UiBootstrapSnapshot,
+        settings: &rtsk::db::queries::SettingsBootstrapSnapshot,
+    ) {
+        if let Some(canonical) = ui.theme.as_deref().and_then(canonical_theme) {
+            self.theme = canonical.into();
+        }
+        if let Some(canonical) = ui.font_size.as_deref().and_then(canonical_font_size) {
+            self.font_size = canonical.into();
+        }
+        if let Some(density) = ui.email_density.as_deref() {
+            self.density = Density::from_setting(density).setting().into();
+        }
+        if let Some(canonical) = ui
+            .reading_pane_position
+            .as_deref()
+            .and_then(canonical_reading_pane)
+        {
+            self.reading_pane_position = canonical.into();
+        }
+        self.sync_status_bar = ui.show_sync_status;
+        self.auto_update = ui.auto_update;
+        self.block_remote_images = settings.block_remote_images;
+        crate::ui::mail_body::set_remote_content_allowed(!self.block_remote_images);
+        self.phishing_detection = settings.phishing_detection_enabled;
+        if let Some(canonical) = settings
+            .phishing_sensitivity
+            .as_deref()
+            .and_then(canonical_phishing_sensitivity)
+        {
+            self.phishing_sensitivity = canonical.into();
+        }
+        if let Some(zoom) = ui.email_zoom.as_deref()
+            && email_zoom_factor(zoom).is_some()
+        {
+            self.email_zoom = zoom.into();
+        }
+        self.thread_date_groups = ui.thread_date_groups;
+        self.sender_logos = ui.sender_logos;
+        crate::sender_logos::set_enabled(self.sender_logos);
+        self.compose_always_show_cc = ui.compose_always_show_cc;
+        self.compose_request_read_receipt = ui.compose_request_read_receipt;
+        self.sidebar_hidden =
+            crate::sidebar_sections::HiddenSections::parse(ui.sidebar_hidden.as_deref());
+        if let Some(seconds) = settings.undo_send_delay_seconds.as_deref()
+            && UNDO_SEND_DELAYS.contains(&seconds)
+        {
+            self.undo_delay = seconds.into();
+        }
+        if let Some(canonical) = ui
+            .mark_as_read_behavior
+            .as_deref()
+            .and_then(|value| canonical_match(value, MARK_AS_READ_OPTIONS))
+        {
+            self.mark_as_read = canonical.into();
+        }
+        if let Some(seconds) = ui.mail_check_interval.as_deref()
+            && MAIL_CHECK_INTERVALS.contains(&seconds)
+        {
+            self.mail_check_interval = seconds.into();
+        }
+        if let Some(label) = ui.email_body_background.as_deref() {
+            self.email_body_background = EmailBodyBackground::from_label(label);
+        }
+        if let Some(display) = ui.date_display.as_deref().and_then(date_display_from_setting) {
+            self.date_display = display;
+        }
+        self.notifications_enabled = settings.notifications_enabled;
+        self.smart_notifications = settings.smart_notifications;
+        if let Some(categories) = settings.notify_categories.as_deref() {
+            self.notify_categories = notify_categories_from_setting(categories);
+        }
+        if let Some(senders) = settings.notification_vip_senders.as_deref() {
+            self.vip_senders = vip_senders_from_setting(senders);
+        }
+        crate::ui::theme::set_email_body_background(self.email_body_background);
+        if let Some(zoom) = email_zoom_factor(&self.email_zoom) {
+            crate::ui::mail_body::set_reading_zoom(zoom);
+        }
+        self.committed_preferences = self.snapshot_preferences();
+    }
+
+    /// Snapshot current preferences into the editing shadow.
+    /// Called when the settings panel opens.
+    pub fn begin_editing(&mut self) {
+        self.editing_preferences = Some(self.snapshot_preferences());
+    }
+
+    /// Commit the editing shadow to committed state and apply to live fields.
+    /// Called on explicit save or when closing with intent to keep changes.
+    pub fn commit_preferences(&mut self) {
+        if let Some(prefs) = self.editing_preferences.take() {
+            self.committed_preferences = prefs.clone();
+            self.apply_preferences(&prefs);
+        }
+    }
+
+    /// Discard the editing shadow and restore committed preferences.
+    /// Called when the user cancels or navigates away without saving.
+    pub fn discard_preferences(&mut self) {
+        self.editing_preferences = None;
+        let committed = self.committed_preferences.clone();
+        self.apply_preferences(&committed);
+    }
+
+    /// Theme picked outside the panel (menu bar, command palette). Written
+    /// to the committed preferences, so it is persisted, and to an open
+    /// editing shadow, so closing the panel does not revert it.
+    pub fn set_theme(&mut self, theme: String) {
+        self.committed_preferences.theme.clone_from(&theme);
+        if let Some(prefs) = self.editing_preferences.as_mut() {
+            prefs.theme.clone_from(&theme);
+        }
+        self.theme = theme;
+    }
+
+    /// Density picked outside the panel (menu bar), written like `set_theme`.
+    pub fn set_density(&mut self, density: Density) {
+        let value = density.setting();
+        value.clone_into(&mut self.committed_preferences.density);
+        if let Some(prefs) = self.editing_preferences.as_mut() {
+            value.clone_into(&mut prefs.density);
+        }
+        value.clone_into(&mut self.density);
+    }
+
+    /// Whether the editing shadow differs from committed state.
+    /// Returns `false` if no editing session is active.
+    #[allow(dead_code)] // not yet consumed by close-without-save confirmation flow
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.editing_preferences
+            .as_ref()
+            .is_some_and(|editing| *editing != self.committed_preferences)
+    }
+
+    /// Build a `PreferencesState` from the current live fields.
+    fn snapshot_preferences(&self) -> PreferencesState {
+        PreferencesState {
+            theme: self.theme.clone(),
+            scale: self.scale,
+            density: self.density.clone(),
+            font_size: self.font_size.clone(),
+            date_display: self.date_display,
+            reading_pane_position: self.reading_pane_position.clone(),
+            sync_status_bar: self.sync_status_bar,
+            auto_update: self.auto_update,
+            block_remote_images: self.block_remote_images,
+            phishing_detection: self.phishing_detection,
+            phishing_sensitivity: self.phishing_sensitivity.clone(),
+            default_rendering_mode: self.default_rendering_mode,
+            email_body_background: self.email_body_background,
+            email_zoom: self.email_zoom.clone(),
+            thread_date_groups: self.thread_date_groups,
+            sender_logos: self.sender_logos,
+            compose_always_show_cc: self.compose_always_show_cc,
+            compose_request_read_receipt: self.compose_request_read_receipt,
+            mark_as_read: self.mark_as_read.clone(),
+            undo_delay: self.undo_delay.clone(),
+            mail_check_interval: self.mail_check_interval.clone(),
+            notifications_enabled: self.notifications_enabled,
+            smart_notifications: self.smart_notifications,
+            notify_categories: self.notify_categories.clone(),
+            vip_senders: self.vip_senders.clone(),
+        }
+    }
+
+    /// Apply a `PreferencesState` to the live fields (for preview or restore).
+    fn apply_preferences(&mut self, prefs: &PreferencesState) {
+        self.theme = prefs.theme.clone();
+        self.scale = prefs.scale;
+        self.density = prefs.density.clone();
+        self.font_size = prefs.font_size.clone();
+        self.date_display = prefs.date_display;
+        self.reading_pane_position = prefs.reading_pane_position.clone();
+        self.sync_status_bar = prefs.sync_status_bar;
+        self.auto_update = prefs.auto_update;
+        self.block_remote_images = prefs.block_remote_images;
+        crate::ui::mail_body::set_remote_content_allowed(!prefs.block_remote_images);
+        self.phishing_detection = prefs.phishing_detection;
+        self.phishing_sensitivity = prefs.phishing_sensitivity.clone();
+        self.default_rendering_mode = prefs.default_rendering_mode;
+        self.email_body_background = prefs.email_body_background;
+        crate::ui::theme::set_email_body_background(prefs.email_body_background);
+        self.email_zoom = prefs.email_zoom.clone();
+        self.thread_date_groups = prefs.thread_date_groups;
+        self.sender_logos = prefs.sender_logos;
+        crate::sender_logos::set_enabled(prefs.sender_logos);
+        self.compose_always_show_cc = prefs.compose_always_show_cc;
+        self.compose_request_read_receipt = prefs.compose_request_read_receipt;
+        self.mark_as_read = prefs.mark_as_read.clone();
+        self.undo_delay = prefs.undo_delay.clone();
+        self.mail_check_interval = prefs.mail_check_interval.clone();
+        self.notifications_enabled = prefs.notifications_enabled;
+        self.smart_notifications = prefs.smart_notifications;
+        self.notify_categories = prefs.notify_categories.clone();
+        self.vip_senders = prefs.vip_senders.clone();
+        if let Some(zoom) = email_zoom_factor(&prefs.email_zoom) {
+            crate::ui::mail_body::set_reading_zoom(zoom);
+        }
+    }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        let initial_preferences = PreferencesState {
+            theme: "Light".into(),
+            scale: 1.0,
+            density: Density::default().setting().into(),
+            font_size: "Default".into(),
+            date_display: DateDisplay::RelativeOffset,
+            reading_pane_position: "Right".into(),
+            sync_status_bar: true,
+            auto_update: false,
+            block_remote_images: false,
+            phishing_detection: true,
+            phishing_sensitivity: "Default".into(),
+            default_rendering_mode: RenderingMode::default(),
+            email_body_background: EmailBodyBackground::default(),
+            email_zoom: DEFAULT_EMAIL_ZOOM.into(),
+            thread_date_groups: true,
+            sender_logos: true,
+            compose_always_show_cc: false,
+            compose_request_read_receipt: false,
+            mark_as_read: "After 2 Seconds".into(),
+            undo_delay: "5".into(),
+            mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
+            notifications_enabled: true,
+            smart_notifications: true,
+            notify_categories: vec!["Primary".into()],
+            vip_senders: Vec::new(),
+        };
+        Self {
+            active_tab: Tab::Accounts,
+            open_select: None,
+            committed_preferences: initial_preferences,
+            editing_preferences: None,
+            persisted_preferences: None,
+            scale: 1.0,
+            scale_preview: None,
+            theme: "Light".into(),
+            density: Density::default().setting().into(),
+            font_size: "Default".into(),
+            reading_pane_position: "Right".into(),
+            selected_theme: None,
+            sync_status_bar: true,
+            auto_update: false,
+            update_check_note: None,
+            block_remote_images: false,
+            phishing_detection: true,
+            phishing_sensitivity: "Default".into(),
+            date_display: DateDisplay::RelativeOffset,
+            default_rendering_mode: RenderingMode::default(),
+            email_body_background: EmailBodyBackground::default(),
+            email_zoom: DEFAULT_EMAIL_ZOOM.into(),
+            thread_date_groups: true,
+            sender_logos: true,
+            mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
+            compose_always_show_cc: false,
+            compose_request_read_receipt: false,
+            sidebar_hidden: crate::sidebar_sections::HiddenSections::default(),
+            undo_delay: "5".into(),
+            mark_as_read: "After 2 Seconds".into(),
+            notifications_enabled: true,
+            smart_notifications: true,
+            notify_categories: vec!["Primary".into()],
+            vip_email_input: UndoableText::new(),
+            vip_senders: Vec::new(),
+            ai_provider: "Claude".into(),
+            ai_api_key: UndoableText::new(),
+            ai_model: "claude-sonnet-4-6".into(),
+            ai_ollama_url: UndoableText::with_initial("http://localhost:11434"),
+            ai_ollama_model: UndoableText::with_initial("llama3.2"),
+            ai_enabled: true,
+            ai_auto_categorize: true,
+            ai_auto_summarize: true,
+            ai_auto_draft: true,
+            ai_writing_style: true,
+            ai_auto_archive_updates: false,
+            ai_auto_archive_promotions: false,
+            ai_auto_archive_social: false,
+            ai_auto_archive_newsletters: false,
+            focused_filter: None,
+            active_sheet: None,
+            sheet_anim: animation::Animation::new(false)
+                .easing(Easing::EaseOutCubic)
+                .duration(Duration::from_millis(200)),
+            hovered_help: None,
+            drag_state: None,
+            labels_by_account: Vec::new(),
+            label_groups: Vec::new(),
+            editing_label_group: None,
+            managed_accounts: Vec::new(),
+            account_drag: None,
+            editing_account: None,
+            editing_label: None,
+            signatures: Vec::new(),
+            signature_editor: None,
+            confirm_delete_signature: None,
+            contact_filter: String::new(),
+            contact_origin_filter: rtsk::db::queries_extra::ContactOriginFilter::All,
+            contacts: Vec::new(),
+            contact_editor: None,
+            contact_issue: None,
+            confirm_delete_contact: None,
+            group_filter: String::new(),
+            groups: Vec::new(),
+            group_editor: None,
+            confirm_delete_group: None,
+            import_wizard: None,
+            pending_discard: None,
+        }
+    }
+}
+
+impl Settings {
+    /// Returns `true` if any of the slide-in editor sheets has unsaved
+    /// changes (the `dirty` flag on its state). Used by the dismissal
+    /// chokepoint to decide whether to pop the discard-confirmation dialog.
+    pub fn any_editor_dirty(&self) -> bool {
+        self.contact_editor.as_ref().is_some_and(|e| e.dirty)
+            || self.group_editor.as_ref().is_some_and(|e| e.dirty)
+            || self.signature_editor.as_ref().is_some_and(|e| e.dirty)
+            || self.editing_account.as_ref().is_some_and(|e| e.dirty)
+    }
+
+    /// Apply a dismissal target unconditionally (no dirty check).
+    pub(crate) fn apply_dismissal(&mut self, target: PendingDiscard) {
+        // Both targets share the same editor teardown; only their final
+        // state diverges.
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, iced::time::Instant::now());
+        self.signature_editor = None;
+        self.editing_account = None;
+        self.contact_editor = None;
+        self.group_editor = None;
+        match target {
+            PendingDiscard::CloseSheet => {
+                self.import_wizard = None;
+            }
+            PendingDiscard::SwitchTab(tab) => {
+                self.active_tab = tab;
+                self.hovered_help = None;
+            }
+        }
+    }
+
+    /// Single chokepoint for any "leave the active editor" request.
+    /// If an editor is dirty, defers the action behind a confirm dialog
+    /// (`pending_discard`). Otherwise applies immediately.
+    pub(crate) fn try_dismiss_editor(&mut self, target: PendingDiscard) {
+        if self.any_editor_dirty() {
+            self.pending_discard = Some(target);
+        } else {
+            self.apply_dismissal(target);
+        }
+    }
+}
+
+/// Resolve `value` to one of `options` using ASCII case-insensitive
+/// equality. Returns the canonical option string when matched so the
+/// dropdown can highlight it. Returns `None` for anything else.
+fn canonical_match(value: &str, options: &[&'static str]) -> Option<&'static str> {
+    options
+        .iter()
+        .find(|opt| opt.eq_ignore_ascii_case(value))
+        .copied()
+}
+
+fn canonical_theme(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["System", "Light", "Dark", "Theme"])
+}
+
+fn canonical_font_size(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["XSmall", "Small", "Default", "Large", "XLarge"])
+}
+
+fn canonical_reading_pane(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["Right", "Bottom", "Hidden"])
+}
+
+fn canonical_phishing_sensitivity(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["Low", "Default", "High"])
+}
+
+/// Settings value stored for a message date format.
+pub fn date_display_setting(display: DateDisplay) -> &'static str {
+    match display {
+        DateDisplay::RelativeOffset => "Relative Offset",
+        DateDisplay::Absolute => "Absolute",
+    }
+}
+
+fn date_display_from_setting(value: &str) -> Option<DateDisplay> {
+    match canonical_match(value, &["Relative Offset", "Absolute"])? {
+        "Absolute" => Some(DateDisplay::Absolute),
+        _ => Some(DateDisplay::RelativeOffset),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rtsk::db::queries::{SettingsBootstrapSnapshot, UiBootstrapSnapshot};
+
+    fn empty_ui_snapshot() -> UiBootstrapSnapshot {
+        UiBootstrapSnapshot {
+            active_account_id: None,
+            language: None,
+            global_compose_shortcut: None,
+            custom_shortcuts: None,
+            search_index_version: None,
+            theme: None,
+            sidebar_collapsed: false,
+            contact_sidebar_visible: true,
+            reading_pane_position: None,
+            read_filter: None,
+            email_list_width: None,
+            email_density: None,
+            mark_as_read_behavior: None,
+            font_size: None,
+            color_theme: None,
+            inbox_view_mode: None,
+            show_sync_status: true,
+            auto_update: false,
+            task_sidebar_visible: false,
+            sidebar_nav_config: None,
+            email_zoom: None,
+            thread_date_groups: true,
+            sender_logos: true,
+            compose_always_show_cc: false,
+            compose_request_read_receipt: false,
+            sidebar_layout: None,
+            toolbar_layout: None,
+            search_scope: None,
+            mail_check_interval: None,
+            email_body_background: None,
+            date_display: None,
+            favorite_contacts: None,
+            sidebar_hidden: None,
+        }
+    }
+
+    fn default_settings_snapshot() -> SettingsBootstrapSnapshot {
+        SettingsBootstrapSnapshot {
+            notifications_enabled: true,
+            undo_send_delay_seconds: None,
+            block_remote_images: true,
+            phishing_detection_enabled: true,
+            phishing_sensitivity: None,
+            sync_period_days: None,
+            ai_provider: None,
+            ollama_server_url: None,
+            ollama_model: None,
+            claude_model: None,
+            openai_model: None,
+            gemini_model: None,
+            copilot_model: None,
+            ai_enabled: true,
+            ai_auto_categorize: true,
+            ai_auto_summarize: true,
+            ai_auto_draft_enabled: true,
+            ai_writing_style_enabled: true,
+            auto_archive_categories: None,
+            smart_notifications: true,
+            notify_categories: None,
+            notification_vip_senders: None,
+            attachment_cache_max_mb: None,
+            compress_attachments: true,
+            allow_lossy_compression: false,
+            opened_files_cleanup_days: None,
+        }
+    }
+
+    /// Every Settings field that the commit handler in `handlers/core.rs`
+    /// writes to the DB must round-trip through `apply_bootstrap` from the
+    /// matching snapshot field. String values are validated against the
+    /// canonical option lists; only the booleans flow through unchanged.
+    #[test]
+    fn apply_bootstrap_round_trips_seven_persisted_fields() {
+        let mut settings = Settings::default();
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("Dark".into());
+        ui.font_size = Some("Large".into());
+        ui.reading_pane_position = Some("Bottom".into());
+        ui.show_sync_status = false;
+
+        let mut s = default_settings_snapshot();
+        s.block_remote_images = false;
+        s.phishing_detection_enabled = false;
+        s.phishing_sensitivity = Some("High".into());
+
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, "Dark");
+        assert_eq!(settings.font_size, "Large");
+        assert_eq!(settings.reading_pane_position, "Bottom");
+        assert!(!settings.sync_status_bar);
+        assert!(!settings.block_remote_images);
+        assert!(!settings.phishing_detection);
+        assert_eq!(settings.phishing_sensitivity, "High");
+    }
+
+    /// Pre-existing dev DBs were seeded with lowercase values like 'system'
+    /// or 'right' that don't match the dropdown option lists, leaving the
+    /// dropdown displaying an unselectable string. `apply_bootstrap` must
+    /// canonicalize these against their option lists - case-insensitively -
+    /// rather than copying them through verbatim.
+    #[test]
+    fn apply_bootstrap_canonicalizes_case_for_string_prefs() {
+        let mut settings = Settings::default();
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("system".into());
+        ui.font_size = Some("default".into());
+        ui.reading_pane_position = Some("right".into());
+        let mut s = default_settings_snapshot();
+        s.phishing_sensitivity = Some("default".into());
+
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, "System");
+        assert_eq!(settings.font_size, "Default");
+        assert_eq!(settings.reading_pane_position, "Right");
+        assert_eq!(settings.phishing_sensitivity, "Default");
+    }
+
+    /// A garbage value in the DB (typo, abandoned theme, value left over
+    /// from a renamed option) must not overwrite the in-memory default and
+    /// leave the dropdown in an unselectable state.
+    #[test]
+    fn apply_bootstrap_keeps_default_when_db_value_is_unknown() {
+        let mut settings = Settings::default();
+        let original_theme = settings.theme.clone();
+        let original_font_size = settings.font_size.clone();
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("Solarized-Lapland".into());
+        ui.font_size = Some("XXXLarge".into());
+        let s = default_settings_snapshot();
+
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, original_theme);
+        assert_eq!(settings.font_size, original_font_size);
+    }
+
+    /// `committed_preferences` is the baseline the editor opens with. After
+    /// `apply_bootstrap` it must reflect the persisted values, otherwise
+    /// the first edit shows a spurious "unsaved changes" state.
+    #[test]
+    fn apply_bootstrap_resets_committed_shadow() {
+        let mut settings = Settings::default();
+        settings.committed_preferences.theme = "Light".into();
+        settings.committed_preferences.sync_status_bar = true;
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("Dark".into());
+        ui.show_sync_status = false;
+
+        let s = default_settings_snapshot();
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.committed_preferences.theme, "Dark");
+        assert!(!settings.committed_preferences.sync_status_bar);
+        // Live and committed must be in lockstep so the next begin_editing()
+        // sees an empty diff.
+        assert_eq!(settings.theme, settings.committed_preferences.theme);
+        assert_eq!(
+            settings.sync_status_bar,
+            settings.committed_preferences.sync_status_bar
+        );
+    }
+
+    /// Snapshot fields that arrive as `None` (no row in the settings table)
+    /// must leave existing Settings fields untouched, so a fresh DB without
+    /// rows for these keys boots with sensible defaults rather than empty
+    /// strings.
+    #[test]
+    fn apply_bootstrap_leaves_string_defaults_when_snapshot_is_none() {
+        let mut settings = Settings::default();
+        let original_theme = settings.theme.clone();
+        let original_font_size = settings.font_size.clone();
+        let original_pane = settings.reading_pane_position.clone();
+        let original_sensitivity = settings.phishing_sensitivity.clone();
+
+        let ui = empty_ui_snapshot();
+        let s = default_settings_snapshot();
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, original_theme);
+        assert_eq!(settings.font_size, original_font_size);
+        assert_eq!(settings.reading_pane_position, original_pane);
+        assert_eq!(settings.phishing_sensitivity, original_sensitivity);
+    }
+
+    /// A theme picked from the menu bar must reach the committed shadow
+    /// (what gets persisted) and survive an open panel being closed or
+    /// cancelled.
+    #[test]
+    fn set_theme_outside_panel_is_committed_and_survives_the_panel() {
+        let mut settings = Settings::default();
+        settings.begin_editing();
+
+        settings.set_theme("Dark".into());
+        settings.discard_preferences();
+
+        assert_eq!(settings.theme, "Dark");
+        assert_eq!(settings.committed_preferences.theme, "Dark");
+    }
+
+    /// The middle density was stored as "Default" before it was named;
+    /// stored values read case-insensitively.
+    #[test]
+    fn apply_bootstrap_reads_density_including_the_legacy_value() {
+        for (stored, expected) in [
+            ("Default", "Comfortable"),
+            ("spacious", "Spacious"),
+            ("Compact", "Compact"),
+            ("unknown", "Comfortable"),
+        ] {
+            let mut settings = Settings::default();
+            let mut ui = empty_ui_snapshot();
+            ui.email_density = Some(stored.into());
+
+            settings.apply_bootstrap(&ui, &default_settings_snapshot());
+
+            assert_eq!(settings.density, expected, "stored {stored}");
+            assert_eq!(settings.committed_preferences.density, expected);
+        }
+    }
+
+    #[test]
+    fn set_density_outside_panel_is_committed_and_survives_the_panel() {
+        let mut settings = Settings::default();
+        settings.begin_editing();
+
+        settings.set_density(Density::Compact);
+        settings.discard_preferences();
+
+        assert_eq!(settings.density, "Compact");
+        assert_eq!(settings.committed_preferences.density, "Compact");
+    }
+
+    #[test]
+    fn date_display_is_read_at_boot_and_written_back_under_the_same_value() {
+        let mut settings = Settings::default();
+        let mut ui = empty_ui_snapshot();
+        ui.date_display = Some("absolute".into());
+        settings.apply_bootstrap(&ui, &default_settings_snapshot());
+        assert_eq!(settings.date_display, DateDisplay::Absolute);
+        assert_eq!(
+            date_display_setting(settings.committed_preferences.date_display),
+            "Absolute"
+        );
+    }
+
+    #[test]
+    fn mark_as_read_is_read_at_boot_and_committed_from_the_panel() {
+        let mut settings = Settings::default();
+        let mut ui = empty_ui_snapshot();
+        ui.mark_as_read_behavior = Some("instantly".into());
+        settings.apply_bootstrap(&ui, &default_settings_snapshot());
+        assert_eq!(settings.mark_as_read, "Instantly");
+        assert_eq!(MarkAsRead::from_setting(&settings.mark_as_read), MarkAsRead::Instantly);
+
+        settings.begin_editing();
+        let _ = crate::component::Component::update(
+            &mut settings,
+            SettingsMessage::MarkAsReadChanged("Manually".into()),
+        );
+        settings.commit_preferences();
+        assert_eq!(settings.committed_preferences.mark_as_read, "Manually");
+        assert_eq!(MarkAsRead::from_setting("junk"), MarkAsRead::AfterDelay);
+    }
+
+    #[test]
+    fn notification_preferences_are_read_at_boot_and_committed_from_the_panel() {
+        let mut settings = Settings::default();
+        let mut snapshot = default_settings_snapshot();
+        snapshot.smart_notifications = false;
+        snapshot.notify_categories = Some("Primary,Social".into());
+        snapshot.notification_vip_senders = Some("Boss@Example.com".into());
+        settings.apply_bootstrap(&empty_ui_snapshot(), &snapshot);
+        assert!(!settings.committed_preferences.smart_notifications);
+        assert_eq!(settings.notify_categories, ["Primary", "Social"]);
+        assert_eq!(settings.vip_senders, ["boss@example.com"]);
+
+        settings.begin_editing();
+        for message in [
+            SettingsMessage::ToggleNotifications(false),
+            SettingsMessage::ToggleNotifyCategory("Social".into()),
+            SettingsMessage::VipEmailChanged("ceo@example.com".into()),
+            SettingsMessage::AddVipSender,
+            SettingsMessage::RemoveVipSender("boss@example.com".into()),
+        ] {
+            let _ = crate::component::Component::update(&mut settings, message);
+        }
+        settings.commit_preferences();
+        let committed = &settings.committed_preferences;
+        assert!(!committed.notifications_enabled);
+        assert_eq!(committed.notify_categories, ["Primary"]);
+        assert_eq!(committed.vip_senders, ["ceo@example.com"]);
+    }
+
+    #[test]
+    fn always_show_cc_is_read_at_boot_and_committed_from_the_panel() {
+        let mut settings = Settings::default();
+        let mut ui = empty_ui_snapshot();
+        ui.compose_always_show_cc = true;
+        settings.apply_bootstrap(&ui, &default_settings_snapshot());
+        assert!(settings.compose_always_show_cc);
+        assert!(settings.committed_preferences.compose_always_show_cc);
+
+        settings.begin_editing();
+        let _ = crate::component::Component::update(
+            &mut settings,
+            SettingsMessage::ToggleComposeAlwaysShowCc(false),
+        );
+        settings.commit_preferences();
+        assert!(!settings.compose_always_show_cc);
+        assert!(!settings.committed_preferences.compose_always_show_cc);
+    }
+
+    #[test]
+    fn read_receipts_are_not_asked_for_unless_the_panel_says_so() {
+        let mut settings = Settings::default();
+        settings.apply_bootstrap(&empty_ui_snapshot(), &default_settings_snapshot());
+        assert!(!settings.compose_request_read_receipt);
+
+        settings.begin_editing();
+        let _ = crate::component::Component::update(
+            &mut settings,
+            SettingsMessage::ToggleComposeRequestReadReceipt(true),
+        );
+        settings.commit_preferences();
+        assert!(settings.compose_request_read_receipt);
+        assert!(settings.committed_preferences.compose_request_read_receipt);
+    }
+}

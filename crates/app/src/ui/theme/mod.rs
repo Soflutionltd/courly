@@ -1,0 +1,42 @@
+#![allow(dead_code)] // Theme infrastructure; some variants and TOML loader not yet wired in.
+
+use std::cell::Cell;
+
+use iced::Color;
+
+use crate::ui::settings::types::EmailBodyBackground;
+
+mod avatar;
+mod button;
+mod catalog;
+mod color;
+mod container;
+mod forms;
+
+// Style functions only receive `&Theme`, so we use a thread-local to
+// communicate the user's preference to `style_email_body_container`.
+thread_local! {
+    pub(crate) static EMAIL_BODY_BG_PREF: Cell<EmailBodyBackground> = const { Cell::new(EmailBodyBackground::Auto) };
+}
+
+/// Set the email body background preference. Call when preferences change.
+pub fn set_email_body_background(pref: EmailBodyBackground) {
+    EMAIL_BODY_BG_PREF.set(pref);
+}
+
+/// Text/icon color on top of avatar circles and primary buttons.
+pub const ON_AVATAR: Color = Color::WHITE;
+/// Ground behind a brand logo: logos are drawn for a white page.
+pub const LOGO_BACKDROP: Color = Color::WHITE;
+
+pub use avatar::{avatar_color, initials};
+pub use button::{
+    ButtonClass, RowActionTone, RowPosition, style_filter_container, style_pill_card_button,
+    style_recessed_list_panel, style_settings_row_button,
+};
+pub use catalog::{THEMES, dark_theme, light_theme, theme_by_index};
+pub use color::hex_to_color;
+pub use container::{ContainerClass, email_body_appearance, pane_frame_colors};
+pub use forms::{
+    PickListClass, RadioClass, RuleClass, SliderClass, TextClass, TextInputClass, TogglerClass,
+};

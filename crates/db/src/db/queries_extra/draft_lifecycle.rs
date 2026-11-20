@@ -1,0 +1,205 @@
+//! Local draft lifecycle: persist, status transitions, and deletion.
+//!
+//! The `local_drafts` table tracks drafts from creation until they are
+//! either successfully sent (row is deleted) or abandoned (deleted via
+//! `delete_draft_sync`). Status flow: `pending` → `sending` → row
+//! removed on send success, or `failed` from any state. The sent
+//! message arrives back through provider sync as a regular thread in
+//! the Sent folder, which is why the local row has no further purpose.
+
+use rusqlite::{Connection, params};
+
+use super::super::from_row::FromRow;
+use crate::db::WriteTarget;
+
+/// Persist a draft as 'pending' (upsert - retries update the existing row).
+#[allow(clippy::too_many_arguments)]
+pub fn persist_draft_pending_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+    account_id: &str,
+    to_addresses: &str,
+    cc_addresses: &str,
+    bcc_addresses: &str,
+    subject: Option<&str>,
+    body_html: &str,
+    reply_to_message_id: Option<&str>,
+    thread_id: Option<&str>,
+    from_email: &str,
+    attachments: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO local_drafts \
+         (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+          subject, body_html, reply_to_message_id, thread_id, \
+          from_email, attachments, updated_at, sync_status) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
+                 unixepoch(), 'pending') \
+         ON CONFLICT(id) DO UPDATE SET \
+           to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
+           subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
+           thread_id = ?9, from_email = ?10, attachments = ?11, \
+           updated_at = unixepoch(), sync_status = 'pending'",
+        params![
+            id,
+            account_id,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            subject,
+            body_html,
+            reply_to_message_id,
+            thread_id,
+            from_email,
+            attachments,
+        ],
+    )
+    .map_err(|e| format!("draft persist: {e}"))?;
+    Ok(())
+}
+
+/// Transition a draft to 'sending'. Returns `Ok(true)` if the transition
+/// succeeded, `Ok(false)` if the draft was not found or already sending.
+pub fn mark_draft_sending_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<bool, String> {
+    let rows = conn
+        .execute(
+            "UPDATE local_drafts SET sync_status = 'sending' \
+             WHERE id = ?1 AND sync_status IN ('pending', 'failed')",
+            params![draft_id],
+        )
+        .map_err(|e| format!("mark sending: {e}"))?;
+    Ok(rows > 0)
+}
+
+/// Transition a draft to 'failed'.
+pub fn mark_draft_failed_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE local_drafts SET sync_status = 'failed' WHERE id = ?1",
+        params![draft_id],
+    )
+    .map_err(|e| format!("mark failed: {e}"))?;
+    Ok(())
+}
+
+/// Look up the remote draft ID for a local draft. Returns None if not found.
+pub fn get_remote_draft_id_sync(
+    conn: &impl WriteTarget,
+    draft_id: &str,
+) -> Result<Option<String>, String> {
+    // NULL until the draft reaches the server: a never-synced draft has no
+    // remote copy, which is not an error.
+    conn.query_row(
+        "SELECT remote_draft_id FROM local_drafts WHERE id = ?1",
+        params![draft_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        _ => Err(format!("draft lookup: {e}")),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled email helpers
+// ---------------------------------------------------------------------------
+
+/// Get overdue locally-delegated scheduled emails.
+pub fn get_overdue_local_scheduled_sync(
+    conn: &Connection,
+    now_unix: i64,
+) -> Result<Vec<super::super::types::DbScheduledEmail>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM scheduled_emails \
+             WHERE status = 'pending' AND delegation = 'local' AND scheduled_at <= ?1 \
+             ORDER BY scheduled_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(
+        params![now_unix],
+        super::super::types::DbScheduledEmail::from_row,
+    )
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+/// Mark a scheduled email as delegated to the server.
+pub fn mark_scheduled_delegated_sync(
+    conn: &Connection,
+    email_id: &str,
+    remote_message_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE scheduled_emails SET status = 'delegated', remote_message_id = ?1 WHERE id = ?2",
+        params![remote_message_id, email_id],
+    )
+    .map_err(|e| format!("mark delegated: {e}"))?;
+    Ok(())
+}
+
+/// Record a scheduled send failure.
+pub fn mark_scheduled_failed_sync(
+    conn: &Connection,
+    email_id: &str,
+    error_message: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE scheduled_emails SET status = 'failed', error_message = ?1, retry_count = retry_count + 1 WHERE id = ?2",
+        params![error_message, email_id],
+    )
+    .map_err(|e| format!("mark failed: {e}"))?;
+    Ok(())
+}
+
+/// Delete a local draft by ID.
+pub fn delete_draft_sync(conn: &impl WriteTarget, draft_id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM local_drafts WHERE id = ?1", params![draft_id])
+        .map_err(|e| format!("draft delete: {e}"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrations;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        migrations::run_all(&conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO accounts (id, email) VALUES ('acc-1', 'acc-1@example.com')",
+            [],
+        )
+        .expect("seed account");
+        conn.execute(
+            "INSERT INTO local_drafts (id, account_id, remote_draft_id) VALUES \
+             ('local', 'acc-1', NULL), ('synced', 'acc-1', 'server-1')",
+            [],
+        )
+        .expect("seed drafts");
+        conn
+    }
+
+    #[test]
+    fn a_draft_never_synced_has_no_remote_copy_and_can_be_deleted() {
+        let conn = setup_db();
+        let write = crate::db::WriteConn::from_raw(&conn);
+
+        assert_eq!(get_remote_draft_id_sync(&write, "local"), Ok(None));
+        assert_eq!(
+            get_remote_draft_id_sync(&write, "synced"),
+            Ok(Some("server-1".to_string()))
+        );
+        assert_eq!(get_remote_draft_id_sync(&write, "missing"), Ok(None));
+
+        delete_draft_sync(&write, "local").expect("delete");
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM local_drafts", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!(left, 1);
+    }
+}

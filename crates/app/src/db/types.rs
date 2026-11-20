@@ -1,0 +1,266 @@
+use crate::ui::label_paint::LabelPaint;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateDisplay {
+    /// Absolute date + relative offset from first message ("+14d")
+    RelativeOffset,
+    /// "Mar 12, 2026 at 2:34 PM"
+    Absolute,
+}
+
+// ── Types (subset of src-tauri/src/db/types.rs) ─────────────
+
+#[derive(Debug, Clone)]
+pub struct Account {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub provider: String,
+    pub account_name: Option<String>,
+    pub account_color: Option<String>,
+    pub last_sync_at: Option<i64>,
+    pub token_expires_at: Option<i64>,
+    pub is_active: bool,
+    pub sort_order: i64,
+    pub is_deleting: bool,
+}
+
+/// A shared/delegated mailbox discovered via Autodiscover.
+#[derive(Debug, Clone)]
+pub struct SharedMailbox {
+    /// The SMTP address of the shared mailbox (e.g., "support@contoso.com").
+    pub mailbox_id: String,
+    /// Display name from Autodiscover or admin config.
+    pub display_name: Option<String>,
+    /// The parent account ID (the user's personal account).
+    pub account_id: String,
+    /// Whether sync is enabled for this shared mailbox.
+    pub is_sync_enabled: bool,
+    /// Set once the account stopped enumerating this mailbox (access
+    /// revoked). Replaces the dropped per-mailbox `sync_error` column.
+    pub revoked_at: Option<i64>,
+}
+
+/// A pinned public folder for sidebar display.
+#[derive(Debug, Clone)]
+pub struct PinnedPublicFolder {
+    /// The EWS FolderId or IMAP folder path.
+    pub folder_id: String,
+    /// Display name for the sidebar.
+    pub display_name: String,
+    /// The parent account ID.
+    pub account_id: String,
+    /// Whether offline sync is enabled for this pin.
+    pub sync_enabled: bool,
+    /// Sidebar ordering position.
+    pub position: i64,
+    /// Unread count (from last hierarchy fetch).
+    pub unread_count: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Thread {
+    pub id: String,
+    pub account_id: String,
+    pub subject: Option<String>,
+    pub snippet: Option<String>,
+    pub last_message_at: Option<i64>,
+    pub message_count: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
+    pub is_pinned: bool,
+    pub is_muted: bool,
+    pub is_flag_complete: bool,
+    pub has_attachments: bool,
+    pub label_paints: Vec<LabelPaint>,
+    pub from_name: Option<String>,
+    pub from_address: Option<String>,
+    /// Recipients of the row's message, shown instead of the sender in Sent
+    /// and Drafts.
+    pub to_addresses: Option<String>,
+    /// Whether this is a local-only draft (not yet synced to server).
+    pub is_local_draft: bool,
+    /// Phase 7-8: which field carried the primary match for this
+    /// search hit. `None` for non-search list paths and SQL search
+    /// paths where field attribution is unavailable or meaningless.
+    pub match_kind: Option<rtsk::search::MatchKind>,
+    /// Phase 7-8: secondary matches above the 50%-of-top-score
+    /// threshold, score-descending. Empty for non-search paths.
+    pub also_matched: Vec<rtsk::search::MatchKind>,
+    /// Folder of the latest message, shown on search results only.
+    pub folder_name: Option<String>,
+    /// The one message this row stands for, when the list shows a person's
+    /// mail one message per row. Opening the row shows that message, not
+    /// the whole conversation with its latest message on top.
+    pub message_id: Option<String>,
+}
+
+impl Thread {
+    pub fn from_db_thread(t: rtsk::db::types::DbThread) -> Self {
+        Self {
+            id: t.id,
+            account_id: t.account_id,
+            subject: t.subject,
+            snippet: t.snippet,
+            last_message_at: t.last_message_at,
+            message_count: t.message_count,
+            is_read: t.is_read,
+            is_starred: t.is_starred,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: t.is_pinned,
+            is_muted: t.is_muted,
+            is_flag_complete: t.is_flag_complete,
+            has_attachments: t.has_attachments,
+            label_paints: Vec::new(),
+            from_name: t.from_name,
+            from_address: t.from_address,
+            to_addresses: t.to_addresses,
+            is_local_draft: false,
+            // not a search hit - no field attribution to carry
+            match_kind: None,
+            also_matched: Vec::new(),
+            folder_name: None,
+            message_id: None,
+        }
+    }
+
+    pub fn from_local_draft(d: rtsk::db::queries_extra::LocalDraftSummary) -> Self {
+        Self {
+            id: d.id,
+            account_id: d.account_id,
+            subject: d.subject,
+            snippet: d.snippet,
+            // `local_drafts.updated_at` is in seconds (`unixepoch()`); a
+            // thread's last message time is in milliseconds.
+            last_message_at: Some(d.updated_at.saturating_mul(1000)),
+            message_count: 1,
+            is_read: true,
+            is_starred: false,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: false,
+            is_muted: false,
+            is_flag_complete: false,
+            has_attachments: false,
+            label_paints: Vec::new(),
+            from_name: None,
+            from_address: d.from_email,
+            to_addresses: d.to_addresses,
+            is_local_draft: true,
+            // not a search hit - no field attribution to carry
+            match_kind: None,
+            also_matched: Vec::new(),
+            folder_name: None,
+            message_id: None,
+        }
+    }
+
+    pub fn from_search_result(r: rtsk::search_pipeline::UnifiedSearchResult) -> Self {
+        Self {
+            id: r.thread_id,
+            account_id: r.account_id,
+            subject: r.subject,
+            snippet: r.snippet,
+            last_message_at: r.date,
+            message_count: r.message_count.unwrap_or(1),
+            is_read: r.is_read,
+            is_starred: r.is_starred,
+            is_replied: false,
+            is_forwarded: false,
+            is_pinned: false,
+            is_muted: false,
+            is_flag_complete: false,
+            has_attachments: r.has_attachments,
+            label_paints: Vec::new(),
+            from_name: r.from_name,
+            from_address: r.from_address,
+            to_addresses: None,
+            is_local_draft: false,
+            match_kind: r.match_kind,
+            also_matched: r.also_matched,
+            folder_name: None,
+            message_id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreadMessage {
+    pub id: String,
+    pub thread_id: String,
+    pub account_id: String,
+    pub from_name: Option<String>,
+    pub from_address: Option<String>,
+    pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
+    pub date: Option<i64>,
+    pub subject: Option<String>,
+    pub message_id_header: Option<String>,
+    /// Quote/signature-stripped summary for collapsed view.
+    /// Falls back to snippet when loaded via legacy path.
+    pub snippet: Option<String>,
+    /// Full HTML body from the body store (decompressed).
+    pub body_html: Option<String>,
+    /// Full plain text body from the body store (decompressed).
+    pub body_text: Option<String>,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_replied: bool,
+    pub is_forwarded: bool,
+    pub has_meeting_invite: bool,
+    /// iMIP `method=` token (`REQUEST`, `REPLY`, `CANCEL`), when present.
+    pub meeting_invite_method: Option<String>,
+    pub meeting_invite_uid: Option<String>,
+    /// `List-Unsubscribe` header text, as the server sent it.
+    pub list_unsubscribe: Option<String>,
+    /// `List-Unsubscribe-Post` header text (RFC 8058 one-click).
+    pub list_unsubscribe_post: Option<String>,
+    /// `Authentication-Results` header text, read for the DKIM verdict.
+    pub auth_results: Option<String>,
+    /// Whether this message was sent by the account owner.
+    pub is_own_message: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ThreadAttachment {
+    pub id: String,
+    pub message_id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+    pub from_name: Option<String>,
+    pub date: Option<i64>,
+}
+
+/// Attachment data for a single message in a pop-out view.
+#[derive(Debug, Clone)]
+pub struct MessageViewAttachment {
+    pub id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub size: Option<i64>,
+}
+
+/// Calendar event data (subset of DbCalendarEvent for app-layer use).
+#[derive(Debug, Clone)]
+pub struct CalendarEvent {
+    pub id: String,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub is_all_day: bool,
+    pub calendar_id: Option<String>,
+    pub account_id: String,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub organizer_name: Option<String>,
+    pub organizer_email: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+}

@@ -1,0 +1,969 @@
+use std::collections::BTreeSet;
+
+use super::support::keyword_membership::{
+    KeywordProvider, recompute_thread_keyword_labels, replace_message_keywords,
+};
+use super::support::persistence::{
+    index_search_documents, store_inline_images, store_message_bodies,
+};
+use super::support::thread_membership::{
+    replace_message_folders_and_recompute, replace_message_membership_and_recompute,
+};
+use common::types::{FolderKind, LabelKind, NamespaceAttribution};
+use db::db::queries_extra::{
+    FolderWriteRow, LabelWriteRow, compute_thread_aggregate, delete_messages_and_cleanup_threads,
+    ensure_folder_rows, insert_attachments, insert_messages, maybe_update_chat_state,
+    query_user_emails, upsert_labels, upsert_thread_aggregate, upsert_thread_participants,
+};
+use rusqlite::OptionalExtension;
+
+use super::ConduitConsumerStores;
+use super::ConduitProviderKind;
+use super::hydrate::{ConsumerMessageRow, decode_imap_object_id};
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PersistAffected {
+    pub thread_ids: Vec<String>,
+    pub message_ids: Vec<String>,
+}
+
+// Finding G (pending-ops guard): the legacy Graph delta path ran
+// `filter_pending_ops` to skip persisting server state for threads that still
+// carried un-acked optimistic local mutations, so an in-flight user action was
+// not clobbered by a stale server snapshot. This consumer write path has NO
+// such guard, DELIBERATELY, matching the LANDED JMAP/B-series precedent: under
+// the conduit migration the action pipeline (B4) owns optimistic local state
+// and its server reconciliation, not the read-side sync consumer. Re-homing a
+// pending-ops filter here would duplicate (and risk diverging from) that B4
+// ownership before B4 exists. Until B4 lands, the exposure is the same one the
+// JMAP cut already accepted and is bounded by the action pipeline's own
+// re-issue/ack semantics; it is recorded here rather than left silent (spec
+// section 9 finding 6).
+pub async fn persist(
+    stores: &ConduitConsumerStores,
+    account_id: &str,
+    provider: ConduitProviderKind,
+    rows: &[ConsumerMessageRow],
+    deleted_ids: &[String],
+) -> Result<PersistAffected, String> {
+    persist_in_namespace(
+        stores,
+        account_id,
+        provider,
+        &NamespaceAttribution::Personal,
+        rows,
+        deleted_ids,
+    )
+    .await
+}
+
+pub async fn persist_in_namespace(
+    stores: &ConduitConsumerStores,
+    account_id: &str,
+    provider: ConduitProviderKind,
+    namespace: &NamespaceAttribution,
+    rows: &[ConsumerMessageRow],
+    deleted_ids: &[String],
+) -> Result<PersistAffected, String> {
+    if rows.is_empty() && deleted_ids.is_empty() {
+        return Ok(PersistAffected::default());
+    }
+
+    let rows = rows.to_vec();
+    let deleted_ids = deleted_ids.to_vec();
+    let account_id = account_id.to_string();
+    let namespace_kind = namespace_kind(namespace).map(str::to_string);
+    let namespace_id = namespace_id(namespace).map(str::to_string);
+    let (affected, persisted_rows, resolved_deleted_ids) = stores
+        .db
+        .with_write({
+            let rows = rows.clone();
+            let deleted_ids = deleted_ids.clone();
+            let account_id = account_id.clone();
+            let namespace_kind = namespace_kind.clone();
+            let namespace_id = namespace_id.clone();
+            move |conn| {
+                let tx = conn.transaction().map_err(|error| error.to_string())?;
+                let mut rows = rows;
+                if provider == ConduitProviderKind::Imap {
+                    for row in &mut rows {
+                        adopt_existing_imap_identity(&tx, row)?;
+                    }
+                }
+                // Namespace attribution is immutable. Check it before the
+                // placeholder/message inserts so a malformed or colliding
+                // delivery can never turn a personal thread into a foreign
+                // one (or vice versa).
+                rows.retain(|row| {
+                    let existing = tx
+                        .query_row(
+                            "SELECT namespace_kind, namespace_id FROM threads \
+                             WHERE account_id = ?1 AND id = ?2",
+                            rusqlite::params![row.message.account_id, row.message.thread_id],
+                            |record| {
+                                Ok((
+                                    record.get::<_, Option<String>>(0)?,
+                                    record.get::<_, Option<String>>(1)?,
+                                ))
+                            },
+                        )
+                        .optional();
+                    match existing {
+                        Ok(Some(found))
+                            if found != (namespace_kind.clone(), namespace_id.clone()) =>
+                        {
+                            log::warn!(
+                                "dropping message {}: thread {} belongs to a different namespace",
+                                row.message.id,
+                                row.message.thread_id
+                            );
+                            false
+                        }
+                        Ok(_) => true,
+                        Err(error) => {
+                            log::warn!(
+                                "dropping message {}: cannot inspect thread namespace: {error}",
+                                row.message.id
+                            );
+                            false
+                        }
+                    }
+                });
+                let deleted_ids = if provider == ConduitProviderKind::Imap {
+                    resolve_imap_deleted_ids(&tx, &account_id, &deleted_ids)?
+                } else {
+                    deleted_ids
+                };
+                for row in &rows {
+                    tx.execute(
+                "INSERT OR IGNORE INTO threads (account_id, id, message_count) VALUES (?1, ?2, 0)",
+                rusqlite::params![row.message.account_id, row.message.thread_id],
+            )
+            .map_err(|error| format!("insert thread placeholder: {error}"))?;
+                }
+                let messages: Vec<_> = rows.iter().map(|row| row.message.clone()).collect();
+                insert_messages(&tx, &messages)
+                    .map_err(|error| format!("insert messages: {error}"))?;
+
+                let mut thread_ids = BTreeSet::new();
+                let mut message_ids = Vec::new();
+                let user_emails = if matches!(
+                    provider,
+                    ConduitProviderKind::Jmap
+                        | ConduitProviderKind::Graph
+                        | ConduitProviderKind::Gmail
+                ) {
+                    Some(query_user_emails(&tx)?)
+                } else {
+                    None
+                };
+                for row in &rows {
+                    thread_ids.insert(row.message.thread_id.clone());
+                    message_ids.push(row.message.id.clone());
+                    let label_rows = row
+                        .labels
+                        .iter()
+                        .map(|label| label_write_row(label, &row.message.account_id))
+                        .collect::<Vec<_>>();
+                    upsert_labels(&tx, &label_rows)
+                        .map_err(|error| format!("upsert labels: {error}"))?;
+                    // The message_folders FK targets folders(account_id, id), so the
+                    // baseline membership write must ensure each folder row exists
+                    // before it writes membership (spec 1 / 4.1.4 "folder-row
+                    // creation"). Production folder sync seeds these; the consumer's
+                    // provider-agnostic path mints a minimal row from the FolderKind.
+                    //
+                    // `ensure_folder_rows`, NOT `insert_folders_batch`: a FolderKind
+                    // carries no rights, no display name and no parent, so the
+                    // container-sync upsert would overwrite `containers_list`'s
+                    // projection with NULLs the moment a message landed in a shared
+                    // folder. That is exactly how a read-only share (rights `lr`)
+                    // lost its `namespace_type` / `right_*` columns and started
+                    // passing the B12 obstacle K preflight as a personal folder,
+                    // while a writable share that happened to hold no messages kept
+                    // its metadata. This path may create a row, never redefine one.
+                    let folder_rows = row
+                        .folders
+                        .iter()
+                        .map(|folder| {
+                            let (namespace_type, owner_id) = match folder {
+                                FolderKind::Shared { owner, .. } => {
+                                    (Some("shared".to_string()), Some(owner.clone()))
+                                }
+                                FolderKind::Public { .. } => (Some("public".to_string()), None),
+                                _ => (None, None),
+                            };
+                            let id = folder.storage_id();
+                            FolderWriteRow {
+                                name: id.clone(),
+                                id,
+                                account_id: row.message.account_id.clone(),
+                                visible: None,
+                                sort_order: None,
+                                imap_folder_path: None,
+                                imap_special_use: None,
+                                // A membership-minted row still knows which
+                                // namespace its id was minted in, so a folder the
+                                // container pass has not (yet) produced does not
+                                // masquerade as personal.
+                                namespace_type,
+                                owner_id,
+                                content_class: None,
+                                parent_id: None,
+                                right_read: None,
+                                right_add: None,
+                                right_remove: None,
+                                right_set_seen: None,
+                                right_set_keywords: None,
+                                right_create_child: None,
+                                right_rename: None,
+                                right_delete: None,
+                                right_submit: None,
+                                is_subscribed: None,
+                                is_undeletable: false,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    ensure_folder_rows(&tx, &folder_rows)
+                        .map_err(|error| format!("ensure folders: {error}"))?;
+                    match provider {
+                        ConduitProviderKind::Jmap => {
+                            replace_message_folders_and_recompute(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                &row.message.id,
+                                &row.folders,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "replace JMAP message folders for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                            insert_attachments(&tx, &row.attachments)
+                                .map_err(|error| format!("insert JMAP attachments: {error}"))?;
+                            upsert_thread_participants(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                row.message.from_address.as_deref(),
+                                row.message.to_addresses.as_deref(),
+                                row.message.cc_addresses.as_deref(),
+                                row.message.bcc_addresses.as_deref(),
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "upsert JMAP thread participants for {}: {error}",
+                                    row.message.id
+                                )
+                            })?;
+                        }
+                        ConduitProviderKind::Graph | ConduitProviderKind::Gmail => {
+                            replace_message_membership_and_recompute(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                &row.message.id,
+                                &row.folders,
+                                &row.labels,
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "replace {} message membership for {}: {error}",
+                                    provider.as_str(),
+                                    row.message.id
+                                )
+                            })?;
+                            insert_attachments(&tx, &row.attachments).map_err(|error| {
+                                format!("insert {} attachments: {error}", provider.as_str())
+                            })?;
+                            if provider == ConduitProviderKind::Graph {
+                                tx.execute(
+                                    "UPDATE messages SET is_pinned = ?3, is_flag_complete = ?4 \
+                                     WHERE account_id = ?1 AND id = ?2",
+                                    rusqlite::params![
+                                        row.message.account_id,
+                                        row.message.id,
+                                        row.is_pinned,
+                                        row.is_flag_complete
+                                    ],
+                                )
+                                .map_err(|error| {
+                                    format!(
+                                        "write pin and flag state for {}: {error}",
+                                        row.message.id
+                                    )
+                                })?;
+                            }
+                            if provider == ConduitProviderKind::Gmail {
+                                insert_gmail_reaction(&tx, &account_id, row)?;
+                            }
+                            upsert_thread_participants(
+                                &tx,
+                                &row.message.account_id,
+                                &row.message.thread_id,
+                                row.message.from_address.as_deref(),
+                                row.message.to_addresses.as_deref(),
+                                row.message.cc_addresses.as_deref(),
+                                row.message.bcc_addresses.as_deref(),
+                            )
+                            .map_err(|error| {
+                                format!(
+                                    "upsert {} thread participants for {}: {error}",
+                                    provider.as_str(),
+                                    row.message.id
+                                )
+                            })?;
+                        }
+                        ConduitProviderKind::Imap => {
+                            insert_attachments(&tx, &row.attachments)
+                                .map_err(|error| format!("insert IMAP attachments: {error}"))?;
+                        }
+                    }
+                    replace_message_keywords(
+                        &tx,
+                        keyword_provider(provider),
+                        &row.message.account_id,
+                        &row.message.id,
+                        &row.keywords,
+                    )
+                    .map_err(|error| {
+                        format!("replace message keywords for {}: {error}", row.message.id)
+                    })?;
+                    if provider != ConduitProviderKind::Imap {
+                        recompute_thread_keyword_labels(
+                            &tx,
+                            keyword_provider(provider),
+                            &row.message.account_id,
+                            &row.message.thread_id,
+                        )
+                        .map_err(|error| {
+                            format!(
+                                "recompute thread keyword labels for {}: {error}",
+                                row.message.thread_id
+                            )
+                        })?;
+                    }
+                }
+
+                if provider != ConduitProviderKind::Imap {
+                    for thread_id in &thread_ids {
+                        let thread_rows = rows
+                            .iter()
+                            .filter(|row| row.message.thread_id == *thread_id)
+                            .collect::<Vec<_>>();
+                        let account_id = thread_rows
+                            .first()
+                            .map(|row| row.message.account_id.as_str())
+                            .ok_or_else(|| format!("missing account for thread {thread_id}"))?;
+                        let aggregate = compute_thread_aggregate(&tx, account_id, thread_id)
+                            .map_err(|error| {
+                                format!("compute thread aggregate {thread_id}: {error}")
+                            })?;
+                        let is_important = if matches!(
+                            provider,
+                            ConduitProviderKind::Jmap
+                                | ConduitProviderKind::Graph
+                                | ConduitProviderKind::Gmail
+                        ) {
+                            // Importance is carried on the hydrated row (from
+                            // `Message::importance` for real JMAP, from the
+                            // `$important` keyword for synthetic fixtures). It is
+                            // NOT read from `row.keywords`: `$important` is
+                            // `$`-prefixed and stripped by `is_user_visible_keyword`
+                            // during hydration, so a keyword-string probe would
+                            // always be false on the real path.
+                            Some(
+                                existing_thread_is_important(&tx, account_id, thread_id)?
+                                    || thread_rows.iter().any(|row| row.is_important),
+                            )
+                        } else {
+                            None
+                        };
+                        upsert_thread_aggregate(
+                            &tx,
+                            account_id,
+                            thread_id,
+                            &aggregate,
+                            is_important,
+                            namespace_kind.as_deref(),
+                            namespace_id.as_deref(),
+                        )
+                        .map_err(|error| format!("upsert thread aggregate {thread_id}: {error}"))?;
+                        if provider == ConduitProviderKind::Graph {
+                            sync_thread_provider_flags(&tx, account_id, thread_id)?;
+                        }
+                        if matches!(
+                            provider,
+                            ConduitProviderKind::Jmap
+                                | ConduitProviderKind::Graph
+                                | ConduitProviderKind::Gmail
+                        ) && let Some(user_emails) = &user_emails
+                        {
+                            maybe_update_chat_state(&tx, account_id, thread_id, user_emails)
+                                .map_err(|error| {
+                                    format!("update chat state {thread_id}: {error}")
+                                })?;
+                        }
+                    }
+                }
+
+                if matches!(
+                    provider,
+                    ConduitProviderKind::Jmap
+                        | ConduitProviderKind::Graph
+                        | ConduitProviderKind::Gmail
+                        | ConduitProviderKind::Imap
+                ) && !deleted_ids.is_empty()
+                {
+                    delete_messages_and_cleanup_threads(&tx, &account_id, &deleted_ids)
+                        .map_err(|error| format!("delete destroyed messages: {error}"))?;
+                }
+
+                assert_no_foreign_key_violations(&tx)?;
+                tx.commit().map_err(|error| error.to_string())?;
+                Ok((
+                    PersistAffected {
+                        thread_ids: thread_ids.into_iter().collect(),
+                        message_ids,
+                    },
+                    rows,
+                    deleted_ids,
+                ))
+            }
+        })
+        .await?;
+
+    store_message_bodies(
+        &stores.body_store,
+        &persisted_rows,
+        provider.as_str(),
+        |row| row.message.id.as_str(),
+        |row| row.body_html.as_ref(),
+        |row| row.body_text.as_ref(),
+    )
+    .await;
+    let inline_images = persisted_rows
+        .iter()
+        .flat_map(|row| row.inline_images.clone())
+        .collect::<Vec<_>>();
+    store_inline_images(&stores.inline_images, inline_images, provider.as_str()).await;
+    let search_docs = persisted_rows
+        .iter()
+        .map(|row| row.search_document.clone())
+        .collect::<Vec<_>>();
+    index_search_documents(&stores.search, search_docs, provider.as_str()).await;
+    if !resolved_deleted_ids.is_empty() {
+        if let Err(error) = stores.body_store.delete(resolved_deleted_ids.clone()).await {
+            log::warn!("Failed to delete conduit bodies: {error}");
+        }
+        if let Err(error) = stores
+            .search
+            .delete_messages_batch(resolved_deleted_ids.clone())
+            .await
+        {
+            log::warn!("Failed to delete conduit search documents: {error}");
+        }
+    }
+
+    Ok(affected)
+}
+
+fn namespace_kind(namespace: &NamespaceAttribution) -> Option<&'static str> {
+    match namespace {
+        NamespaceAttribution::Personal => None,
+        NamespaceAttribution::Shared { .. } => Some("shared"),
+        NamespaceAttribution::Public { .. } => Some("public"),
+    }
+}
+
+fn namespace_id(namespace: &NamespaceAttribution) -> Option<&str> {
+    match namespace {
+        NamespaceAttribution::Personal => None,
+        NamespaceAttribution::Shared { owner } => Some(owner),
+        NamespaceAttribution::Public { folder_storage_id } => Some(folder_storage_id),
+    }
+}
+
+fn keyword_provider(provider: ConduitProviderKind) -> KeywordProvider {
+    match provider {
+        ConduitProviderKind::Imap => KeywordProvider::Imap,
+        ConduitProviderKind::Gmail | ConduitProviderKind::Graph | ConduitProviderKind::Jmap => {
+            KeywordProvider::Jmap
+        }
+    }
+}
+
+fn label_write_row(label: &LabelKind, account_id: &str) -> LabelWriteRow {
+    let id = label.storage_id();
+    let (name, sort_order, is_undeletable) = match label {
+        LabelKind::GraphCategory(_) => (
+            id.strip_prefix("cat:").unwrap_or(id.as_str()).to_string(),
+            None,
+            false,
+        ),
+        LabelKind::GraphImportance(level) => (
+            level.display_name().to_string(),
+            Some(level.sort_order()),
+            true,
+        ),
+        _ => (id.clone(), None, false),
+    };
+    LabelWriteRow {
+        id,
+        account_id: account_id.to_string(),
+        name,
+        visible: None,
+        sort_order,
+        server_color_bg: None,
+        server_color_fg: None,
+        user_color_bg: None,
+        user_color_fg: None,
+        is_undeletable,
+    }
+}
+
+fn adopt_existing_imap_identity(
+    tx: &db::db::WriteTxn<'_>,
+    row: &mut ConsumerMessageRow,
+) -> Result<(), String> {
+    let (Some(folder), Some(uid)) = (row.message.imap_folder.as_deref(), row.message.imap_uid)
+    else {
+        return Ok(());
+    };
+    let existing: Option<(String, String)> = tx
+        .query_row(
+            "SELECT id, thread_id FROM messages \
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
+             LIMIT 1",
+            rusqlite::params![row.message.account_id, folder, uid],
+            |lookup| Ok((lookup.get(0)?, lookup.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("lookup existing IMAP message: {error}"))?;
+    if let Some((id, thread_id)) = existing {
+        row.message.id = id.clone();
+        row.message.thread_id = thread_id.clone();
+        row.search_document.message_id = id.clone();
+        row.search_document.thread_id = thread_id;
+        for attachment in &mut row.attachments {
+            attachment.message_id = id.clone();
+        }
+    }
+    Ok(())
+}
+
+fn resolve_imap_deleted_ids(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    ids: &[String],
+) -> Result<Vec<String>, String> {
+    ids.iter()
+        .map(|id| {
+            if let Some(decoded) = decode_imap_object_id(id) {
+                let local_id = tx
+                    .query_row(
+                        "SELECT id FROM messages \
+                         WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3 \
+                         LIMIT 1",
+                        rusqlite::params![account_id, decoded.folder, i64::from(decoded.uid)],
+                        |lookup| lookup.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(|error| format!("resolve IMAP expunge id: {error}"))?;
+                Ok(local_id)
+            } else {
+                Ok(Some(id.clone()))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|ids| ids.into_iter().flatten().collect())
+}
+
+/// Outlook pins and flags messages, the list shows threads: a thread is
+/// pinned (or carries a completed flag) while any of its messages does.
+fn sync_thread_provider_flags(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "UPDATE threads SET
+             is_pinned = EXISTS (
+                 SELECT 1 FROM messages
+                 WHERE account_id = ?1 AND thread_id = ?2 AND is_pinned = 1
+             ),
+             is_flag_complete = EXISTS (
+                 SELECT 1 FROM messages
+                 WHERE account_id = ?1 AND thread_id = ?2 AND is_flag_complete = 1
+             )
+         WHERE account_id = ?1 AND id = ?2",
+        rusqlite::params![account_id, thread_id],
+    )
+    .map(|_| ())
+    .map_err(|error| format!("sync thread pin {thread_id}: {error}"))
+}
+
+fn existing_thread_is_important(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<bool, String> {
+    tx.query_row(
+        "SELECT COALESCE(is_important, 0) FROM threads WHERE account_id = ?1 AND id = ?2",
+        rusqlite::params![account_id, thread_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map_err(|error| format!("read existing thread importance: {error}"))
+    .map(|value| value.unwrap_or(0) != 0)
+}
+
+fn insert_gmail_reaction(
+    tx: &db::db::WriteTxn<'_>,
+    account_id: &str,
+    row: &ConsumerMessageRow,
+) -> Result<(), String> {
+    let Some(emoji) = row.reaction_emoji.as_deref() else {
+        return Ok(());
+    };
+    let Some(in_reply_to) = row.message.in_reply_to_header.as_deref() else {
+        log::warn!(
+            "Gmail reaction message {} has no In-Reply-To header, skipping",
+            row.message.id
+        );
+        return Ok(());
+    };
+    let Some(reactor_email) = row.message.from_address.as_deref() else {
+        return Ok(());
+    };
+
+    let target_message_id: Option<String> = tx
+        .query_row(
+            "SELECT id FROM messages WHERE message_id_header = ?1 AND account_id = ?2 LIMIT 1",
+            rusqlite::params![in_reply_to, account_id],
+            |lookup| lookup.get("id"),
+        )
+        .ok();
+    let target_id = target_message_id.as_deref().unwrap_or(in_reply_to);
+
+    tx.execute(
+        "INSERT INTO message_reactions \
+         (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'gmail_mime') \
+         ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
+           reactor_name = ?4, reacted_at = ?6",
+        rusqlite::params![
+            target_id,
+            account_id,
+            reactor_email,
+            row.message.from_name,
+            emoji,
+            row.message.date,
+        ],
+    )
+    .map_err(|error| format!("insert Gmail reaction: {error}"))?;
+    Ok(())
+}
+
+fn assert_no_foreign_key_violations(tx: &db::db::WriteTxn<'_>) -> Result<(), String> {
+    let mut stmt = tx
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(|error| format!("prepare foreign_key_check: {error}"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|error| format!("run foreign_key_check: {error}"))?;
+    if let Some(row) = rows
+        .next()
+        .map_err(|error| format!("read foreign_key_check: {error}"))?
+    {
+        let table: String = row.get(0).unwrap_or_else(|_| "<unknown>".to_string());
+        let rowid: i64 = row.get(1).unwrap_or(-1);
+        let parent: String = row.get(2).unwrap_or_else(|_| "<unknown>".to_string());
+        let fkid: i64 = row.get(3).unwrap_or(-1);
+        return Err(format!(
+            "foreign key violation table={table} rowid={rowid} parent={parent} fkid={fkid}"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::super::hydrate::hydrate_change_to_message_insert_row_offline;
+    use super::super::{ConduitConsumerStores, ConduitProviderKind};
+    use super::persist;
+    use conduit_types::{Change, ObjectChange, ObjectChangeKind, ObjectId};
+    use service_state::{
+        BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+    };
+    use tokio::sync::mpsc;
+
+    fn state() -> (WriteDbState, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let pool = db::db::open_writer_pool(tmp.path()).unwrap();
+        pool.with_write_sync(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider) VALUES ('acc', 'a@example.com', 'jmap')",
+                [],
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        (WriteDbState::from_pool(pool), tmp)
+    }
+
+    fn stores(state: WriteDbState, tmp: &tempfile::TempDir) -> ConduitConsumerStores {
+        let (search_tx, _search_rx) = mpsc::channel(8);
+        ConduitConsumerStores {
+            db: state,
+            body_store: BodyStoreWriteState::init(tmp.path()).unwrap(),
+            inline_images: InlineImageStoreWriteState::init(tmp.path()).unwrap(),
+            search: SearchWriteHandle::from_sender(search_tx),
+        }
+    }
+
+    fn synthetic_change(
+        id: &str,
+        thread_id: &str,
+        folders: &[&str],
+        labels: &[&str],
+        keywords: &[&str],
+    ) -> Change {
+        let synthetic = super::super::hydrate::SyntheticMessage {
+            id: id.to_string(),
+            thread_id: Some(thread_id.to_string()),
+            subject: format!("subject {id}"),
+            from_addr: "peer@example.com".to_string(),
+            to_addrs: vec!["me@example.com".to_string()],
+            folder_ids: folders.iter().map(|f| (*f).to_string()).collect(),
+            label_ids: labels.iter().map(|l| (*l).to_string()).collect(),
+            keywords: keywords.iter().map(|k| (*k).to_string()).collect(),
+            raw_body: b"hello world".to_vec(),
+            degraded_body: false,
+            forced_outcome: None,
+            reaction_emoji: None,
+        };
+        let encoded = super::super::hydrate::encode_synthetic_message(&synthetic).unwrap();
+        Change::ObjectChange(ObjectChange {
+            id: ObjectId(encoded),
+            kind: ObjectChangeKind::Created,
+        })
+    }
+
+    async fn count(state: &WriteDbState, sql: &'static str, id: &'static str) -> i64 {
+        let id = id.to_string();
+        state
+            .with_read(move |conn| {
+                conn.query_row(sql, rusqlite::params![id], |row| row.get::<_, i64>(0))
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap()
+    }
+
+    fn offline_rows(
+        provider: ConduitProviderKind,
+        changes: &[Change],
+    ) -> Vec<super::super::hydrate::ConsumerMessageRow> {
+        changes
+            .iter()
+            .map(|change| {
+                match hydrate_change_to_message_insert_row_offline("acc", provider, change) {
+                    super::super::hydrate::HydratedChange::Message(row, _) => *row,
+                    other => panic!("unexpected result {other:?}"),
+                }
+            })
+            .collect()
+    }
+
+    const THREAD_PINNED: &str =
+        "SELECT is_pinned FROM threads WHERE account_id = 'acc' AND id = ?1";
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_outlook_pin_on_any_message_pins_the_thread_until_none_is_left() {
+        let (state, tmp) = state();
+        let stores = stores(state.clone(), &tmp);
+        let graph = ConduitProviderKind::Graph;
+
+        let rows = offline_rows(
+            graph,
+            &[
+                synthetic_change("m1", "t1", &["INBOX"], &[], &["$pinned"]),
+                synthetic_change("m2", "t1", &["INBOX"], &[], &[]),
+            ],
+        );
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, THREAD_PINNED, "t1").await, 1);
+
+        let rows = offline_rows(graph, &[synthetic_change("m2", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(
+            count(&state, THREAD_PINNED, "t1").await,
+            1,
+            "m1 is still pinned in Outlook"
+        );
+
+        let rows = offline_rows(graph, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, THREAD_PINNED, "t1").await, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_completed_outlook_flag_marks_the_thread_and_clears_with_it() {
+        let (state, tmp) = state();
+        let stores = stores(state.clone(), &tmp);
+        let graph = ConduitProviderKind::Graph;
+        const COMPLETE: &str =
+            "SELECT is_flag_complete FROM threads WHERE account_id = 'acc' AND id = ?1";
+
+        let rows = offline_rows(
+            graph,
+            &[synthetic_change(
+                "m1",
+                "t1",
+                &["INBOX"],
+                &[],
+                &["$flag-complete"],
+            )],
+        );
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, COMPLETE, "t1").await, 1);
+
+        let rows = offline_rows(graph, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", graph, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, COMPLETE, "t1").await, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_provider_without_pins_keeps_the_local_thread_pin() {
+        let (state, tmp) = state();
+        let stores = stores(state.clone(), &tmp);
+        let jmap = ConduitProviderKind::Jmap;
+
+        let rows = offline_rows(jmap, &[synthetic_change("m1", "t1", &["INBOX"], &[], &[])]);
+        persist(&stores, "acc", jmap, &rows, &[]).await.unwrap();
+        state
+            .with_write(|conn| {
+                conn.execute(
+                    "UPDATE threads SET is_pinned = 1 WHERE account_id = 'acc' AND id = 't1'",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap();
+
+        persist(&stores, "acc", jmap, &rows, &[]).await.unwrap();
+        assert_eq!(count(&state, THREAD_PINNED, "t1").await, 1);
+    }
+
+    /// Spec 6.1 `consumer_membership_baseline`: a multi-message thread with
+    /// folders / labels / keywords must produce REAL, consistent rows in
+    /// every membership table plus the recomputed thread rollup - not merely
+    /// land the message rows.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn consumer_membership_baseline() {
+        let (state, _tmp) = state();
+        let changes = [
+            synthetic_change("m1", "t1", &["INBOX"], &["kw:project"], &["project"]),
+            synthetic_change("m2", "t1", &["INBOX"], &["kw:project"], &["project"]),
+        ];
+        let rows: Vec<_> = changes
+            .iter()
+            .map(|change| {
+                match hydrate_change_to_message_insert_row_offline(
+                    "acc",
+                    ConduitProviderKind::Jmap,
+                    change,
+                ) {
+                    super::super::hydrate::HydratedChange::Message(row, _) => *row,
+                    other => panic!("unexpected result {other:?}"),
+                }
+            })
+            .collect();
+        // The hydrated rows must actually carry the membership content; a
+        // baseline that silently dropped folders/labels/keywords would still
+        // land message rows, so assert the content survived hydration.
+        assert!(
+            rows.iter().all(|row| !row.folders.is_empty()),
+            "folders hydrated"
+        );
+
+        let stores = stores(state.clone(), &_tmp);
+        let affected = persist(&stores, "acc", ConduitProviderKind::Jmap, &rows, &[])
+            .await
+            .unwrap();
+        assert_eq!(affected.message_ids, vec!["m1", "m2"]);
+        assert_eq!(affected.thread_ids, vec!["t1"]);
+
+        // Every message row landed.
+        assert_eq!(
+            count(
+                &state,
+                "SELECT COUNT(*) FROM messages WHERE thread_id = ?1",
+                "t1"
+            )
+            .await,
+            2,
+            "both message rows landed"
+        );
+        // Each message produced a message_folders row from its synthetic folder.
+        assert_eq!(
+            count(
+                &state,
+                "SELECT COUNT(*) FROM message_folders mf JOIN messages m \
+                 ON m.id = mf.message_id WHERE m.thread_id = ?1",
+                "t1"
+            )
+            .await,
+            2,
+            "each message produced a message_folders row"
+        );
+        // Each message produced a message_keywords row.
+        assert_eq!(
+            count(
+                &state,
+                "SELECT COUNT(*) FROM message_keywords mk JOIN messages m \
+                 ON m.id = mk.message_id WHERE m.thread_id = ?1",
+                "t1"
+            )
+            .await,
+            2,
+            "each message produced a message_keywords row"
+        );
+        // The thread folder rollup recomputed from the message rows.
+        assert!(
+            count(
+                &state,
+                "SELECT COUNT(*) FROM thread_folders WHERE thread_id = ?1",
+                "t1"
+            )
+            .await
+                >= 1,
+            "thread_folders rollup recomputed"
+        );
+        // The thread label rollup (keyword-derived) recomputed.
+        assert!(
+            count(
+                &state,
+                "SELECT COUNT(*) FROM thread_labels WHERE thread_id = ?1",
+                "t1"
+            )
+            .await
+                >= 1,
+            "thread_labels rollup recomputed"
+        );
+    }
+
+    // The JMAP byte-identical membership-AND-threading equality gate
+    // (`jmap_consumer_membership_equals_legacy`) lives in `golden_test.rs`:
+    // it drives the full hydrate -> persist -> post_persist path against a
+    // frozen golden captured from the legacy JMAP persist semantics, rather
+    // than the consumer-only row counts this module used to assert
+    // (B3a-cut-jmap 4.0 / 6.1).
+}

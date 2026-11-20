@@ -1,0 +1,628 @@
+//! Month view grid widget and mini-month calendar for the calendar feature.
+//!
+//! Provides data types, grid builder, and view functions for rendering
+//! a full month grid and a compact mini-month navigation widget.
+
+use jiff::Span;
+use jiff::civil::{Date as NaiveDate, Weekday};
+use rust_i18n::t;
+
+/// Days from Monday, in the `i64` this module's week arithmetic wants. jiff
+/// spells chrono's `num_days_from_monday` as `to_monday_zero_offset`.
+fn days_from_monday(day: Weekday) -> i64 {
+    i64::from(day.to_monday_zero_offset())
+}
+
+/// Add `days` to a date, saturating at the representable range rather than
+/// panicking. The grid builders walk fixed 6-week windows, so overflow is only
+/// reachable at the extreme ends of the calendar.
+fn add_days(date: NaiveDate, days: i64) -> NaiveDate {
+    date.checked_add(Span::new().days(days)).unwrap_or(date)
+}
+
+/// Build a civil date from this module's `i32`/`u32` year and month. jiff's
+/// civil fields are `i16`/`i8`; an out-of-range value is the same "no such
+/// date" case `from_ymd_opt` returned `None` for.
+fn civil_date(year: i32, month: u32, day: i8) -> Option<NaiveDate> {
+    NaiveDate::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, day).ok()
+}
+use iced::widget::{button, column, container, row, text};
+use iced::{Alignment, Color, Element, Length, Padding, Theme};
+
+use super::layout::*;
+use super::theme;
+
+// ── Data types ──────────────────────────────────────────
+
+/// A single event to render in the month grid.
+pub struct MonthEvent {
+    pub id: String,
+    pub title: String,
+    /// Unix timestamp (seconds).
+    pub start_time: i64,
+    /// Unix timestamp (seconds).
+    pub end_time: i64,
+    pub all_day: bool,
+    /// Hex color string from the calendar (e.g. "#4285f4").
+    pub color: String,
+}
+
+/// A day cell in the month grid.
+pub struct MonthDay {
+    pub date: NaiveDate,
+    pub events: Vec<MonthEvent>,
+    pub is_today: bool,
+    pub is_current_month: bool,
+}
+
+/// Complete month grid data.
+#[allow(dead_code)] // year/month retained for header rendering pass
+pub struct MonthGridData {
+    pub year: i32,
+    pub month: u32,
+    pub weeks: Vec<[MonthDay; 7]>,
+    pub week_start: Weekday,
+}
+
+// ── Grid builder ────────────────────────────────────────
+
+/// Build a `MonthGridData` from a year/month, distributing events to the
+/// correct day cells based on their `start_time`.
+pub fn build_month_grid(
+    year: i32,
+    month: u32,
+    events: &[MonthEvent],
+    week_start: Weekday,
+    today: NaiveDate,
+) -> MonthGridData {
+    // Find the first day of the month.
+    let Some(first_of_month) = civil_date(year, month, 1) else {
+        return MonthGridData {
+            year,
+            month,
+            weeks: Vec::new(),
+            week_start,
+        };
+    };
+
+    // Walk backward to find the grid start (the week_start day on or before first_of_month).
+    let grid_start = rewind_to_weekday(first_of_month, week_start);
+
+    // The grid needs 5 or 6 rows. We figure out how many by checking whether
+    // the last day of the month lands in row 5 or row 6.
+    let last_of_month = last_day_of_month(year, month);
+    let total_days_shown = days_between(grid_start, last_of_month) + 1;
+    let num_weeks = total_days_shown.div_ceil(7);
+    let num_weeks = num_weeks.max(5); // always at least 5 rows
+
+    let mut weeks = Vec::with_capacity(num_weeks);
+
+    for week_idx in 0..num_weeks {
+        let mut week: [MonthDay; 7] = std::array::from_fn(|day_idx| {
+            #[allow(clippy::cast_possible_wrap)]
+            let offset = (week_idx * 7 + day_idx) as i64;
+            let date = add_days(grid_start, offset);
+            MonthDay {
+                date,
+                events: Vec::new(),
+                is_today: date == today,
+                is_current_month: u32::from(date.month().unsigned_abs()) == month
+                    && i32::from(date.year()) == year,
+            }
+        });
+
+        // Distribute events into this week's cells.
+        // Multi-day events appear on every day they span, not just the start date.
+        for event in events {
+            let Some((event_start, event_end)) =
+                super::calendar::event_day_span(event.start_time, event.end_time)
+            else {
+                continue;
+            };
+            for day in &mut week {
+                if day.date >= event_start && day.date <= event_end {
+                    day.events.push(MonthEvent {
+                        id: event.id.clone(),
+                        title: event.title.clone(),
+                        start_time: event.start_time,
+                        end_time: event.end_time,
+                        all_day: event.all_day,
+                        color: event.color.clone(),
+                    });
+                }
+            }
+        }
+
+        // Sort events: all-day first, then by start_time.
+        for day in &mut week {
+            day.events.sort_by(|a, b| {
+                b.all_day
+                    .cmp(&a.all_day)
+                    .then(a.start_time.cmp(&b.start_time))
+            });
+        }
+
+        weeks.push(week);
+    }
+
+    MonthGridData {
+        year,
+        month,
+        weeks,
+        week_start,
+    }
+}
+
+// ── Month view widget ───────────────────────────────────
+
+/// Render the full month view grid.
+///
+/// Layout: header row of day-of-week labels, followed by 5-6 week rows
+/// each containing 7 day cells. Each cell shows the date number and
+/// up to N event entries (with a "+N more" indicator when truncated).
+pub fn month_view<'a, M: 'a + Clone>(
+    data: &'a MonthGridData,
+    on_date_click: impl Fn(NaiveDate) -> M + 'a,
+    on_event_click: impl Fn(&str) -> M + 'a,
+) -> Element<'a, M> {
+    let max_no_overflow = max_events_without_overflow();
+    let max_with_overflow = max_events_with_overflow();
+
+    // Header row: week# label + day-of-week labels.
+    let header = day_of_week_header_with_week_num(data.week_start);
+
+    // Week rows.
+    let mut grid = column![header].spacing(SPACE_0);
+
+    for week in &data.weeks {
+        // ISO week number from the first day of the row.
+        let week_num = week
+            .first()
+            .map(|d| d.date.iso_week_date().week())
+            .unwrap_or(0);
+
+        let week_label = button(
+            container(
+                text(format!("{week_num}"))
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .width(Length::Fixed(WEEK_NUM_COL_WIDTH))
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Start)
+            .padding(Padding::from([SPACE_XXS, 0.0])),
+        )
+        .on_press(on_date_click(week[0].date))
+        .padding(0)
+        .style(theme::ButtonClass::Ghost.style());
+
+        let mut week_row = row![week_label].spacing(SPACE_0);
+        for day in week {
+            let event_count = day.events.len();
+            let max_events = if event_count <= max_no_overflow {
+                max_no_overflow
+            } else {
+                max_with_overflow
+            };
+            let cell = day_cell(day, max_events, &on_date_click, &on_event_click);
+            week_row = week_row.push(cell);
+        }
+        grid = grid.push(week_row.height(Length::Fill));
+    }
+
+    container(grid)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// Width of the ISO week number column.
+const WEEK_NUM_COL_WIDTH: f32 = 28.0;
+
+/// Header row with week# column + abbreviated day-of-week labels.
+fn day_of_week_header_with_week_num<'a, M: 'a>(week_start: Weekday) -> Element<'a, M> {
+    // Empty cell for the week number column.
+    let wk_header = container(
+        text(t!("calendar.week_column"))
+            .size(TEXT_XS)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .width(Length::Fixed(WEEK_NUM_COL_WIDTH))
+    .height(CALENDAR_HEADER_HEIGHT)
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center);
+
+    let mut header_row = row![wk_header].spacing(SPACE_0);
+    for i in 0..7 {
+        let day = weekday_offset(week_start, i);
+        let label = crate::i18n::weekday_short(day.to_monday_zero_offset().unsigned_abs());
+        let cell = container(
+            text(label)
+                .size(TEXT_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .width(Length::Fill)
+        .height(CALENDAR_HEADER_HEIGHT)
+        .padding(Padding::from([0.0, SPACE_XXS]))
+        .align_y(Alignment::Center);
+        header_row = header_row.push(cell);
+    }
+    header_row.into()
+}
+
+/// A single day cell in the month grid.
+fn day_cell<'a, M: 'a + Clone>(
+    day: &'a MonthDay,
+    max_events: usize,
+    on_date_click: &(impl Fn(NaiveDate) -> M + 'a),
+    on_event_click: &(impl Fn(&str) -> M + 'a),
+) -> Element<'a, M> {
+    let cell_style = if day.is_today {
+        theme::ContainerClass::CalendarCellToday
+    } else if day.is_current_month {
+        theme::ContainerClass::CalendarCell
+    } else {
+        theme::ContainerClass::CalendarCellMuted
+    };
+
+    // Date number.
+    let date_num = day.date.day();
+    let date_text_style: fn(&Theme) -> text::Style = if day.is_today {
+        text::primary
+    } else if day.is_current_month {
+        text::base
+    } else {
+        theme::TextClass::Muted.style()
+    };
+    let date_font = if day.is_today {
+        crate::font::text_semibold()
+    } else {
+        crate::font::text()
+    };
+
+    let date_label = button(
+        text(format!("{date_num}"))
+            .size(TEXT_SM)
+            .style(date_text_style)
+            .font(date_font),
+    )
+    .on_press(on_date_click(day.date))
+    .padding(Padding::from([SPACE_XXXS, SPACE_XXS]))
+    .style(theme::ButtonClass::Ghost.style());
+
+    let mut content = column![date_label].spacing(SPACE_XXXS);
+
+    // Event entries (capped).
+    let total = day.events.len();
+    let visible = total.min(max_events);
+    let overflow = total.saturating_sub(max_events);
+
+    for event in day.events.iter().take(visible) {
+        content = content.push(event_entry(event, on_event_click(&event.id)));
+    }
+
+    if overflow > 0 {
+        content = content.push(
+            button(
+                text(more_label(overflow))
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Muted.style()),
+            )
+            .on_press(on_date_click(day.date))
+            .padding(Padding::from([0.0, SPACE_XXS]))
+            .style(theme::ButtonClass::Ghost.style()),
+        );
+    }
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(SPACE_XXXS)
+        .style(cell_style.style())
+        .into()
+}
+
+// ── Event entry ─────────────────────────────────────────
+
+/// A single event entry inside a day cell.
+///
+/// Small container with colored background and event title text.
+/// Text color is chosen based on background luminance for readability.
+fn event_entry<'a, M: 'a + Clone>(event: &'a MonthEvent, on_click: M) -> Element<'a, M> {
+    let bg_color = theme::hex_to_color(&event.color);
+    let text_color = contrasting_text_color(bg_color);
+
+    let label = text(&event.title)
+        .size(TEXT_XS)
+        .color(text_color)
+        .wrapping(text::Wrapping::None);
+
+    button(
+        container(label)
+            .padding(Padding::from([0.0, SPACE_XXS]))
+            .width(Length::Fill)
+            .height(CALENDAR_EVENT_HEIGHT)
+            .align_y(Alignment::Center)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(bg_color.into()),
+                border: iced::Border {
+                    radius: RADIUS_SM.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+    )
+    .on_press(on_click)
+    .padding(0)
+    .style(theme::ButtonClass::BareTransparent.style())
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Mini-month calendar ─────────────────────────────────
+
+/// A compact month grid for the calendar sidebar (date navigation).
+///
+/// Shows a header with prev/next arrows and month/year label,
+/// followed by a 7-column grid of date numbers.
+// TODO(refactor): wrap navigation params into a struct.
+#[allow(clippy::too_many_arguments)]
+pub fn mini_month<'a, M: 'a + Clone>(
+    year: i32,
+    month: u32,
+    selected_date: Option<NaiveDate>,
+    today: NaiveDate,
+    week_start: Weekday,
+    dates_with_events: &'a std::collections::HashSet<NaiveDate>,
+    on_date_click: impl Fn(NaiveDate) -> M + 'a,
+    on_prev_month: M,
+    on_next_month: M,
+) -> Element<'a, M> {
+    // Month/year header with arrows.
+    let month_name = i8::try_from(month).map_or_else(|_| String::new(), crate::i18n::month_name);
+    let header = row![
+        button(
+            container(text("\u{25C0}").size(TEXT_SM).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(on_prev_month)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style()),
+        container(
+            text(t!("calendar.month_year", month = month_name, year = year))
+                .size(TEXT_SM)
+                .style(text::base)
+                .font(crate::font::text_semibold()),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center),
+        button(
+            container(text("\u{25B6}").size(TEXT_SM).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(on_next_month)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style()),
+    ]
+    .align_y(Alignment::Center);
+
+    let Some(first_of_month) = civil_date(year, month, 1) else {
+        return header.into();
+    };
+    let grid_start = rewind_to_weekday(first_of_month, week_start);
+    let last = last_day_of_month(year, month);
+    let total = days_between(grid_start, last) + 1;
+    let grid = day_grid(
+        DayGrid {
+            first_day: grid_start,
+            weeks: total.div_ceil(7).max(5),
+            month: Some((year, month)),
+            selected: selected_date,
+            today,
+            week_start,
+            dates_with_events,
+        },
+        on_date_click,
+    );
+
+    column![header, grid].spacing(SPACE_XXS).into()
+}
+
+/// The weeks a mini calendar shows under its header.
+#[derive(Clone, Copy)]
+pub struct DayGrid<'a> {
+    /// The first cell, on `week_start`.
+    pub first_day: NaiveDate,
+    pub weeks: usize,
+    /// Days outside this (year, month) are muted and carry no event dot.
+    pub month: Option<(i32, u32)>,
+    pub selected: Option<NaiveDate>,
+    pub today: NaiveDate,
+    pub week_start: Weekday,
+    pub dates_with_events: &'a std::collections::HashSet<NaiveDate>,
+}
+
+/// Two-letter weekday initials over `grid.weeks` rows of clickable days.
+pub fn day_grid<'a, M: 'a + Clone>(
+    grid: DayGrid<'a>,
+    on_date_click: impl Fn(NaiveDate) -> M + 'a,
+) -> Element<'a, M> {
+    let mut dow_row = row![].spacing(SPACE_0);
+    for i in 0..7 {
+        let day = weekday_offset(grid.week_start, i);
+        let label = weekday_two_letter(day);
+        dow_row = dow_row.push(
+            container(
+                text(label)
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .width(Length::Fill)
+            .height(MINI_MONTH_CELL_SIZE)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+        );
+    }
+
+    let mut rows = column![].spacing(SPACE_0);
+    for w in 0..grid.weeks {
+        let mut week_row = row![].spacing(SPACE_0);
+        for d in 0..7 {
+            #[allow(clippy::cast_possible_wrap)]
+            let offset = (w * 7 + d) as i64;
+            let date = add_days(grid.first_day, offset);
+            let in_month = grid.month.is_none_or(|(year, month)| {
+                u32::from(date.month().unsigned_abs()) == month && i32::from(date.year()) == year
+            });
+            let is_today = date == grid.today;
+            let is_selected = grid.selected == Some(date);
+            let num_str = format!("{}", date.day());
+            let text_style: fn(&Theme) -> text::Style = if is_today {
+                text::primary
+            } else if in_month {
+                text::base
+            } else {
+                theme::TextClass::Muted.style()
+            };
+            let font = if is_today {
+                crate::font::text_semibold()
+            } else {
+                crate::font::text()
+            };
+
+            let has_events = grid.dates_with_events.contains(&date);
+            let label = text(num_str).size(TEXT_XS).style(text_style).font(font);
+
+            // Always reserve space for the event dot so it doesn't shift the
+            // date number when present.
+            let dot_style: fn(&Theme) -> text::Style = if has_events && in_month {
+                text::primary
+            } else {
+                |_| text::Style {
+                    color: Some(Color::TRANSPARENT),
+                }
+            };
+            let dot =
+                container(text("\u{2022}").size(4.0).style(dot_style)).align_x(Alignment::Center);
+            let cell_content: Element<'_, M> = column![label, dot]
+                .spacing(0)
+                .align_x(Alignment::Center)
+                .into();
+
+            let cell_container = if is_selected {
+                container(cell_content)
+                    .width(Length::Fill)
+                    .height(MINI_MONTH_CELL_SIZE)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+                    .style(theme::ContainerClass::MiniMonthSelected.style())
+            } else {
+                container(cell_content)
+                    .width(Length::Fill)
+                    .height(MINI_MONTH_CELL_SIZE)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+            };
+
+            let cell_btn = button(cell_container)
+                .on_press(on_date_click(date))
+                .padding(0)
+                .style(theme::ButtonClass::Ghost.style());
+
+            week_row = week_row.push(cell_btn);
+        }
+        rows = rows.push(week_row);
+    }
+
+    column![dow_row, rows].spacing(SPACE_XXS).into()
+}
+
+// ── Helpers ─────────────────────────────────────────────
+
+/// How many events can fit in a single day cell without a "+N more" row
+/// (date row occupies one event-height slot).
+fn max_events_without_overflow() -> usize {
+    let available = CALENDAR_CELL_MIN_HEIGHT - CALENDAR_EVENT_HEIGHT;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let count = (available / CALENDAR_EVENT_HEIGHT).floor() as usize;
+    count.max(1)
+}
+
+/// How many events to show when there IS a "+N more" row (one fewer slot).
+fn max_events_with_overflow() -> usize {
+    max_events_without_overflow().saturating_sub(1).max(1)
+}
+
+/// Rewind a date to the previous (or same) occurrence of `target` weekday.
+pub(crate) fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
+    let current = date.weekday();
+    let diff = (days_from_monday(current) - days_from_monday(target) + 7) % 7;
+    add_days(date, -diff)
+}
+
+/// Last day of a given year/month.
+fn last_day_of_month(year: i32, month: u32) -> NaiveDate {
+    civil_date(year, month, 1).map_or_else(NaiveDate::default, NaiveDate::last_of_month)
+}
+
+/// Number of days between two dates (inclusive would be +1 at call site).
+fn days_between(a: NaiveDate, b: NaiveDate) -> usize {
+    let diff = (b - a).get_days();
+    #[allow(clippy::cast_sign_loss)]
+    if diff < 0 { 0 } else { diff as usize }
+}
+
+/// Get the weekday that is `offset` days after `start`.
+fn weekday_offset(start: Weekday, offset: usize) -> Weekday {
+    // `to_monday_zero_offset` is 0..=6 by construction, so `unsigned_abs`
+    // widens without a lossy cast.
+    let base = usize::from(start.to_monday_zero_offset().unsigned_abs());
+    let target = (base + offset) % 7;
+    match target {
+        0 => Weekday::Monday,
+        1 => Weekday::Tuesday,
+        2 => Weekday::Wednesday,
+        3 => Weekday::Thursday,
+        4 => Weekday::Friday,
+        5 => Weekday::Saturday,
+        _ => Weekday::Sunday,
+    }
+}
+
+/// "+3 more" under a day's visible events.
+pub fn more_label(overflow: usize) -> String {
+    if overflow == 1 {
+        t!("calendar.more_one")
+    } else {
+        t!("calendar.more_other", count = overflow)
+    }
+    .into_owned()
+}
+
+/// Two-letter weekday abbreviation for the mini-month.
+fn weekday_two_letter(day: Weekday) -> std::borrow::Cow<'static, str> {
+    match day {
+        Weekday::Monday => t!("calendar.weekday_min.monday"),
+        Weekday::Tuesday => t!("calendar.weekday_min.tuesday"),
+        Weekday::Wednesday => t!("calendar.weekday_min.wednesday"),
+        Weekday::Thursday => t!("calendar.weekday_min.thursday"),
+        Weekday::Friday => t!("calendar.weekday_min.friday"),
+        Weekday::Saturday => t!("calendar.weekday_min.saturday"),
+        Weekday::Sunday => t!("calendar.weekday_min.sunday"),
+    }
+}
+
+/// Choose white or dark text based on background luminance.
+/// Uses the ITU-R BT.601 luma formula (0.299R + 0.587G + 0.114B).
+fn contrasting_text_color(bg: iced::Color) -> iced::Color {
+    let luminance = 0.299 * bg.r + 0.587 * bg.g + 0.114 * bg.b;
+    if luminance > 0.5 {
+        iced::Color::BLACK
+    } else {
+        iced::Color::WHITE
+    }
+}

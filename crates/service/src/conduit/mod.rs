@@ -1,0 +1,30 @@
+pub mod attachment;
+pub mod aux;
+pub mod checkpoint_store;
+pub mod consumer;
+pub mod contacts;
+pub mod containers;
+pub mod engine;
+pub mod engine_sync;
+pub mod error_map;
+pub mod factory;
+pub mod gmail_signatures;
+pub mod push_ingress;
+pub mod reconcile;
+pub mod resident;
+pub mod server_filters;
+pub mod server_search;
+pub mod settings;
+pub mod token_source;
+
+pub use checkpoint_store::SqliteCheckpointStore;
+pub use consumer::{
+    ConduitConsumerStores, ConduitProviderKind, ChangeStreamConsumer, ConsumerDriveReport,
+    ConsumerHook, ConsumerHookRegistry, ResidentFlushTelemetry, ResidentFlushTelemetrySnapshot,
+};
+pub use engine::ConduitSyncEngine;
+pub use error_map::{account_error_to_action_error, account_error_to_operation_result};
+pub use factory::{ConduitBuildError, build_account_factory};
+pub use push_ingress::{PushIngress, PushIngressConfig, RoutingKey};
+pub use resident::{ResidentEngine, hot_poll_interval_from_setting};
+pub use token_source::DbWriteBackTokenSource;

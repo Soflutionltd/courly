@@ -1,0 +1,236 @@
+# Contact Import: Problem Statement
+
+## Overview
+
+Enterprise users manage contacts in spreadsheets. The reality is Excel files with columns that are never consistently named, and CSV exports with unpredictable encoding and delimiters. A contact importer must handle this mess gracefully.
+
+This is a self-contained problem warranting its own crate (`crates/import/`).
+
+## Supported Formats
+
+1. **CSV** - the most common export format from Excel and other tools
+   - Encoding detection: UTF-8, UTF-16 (with/without BOM), Windows-1252, Latin-1, and other locale-specific encodings
+   - Delimiter detection: comma, semicolon, tab (European Excel uses semicolons)
+   - Quoted fields, escaped quotes, mixed line endings
+
+2. **XLSX** - Excel's native format
+   - Consistently UTF-8 internally (OOXML)
+   - Multi-sheet workbooks (user may need to select a sheet)
+   - OOXML parsing infrastructure already exists in the squeeze crate
+
+3. **vCard (.vcf)** - standard contact interchange format
+   - RFC 6350 (vCard 4.0) and RFC 2426 (vCard 3.0)
+   - vCard parsing already exists in `crates/import/src/vcard_parser.rs`
+   - A single .vcf file can contain multiple contacts
+
+## Recipient Paste Input
+
+The import crate also owns normalization for recipient lists pasted into
+compose To/Cc/Bcc fields and contact-group member inputs. This is not a full
+wizard flow, but it is the same business problem: users bring recipient data
+from spreadsheets, Word documents, Outlook messages, and ad-hoc corporate
+lists, and the app should turn that data into valid contacts/recipients with
+consistent normalization and diagnostics.
+
+This path must handle malformed address text such as:
+
+- `Name <email>` entries with missing quotes, missing angle brackets, or mixed
+  delimiters
+- bare email addresses mixed with display names
+- TSV-like rows copied from spreadsheet cells
+- contact names and email addresses pasted into the middle of other entries
+- duplicate recipients in the same paste operation
+
+### Rich Clipboard Reality
+
+Modern spreadsheet and rich-text applications place multiple representations of
+the same selection on the clipboard. Rich editors choose the richest format they
+recognize, which is why copying cells from Excel and pasting into Word or
+WordPad creates an actual table. Plain-text consumers receive a lossy fallback,
+often tab-separated text.
+
+Important formats to support:
+
+- Windows:
+  - `CF_UNICODETEXT` / text fallback
+  - registered `HTML Format` (`CF_HTML`), including `StartHTML`,
+    `EndHTML`, `StartFragment`, and `EndFragment` byte offsets
+  - registered `Rich Text Format`
+  - Excel-specific clipboard formats such as BIFF/BIFF12, CSV, text,
+    RTF, and table/value formats
+- macOS:
+  - `NSPasteboard.PasteboardType.string`
+  - `tabularText`
+  - `html`
+  - `rtf`
+- Linux desktops:
+  - `text/html`
+  - `text/rtf`
+  - `text/plain;charset=utf-8`
+  - `UTF8_STRING`
+  - `text/plain`
+
+References:
+
+- Microsoft: Windows clipboard formats - https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-formats
+- Microsoft: HTML clipboard format - https://learn.microsoft.com/en-gb/windows/win32/dataxchg/html-clipboard-format
+- Microsoft: Excel supported clipboard formats - https://support.microsoft.com/en-us/office/file-formats-that-are-supported-in-excel-0943ff2c-6014-4e8d-aaea-b83d51d46247
+- Microsoft: `XlClipboardFormat` enumeration - https://learn.microsoft.com/en-us/office/vba/api/excel.xlclipboardformat
+- Apple: `NSPasteboard.PasteboardType` - https://developer.apple.com/documentation/appkit/nspasteboard/pasteboardtype
+
+### Current Limitation
+
+The current iced clipboard abstraction exposes only text:
+`Clipboard::read(kind) -> Option<String>`. The token input therefore emits only
+`TokenInputMessage::Paste(String)`. That lets the import crate parse the
+plain-text fallback, but it cannot see the HTML/RTF/table structure that Excel
+or Word actually placed on the clipboard.
+
+The underlying clipboard stack has the same limitation today. `window_clipboard`
+exposes `read() -> String`, Windows reads only `get_clipboard_string()`, and the
+Wayland path accepts only plain-text MIME targets. Full rich paste support
+therefore requires extending or bypassing the iced/window clipboard layer, not
+only improving the parser.
+
+### Target API
+
+The app should pass all available recipient-paste representations to the import
+crate:
+
+```rust
+pub struct RecipientPastePayload {
+    pub plain_text: Option<String>,
+    pub html: Option<String>,
+    pub rtf: Option<String>,
+}
+
+pub struct RecipientPasteResult {
+    pub recipients: Vec<ParsedRecipient>,
+    pub skipped: Vec<SkippedRecipient>,
+    pub source_format: RecipientPasteSourceFormat,
+}
+
+pub fn parse_recipient_paste(payload: &RecipientPastePayload) -> RecipientPasteResult;
+```
+
+Parser preference order:
+
+1. **HTML table or fragment** - extract rows/cells, then reuse the import
+   crate's table mapping heuristics to detect email/name columns.
+2. **RTF table text** - use `\cell` and `\row` boundaries as table hints when
+   available, otherwise reduce to text.
+3. **Plain text** - use the forgiving recipient scanner for address lists,
+   missing punctuation, TSV rows, and glued entries.
+
+The parser output should be suitable for both compose fields and group-member
+inputs: normalized email addresses, display names when recoverable, duplicate
+suppression, and skipped-row diagnostics for values that could not become
+recipients.
+
+## The Column Mapping Problem
+
+CSV and XLSX files have no standardized column headers. The importer must:
+
+1. **Auto-detect columns** - heuristic matching on common header names:
+   - Email: "email", "e-mail", "email address", "mail", "e-post", etc.
+   - Name: "name", "full name", "display name", "contact", "navn", etc.
+   - First/Last: "first name", "last name", "given name", "surname", "fornavn", "etternavn", etc.
+   - Phone: "phone", "telephone", "mobile", "tel", "telefon", etc.
+   - Company: "company", "organization", "org", "firma", etc.
+   - Group: "group", "category", "list", "gruppe", etc.
+
+2. **Let the user correct the mapping** - auto-detection will be wrong sometimes. The user must be able to reassign columns before import.
+
+3. **Preview the result** - show what will be imported before committing, so the user can catch mapping errors.
+
+## Import Flow
+
+### Step 1: File Selection
+
+User selects a file (.csv, .xlsx, .vcf). For .xlsx with multiple sheets, a sheet selector appears.
+
+### Step 2: Preview + Column Mapping
+
+The importer displays a table preview of the first ~20 rows. Each column has a dropdown header where the user can assign its role (Email, Name, Phone, Company, Group, or Ignore). Auto-detected assignments are pre-filled.
+
+**No headers?** The importer must detect whether the first row is a header or data. Heuristic: if the first row contains values that look like email addresses, phone numbers, or other data rather than label-like strings, treat it as data (no headers). In that case, column mapping relies entirely on content sniffing (e.g., a column where most values contain `@` is probably Email) and user correction. A checkbox "First row is a header" lets the user override the detection either way.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Column mapping:                                             │
+│                                                             │
+│  [Email ▾]          [Name ▾]          [Phone ▾]             │
+│  ──────────────────────────────────────────────             │
+│  alice@corp.com     Alice Smith       +47 123 456           │
+│  bob@corp.com       Bob Jones         +47 789 012           │
+│  carol@corp.com     Carol Williams                          │
+│  ...                                                        │
+│                                                             │
+│ Account: [Work Account ▾]                                   │
+│                                                             │
+│ 247 contacts will be imported.                              │
+│ 3 rows skipped (no valid email).                            │
+│                                                             │
+│ [Import]                                                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- Rows without a valid email in the mapped email column are skipped (with a count shown). The preview highlights problem rows - skipped rows are shown in a muted/strikethrough style with a reason indicator (no email, invalid email, etc.) rather than silently hidden. This lets the user catch mapping errors before importing: if most rows are skipped, the email column is probably mapped wrong.
+- An account selector determines where imported contacts are created (same options as contact creation: provider accounts + "Local")
+- If a "Group" column is mapped, contacts are automatically added to groups matching the group column value (groups are created if they don't exist). A single cell may contain multiple groups separated by semicolons, commas, or pipes (e.g., "Engineering; Project X"). The importer splits on these delimiters and trims whitespace. If the delimiter is ambiguous (e.g., a group name contains a comma), the preview table shows the parsed group names so the user can verify before importing.
+
+### Step 3: Import
+
+The import runs. A summary shows: N contacts imported, N groups created, N rows skipped, N duplicates (matched by email).
+
+**Duplicate handling:** If an imported email matches an existing contact, the default behavior is to skip the duplicate and report it in the summary. A toggle on the preview screen - "Update existing contacts with imported data" - changes this to a merge: imported fields overwrite existing fields where the imported value is non-empty, but existing fields not present in the import are preserved. The toggle defaults to off (skip). The summary distinguishes between skipped duplicates and updated contacts.
+
+### vCard Import
+
+vCard files skip the column mapping step entirely - the format is structured. The flow is: file selection → preview (list of contacts to be imported) → account selector → import.
+
+## Data Cleaning
+
+The importer applies minimal automatic cleanup to imported values:
+
+- **Whitespace** - leading/trailing whitespace is trimmed from all fields
+- **Email normalization** - lowercased, whitespace stripped
+- **Phone numbers** - no formatting changes. Phone formats vary too widely by locale to normalize safely. Store as-is.
+- **Names** - no case correction. "ALICE SMITH" stays as-is; the user can fix it in the contact editor. Guessing at name capitalization is error-prone across cultures.
+
+The principle is: clean what is unambiguously wrong (stray whitespace, mixed-case emails) and leave everything else to the user. The importer is not a data cleaning tool - it is a data ingestion tool.
+
+## Crate Design
+
+`crates/import/` - pure library crate, no UI. Responsibilities:
+
+- File format detection and parsing
+- Encoding detection and conversion
+- Delimiter detection
+- Column header heuristic matching
+- Parsed contact rows as structured output
+- vCard parsing (`crates/import/src/vcard_parser.rs`)
+
+The UI for the import wizard lives in the app crate. The import crate provides the data; the app provides the interaction.
+
+## Ecosystem Patterns
+
+How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) map to this spec's requirements.
+
+### Requirements to Survey Matches
+
+| Requirement | Primary Source | How It Applies |
+|---|---|---|
+| Preview data table | shadcn-rs `data_table` | Column renderers, row iteration; adapt for dynamic columns (unknown at compile time) |
+| File selection | shadcn-rs/pikeru (`rfd`) | `rfd::AsyncFileDialog` with format filter - solved problem |
+| Multi-step wizard | raffi query routing | `ImportStep` enum state machine: FileSelect → SheetSelect → Preview → Importing → Summary |
+| Column mapping dropdowns | shadcn-rs/iced-plus props-builder | `ColumnRole` enum with iced `pick_list` per column header |
+| Import progress/cancel | bloom generational tracking + pikeru subscriptions | Tag import task with generation; stream row-by-row progress |
+| Account selector | bloom config shadow | Entire wizard state is transient editing state; only commits on "Import" |
+| Drag-and-drop file import | iced_drop + shadcn-rs file-drop-zone | Optional enhancement using OS-level drag events |
+
+### Gaps
+
+- **Encoding detection** (UTF-8, UTF-16, Windows-1252): Library crate concern (`chardetng`, `encoding_rs`) - no iced involvement
+- **vCard parsing**: Internal (`crates/import/src/vcard_parser.rs`)
+- **Duplicate handling**: Library crate concern - matching logic is entirely backend, no UI pattern needed

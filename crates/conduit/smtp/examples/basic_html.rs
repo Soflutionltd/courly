@@ -1,0 +1,47 @@
+use conduit_smtp::{
+    Message,
+    message::{MultiPart, SinglePart, header},
+};
+
+fn main() {
+    // The html we want to send.
+    let html = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello from Conduit SMTP!</title>
+</head>
+<body>
+    <div style="display: flex; flex-direction: column; align-items: center;">
+        <h2 style="font-family: Arial, Helvetica, sans-serif;">Hello from Conduit SMTP!</h2>
+        <h4 style="font-family: Arial, Helvetica, sans-serif;">A mailer library for Rust</h4>
+    </div>
+</body>
+</html>"#;
+
+    // Build the message.
+    let email = Message::builder()
+        .from("NoBody <nobody@domain.tld>".parse().unwrap())
+        .to("Hei <hei@domain.tld>".parse().unwrap())
+        .subject("Hello from Conduit SMTP!")
+        .multipart(
+            MultiPart::alternative() // This is composed of two parts.
+                .singlepart(
+                    SinglePart::builder()
+                        .header(header::ContentType::TEXT_PLAIN)
+                        .body(String::from(
+                            "Hello from Conduit SMTP! A mailer library for Rust",
+                        )), // Every message should have a plain text fallback.
+                )
+                .singlepart(
+                    SinglePart::builder()
+                        .header(header::ContentType::TEXT_HTML)
+                        .body(String::from(html)),
+                ),
+        )
+        .expect("failed to build email");
+
+    let raw_message = email.formatted();
+    println!("{}", String::from_utf8_lossy(&raw_message));
+}

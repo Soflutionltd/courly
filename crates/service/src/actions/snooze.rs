@@ -1,0 +1,58 @@
+use super::context::ActionContext;
+use super::log::MutationLog;
+use super::outcome::{ActionError, ActionOutcome};
+
+/// Snooze a single thread: remove from inbox, set snooze timestamp.
+/// Local-only by design - no provider has a universal snooze equivalent.
+pub async fn snooze(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    until: i64,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("snooze", account_id, thread_id);
+
+    let db = ctx.write_db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    let local_result = db
+        .with_write(move |conn| {
+            db::db::queries_extra::remove_folder(conn, &aid, &tid, "INBOX")?;
+            db::db::queries_extra::action_helpers::snooze_thread_sync(conn, &aid, &tid, until)?;
+            Ok(())
+        })
+        .await
+        .map_err(ActionError::db);
+
+    let outcome = match local_result {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => ActionOutcome::Failed { error: e },
+    };
+    mlog.emit(&outcome);
+    outcome
+}
+
+/// Unsnooze a single thread: restore to inbox, clear snooze state.
+/// Local-only by design.
+pub async fn unsnooze(ctx: &ActionContext, account_id: &str, thread_id: &str) -> ActionOutcome {
+    let mlog = MutationLog::begin("unsnooze", account_id, thread_id);
+
+    let db = ctx.write_db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    let local_result = db
+        .with_write(move |conn| {
+            db::db::queries_extra::insert_folder(conn, &aid, &tid, "INBOX")?;
+            db::db::queries_extra::action_helpers::unsnooze_thread_sync(conn, &aid, &tid)?;
+            Ok(())
+        })
+        .await
+        .map_err(ActionError::db);
+
+    let outcome = match local_result {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => ActionOutcome::Failed { error: e },
+    };
+    mlog.emit(&outcome);
+    outcome
+}

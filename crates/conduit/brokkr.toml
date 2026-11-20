@@ -1,0 +1,94 @@
+project = "conduit"
+
+[test]
+debug = true
+# This workspace is a set of published library crates and its doc examples are
+# part of the documented API surface. Brokkr leaves doctests off by default
+# because a nextest CI lane cannot run them; conduit has no such lane, so
+# leaving them off means the examples in ~24 source files are never compiled.
+doctests = true
+
+# Declaring any [[check]] entry replaces brokkr's implicit single `--all-features`
+# sweep, so the entries below have to reconstruct that coverage between them. conduit is a *virtual* workspace (no root package), so `features` is only
+# legal on an entry that also names `packages`; the workspace-wide baseline
+# therefore rides default features plus cargo's own unification across the
+# selected members.
+
+# Baseline: every member, default features. Unification across the workspace
+# selection donates the non-default features that in-workspace consumers ask
+# for - conduit-sync pulls `conduit-jmap/sync`, conduit-imap pulls
+# `conduit-smtp/tokio`, and dav-core's dev-dependency pulls
+# `conduit-net/test-support`. The one all-features flag nothing donates is
+# smtp's `dkim`, which the next entry covers.
+[[check]]
+name = "workspace"
+
+# smtp's DKIM signer is behind an optional feature no workspace member enables,
+# so it is invisible to the baseline sweep above.
+[[check]]
+name = "smtp-dkim"
+packages = ["conduit-smtp"]
+features = ["dkim"]
+
+# The feature-OFF leg. Everything above compiles conduit-jmap with its default
+# feature set, so the `#[cfg(not(feature = "calendars"))]` code and the
+# exhaustiveness arms that only exist for a calendars-off build are never
+# typechecked. `feature_unification = "selected"` pins the resolution so a
+# sibling member cannot donate the features back and quietly turn this into a
+# fourth copy of the default sweep.
+#
+# This is the default feature set MINUS `calendars`, deliberately: the one cfg
+# the code actually branches on. The zero-feature build is the next entry's job.
+[[check]]
+name = "jmap-calendars-off"
+packages = ["conduit-jmap"]
+no_default_features = true
+features = ["websockets", "mail", "contacts", "blob", "quota"]
+feature_unification = "selected"
+
+# conduit-jmap with NO features, resolved as `cargo install` would - per package,
+# so no sibling member can donate a feature back. Every default feature of this
+# crate is optional, and a consumer turning them off must still get a crate that
+# builds; before this sweep existed it never had.
+[[check]]
+name = "jmap-no-default"
+packages = ["conduit-jmap"]
+no_default_features = true
+feature_unification = "package"
+
+# conduit-jmap with its `sync` feature, resolved per package. The workspace sweep
+# only builds `sync` because conduit-sync donates it through unification, so a
+# focused `brokkr test -p conduit-jmap` never compiled `jmap/src/sync/`
+# at all. `package` resolution makes the feature request explicit here and also
+# proves `sync` enables everything it needs itself rather than leaning on a
+# sibling.
+[[check]]
+name = "jmap-sync"
+packages = ["conduit-jmap"]
+features = ["sync"]
+feature_unification = "package"
+
+# Every published crate at its DEFAULT features, resolved per package the way
+# `cargo install` and a downstream dependent resolve it. The `workspace` sweep
+# unifies features across members, so a crate that compiles only because a
+# sibling donates a feature it forgot to enable itself passes there and breaks
+# for its consumers - the shape of the blocking SMTP transport that once failed
+# to build without `tokio`. `package` resolution is the only mode that catches
+# it. Keep this list in step with the workspace's published members.
+[[check]]
+name = "install-shape"
+packages = [
+    "conduit-types",
+    "conduit-net",
+    "conduit-sasl",
+    "conduit-smtp",
+    "conduit-imap",
+    "conduit-jmap",
+    "conduit-google",
+    "conduit-graph",
+    "conduit-dav-core",
+    "conduit-carddav",
+    "conduit-caldav",
+    "conduit-sync",
+]
+feature_unification = "package"

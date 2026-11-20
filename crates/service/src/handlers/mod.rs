@@ -1,0 +1,338 @@
+mod account;
+mod account_verify;
+mod action;
+mod action_mark_chat_read;
+mod action_mark_thread_read;
+mod action_scheduled_send;
+mod action_send;
+mod action_status;
+mod attachment;
+mod boot;
+mod cal_action;
+mod calendar;
+mod contacts;
+pub(crate) mod extract;
+mod folder;
+mod gal;
+mod health;
+mod internal;
+mod label;
+mod oauth;
+mod pending_ops_kick;
+mod pinned_search;
+mod settings;
+mod signature;
+mod smart_folder;
+mod sync;
+mod template;
+pub(crate) mod test_helpers;
+mod thread_ui_state;
+
+pub(crate) use action_mark_chat_read::JournaledChatRead;
+pub(crate) use action_send::JournaledSend;
+
+use crate::boot::BootSharedState;
+use serde_json::Value;
+use service_api::{ClientNotification, RequestParams, ServiceError};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// Dispatch a request to its handler.
+///
+/// `RequestParams::Shutdown` is intentionally not handled here - the dispatch
+/// loop intercepts it directly so the drain + sentinel + ack ordering is
+/// explicit at the lifecycle layer. Treat reaching this arm as a bug.
+pub(crate) async fn dispatch(
+    params: RequestParams,
+    started_at: Instant,
+    boot_state: Arc<BootSharedState>,
+) -> Result<Value, ServiceError> {
+    match params {
+        RequestParams::HealthPing => health::handle(started_at, &boot_state).await,
+        RequestParams::Shutdown => Err(ServiceError::Internal(
+            "shutdown reached handler dispatch; lifecycle layer should have intercepted".into(),
+        )),
+        RequestParams::BootReady => boot::handle(&boot_state).await,
+        RequestParams::ActionExecutePlan { plan } => action::handle(&boot_state, plan).await,
+        RequestParams::CalActionExecutePlan { plan } => cal_action::handle(&boot_state, plan).await,
+        RequestParams::ActionJobStatus { plan_id } => {
+            action_status::handle(&boot_state, plan_id).await
+        }
+        RequestParams::ActionMarkChatRead { chat_email } => {
+            action_mark_chat_read::handle(&boot_state, chat_email).await
+        }
+        RequestParams::ActionMarkThreadRead {
+            account_id,
+            thread_id,
+        } => action_mark_thread_read::handle(&boot_state, account_id, thread_id).await,
+        RequestParams::ActionSend { request } => action_send::handle(&boot_state, *request).await,
+        RequestParams::TestDiscardDraft { params } => {
+            test_helpers::discard_draft_handle(&boot_state, params).await
+        }
+        RequestParams::TestContainerCrud { params } => {
+            test_helpers::container_crud_handle(&boot_state, params).await
+        }
+        RequestParams::ActionCancelScheduledSend { params } => {
+            action_scheduled_send::handle_cancel(&boot_state, params).await
+        }
+        RequestParams::ActionRescheduleSend { params } => {
+            action_scheduled_send::handle_reschedule(&boot_state, params).await
+        }
+        RequestParams::ActionDeleteDraft { params } => {
+            action_scheduled_send::handle_delete_draft(&boot_state, params).await
+        }
+        RequestParams::SyncStartAccount { params } => {
+            sync::handle_start_account(&boot_state, params).await
+        }
+        RequestParams::SyncCancelAccount { params } => {
+            sync::handle_cancel_account(&boot_state, params).await
+        }
+        RequestParams::SyncResumeAccount { params } => {
+            sync::handle_resume_account(&boot_state, params).await
+        }
+        RequestParams::SyncResyncAccount { params } => {
+            sync::handle_resync_account(&boot_state, params).await
+        }
+        RequestParams::SyncServerSearch { params } => {
+            sync::handle_server_search(&boot_state, params).await
+        }
+        RequestParams::SyncFocusFolder { params } => {
+            sync::handle_focus_folder(&boot_state, params).await
+        }
+        RequestParams::CalendarStartAccountSync { params } => {
+            calendar::handle_start_account_sync(&boot_state, params).await
+        }
+        RequestParams::CalendarCancelAccountSync { params } => {
+            calendar::handle_cancel_account_sync(&boot_state, params).await
+        }
+        RequestParams::CalendarSetVisibility { params } => {
+            calendar::handle_set_visibility(&boot_state, params).await
+        }
+        RequestParams::ThreadUiStateSet { params } => {
+            thread_ui_state::handle_set(&boot_state, params).await
+        }
+        RequestParams::SettingsSet { params } => settings::handle_set(&boot_state, params).await,
+        RequestParams::SignatureCreate { params } => {
+            signature::handle_create(&boot_state, params).await
+        }
+        RequestParams::SignatureUpdate { params } => {
+            signature::handle_update(&boot_state, params).await
+        }
+        RequestParams::SignatureDelete { params } => {
+            signature::handle_delete(&boot_state, params).await
+        }
+        RequestParams::SignatureReorder { params } => {
+            signature::handle_reorder(&boot_state, params).await
+        }
+        RequestParams::TemplateSave { params } => template::handle_save(&boot_state, params).await,
+        RequestParams::TemplateDelete { params } => {
+            template::handle_delete(&boot_state, params).await
+        }
+        RequestParams::LabelGroupReorder { params } => {
+            label::handle_reorder(&boot_state, params).await
+        }
+        RequestParams::LabelSave { params } => label::handle_save(&boot_state, params).await,
+        RequestParams::LabelDelete { params } => label::handle_delete(&boot_state, params).await,
+        RequestParams::LabelGroupSave { params } => {
+            label::handle_group_save(&boot_state, params).await
+        }
+        RequestParams::LabelGroupDelete { params } => {
+            label::handle_group_delete(&boot_state, params).await
+        }
+        RequestParams::FolderCreate { params } => folder::handle_create(&boot_state, params).await,
+        RequestParams::FolderRename { params } => folder::handle_rename(&boot_state, params).await,
+        RequestParams::FolderMove { params } => folder::handle_move(&boot_state, params).await,
+        RequestParams::FolderDelete { params } => folder::handle_delete(&boot_state, params).await,
+        RequestParams::FolderMarkAllRead { params } => {
+            folder::handle_mark_all_read(&boot_state, params).await
+        }
+        RequestParams::FolderEmpty { params } => folder::handle_empty(&boot_state, params).await,
+        RequestParams::ContactsGroupSave { params } => {
+            contacts::handle_group_save(&boot_state, params).await
+        }
+        RequestParams::ContactsGroupDelete { params } => {
+            contacts::handle_group_delete(&boot_state, params).await
+        }
+        RequestParams::AccountUpdate { params } => {
+            account::handle_update(&boot_state, params).await
+        }
+        RequestParams::AccountReorder { params } => {
+            account::handle_reorder(&boot_state, params).await
+        }
+        RequestParams::AccountCreate { params } => {
+            account::handle_create(&boot_state, params).await
+        }
+        RequestParams::AccountVerify { params } => {
+            account_verify::handle_verify_account(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchCreateOrUpdate { params } => {
+            pinned_search::handle_create_or_update(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchUpdate { params } => {
+            pinned_search::handle_update(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchDelete { params } => {
+            pinned_search::handle_delete(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchDeleteAll { params } => {
+            pinned_search::handle_delete_all(&boot_state, params).await
+        }
+        RequestParams::SmartFolderCreate { params } => {
+            smart_folder::handle_create(&boot_state, params).await
+        }
+        RequestParams::ContactsContactSave { params } => {
+            contacts::handle_contact_save(&boot_state, params).await
+        }
+        RequestParams::ContactsContactSaveWithWriteback { params } => {
+            contacts::handle_contact_save_with_writeback(&boot_state, params).await
+        }
+        RequestParams::ContactsContactDelete { params } => {
+            contacts::handle_contact_delete(&boot_state, params).await
+        }
+        RequestParams::AccountUpdateTokens { params } => {
+            account::handle_update_tokens(&boot_state, params).await
+        }
+        RequestParams::OauthExchangeCode { params } => {
+            oauth::handle_exchange_code(&boot_state, params).await
+        }
+        RequestParams::AttachmentFetch { params } => {
+            attachment::handle_fetch(&boot_state, params).await
+        }
+        RequestParams::AttachmentCacheSize { params: _ } => {
+            attachment::handle_cache_size(&boot_state).await
+        }
+        RequestParams::AttachmentClearCache { params: _ } => {
+            attachment::handle_clear_cache(&boot_state).await
+        }
+        RequestParams::ExtractStatus { params } => {
+            extract::handle_status(&boot_state, params).await
+        }
+        RequestParams::IndexRebuild { params } => {
+            extract::handle_rebuild(&boot_state, params).await
+        }
+        RequestParams::AccountDelete { params } => {
+            account::handle_delete(&boot_state, params).await
+        }
+        RequestParams::ReadBootstrapSnapshots { params } => {
+            internal::handle_read_bootstrap_snapshots(&boot_state, params).await
+        }
+        RequestParams::EncryptForStorage { params } => {
+            internal::handle_encrypt_for_storage(&boot_state, params).await
+        }
+        RequestParams::DecryptForStorage { params } => {
+            internal::handle_decrypt_for_storage(&boot_state, params).await
+        }
+        RequestParams::TestPanic => test_helpers::panic_handle().await,
+        RequestParams::TestVersion { version } => test_helpers::version_handle(version).await,
+        RequestParams::TestSlow { millis } => test_helpers::slow_handle(millis).await,
+        RequestParams::TestPrintln { message } => test_helpers::println_handle(message).await,
+        RequestParams::TestSeedAccount { params } => {
+            test_helpers::seed_account_handle(&boot_state, params).await
+        }
+        RequestParams::TestConduitFactoryOpen { params } => {
+            test_helpers::conduit_factory_open_handle(&boot_state, params).await
+        }
+        RequestParams::TestCounterRead { counter } => {
+            test_helpers::counter_read_handle(counter).await
+        }
+        RequestParams::TestCrashAfterNWrites { params } => {
+            test_helpers::crash_after_n_writes_handle(params).await
+        }
+        RequestParams::TestSeedThread { params } => {
+            test_helpers::seed_thread_handle(&boot_state, params).await
+        }
+        RequestParams::TestSeedCachedAttachment { params } => {
+            test_helpers::seed_cached_attachment_handle(&boot_state, params).await
+        }
+        RequestParams::TestSeedRemoteAttachment { params } => {
+            test_helpers::seed_remote_attachment_handle(&boot_state, params).await
+        }
+        RequestParams::TestRemoveCachedAttachmentBytes { params } => {
+            test_helpers::remove_cached_attachment_bytes_handle(&boot_state, params).await
+        }
+        RequestParams::TestThreadRead { params } => {
+            test_helpers::thread_read_handle(&boot_state, params).await
+        }
+        RequestParams::TestPendingOpsRead { params } => {
+            test_helpers::pending_ops_read_handle(&boot_state, params).await
+        }
+        RequestParams::TestStartSync { params } => {
+            test_helpers::start_sync_handle(&boot_state, params).await
+        }
+        RequestParams::TestContactPull { params } => {
+            test_helpers::contact_pull_handle(&boot_state, params).await
+        }
+        RequestParams::TestGroupPull { params } => {
+            test_helpers::group_pull_handle(&boot_state, params).await
+        }
+        RequestParams::TestGraphAuxPass { params } => {
+            test_helpers::graph_aux_pass_handle(&boot_state, params).await
+        }
+        RequestParams::TestGalKick => test_helpers::gal_kick_handle(&boot_state).await,
+        RequestParams::TestConduitAttach { params } => {
+            test_helpers::conduit_attach_handle(&boot_state, params).await
+        }
+        RequestParams::TestConduitInjectBatch { params } => {
+            test_helpers::conduit_inject_batch_handle(params).await
+        }
+        RequestParams::TestConduitArmHook { params } => {
+            test_helpers::conduit_arm_hook_handle(params).await
+        }
+        RequestParams::TestConduitProbe { params } => {
+            test_helpers::conduit_probe_handle(&boot_state, params).await
+        }
+        RequestParams::TestQueryDbState { params } => {
+            test_helpers::query_db_state_handle(&boot_state, params).await
+        }
+        RequestParams::TestSearchIndex { params } => {
+            test_helpers::search_index_handle(&boot_state, params).await
+        }
+        RequestParams::TestDelayNextWrite { params } => {
+            test_helpers::delay_next_write_handle(params).await
+        }
+        RequestParams::TestQueryBlobTombstoneState { params } => {
+            test_helpers::query_blob_tombstone_state_handle(&boot_state, params).await
+        }
+        RequestParams::TestRunDiscovery { params } => {
+            test_helpers::run_discovery_handle(params).await
+        }
+    }
+}
+
+/// Dispatch a UI -> Service notification (Phase 2 plan scope item 11).
+///
+/// No response is emitted - notifications are fire-and-forget by
+/// construction. The handler returns `Result<(), String>` so it can
+/// surface a diagnostic into the dispatch log even though the UI never
+/// observes it directly.
+pub(crate) async fn dispatch_notification(
+    notification: ClientNotification,
+    boot_state: Arc<BootSharedState>,
+) -> Result<(), String> {
+    match notification {
+        ClientNotification::PendingOpsKick => pending_ops_kick::handle(&boot_state).await,
+        ClientNotification::PendingOpsCancelForResource {
+            account_id,
+            resource_id,
+            operation_type,
+        } => {
+            pending_ops_kick::handle_cancel_for_resource(
+                &boot_state,
+                account_id,
+                resource_id,
+                operation_type,
+            )
+            .await
+        }
+        ClientNotification::CalendarKick => calendar::handle_calendar_kick(&boot_state).await,
+        ClientNotification::GalKick => gal::handle_gal_kick(&boot_state).await,
+        ClientNotification::PinnedSearchKick => pinned_search::handle_kick(&boot_state).await,
+        ClientNotification::AttachmentEvictionKick => {
+            attachment::handle_eviction_kick(&boot_state).await
+        }
+        ClientNotification::AttachmentTmpCleanupKick => {
+            attachment::handle_tmp_cleanup_kick(&boot_state).await
+        }
+        ClientNotification::ExtractBackfillKick => extract::handle_backfill_kick(&boot_state).await,
+    }
+}

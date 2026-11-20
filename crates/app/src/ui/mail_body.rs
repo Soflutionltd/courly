@@ -1,0 +1,1300 @@
+//! HTML email bodies rendered off the UI thread by the `mail-html` engine
+//! and shown as image tiles with clickable link areas and selectable text.
+
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+
+use iced::widget::{
+    Space, button, column, container, image, mouse_area, row, scrollable, sensor, stack, text,
+};
+use iced::{Alignment, Element, Length, Padding, Vector, mouse};
+use mail_html::{
+    Appearance, Bytes, LinkArea, QuoteHeader, RemoteFetcher, RenderRequest, TextLine, Url,
+};
+use rust_i18n::t;
+
+use crate::icon;
+use crate::ui::anchored_overlay::anchored_overlay;
+use crate::ui::layout::*;
+use crate::ui::mail_selection::{SelectAction, Selection, text_selector};
+use crate::ui::theme;
+use crate::ui::widgets;
+
+const LINK_MENU_WIDTH: f32 = 280.0;
+const SELECTION_MENU_WIDTH: f32 = 200.0;
+/// Longer link addresses are cut in the menu header.
+const LINK_MENU_HREF_CHARS: usize = 160;
+
+/// What a link in an HTML body asks for.
+#[derive(Debug, Clone)]
+pub enum LinkAction {
+    Open(String),
+    /// Right-click: show the link menu at this offset from the page's
+    /// top-left corner.
+    ShowMenu {
+        href: String,
+        at: Vector,
+    },
+    CloseMenu,
+    Copy(String),
+    /// Start a new message to this address, from a `mailto:` link.
+    Compose(String),
+}
+
+/// Largest remote resource accepted when the user allows remote content.
+const REMOTE_MAX_BYTES: u64 = 15 * 1024 * 1024;
+const REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Source of render tickets. A result is applied only if its ticket is the
+/// one its state is waiting for, so renders for replaced content are dropped.
+static NEXT_TICKET: AtomicU64 = AtomicU64::new(1);
+
+/// Remote resources fetched at the same time, across all messages.
+const REMOTE_CONCURRENCY: usize = 6;
+const REMOTE_MAX_REDIRECTS: usize = 5;
+
+/// A sender chooses these URLs, so they must not reach the user's own
+/// machine or network (router admin pages, LAN services, cloud metadata).
+/// Names are checked after DNS resolution, which also covers rebinding.
+static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(REMOTE_TIMEOUT)
+        .user_agent("Mozilla/5.0")
+        .dns_resolver(PublicOnlyResolver)
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= REMOTE_MAX_REDIRECTS {
+                attempt.error("too many redirects")
+            } else if is_public_url(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .build()
+        .map_err(|e| log::warn!("remote image client unavailable: {e}"))
+        .ok()
+});
+
+static REMOTE_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(REMOTE_CONCURRENCY)));
+
+struct PublicOnlyResolver;
+
+impl reqwest::dns::Resolve for PublicOnlyResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let public: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|addr| is_public_ip(addr.ip()))
+                .collect();
+            if public.is_empty() {
+                return Err(format!("{host} resolves to no public address").into());
+            }
+            let addrs: reqwest::dns::Addrs = Box::new(public.into_iter());
+            Ok(addrs)
+        })
+    }
+}
+
+/// The HTTP client for URLs a sender chose: it never reaches the user's own
+/// machine or network, whatever the name resolves to or redirects to.
+pub(crate) fn public_http_client() -> Option<&'static reqwest::Client> {
+    HTTP.as_ref()
+}
+
+/// IP literals never reach the resolver, so the URL host is checked too.
+pub(crate) fn is_public_url(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    match host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+    {
+        Ok(ip) => is_public_ip(ip),
+        Err(_) => {
+            let name = host.trim_end_matches('.');
+            !(name.eq_ignore_ascii_case("localhost")
+                || name.to_ascii_lowercase().ends_with(".localhost"))
+        }
+    }
+}
+
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+                || ip.is_documentation()
+                || a == 0
+                || (a == 100 && (64..128).contains(&b))
+                || a >= 240)
+        }
+        std::net::IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
+            Some(mapped) => is_public_ip(std::net::IpAddr::V4(mapped)),
+            None => {
+                !(ip.is_unspecified()
+                    || ip.is_loopback()
+                    || ip.is_multicast()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local())
+            }
+        },
+    }
+}
+
+/// One card of a rendered body: the message itself, or one of the earlier
+/// messages quoted at its end.
+struct BodyCard {
+    /// Where the card starts, from the top of the rendered body.
+    top: f32,
+    height: f32,
+    tiles: Vec<(image::Handle, f32)>,
+    /// Placed from the card's top-left corner.
+    links: Vec<LinkArea>,
+    /// The card's lines in the body's `text`.
+    lines: std::ops::Range<usize>,
+    /// Who wrote a quoted message and when, as the mail quoting it says.
+    header: Option<QuoteHeader>,
+}
+
+/// A rendered email body, ready to draw.
+pub struct RenderedBody {
+    width: f32,
+    /// The message first, then each quoted message, top to bottom.
+    cards: Vec<BodyCard>,
+    /// Every line of the body, each placed from the top-left corner of the
+    /// card that shows it.
+    text: Vec<TextLine>,
+    blocked_remote: usize,
+}
+
+impl std::fmt::Debug for RenderedBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderedBody")
+            .field("width", &self.width)
+            .field("cards", &self.cards.len())
+            .field("lines", &self.text.len())
+            .field("blocked_remote", &self.blocked_remote)
+            .finish()
+    }
+}
+
+impl RenderedBody {
+    /// Cut a render into its cards at `mail.quote_starts`.
+    fn from_mail(mail: mail_html::RenderedMail) -> Self {
+        let mut tops = vec![0.0];
+        tops.extend(mail.quote_starts.iter().copied());
+        let card_at = |y: f32| tops.iter().rposition(|&top| y >= top).unwrap_or(0);
+        // A quoted message rendered on its own opens with its own header.
+        let mut headers = std::iter::once(mail.lead_header).chain(mail.quote_headers);
+        let mut cards: Vec<BodyCard> = tops
+            .iter()
+            .enumerate()
+            .map(|(index, &top)| BodyCard {
+                top,
+                height: tops.get(index + 1).copied().unwrap_or(mail.height) - top,
+                tiles: Vec::new(),
+                links: Vec::new(),
+                lines: 0..0,
+                header: headers.next().flatten(),
+            })
+            .collect();
+        for tile in mail.tiles {
+            // No tile spans a cut, so its middle names its card.
+            let card = &mut cards[card_at(tile.y + tile.height / 2.0)];
+            card.tiles.push((
+                image::Handle::from_rgba(tile.px_width, tile.px_height, tile.rgba),
+                tile.height,
+            ));
+        }
+        for mut link in mail.links {
+            let card = &mut cards[card_at(link.y + link.height / 2.0)];
+            link.y -= card.top;
+            card.links.push(link);
+        }
+        let mut text = mail.text;
+        // Lines come in reading order and the cards follow it, so a line
+        // never belongs to a card above the one of the line before it.
+        let mut current = 0;
+        for (index, line) in text.iter_mut().enumerate() {
+            let card = card_at(line.y + line.height / 2.0).max(current);
+            for skipped in &mut cards[current + 1..=card] {
+                skipped.lines = index..index;
+            }
+            current = card;
+            line.y -= cards[card].top;
+            cards[card].lines.end = index + 1;
+        }
+        let end = text.len();
+        for unreached in &mut cards[current + 1..] {
+            unreached.lines = end..end;
+        }
+        Self {
+            width: mail.width,
+            cards,
+            text,
+            blocked_remote: mail.blocked_remote,
+        }
+    }
+}
+
+/// Inputs of one render pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderInputs {
+    pub ticket: u64,
+    pub width: f32,
+    pub zoom: f32,
+    pub allow_remote: bool,
+    pub appearance: Appearance,
+    /// The body is a quoted message on its own: see `HtmlBodyState::quoted`.
+    pub quote_only: bool,
+}
+
+/// Per-message render state in the reading pane.
+#[derive(Debug, Clone)]
+pub struct HtmlBodyState {
+    desired_width: Option<f32>,
+    zoom: f32,
+    /// Ticket of the render in flight, if any.
+    in_flight: Option<u64>,
+    failed: bool,
+    allow_remote: bool,
+    appearance: Appearance,
+    /// The user asked to see this message as sent, without dark recolouring.
+    original: bool,
+    /// The body is a quoted message on its own, the one a reply is written
+    /// to: the header it opens with is shown as the header of its card.
+    quote_only: bool,
+    rendered: Option<Arc<RenderedBody>>,
+    /// The link whose right-click menu is open, and where it opens.
+    link_menu: Option<(String, Vector)>,
+    /// The text the reader selected in the current render.
+    selection: Option<Selection>,
+    /// Where the right-click menu of the selection opens, when it is open.
+    selection_menu: Option<Vector>,
+}
+
+thread_local! {
+    static READING_ZOOM: Cell<f32> = const { Cell::new(1.0) };
+    static READING_APPEARANCE: Cell<Appearance> = Cell::new(Appearance::default());
+    static REMOTE_CONTENT_ALLOWED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether messages load remote content without asking, set from the
+/// "block remote images" preference.
+pub fn set_remote_content_allowed(allowed: bool) {
+    REMOTE_CONTENT_ALLOWED.with(|cell| cell.set(allowed));
+}
+
+/// Zoom applied to HTML bodies, set from the user's preference.
+pub fn reading_zoom() -> f32 {
+    READING_ZOOM.with(Cell::get)
+}
+
+pub fn set_reading_zoom(zoom: f32) {
+    READING_ZOOM.with(|cell| cell.set(zoom));
+}
+
+/// What HTML bodies are painted on, set from the theme and preference.
+pub fn reading_appearance() -> Appearance {
+    READING_APPEARANCE.with(Cell::get)
+}
+
+pub fn set_reading_appearance(appearance: Appearance) {
+    READING_APPEARANCE.with(|cell| cell.set(appearance));
+}
+
+impl Default for HtmlBodyState {
+    fn default() -> Self {
+        Self {
+            desired_width: None,
+            zoom: reading_zoom(),
+            in_flight: None,
+            failed: false,
+            allow_remote: REMOTE_CONTENT_ALLOWED.with(Cell::get),
+            appearance: reading_appearance(),
+            original: false,
+            quote_only: false,
+            rendered: None,
+            link_menu: None,
+            selection: None,
+            selection_menu: None,
+        }
+    }
+}
+
+impl HtmlBodyState {
+    pub fn show_link_menu(&mut self, href: String, at: Vector) {
+        self.selection_menu = None;
+        self.link_menu = Some((href, at));
+    }
+
+    /// Apply what the reader did to the text selection. Returns the text to
+    /// put on the clipboard when the action is a copy.
+    pub fn select(&mut self, action: SelectAction) -> Option<String> {
+        let lines = self.rendered.as_ref().map(|body| body.text.as_slice())?;
+        self.selection_menu = None;
+        match action {
+            SelectAction::Set(selection) => self.selection = Some(selection),
+            SelectAction::Unset { first, count } => {
+                if self
+                    .selection
+                    .is_some_and(|selection| selection.touches(first, count))
+                {
+                    self.selection = None;
+                }
+            }
+            SelectAction::SelectAll => self.selection = Selection::all(lines),
+            SelectAction::ShowMenu(at) => {
+                self.link_menu = None;
+                self.selection_menu = Some(at);
+            }
+            SelectAction::CloseMenu => {}
+            SelectAction::Copy => {
+                return self
+                    .selection
+                    .map(|selection| selection.text(lines))
+                    .filter(|text| !text.is_empty());
+            }
+        }
+        None
+    }
+
+    /// The text of the current render, as a reader would copy all of it.
+    pub fn rendered_text(&self) -> Option<String> {
+        let lines = self.rendered.as_ref()?.text.as_slice();
+        Selection::all(lines).map(|all| all.text(lines))
+    }
+
+    /// The text moved with the new layout, so a selection would cover
+    /// other words.
+    fn drop_selection(&mut self) {
+        self.selection = None;
+        self.selection_menu = None;
+    }
+
+    pub fn close_link_menu(&mut self) {
+        self.link_menu = None;
+    }
+
+    /// Change the reading zoom. Returns true when a new render should start.
+    pub fn set_zoom(&mut self, zoom: f32) -> bool {
+        if (self.zoom - zoom).abs() < f32::EPSILON {
+            return false;
+        }
+        self.zoom = zoom;
+        self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
+    /// Change what the body is painted on. Returns true when a new render
+    /// should start.
+    pub fn set_appearance(&mut self, appearance: Appearance) -> bool {
+        if self.appearance == appearance {
+            return false;
+        }
+        self.appearance = appearance;
+        self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
+    /// Switch between the dark recolouring and the email as sent. Returns
+    /// true when a new render should start.
+    pub fn toggle_original(&mut self) -> bool {
+        self.set_original(!self.original)
+    }
+
+    /// Show the email as sent (`true`) or recoloured for the page. Returns
+    /// true when a new render should start.
+    pub fn set_original(&mut self, original: bool) -> bool {
+        if self.original == original {
+            return false;
+        }
+        self.original = original;
+        self.desired_width.is_some() && self.in_flight.is_none()
+    }
+
+    /// A fresh state for a quoted message shown on its own, under the reply
+    /// being written to it.
+    pub fn quoted() -> Self {
+        Self {
+            quote_only: true,
+            ..Self::default()
+        }
+    }
+
+    /// The header of the `position`-th message quoted at the end of the
+    /// rendered body, as the mail quoting it wrote it.
+    pub fn quote_header(&self, position: usize) -> Option<&QuoteHeader> {
+        self.rendered
+            .as_ref()?
+            .cards
+            .get(position + 1)?
+            .header
+            .as_ref()
+    }
+
+    /// A fresh state that shows the email as sent when `original` is set.
+    pub fn with_original(original: bool) -> Self {
+        Self {
+            original,
+            ..Self::default()
+        }
+    }
+
+    /// `Some(showing_original)` when the body is recoloured for a dark page,
+    /// so the reader can switch back to the email as sent.
+    pub fn dark_tone(&self) -> Option<bool> {
+        self.appearance.dark.then_some(self.original)
+    }
+
+    fn effective_appearance(&self) -> Appearance {
+        if self.original {
+            Appearance::default()
+        } else {
+            self.appearance
+        }
+    }
+
+    /// Record the width the body is laid out at. Returns true when a new
+    /// render should start.
+    pub fn set_width(&mut self, width: f32) -> bool {
+        let width = width.floor();
+        if width < 1.0 || self.desired_width == Some(width) {
+            return false;
+        }
+        self.desired_width = Some(width);
+        self.in_flight.is_none()
+    }
+
+    /// Allow remote content for this message. Returns true when a new
+    /// render should start.
+    pub fn allow_remote(&mut self) -> bool {
+        if self.allow_remote {
+            return false;
+        }
+        self.allow_remote = true;
+        self.in_flight.is_none()
+    }
+
+    /// Drop the current render after the content changed. Returns true when
+    /// the width is known, so a new render can start right away; results
+    /// still in flight for the old content are ignored.
+    pub fn restart(&mut self) -> bool {
+        self.in_flight = None;
+        self.failed = false;
+        self.rendered = None;
+        self.drop_selection();
+        self.desired_width.is_some()
+    }
+
+    /// Store a finished render. Returns true when the width or zoom changed
+    /// while it was running and another pass is needed. Results for any
+    /// other ticket are ignored.
+    pub fn finish(&mut self, inputs: RenderInputs, body: Option<Arc<RenderedBody>>) -> bool {
+        if self.in_flight != Some(inputs.ticket) {
+            return false;
+        }
+        self.in_flight = None;
+        // The links moved with the new layout, so the menu would point at nothing.
+        self.link_menu = None;
+        self.drop_selection();
+        match body {
+            Some(body) => {
+                self.failed = false;
+                self.rendered = Some(body);
+            }
+            None => self.failed = true,
+        }
+        (self.zoom - inputs.zoom).abs() >= f32::EPSILON
+            || inputs.appearance != self.effective_appearance()
+            || self
+                .desired_width
+                .is_some_and(|w| (w - inputs.width).abs() >= 1.0)
+    }
+
+    /// Mark a render as started and return its inputs.
+    pub fn start(&mut self) -> Option<RenderInputs> {
+        let width = self.desired_width?;
+        let ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
+        self.in_flight = Some(ticket);
+        Some(RenderInputs {
+            ticket,
+            width,
+            zoom: self.zoom,
+            allow_remote: self.allow_remote,
+            appearance: self.effective_appearance(),
+            quote_only: self.quote_only,
+        })
+    }
+}
+
+/// Extract raw bytes for inline (`cid:`) images.
+pub fn inline_image_bytes(handles: &HashMap<String, image::Handle>) -> HashMap<String, Bytes> {
+    handles
+        .iter()
+        .filter_map(|(cid, handle)| match handle {
+            image::Handle::Bytes(_, bytes) => Some((cid.clone(), bytes.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Render one body on a blocking worker. `None` when the engine failed.
+pub async fn render(
+    html: String,
+    inputs: RenderInputs,
+    inline_images: HashMap<String, Bytes>,
+) -> Option<Arc<RenderedBody>> {
+    let remote = inputs
+        .allow_remote
+        .then(|| remote_fetcher(tokio::runtime::Handle::current()));
+    let result = tokio::task::spawn_blocking(move || {
+        let mail = mail_html::render(RenderRequest {
+            html,
+            width: inputs.width,
+            zoom: inputs.zoom,
+            inline_images,
+            remote,
+            appearance: inputs.appearance,
+            quote_only: inputs.quote_only,
+        });
+        Arc::new(RenderedBody::from_mail(mail))
+    })
+    .await;
+    result
+        .map_err(|e| log::error!("HTML email render failed: {e}"))
+        .ok()
+}
+
+fn remote_fetcher(runtime: tokio::runtime::Handle) -> RemoteFetcher {
+    Arc::new(move |url: &Url| {
+        let client = HTTP.as_ref()?;
+        let url = url.clone();
+        if !is_public_url(&url) {
+            return None;
+        }
+        runtime.block_on(async move {
+            let _permit = Arc::clone(&REMOTE_PERMITS).acquire_owned().await.ok()?;
+            let mut response = client.get(url).send().await.ok()?.error_for_status().ok()?;
+            if response
+                .content_length()
+                .is_some_and(|len| len > REMOTE_MAX_BYTES)
+            {
+                return None;
+            }
+            let mut body = Vec::new();
+            while let Some(chunk) = response.chunk().await.ok()? {
+                if (body.len() + chunk.len()) as u64 > REMOTE_MAX_BYTES {
+                    return None;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Some(Bytes::from(body))
+        })
+    })
+}
+
+/// What the links of a rendered body do.
+enum Links<'a, M> {
+    /// A click opens the link; nothing else.
+    OpenOnly(Rc<dyn Fn(String) -> M + 'a>),
+    /// A click opens the link, a right-click shows its menu, and the text
+    /// around the links can be selected.
+    WithMenu {
+        on_link: Rc<dyn Fn(LinkAction) -> M + 'a>,
+        on_select: Rc<dyn Fn(SelectAction) -> M + 'a>,
+    },
+}
+
+/// A rendered body as the cards it is shown in.
+pub struct BodyCards<'a, M> {
+    /// The message itself. It also reports the width bodies are laid out at.
+    pub message: Element<'a, M>,
+    /// The header that message opened with, when it is a quoted message
+    /// shown on its own.
+    pub message_header: Option<&'a QuoteHeader>,
+    /// Each earlier message quoted at its end, top to bottom.
+    pub quoted: Vec<QuotedCard<'a, M>>,
+}
+
+/// An earlier message quoted at the end of another.
+pub struct QuotedCard<'a, M> {
+    /// Who wrote it and when, when the mail quoting it says so.
+    pub header: Option<&'a QuoteHeader>,
+    pub body: Element<'a, M>,
+}
+
+/// An HTML body whose links only open on click, for previews. Reports its
+/// available width through `on_width` so the owner can (re)render at the
+/// right size. A preview is one block: quoted messages follow under a rule.
+pub fn view<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    on_link: impl Fn(String) -> M + 'a,
+    on_show_remote: M,
+) -> Element<'a, M> {
+    view_cards(state, fallback_text, on_width, on_link, on_show_remote).stacked()
+}
+
+/// The same body as [`view`], as the cards it is made of: the message, then
+/// each earlier message quoted at its end.
+pub fn view_cards<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    on_link: impl Fn(String) -> M + 'a,
+    on_show_remote: M,
+) -> BodyCards<'a, M> {
+    body_view(
+        state,
+        fallback_text,
+        on_width,
+        &Links::OpenOnly(Rc::new(on_link)),
+        on_show_remote,
+    )
+}
+
+/// A quote header on one line: "Ann Example <ann@example.com> · Monday".
+fn header_line(header: &QuoteHeader) -> String {
+    let sender = match (&header.name, &header.address) {
+        (Some(name), Some(address)) => format!("{name} <{address}>"),
+        (Some(only), None) | (None, Some(only)) => only.clone(),
+        (None, None) => String::new(),
+    };
+    match &header.date {
+        Some(date) => format!("{sender} \u{00B7} {date}"),
+        None => sender,
+    }
+}
+
+impl<'a, M: 'a> BodyCards<'a, M> {
+    /// The body as one block, for a place that shows a single card: each
+    /// quoted message follows under a rule.
+    pub fn stacked(self) -> Element<'a, M> {
+        if self.quoted.is_empty() && self.message_header.is_none() {
+            return self.message;
+        }
+        let mut block = column![].spacing(SPACE_SM);
+        if let Some(line) = self.message_header.map(header_line) {
+            block = block.push(
+                text(line)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Muted.style()),
+            );
+        }
+        block = block.push(self.message);
+        for quoted in self.quoted {
+            block = block.push(widgets::divider());
+            // The lines naming the sender were taken off the rendered page.
+            if let Some(line) = quoted.header.map(header_line) {
+                block = block.push(
+                    text(line)
+                        .size(TEXT_SM)
+                        .style(theme::TextClass::Muted.style()),
+                );
+            }
+            block = block.push(quoted.body);
+        }
+        block.into()
+    }
+}
+
+/// The HTML body of a received message, whose links also have a
+/// right-click menu and whose text can be selected and copied.
+pub fn view_with_link_menu<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    on_link: impl Fn(LinkAction) -> M + 'a,
+    on_select: impl Fn(SelectAction) -> M + 'a,
+    on_show_remote: M,
+) -> BodyCards<'a, M> {
+    body_view(
+        state,
+        fallback_text,
+        on_width,
+        &Links::WithMenu {
+            on_link: Rc::new(on_link),
+            on_select: Rc::new(on_select),
+        },
+        on_show_remote,
+    )
+}
+
+fn body_view<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    on_width: impl Fn(f32) -> M + 'a,
+    links: &Links<'a, M>,
+    on_show_remote: M,
+) -> BodyCards<'a, M> {
+    let mut quoted = Vec::new();
+    let mut message_header = None;
+    let content: Element<'a, M> = match state {
+        Some(HtmlBodyState {
+            rendered: Some(body),
+            allow_remote,
+            desired_width,
+            link_menu,
+            selection,
+            selection_menu,
+            ..
+        }) => {
+            let overflows = desired_width.is_some_and(|w| body.width > w + 1.0);
+            let mut pages = body.cards.iter().map(|card| QuotedCard {
+                header: card.header.as_ref(),
+                body: rendered_page(
+                    body,
+                    card,
+                    link_menu.as_ref(),
+                    (*selection, *selection_menu),
+                    overflows,
+                    links,
+                ),
+            });
+            let page = match pages.next() {
+                Some(card) => {
+                    message_header = card.header;
+                    card.body
+                }
+                None => Space::new().width(Length::Fill).into(),
+            };
+            quoted.extend(pages);
+            if body.blocked_remote > 0 && !allow_remote {
+                column![remote_banner(on_show_remote), page]
+                    .spacing(SPACE_XS)
+                    .into()
+            } else {
+                page
+            }
+        }
+        Some(HtmlBodyState { failed: true, .. }) => text(fallback_text.map_or_else(
+            || t!("main.reading_pane.body_unavailable").into_owned(),
+            str::to_string,
+        ))
+        .size(TEXT_LG)
+        .into(),
+        _ => Space::new()
+            .width(Length::Fill)
+            .height(HTML_BODY_PLACEHOLDER_HEIGHT)
+            .into(),
+    };
+
+    let on_width = Rc::new(on_width);
+    let on_resize = Rc::clone(&on_width);
+    let message = sensor(container(content).width(Length::Fill))
+        .on_show(move |size| on_width(size.width))
+        .on_resize(move |size| on_resize(size.width))
+        .into();
+    BodyCards {
+        message,
+        message_header,
+        quoted,
+    }
+}
+
+/// One card of a rendered body. The menus of the body are opened and
+/// placed from the body's top-left corner, whichever card shows them.
+fn rendered_page<'a, M: Clone + 'a>(
+    body: &'a RenderedBody,
+    card: &'a BodyCard,
+    link_menu: Option<&'a (String, Vector)>,
+    (selection, selection_menu): (Option<Selection>, Option<Vector>),
+    overflows: bool,
+    links: &Links<'a, M>,
+) -> Element<'a, M> {
+    let from_body = Vector::new(0.0, card.top);
+    let shows = |at: Vector| at.y >= card.top && at.y < card.top + card.height;
+
+    let mut tiles = column![].width(body.width);
+    for (handle, height) in &card.tiles {
+        tiles = tiles.push(
+            image(handle.clone())
+                .width(body.width)
+                .height(*height)
+                .content_fit(iced::ContentFit::Fill),
+        );
+    }
+
+    let mut layers = stack![tiles].width(body.width).height(card.height);
+    for link in &card.links {
+        let place = Vector::new(link.x.max(0.0), link.y.max(0.0));
+        let origin = place + from_body;
+        let area = mouse_area(Space::new().width(link.width).height(link.height))
+            .interaction(mouse::Interaction::Pointer);
+        let hit: Element<'a, M> = match links {
+            Links::OpenOnly(on_open) => area.on_press(on_open(link.href.clone())).into(),
+            Links::WithMenu { on_link, .. } => {
+                let on_menu = Rc::clone(on_link);
+                let href = link.href.clone();
+                anchored_overlay(area.on_press(on_link(LinkAction::Open(link.href.clone()))))
+                    .on_right_press_offset(move |at| {
+                        on_menu(LinkAction::ShowMenu {
+                            href: href.clone(),
+                            at: origin + at,
+                        })
+                    })
+                    .into()
+            }
+        };
+        layers = layers.push(container(hit).padding(Padding {
+            top: place.y,
+            left: place.x,
+            right: 0.0,
+            bottom: 0.0,
+        }));
+    }
+
+    let mut page = match links {
+        Links::OpenOnly(_) => anchored_overlay(layers),
+        Links::WithMenu { on_select, .. } => {
+            let on_select = Rc::clone(on_select);
+            anchored_overlay(text_selector(
+                layers,
+                &body.text[card.lines.clone()],
+                card.lines.start,
+                selection,
+                move |action| {
+                    on_select(match action {
+                        SelectAction::ShowMenu(at) => SelectAction::ShowMenu(at + from_body),
+                        other => other,
+                    })
+                },
+            ))
+        }
+    };
+    if let Links::WithMenu { on_link, on_select } = links {
+        if let Some((href, at)) = link_menu.filter(|(_, at)| shows(*at)) {
+            page = page
+                .popup(link_menu_card(href, on_link.as_ref()))
+                .anchor_offset(*at - from_body)
+                .popup_width(LINK_MENU_WIDTH)
+                .on_dismiss(on_link(LinkAction::CloseMenu));
+        } else if let Some(at) = selection_menu.filter(|at| shows(*at)) {
+            page = page
+                .popup(selection_menu_card(on_select.as_ref()))
+                .anchor_offset(at - from_body)
+                .popup_width(SELECTION_MENU_WIDTH)
+                .on_dismiss(on_select(SelectAction::CloseMenu));
+        }
+    }
+
+    if !overflows {
+        return page.into();
+    }
+    scrollable(page)
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default(),
+        ))
+        .width(Length::Fill)
+        .into()
+}
+
+/// The right-click menu of a link: its real address first, so a link
+/// whose text names another site can be spotted, then what it can do.
+fn link_menu_card<'a, M: Clone + 'a>(
+    href: &'a str,
+    on_link: &(dyn Fn(LinkAction) -> M + 'a),
+) -> Element<'a, M> {
+    let shown = match href.char_indices().nth(LINK_MENU_HREF_CHARS) {
+        Some((cut, _)) => format!("{}…", &href[..cut]),
+        None => href.to_owned(),
+    };
+    let mut items = column![
+        container(
+            text(shown)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style())
+                .wrapping(text::Wrapping::WordOrGlyph),
+        )
+        .padding(PAD_NAV_ITEM)
+        .width(Length::Fill),
+        widgets::divider(),
+    ]
+    .spacing(SPACE_XXS);
+    if let Some(address) = mailto_address(href) {
+        items = items
+            .push(link_menu_item(
+                icon::pencil(),
+                t!("main.link_menu.new_message"),
+                on_link(LinkAction::Compose(address.clone())),
+            ))
+            .push(link_menu_item(
+                icon::copy(),
+                t!("main.link_menu.copy_address"),
+                on_link(LinkAction::Copy(address)),
+            ));
+    } else {
+        if is_web_link(href) {
+            items = items.push(link_menu_item(
+                icon::external_link(),
+                t!("main.link_menu.open"),
+                on_link(LinkAction::Open(href.to_owned())),
+            ));
+        }
+        items = items.push(link_menu_item(
+            icon::copy(),
+            t!("main.link_menu.copy_link"),
+            on_link(LinkAction::Copy(href.to_owned())),
+        ));
+    }
+    container(items)
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style())
+        .into()
+}
+
+/// The right-click menu of selected text.
+fn selection_menu_card<'a, M: Clone + 'a>(
+    on_select: &(dyn Fn(SelectAction) -> M + 'a),
+) -> Element<'a, M> {
+    container(
+        column![
+            link_menu_item(
+                icon::copy(),
+                t!("main.selection_menu.copy"),
+                on_select(SelectAction::Copy),
+            ),
+            link_menu_item(
+                icon::align_left(),
+                t!("main.selection_menu.select_all"),
+                on_select(SelectAction::SelectAll),
+            ),
+        ]
+        .spacing(SPACE_XXS),
+    )
+    .padding(PAD_DROPDOWN)
+    .style(theme::ContainerClass::SelectMenu.style())
+    .into()
+}
+
+fn link_menu_item<'a, M: Clone + 'a>(
+    ico: iced::widget::Text<'a>,
+    label: std::borrow::Cow<'a, str>,
+    on_press: M,
+) -> Element<'a, M> {
+    button(
+        row![
+            container(ico.size(ICON_MD).style(text::secondary))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
+}
+
+fn is_web_link(href: &str) -> bool {
+    Url::parse(href).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+}
+
+/// The first address of a `mailto:` link, without its subject or body.
+fn mailto_address(href: &str) -> Option<String> {
+    let url = Url::parse(href)
+        .ok()
+        .filter(|url| url.scheme() == "mailto")?;
+    url.path()
+        .split(',')
+        .map(str::trim)
+        .find(|address| address.contains('@'))
+        .map(str::to_owned)
+}
+
+fn remote_banner<'a, M: Clone + 'a>(on_show_remote: M) -> Element<'a, M> {
+    container(
+        row![
+            icon::shield()
+                .size(ICON_SM)
+                .style(theme::TextClass::Muted.style()),
+            text(t!("main.reading_pane.remote_images_blocked"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style()),
+            Space::new().width(Length::Fill),
+            button(text(t!("main.reading_pane.show_images")).size(TEXT_SM))
+                .on_press(on_show_remote)
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::Secondary.style()),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_REMOTE_BANNER)
+    .width(Length::Fill)
+    .style(theme::ContainerClass::Badge.style())
+    .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_content_never_targets_local_or_private_hosts() {
+        for blocked in [
+            "http://127.0.0.1/x.png",
+            "http://localhost/x.png",
+            "http://router.localhost./x.png",
+            "http://192.168.1.1/cgi-bin/reboot",
+            "http://10.0.0.5/",
+            "http://172.20.0.1/",
+            "http://169.254.169.254/latest/meta-data",
+            "http://100.64.0.1/",
+            "http://0.0.0.0/",
+            "http://[::1]/",
+            "http://[fd00::1]/",
+            "http://[fe80::1]/",
+            "http://[::ffff:192.168.1.1]/",
+        ] {
+            let url = Url::parse(blocked).expect("url");
+            assert!(!is_public_url(&url), "{blocked}");
+        }
+        for allowed in [
+            "https://images.example.com/logo.png",
+            "http://93.184.216.34/pixel.gif",
+            "https://[2606:4700::1111]/x.png",
+        ] {
+            let url = Url::parse(allowed).expect("url");
+            assert!(is_public_url(&url), "{allowed}");
+        }
+    }
+
+    #[tokio::test]
+    async fn names_resolving_to_loopback_are_refused() {
+        use reqwest::dns::Resolve;
+
+        let name: reqwest::dns::Name = "localhost".parse().expect("name");
+        assert!(PublicOnlyResolver.resolve(name).await.is_err());
+    }
+
+    fn body(width: f32) -> Option<Arc<RenderedBody>> {
+        Some(Arc::new(RenderedBody {
+            width,
+            cards: Vec::new(),
+            text: Vec::new(),
+            blocked_remote: 0,
+        }))
+    }
+
+    #[test]
+    fn a_render_is_cut_into_one_card_per_quoted_message() {
+        let line = |y: f32, text: &str| TextLine {
+            block: 0,
+            y,
+            height: 20.0,
+            text: text.to_string(),
+            cells: Vec::new(),
+        };
+        let tile = |y: f32, height: f32| mail_html::Tile {
+            y,
+            height,
+            px_width: 1,
+            px_height: 1,
+            rgba: vec![0; 4],
+        };
+        let body = RenderedBody::from_mail(mail_html::RenderedMail {
+            width: 600.0,
+            height: 300.0,
+            tiles: vec![tile(0.0, 100.0), tile(100.0, 150.0), tile(250.0, 50.0)],
+            links: vec![LinkArea {
+                x: 5.0,
+                y: 120.0,
+                width: 10.0,
+                height: 10.0,
+                href: "https://example.com".into(),
+            }],
+            text: vec![
+                line(10.0, "The reply"),
+                line(110.0, "On Tuesday, Bob wrote:"),
+                line(140.0, "The middle message"),
+                line(260.0, "The first message"),
+            ],
+            quote_starts: vec![100.0, 250.0],
+            lead_header: None,
+            quote_headers: vec![
+                None,
+                Some(QuoteHeader {
+                    name: Some("Ann Example".to_owned()),
+                    ..QuoteHeader::default()
+                }),
+            ],
+            blocked_remote: 0,
+        });
+        let heights: Vec<f32> = body.cards.iter().map(|card| card.height).collect();
+        assert_eq!(heights, [100.0, 150.0, 50.0]);
+        let lines: Vec<_> = body.cards.iter().map(|card| card.lines.clone()).collect();
+        assert_eq!(lines, [0..1, 1..3, 3..4]);
+        assert!(body.cards.iter().all(|card| card.tiles.len() == 1));
+        // Lines and links are placed from the top of their own card.
+        let tops: Vec<f32> = body.text.iter().map(|line| line.y).collect();
+        assert_eq!(tops, [10.0, 10.0, 40.0, 10.0]);
+        assert!((body.cards[1].links[0].y - 20.0).abs() < f32::EPSILON);
+        assert!(body.cards[0].links.is_empty());
+        // The message has no quote header; each quote keeps its own.
+        let names: Vec<Option<&str>> = body
+            .cards
+            .iter()
+            .map(|card| {
+                card.header
+                    .as_ref()
+                    .and_then(|header| header.name.as_deref())
+            })
+            .collect();
+        assert_eq!(names, [None, None, Some("Ann Example")]);
+    }
+
+    #[test]
+    fn first_width_starts_a_render() {
+        let mut state = HtmlBodyState::default();
+        assert!(state.set_width(600.4));
+        let inputs = state.start().expect("width known");
+        assert!((inputs.width - 600.0).abs() < f32::EPSILON);
+        assert!(!inputs.allow_remote);
+    }
+
+    #[test]
+    fn width_change_during_render_triggers_one_more_pass() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        assert!(!state.set_width(500.0), "no second render while in flight");
+        assert!(state.finish(inputs, body(inputs.width)));
+        let inputs = state.start().expect("restarted");
+        assert!(!state.finish(inputs, body(inputs.width)));
+    }
+
+    #[test]
+    fn results_for_replaced_state_are_ignored() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let first = state.start().expect("started");
+        let mut replaced = HtmlBodyState::default();
+        assert!(!replaced.finish(first, body(first.width)));
+        assert!(replaced.rendered.is_none());
+        state.set_width(700.0);
+        let newer = state.start().expect("restarted");
+        assert!(!state.finish(first, body(first.width)));
+        assert!(state.rendered.is_none());
+        assert!(!state.finish(newer, body(700.0)));
+        assert!(state.rendered.is_some());
+    }
+
+    #[test]
+    fn allowing_remote_rerenders_once() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        assert!(state.allow_remote());
+        assert!(!state.allow_remote());
+        assert!(state.start().expect("started").allow_remote);
+    }
+
+    #[test]
+    fn remote_content_loads_without_asking_when_not_blocked() {
+        set_remote_content_allowed(true);
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        assert!(!state.allow_remote(), "already allowed");
+        assert!(state.start().expect("started").allow_remote);
+        set_remote_content_allowed(false);
+    }
+
+    #[test]
+    fn a_new_render_closes_the_link_menu() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        state.show_link_menu("https://example.com".into(), Vector::new(10.0, 20.0));
+        state.finish(inputs, body(600.0));
+        assert!(state.link_menu.is_none());
+    }
+
+    #[test]
+    fn link_menu_reads_the_address_of_a_mailto_link() {
+        assert_eq!(
+            mailto_address("mailto:jo@example.com?subject=Hi").as_deref(),
+            Some("jo@example.com")
+        );
+        assert_eq!(
+            mailto_address("mailto:,al@example.com,bo@example.com").as_deref(),
+            Some("al@example.com")
+        );
+        assert_eq!(mailto_address("mailto:?subject=Hi"), None);
+        assert_eq!(
+            mailto_address("https://example.com/mailto:jo@example.com"),
+            None
+        );
+        assert!(is_web_link("https://example.com/a"));
+        assert!(!is_web_link("tel:+33123456789"));
+    }
+
+    #[test]
+    fn zoom_change_rerenders_at_the_new_zoom() {
+        let mut state = HtmlBodyState::default();
+        assert!(!state.set_zoom(0.9), "no width yet, nothing to render");
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        assert!((inputs.zoom - 0.9).abs() < f32::EPSILON);
+        assert!(!state.set_zoom(1.25), "no second render while in flight");
+        assert!(state.finish(inputs, body(600.0)));
+        let inputs = state.start().expect("restarted");
+        assert!((inputs.zoom - 1.25).abs() < f32::EPSILON);
+        assert!(!state.finish(inputs, body(600.0)));
+    }
+
+    const DARK: Appearance = Appearance {
+        background: [31, 31, 31],
+        dark: true,
+    };
+
+    #[test]
+    fn appearance_change_during_render_triggers_one_more_pass() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        let inputs = state.start().expect("started");
+        assert!(
+            !state.set_appearance(DARK),
+            "no second render while in flight"
+        );
+        assert!(state.finish(inputs, body(600.0)));
+        let inputs = state.start().expect("restarted");
+        assert_eq!(inputs.appearance, DARK);
+        assert!(!state.finish(inputs, body(600.0)));
+    }
+
+    #[test]
+    fn showing_the_original_renders_without_recolouring() {
+        let mut state = HtmlBodyState::default();
+        assert_eq!(state.dark_tone(), None, "nothing to switch on a light page");
+        state.set_appearance(DARK);
+        state.set_width(600.0);
+        assert_eq!(state.dark_tone(), Some(false));
+        assert!(!state.set_original(false));
+        let inputs = state.start().expect("started");
+        assert_eq!(inputs.appearance, DARK);
+        assert!(!state.finish(inputs, body(600.0)));
+        assert!(state.toggle_original());
+        assert_eq!(state.dark_tone(), Some(true));
+        let inputs = state.start().expect("restarted");
+        assert_eq!(inputs.appearance, Appearance::default());
+    }
+}

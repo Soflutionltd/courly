@@ -1,0 +1,52 @@
+[package]
+name = "common"
+publish = false
+description = "Shared provider utilities for Courly email providers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mail-parser = "0.11.3"
+# Workspace deps
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+jiff.workspace = true
+rusqlite.workspace = true
+
+# Extracted workspace crates
+db = { path = "../db" }
+store = { path = "../stores" }
+seen = { path = "../seen" }
+types = { path = "../types" }
+crypto-key = { path = "../crypto-key" }
+# `common` stays UI-safe at the dep-graph level: provider sync is driven
+# Service-side through the Conduit engine and consumer.
+
+# Crate-specific deps
+tokio = { workspace = true, features = ["sync"] }
+log = "0.4"
+unicode-segmentation = "1.12"
+zeroize = "1"
+regex = "1"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+css-inline = { version = "0.21", default-features = false }
+lol_html = "3.0.0"
+ammonia = "4"
+aes-gcm = "0.11"
+getrandom = { version = "0.4.2", features = ["std"] }
+hotpath = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "net", "io-util"] }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "seen/hotpath", "types/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "seen/hotpath-alloc", "types/hotpath-alloc"]

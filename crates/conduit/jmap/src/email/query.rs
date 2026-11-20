@@ -1,0 +1,355 @@
+use jiff::Timestamp;
+use serde::Serialize;
+
+use crate::core::{
+    query::{self, QueryObject},
+    set::from_timestamp,
+};
+use crate::mailbox::MailboxId;
+use crate::thread::ThreadId;
+
+use super::{Email, EmailId, QueryArguments};
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub(crate) enum Filter {
+    InMailbox {
+        #[serde(rename = "inMailbox")]
+        value: MailboxId,
+    },
+    InMailboxOtherThan {
+        #[serde(rename = "inMailboxOtherThan")]
+        value: Vec<MailboxId>,
+    },
+    Before {
+        #[serde(rename = "before")]
+        value: Timestamp,
+    },
+    After {
+        #[serde(rename = "after")]
+        value: Timestamp,
+    },
+    MinSize {
+        #[serde(rename = "minSize")]
+        value: u32,
+    },
+    MaxSize {
+        #[serde(rename = "maxSize")]
+        value: u32,
+    },
+    AllInThreadHaveKeyword {
+        #[serde(rename = "allInThreadHaveKeyword")]
+        value: String,
+    },
+    SomeInThreadHaveKeyword {
+        #[serde(rename = "someInThreadHaveKeyword")]
+        value: String,
+    },
+    NoneInThreadHaveKeyword {
+        #[serde(rename = "noneInThreadHaveKeyword")]
+        value: String,
+    },
+    HasKeyword {
+        #[serde(rename = "hasKeyword")]
+        value: String,
+    },
+    NotKeyword {
+        #[serde(rename = "notKeyword")]
+        value: String,
+    },
+    HasAttachment {
+        #[serde(rename = "hasAttachment")]
+        value: bool,
+    },
+    Text {
+        #[serde(rename = "text")]
+        value: String,
+    },
+    From {
+        #[serde(rename = "from")]
+        value: String,
+    },
+    To {
+        #[serde(rename = "to")]
+        value: String,
+    },
+    Cc {
+        #[serde(rename = "cc")]
+        value: String,
+    },
+    Bcc {
+        #[serde(rename = "bcc")]
+        value: String,
+    },
+    Subject {
+        #[serde(rename = "subject")]
+        value: String,
+    },
+    Body {
+        #[serde(rename = "body")]
+        value: String,
+    },
+    Header {
+        #[serde(rename = "header")]
+        value: Vec<String>,
+    },
+
+    // Non-standard
+    Id {
+        #[serde(rename = "id")]
+        value: Vec<EmailId>,
+    },
+    SentBefore {
+        #[serde(rename = "sentBefore")]
+        value: Timestamp,
+    },
+    SentAfter {
+        #[serde(rename = "sentAfter")]
+        value: Timestamp,
+    },
+    InThread {
+        #[serde(rename = "inThread")]
+        value: ThreadId,
+    },
+}
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(tag = "property")]
+#[non_exhaustive]
+pub(crate) enum Comparator {
+    #[serde(rename = "receivedAt")]
+    ReceivedAt,
+    #[serde(rename = "size")]
+    Size,
+    #[serde(rename = "from")]
+    From,
+    #[serde(rename = "to")]
+    To,
+    #[serde(rename = "subject")]
+    Subject,
+    #[serde(rename = "sentAt")]
+    SentAt,
+    #[serde(rename = "hasKeyword")]
+    HasKeyword { keyword: String },
+    #[serde(rename = "allInThreadHaveKeyword")]
+    AllInThreadHaveKeyword { keyword: String },
+    #[serde(rename = "someInThreadHaveKeyword")]
+    SomeInThreadHaveKeyword { keyword: String },
+
+    // Non-standard
+    #[serde(rename = "cc")]
+    Cc,
+}
+
+impl Filter {
+    pub(crate) fn in_mailbox(value: impl Into<MailboxId>) -> Self {
+        Filter::InMailbox {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn in_mailbox_other_than<U, V>(value: U) -> Self
+    where
+        U: IntoIterator<Item = V>,
+        V: Into<MailboxId>,
+    {
+        Filter::InMailboxOtherThan {
+            value: value.into_iter().map(std::convert::Into::into).collect(),
+        }
+    }
+
+    pub(crate) fn before(value: i64) -> Self {
+        Filter::Before {
+            value: from_timestamp(value),
+        }
+    }
+
+    pub(crate) fn after(value: i64) -> Self {
+        Filter::After {
+            value: from_timestamp(value),
+        }
+    }
+
+    pub(crate) fn min_size(value: u32) -> Self {
+        Filter::MinSize { value }
+    }
+
+    pub(crate) fn max_size(value: u32) -> Self {
+        Filter::MaxSize { value }
+    }
+
+    pub(crate) fn all_in_thread_have_keyword(value: impl Into<String>) -> Self {
+        Filter::AllInThreadHaveKeyword {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn some_in_thread_have_keyword(value: impl Into<String>) -> Self {
+        Filter::SomeInThreadHaveKeyword {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn none_in_thread_have_keyword(value: impl Into<String>) -> Self {
+        Filter::NoneInThreadHaveKeyword {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn has_keyword(value: impl Into<String>) -> Self {
+        Filter::HasKeyword {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn not_keyword(value: impl Into<String>) -> Self {
+        Filter::NotKeyword {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn has_attachment(value: bool) -> Self {
+        Filter::HasAttachment { value }
+    }
+
+    pub(crate) fn text(value: impl Into<String>) -> Self {
+        Filter::Text {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn from(value: impl Into<String>) -> Self {
+        Filter::From {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn to(value: impl Into<String>) -> Self {
+        Filter::To {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn cc(value: impl Into<String>) -> Self {
+        Filter::Cc {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn bcc(value: impl Into<String>) -> Self {
+        Filter::Bcc {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn subject(value: impl Into<String>) -> Self {
+        Filter::Subject {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn body(value: impl Into<String>) -> Self {
+        Filter::Body {
+            value: value.into(),
+        }
+    }
+
+    pub(crate) fn header(header: impl Into<String>, v: Option<impl Into<String>>) -> Self {
+        let mut value = Vec::with_capacity(2);
+        value.push(header.into());
+        if let Some(v) = v {
+            value.push(v.into());
+        }
+        Filter::Header { value }
+    }
+
+    // Stalwart JMAP specific
+    pub(crate) fn id<U, V>(value: U) -> Self
+    where
+        U: IntoIterator<Item = V>,
+        V: Into<EmailId>,
+    {
+        Filter::Id {
+            value: value.into_iter().map(std::convert::Into::into).collect(),
+        }
+    }
+
+    pub(crate) fn sent_before(value: i64) -> Self {
+        Filter::SentBefore {
+            value: from_timestamp(value),
+        }
+    }
+
+    pub(crate) fn sent_after(value: i64) -> Self {
+        Filter::SentAfter {
+            value: from_timestamp(value),
+        }
+    }
+
+    pub(crate) fn in_thread(value: impl Into<ThreadId>) -> Self {
+        Filter::InThread {
+            value: value.into(),
+        }
+    }
+}
+
+impl Comparator {
+    pub(crate) fn received_at() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::ReceivedAt)
+    }
+
+    pub(crate) fn size() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::Size)
+    }
+
+    pub(crate) fn from() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::From)
+    }
+
+    pub(crate) fn to() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::To)
+    }
+
+    pub(crate) fn cc() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::Cc)
+    }
+
+    pub(crate) fn subject() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::Subject)
+    }
+
+    pub(crate) fn sent_at() -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::SentAt)
+    }
+
+    pub(crate) fn has_keyword(keyword: impl Into<String>) -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::HasKeyword {
+            keyword: keyword.into(),
+        })
+    }
+
+    pub(crate) fn all_in_thread_have_keyword(
+        keyword: impl Into<String>,
+    ) -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::AllInThreadHaveKeyword {
+            keyword: keyword.into(),
+        })
+    }
+
+    pub(crate) fn some_in_thread_have_keyword(
+        keyword: impl Into<String>,
+    ) -> query::Comparator<Comparator> {
+        query::Comparator::new(Comparator::SomeInThreadHaveKeyword {
+            keyword: keyword.into(),
+        })
+    }
+}
+
+impl QueryObject for Email {
+    type QueryArguments = QueryArguments;
+
+    type Filter = Filter;
+
+    type Sort = Comparator;
+}

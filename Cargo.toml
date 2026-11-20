@@ -1,0 +1,166 @@
+[workspace]
+resolver = "3"
+members = [
+"crates/db",
+"crates/vtimezones-empty",
+"crates/db-read",
+"crates/db-read-lockdown",
+"crates/core",
+"crates/service-api",
+"crates/service",
+"crates/app",
+"crates/runner",
+"crates/squeeze",
+"crates/cmdk",
+"crates/search",
+"crates/stores",
+"crates/smart-folder",
+"crates/ai",
+"crates/calendar",
+"crates/label-colors",
+"crates/seen",
+"crates/common",
+"crates/sync",
+"crates/system-fonts",
+"crates/rte",
+"crates/iced-drop",
+"crates/import",
+"crates/dev-seed",
+"crates/types",
+"crates/crypto-key",
+"crates/process-lifetime",
+"crates/service-state",
+"crates/action-types",
+"crates/coverage",
+"crates/mail-html",
+]
+
+exclude = [
+"crates/conduit",
+"docs/research/slug-glyph-proto",
+"vendor/blitz-dom",
+]
+
+[workspace.package]
+version = "0.2.8"
+edition = "2024"
+authors = ["Soflution Ltd"]
+license = "LicenseRef-PolyForm-Shield-1.0.0"
+rust-version = "1.97"
+
+[workspace.lints.clippy]
+# Style: modern idiomatic Rust
+uninlined_format_args = "deny"
+cloned_instead_of_copied = "deny"
+redundant_closure_for_method_calls = "deny"
+semicolon_if_nothing_returned = "deny"
+manual_string_new = "deny"
+explicit_iter_loop = "deny"
+implicit_clone = "deny"
+needless_pass_by_value = "deny"
+unnecessary_sort_by = "deny"
+collapsible_match = "deny"
+if_same_then_else = "deny"
+needless_borrow = "deny"
+ptr_arg = "deny"
+redundant_locals = "deny"
+regex_creation_in_loops = "deny"
+unnecessary_unwrap = "deny"
+wrong_self_convention = "deny"
+
+# Safety: strict error handling
+unwrap_in_result = "deny"
+ok_expect = "deny"
+unwrap_used = "deny"
+
+# Async safety
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+
+# Type safety
+large_enum_variant = "deny"
+clone_on_ref_ptr = "deny"
+float_cmp = "deny"
+cast_sign_loss = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+
+# Safety: no debug/placeholder code in production
+dbg_macro = "deny"
+todo = "deny"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+futures-util = "0.3"
+
+# Async runtime
+tokio = { version = "1.52.3" }
+
+# Database
+rusqlite = { version = "0.40" }
+
+# Time
+#
+# jiff, not chrono. It is also the time vocabulary on the conduit boundary
+# (`conduit-types` and `conduit-sync` both depend on it), so the two sides now
+# agree, and it carries its own tzdb, which retired the separate `chrono-tz`
+# dependency `brokkr deps` used to flag as stale.
+jiff = { version = "0.2.35", features = ["serde"] }
+
+# HTTP client
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "json", "form"] }
+bytes = "1"
+
+# Conduit migration
+conduit-types = { path = "crates/conduit/types" }
+conduit-net = { path = "crates/conduit/net" }
+conduit-sync = { path = "crates/conduit/sync" }
+conduit-jmap = { path = "crates/conduit/jmap" }
+conduit-imap = { path = "crates/conduit/imap" }
+conduit-graph = { path = "crates/conduit/graph" }
+conduit-google = { path = "crates/conduit/google" }
+conduit-caldav = { path = "crates/conduit/caldav" }
+conduit-carddav = { path = "crates/conduit/carddav" }
+
+# Encoding
+base64 = "0.23"
+
+# XML
+quick-xml = "0.42.0"
+
+# Profiling
+hotpath = "0.27.0"
+
+# Optimized release profile
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+# Unwinding is only relied on for the HTML email renderer and attachment
+# text extraction; the runner's panic hook aborts on every other panic in
+# release builds.
+panic = "unwind"
+
+[profile.release.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 0
+debug = 1
+incremental = true
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# caldata (via conduit CalDAV/CardDAV) hard-depends on the GPL-3.0
+# vtimezones-rs but only reads it in RFC 7809 mode, which conduit never
+# enables. See crates/vtimezones-empty.
+[patch.crates-io]
+vtimezones-rs = { path = "crates/vtimezones-empty" }
+# blitz-dom 0.3.0-beta.4 with auto-layout tables taking the widest cell
+# width of every row, as browsers do (upstream only reads the first row).
+blitz-dom = { path = "vendor/blitz-dom" }

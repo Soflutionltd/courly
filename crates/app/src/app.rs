@@ -1,0 +1,1367 @@
+use crate::appearance;
+use crate::command_resolver;
+use crate::db::{self, Db};
+use crate::message::Message;
+use crate::pop_out::{self, PopOutWindow};
+use crate::service_client::{ServiceClient, ServiceNotificationReceiver};
+use crate::ui::add_account::AddAccountWizard;
+use crate::ui::calendar::{CalendarState, CalendarView};
+use crate::ui::palette::Palette;
+use crate::ui::reading_pane::ReadingPane;
+use crate::ui::settings::Settings;
+use crate::ui::sidebar::Sidebar;
+use crate::ui::status_bar::{
+    StatusBar, SyncProgressReceiver, create_sync_progress_channel, shared_receiver,
+};
+use crate::ui::thread_list::ThreadList;
+use crate::ui::undoable::UndoableText;
+use crate::window_state;
+use cmdk::{BindingTable, Chord, CommandRegistry, FocusedRegion, UndoStack, current_platform};
+use iced::{Task, Theme};
+use rtsk::db::queries_extra::get_calendar_default_view_sync;
+use rtsk::generation::{GenerationCounter, Nav, PopOut, Search, ThreadDetail};
+use rust_i18n::t;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Whether the app is showing mail or calendar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Mail,
+    Calendar,
+}
+
+/// Which vertical divider is being dragged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Divider {
+    Sidebar,
+    ThreadList,
+}
+
+/// Drag handle width in logical pixels. It doubles as the gap between the
+/// floating panes, so it matches `PANE_GAP`.
+pub(crate) const DIVIDER_WIDTH: f32 = crate::ui::layout::PANE_GAP;
+
+/// How long to wait for the second chord of a sequence.
+pub(crate) const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// Pending chord state for two-key sequence bindings.
+pub(crate) struct PendingChord {
+    pub(crate) first: Chord,
+}
+
+/// Phase 8-4: in-flight index-rebuild progress for the status-bar
+/// component. Carries the latest counters from
+/// `Notification::IndexRebuildProgress`; cleared on
+/// `Notification::IndexRebuildCompleted`.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // status-bar render is a small follow-up; data wired through update.rs
+pub struct RebuildProgressState {
+    pub rebuild_id: String,
+    pub processed: u64,
+    pub total: u64,
+}
+
+pub struct ReadyApp {
+    pub(crate) db: Arc<Db>,
+    pub(crate) sidebar: Sidebar,
+    pub(crate) thread_list: ThreadList,
+    pub(crate) reading_pane: ReadingPane,
+    pub(crate) settings: Settings,
+    pub(crate) status_bar: StatusBar,
+    pub(crate) status: String,
+    pub(crate) mode: appearance::Mode,
+    pub(crate) app_mode: AppMode,
+    pub(crate) calendar: CalendarState,
+    pub(crate) sidebar_width: f32,
+    pub(crate) thread_list_width: f32,
+    pub(crate) dragging: Option<Divider>,
+    pub(crate) hovered_divider: Option<Divider>,
+    pub(crate) side_panel: crate::ui::side_panel::SidePanel,
+    pub(crate) show_settings: bool,
+    pub(crate) window: window_state::WindowState,
+
+    pub(crate) main_window_id: iced::window::Id,
+    pub(crate) pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
+    /// Compose shown in the main window instead of the reading pane. Its
+    /// state lives in `pop_out_windows` under this id, which no real window
+    /// uses, so every compose handler works for it unchanged.
+    pub(crate) inline_compose: Option<iced::window::Id>,
+    /// The sender (account id, address) last picked in a new message, so
+    /// the next new message starts from it instead of the first account.
+    pub(crate) last_new_message_from: Option<(String, String)>,
+    /// The window last brought to the front.
+    pub(crate) focused_window: iced::window::Id,
+    /// The compose window last brought to the front, where a template
+    /// from the side panel goes.
+    pub(crate) last_compose_window: Option<iced::window::Id>,
+    #[cfg(target_os = "macos")]
+    pub(crate) menu_bar: Option<crate::menu_bar::MenuBar>,
+    pub(crate) pop_out_generation: GenerationCounter<PopOut>,
+    pub(crate) nav_generation: GenerationCounter<Nav>,
+    pub(crate) thread_generation: GenerationCounter<ThreadDetail>,
+
+    // Command palette infrastructure
+    pub(crate) registry: CommandRegistry,
+    pub(crate) binding_table: BindingTable,
+    pub(crate) focused_region: Option<FocusedRegion>,
+    pub(crate) is_online: bool,
+    pub(crate) pending_chord: Option<PendingChord>,
+    /// Threads (account id, thread id) waiting for the user to confirm they
+    /// go for good. Only asked in the trash, where nothing can bring them back.
+    pub(crate) pending_permanent_delete: Option<Vec<(String, String)>>,
+    /// Dialog opened from the sidebar folder menu.
+    pub(crate) folder_dialog: Option<crate::ui::folder_dialog::FolderDialog>,
+    /// Everyone a message was sent to, opened from the "To" line of its card.
+    pub(crate) recipients_dialog: Option<crate::ui::recipients::RecipientsDialog>,
+    /// The ribbon's Move menu, open under its button.
+    pub(crate) move_menu: Option<crate::ui::move_menu::MoveMenu>,
+    /// The ribbon's Categorize menu, open under its button.
+    pub(crate) category_menu: Option<crate::ui::category_menu::CategoryMenu>,
+    /// A press on a message row, followed for a drag onto a folder.
+    pub(crate) thread_drag: Option<crate::handlers::thread_drag::ThreadDrag>,
+    /// People suggested under the search field.
+    pub(crate) search_suggest: crate::ui::search_suggest::SearchSuggest,
+    /// Row menu action that needs the conversation's messages, held until
+    /// the reading pane has loaded that thread (account id, thread id).
+    pub(crate) pending_row_action:
+        Option<(String, String, crate::handlers::row_menu::RowMessageAction)>,
+    pub(crate) toolbar: crate::ui::toolbar::Toolbar,
+    pub(crate) search_scope: crate::ui::search_scope::SearchScopeState,
+    pub(crate) palette: Palette,
+    pub(crate) undo_stack: UndoStack<crate::action_resolve::MailUndoPayload>,
+
+    // Chat state
+    pub(crate) chat_timeline: Option<crate::ui::chat_timeline::ChatTimeline>,
+    pub(crate) chat_generation: GenerationCounter<rtsk::generation::Chat>,
+
+    // Phase 8-1: latest Service health surfaced by `ServiceClient`.
+    // Used by `crates/app/src/ui/status_bar.rs` to render a banner
+    // when not `Healthy`. Defaults to `Healthy` post-`BootReady`;
+    // transitions to `Respawning` / `PersistentlyFailing` on crash
+    // events.
+    pub(crate) service_health: crate::service_client::ServiceHealth,
+    // Phase 8-4: latest in-flight index-rebuild progress for the
+    // status-bar component. `None` means no rebuild is in flight.
+    // Set on `Notification::IndexRebuildProgress`, cleared on
+    // `Notification::IndexRebuildCompleted`.
+    pub(crate) index_rebuild_progress: Option<RebuildProgressState>,
+
+    // Search state
+    pub(crate) search_state: Option<Arc<rtsk::search::SearchReadState>>,
+    /// True while `SearchReadState::init` is still in flight at boot.
+    /// Flipped to false on either `SearchStateReady(Ok)` or
+    /// `SearchStateReady(Err)`. While true, search dispatch defers (stores
+    /// the resolved intent in `pending_search`) instead of falling through
+    /// to the SQL fallback - the fallback is meant for true init-failure
+    /// recovery, not for the pre-boot race window.
+    pub(crate) search_state_pending: bool,
+    /// Search dispatch deferred during the pre-boot window. Replayed when
+    /// `SearchStateReady` arrives. Each new dispatch overwrites this so
+    /// rapid typing collapses to the most recent intent.
+    pub(crate) pending_search: Option<crate::handlers::search::ResolvedSearch>,
+    /// Phase 3 task 17: stamped on `Notification::IndexCommitted`
+    /// arrival; cleared by the 200 ms `ReaderReloadTick` handler
+    /// after calling `reader.reload()`. The debounce collapses a
+    /// commit storm under heavy initial sync (writer task can fire
+    /// up to one commit per
+    /// `crates/service/src/search_writer.rs::COMMIT_TIME_THRESHOLD`)
+    /// into ~5 reloads/sec. Reload itself is cheap; the debounce
+    /// matters because pinning a `Searcher` across rapid reloads
+    /// keeps stale segments mapped longer than necessary.
+    pub(crate) pending_reader_reload: Option<std::time::Instant>,
+    /// Phase 5 task 11: stamped on `Notification::CalendarChanged` arrival;
+    /// cleared by the 250 ms `CalendarReloadTick` handler after calling
+    /// `reload_calendar_events()`. Debounces N near-simultaneous
+    /// `CalendarChanged` notifications (one per account in a kick batch)
+    /// into a single UI reload.
+    pub(crate) pending_calendar_reload: Option<std::time::Instant>,
+    /// Stamped on `Notification::MailboxChanged`; cleared by the 250 ms
+    /// `MailboxReloadTick` handler once it reloads the list and counts.
+    pub(crate) pending_mailbox_reload: Option<std::time::Instant>,
+    /// What new inbox mail has already been considered for notifications.
+    pub(crate) new_mail: crate::new_mail::NewMailWatch,
+    /// Thread a notification click opens once its inbox has loaded.
+    pub(crate) pending_notified_thread: Option<(String, String)>,
+    /// When the last window-focus re-read of every account ran.
+    pub(crate) last_focus_sync: Option<std::time::Instant>,
+    pub(crate) search_generation: GenerationCounter<Search>,
+    pub(crate) search_query: UndoableText,
+    /// Sender picked from the suggestions, shown as a pill in front of the
+    /// field and searched as `from:` without appearing in the text.
+    pub(crate) search_sender: Option<String>,
+    /// The address and name of the last person picked from the suggestions,
+    /// to name them above their mail.
+    pub(crate) search_sender_name: Option<(String, String)>,
+    /// People starred as favourites, listed in the folder column.
+    pub(crate) favorites: crate::favorites::Favorites,
+    /// People (with the account searched, `None` for all) whose older mail
+    /// was already asked of the server this session.
+    pub(crate) server_searched: std::collections::HashSet<(Option<String>, String)>,
+    /// The server search running or failed for the latest person picked.
+    pub(crate) server_search: Option<crate::handlers::search::ServerSearch>,
+    pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
+    /// Whether the user was in a sidebar-scoped view before entering search.
+    /// When search is cleared, threads are reloaded from the current
+    /// navigation state instead of restoring a stale clone.
+    pub(crate) was_in_scope_view: bool,
+
+    // Search history (recent queries from pinned_searches)
+    pub(crate) search_history: Vec<String>,
+
+    // Pinned searches
+    pub(crate) pinned_searches: Vec<db::PinnedSearch>,
+    pub(crate) editing_pinned_search: Option<i64>,
+
+    pub(crate) no_accounts: bool,
+    pub(crate) add_account_wizard: Option<AddAccountWizard>,
+
+    /// Currently held keyboard modifiers (for Ctrl+click, Shift+click).
+    pub(crate) current_modifiers: iced::keyboard::Modifiers,
+
+    /// Active chat contact email, set when entering chat view.
+    pub(crate) active_chat: Option<String>,
+
+    // Sync progress pipeline
+    pub(crate) sync_receiver: SyncProgressReceiver,
+    #[allow(dead_code)]
+    pub(crate) sync_reporter: Arc<crate::ui::status_bar::IcedProgressReporter>,
+
+    /// Body store for loading decompressed message bodies via core.
+    pub(crate) body_store: Option<rtsk::body_store::BodyStoreReadState>,
+    /// Inline image store for CID image resolution.
+    pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState>,
+
+    /// Attachments roadmap Phase 5: per-thread "last folder used" for
+    /// Save / Save All dialogs. In-memory only; cross-session
+    /// persistence is deferred until the IPC payoff is worth the
+    /// plumbing. Keyed by `(account_id, thread_id)`. Capped via
+    /// `LastFolderCache` so a long-running session walking many
+    /// threads does not accumulate unbounded entries.
+    pub(crate) attachment_last_folders: crate::handlers::attachments::LastFolderCache,
+
+    // Service process scaffold
+    pub(crate) service_client: Option<Arc<ServiceClient>>,
+    pub(crate) service_notifications: ServiceNotificationReceiver,
+
+    /// Per-plan completion state for action plans dispatched via the
+    /// IPC `action.execute_plan` path. Inserted in `dispatch_plan`,
+    /// accumulated as `OperationOutcome` notifications arrive, drained
+    /// in `Notification::ActionCompleted` handling - which fires
+    /// `Message::ActionCompleted` carrying the assembled domain
+    /// outcomes so `handle_action_completed` runs unchanged.
+    ///
+    /// Tri-state per Phase 2 plan scope item 14: `state` distinguishes
+    /// `Pending` (no ack observed yet) / `Acked` (Service journaled
+    /// the plan; replay-safe across respawn) / `AckUnknown` (ack lost
+    /// on the wire; reconciled via `action.job_status` after the next
+    /// `boot.ready`).
+    pub(crate) pending_action_plans:
+        std::collections::HashMap<service_api::PlanId, PendingActionPlan>,
+
+    /// Threads a completed action just took out of a view. See
+    /// [`RecentlyRemoved`].
+    pub(crate) recently_removed: Vec<RecentlyRemoved>,
+
+    /// In-flight compose-send dispatches keyed by `send_id` (the
+    /// UI-generated UUIDv7 the wire request carries; doubles as the
+    /// `plan_id` the eventual `ActionCompleted` notification echoes
+    /// back). Maps to the compose window so the completion handler
+    /// can fire `Message::SendCompleted` against the right window.
+    /// Entries are removed on completion arrival.
+    pub(crate) in_flight_sends:
+        std::collections::HashMap<service_api::PlanId, crate::handlers::pop_out::SendOrigin>,
+
+    /// Sent messages still inside their undo delay, oldest first.
+    pub(crate) delayed_sends: Vec<crate::handlers::pop_out::DelayedSend>,
+
+    /// Client-side action throttle keyed by `(account_id, thread_id)`.
+    ///
+    /// Phase 2 plan scope item 12 + open question 7. Absorbs fast
+    /// double-clicks before they hit the wire so a single user gesture
+    /// produces a single IPC roundtrip; complements the Service-side
+    /// `ActionContext::in_flight` HashSet (which is the canonical
+    /// correctness gate).
+    ///
+    /// Entries expire on `ActionCompleted` arrival (the canonical
+    /// release) OR after 200 ms (the safety valve in case completion
+    /// notifications are lost). 200 ms is the user-perception window
+    /// for an intentional second click - faster than that is a
+    /// double-click.
+    pub(crate) action_throttle: std::collections::HashMap<(String, String), std::time::Instant>,
+    /// A main-window move or resize is waiting to be written to disk.
+    pub(crate) window_save_pending: bool,
+
+    pub(crate) updater: crate::updater::UpdaterState,
+}
+
+/// Tri-state for an in-flight action plan per Phase 2 plan scope item 14.
+///
+/// The state is what distinguishes "ServiceCrashed but the plan was
+/// already journaled" (do nothing - the worker will replay) from
+/// "ServiceCrashed before we know if the plan was journaled" (defer
+/// rollback to post-respawn reconciliation via `action.job_status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanState {
+    /// IPC future has not resolved. Optimistic state is applied; no
+    /// rollback path triggers yet.
+    Pending,
+    /// `ActionPlanAck { journaled: true }` was observed. Plan is
+    /// durable; `ServiceCrashed` from now on does NOT trigger rollback
+    /// because outcomes will arrive via journal replay after respawn.
+    Acked,
+    /// IPC resolved with `ServiceCrashed` / `Timeout` / wire-corruption
+    /// before an ack was observed. Optimistic state is held; the next
+    /// `boot.ready` post-respawn fires `action.job_status(plan_id)` to
+    /// resolve to either `Acked` (journal row exists -> let replay
+    /// drive completion) or rollback (journal has no row -> the
+    /// optimistic update was wrong, revert it).
+    AckUnknown,
+}
+
+/// How long a view keeps out a thread an action just removed from it.
+pub(crate) const RECENTLY_REMOVED_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A thread a completed action took out of a view.
+///
+/// The move is written locally and accepted by the provider, but a sync
+/// pass that read the provider a moment earlier can still file the thread
+/// back in its old folder, until the next pass corrects it: a deleted mail
+/// came back in the list, then left on its own. Reloads of the view it left
+/// keep it out until `until`. Any new action on the thread, an undo
+/// included, lifts this at once.
+pub(crate) struct RecentlyRemoved {
+    pub account_id: String,
+    pub thread_id: String,
+    /// The view the thread left, from [`ReadyApp::view_key`].
+    pub view: String,
+    pub until: std::time::Instant,
+}
+
+/// State tracked per dispatched action plan while its
+/// `OperationOutcome` notifications stream in.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingActionPlan {
+    pub(crate) plan: crate::action_resolve::ActionExecutionPlan,
+    /// `(operation_id, ActionOutcome)` pairs in arrival order. Sorted
+    /// by `operation_id` before firing `Message::ActionCompleted` so
+    /// the per-target outcome ordering matches the dispatched plan.
+    pub(crate) outcomes: Vec<(u32, service_api::actions::ActionOutcome)>,
+    pub(crate) state: PlanState,
+    /// Idempotency guard for `OperationOutcome` notifications: replay
+    /// from the journal can re-emit an outcome the UI already saw, and
+    /// per Phase 2 plan scope item 17 the wire is idempotent. Drop the
+    /// duplicate when `applied_outcomes` already contains the
+    /// `operation_id`. Not the same as `outcomes.iter().any(...)`:
+    /// failures might still need toast logic at `ActionCompleted`
+    /// time, but a duplicate must not double-push.
+    pub(crate) applied_outcomes: std::collections::HashSet<u32>,
+    /// Set when this plan is the inverse dispatched by an undo (Phase
+    /// 2 task 14). Carries the original action's description so the
+    /// completion handler can fire `Message::UndoCompleted` (toast +
+    /// nav + thread-list reload) instead of `Message::ActionCompleted`
+    /// (toast + per-behavior post-success effects).
+    pub(crate) undo_description: Option<String>,
+}
+
+impl ReadyApp {
+    /// Construct the `Ready` half of the app state machine. Called from
+    /// `BootingApp::update` when `Message::ServiceBootReady` arrives. Does
+    /// the heavy bootstrap work (DB open, accounts/sidebar/calendar load,
+    /// action_ctx construction) the original `App::boot` did synchronously
+    /// before Phase 1.5; the Service has already migrated the schema by
+    /// this point so the UI's local DB open is fast.
+    pub(crate) fn from_boot_ready(
+        boot_response: &service_api::BootReadyResponse,
+        main_window_id: iced::window::Id,
+        service_client: Arc<ServiceClient>,
+        service_notifications: ServiceNotificationReceiver,
+    ) -> (Self, Task<Message>) {
+        log::info!(
+            "Service boot.ready: schema_version={}, migrations_applied={}",
+            boot_response.schema_version,
+            boot_response.migrations_applied,
+        );
+        if !boot_response.recovery_warnings.is_empty() {
+            log::warn!(
+                "Service boot completed with {} recovery warning(s); state-repair steps that did \
+                 not run cleanly: {}. The boot succeeded; the next boot will retry. See the \
+                 service log for the underlying errors.",
+                boot_response.recovery_warnings.len(),
+                boot_response.recovery_warnings.join(", "),
+            );
+        }
+        let data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+        let db = Arc::new(Db::open(data_dir).expect("UI-side DB open after Service handshake"));
+        let db_ref = Arc::clone(&db);
+        let db_ref2 = Arc::clone(&db);
+        let db_ref3 = Arc::clone(&db);
+        let db_ref4 = Arc::clone(&db);
+        let window = window_state::WindowState::load(data_dir);
+
+        let mut registry = CommandRegistry::new();
+        let mut binding_table = BindingTable::new(&registry, current_platform());
+        let keybindings_path = data_dir.join("keybindings.json");
+        if let Err(e) = binding_table.load_overrides_from_file(&keybindings_path) {
+            eprintln!("warning: failed to load keybinding overrides: {e}");
+        }
+        // Load persisted usage counts for command ranking
+        let usage_path = data_dir.join("command_usage.json");
+        if let Ok(json) = std::fs::read_to_string(&usage_path)
+            && let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, u32>>(&json)
+        {
+            registry.usage.load_from_map(&map);
+        }
+        let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
+
+        let (rx, reporter) = create_sync_progress_channel();
+        let sync_receiver = shared_receiver(rx);
+        let sync_reporter = Arc::new(reporter);
+
+        // Phase 8-1: body store, inline image store, and search read
+        // state init are dispatched as async tasks below so the splash
+        // -> Ready transition fires immediately rather than blocking
+        // on slow-disk file I/O. Each field stays `None` until its
+        // BodyStoreReady / InlineImageStoreReady / SearchStateReady
+        // message lands and `update.rs` populates the slot. UI surfaces
+        // that depend on a store render a "loading..." placeholder
+        // until then; the gap is well under 100 ms on warm hardware
+        // and the splash transition no longer freezes during it.
+        let body_store: Option<rtsk::body_store::BodyStoreReadState> = None;
+        let inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState> = None;
+
+        // Phase 6a-part-2: the bootstrap-snapshot decrypt path flows
+        // through `internal.read_bootstrap_snapshots` (one IPC, both
+        // snapshots returned already-decrypted). The N-decrypt-per-boot
+        // anti-pattern (one IPC per secure setting under a generic
+        // `decrypt_for_storage`) was rejected when the encryption-key
+        // boundary moved fully into the Service.
+        //
+        // Phase 6d-A removed the last UI-side `load_encryption_key`
+        // call: the contacts pipeline now runs Service-side via
+        // `contacts.contact_save_with_writeback` / `contacts.contact_delete`,
+        // and the `action_ctx` field that carried the key is gone.
+        // The Service holds the validated key bytes for the lifetime
+        // of the process; the UI never touches `courly.key`.
+
+        // Phase 8-1: search read state init is also dispatched async
+        // (see body_store / inline_image_store comment above).
+        let search_state: Option<Arc<rtsk::search::SearchReadState>> = None;
+
+        let session = pop_out::session::SessionState::load(data_dir);
+
+        let calendar_default_view = db
+            .read_db_state()
+            .with_read_sync(get_calendar_default_view_sync)
+            .ok()
+            .flatten()
+            .map(|view_name| CalendarState::parse_view_name(&view_name))
+            .unwrap_or(CalendarView::Month);
+
+        // Phase 6a-part-2 (encryption-key handle): persisted preferences
+        // arrive via `internal.read_bootstrap_snapshots` and are applied
+        // when `Message::BootstrapSnapshotsLoaded` lands - see the
+        // boot-task assembly below. The Service decrypts secure settings
+        // with its already-loaded key; the UI never holds an encrypted
+        // byte for the bootstrap path. Until the IPC settles the UI
+        // shows defaults; the round-trip is sub-100 ms in steady-state
+        // and the 10 s wire timeout absorbs cold-disk + key-stretch
+        // contention.
+
+        let mut app = Self {
+            db,
+            sidebar: Sidebar::new(),
+            thread_list: ThreadList::new(),
+            reading_pane: ReadingPane::new(),
+            settings: Settings::with_scale(*crate::DEFAULT_SCALE.get().unwrap_or(&1.0)),
+            status_bar: StatusBar::new(),
+            status: "Service ready".to_string(),
+            mode: appearance::Mode::Dark,
+            app_mode: AppMode::Mail,
+            calendar: CalendarState::with_default_view(calendar_default_view),
+            sidebar_width: window.sidebar_width,
+            thread_list_width: window.thread_list_width,
+            dragging: None,
+            hovered_divider: None,
+            side_panel: crate::ui::side_panel::SidePanel::new(
+                window.side_panel_open,
+                window.side_panel_module,
+            ),
+            show_settings: false,
+            window,
+            main_window_id,
+            pop_out_windows: HashMap::new(),
+            inline_compose: None,
+            last_new_message_from: None,
+            focused_window: main_window_id,
+            last_compose_window: None,
+            #[cfg(target_os = "macos")]
+            menu_bar: None,
+            pop_out_generation: GenerationCounter::new(),
+            nav_generation: GenerationCounter::new(),
+            thread_generation: GenerationCounter::new(),
+            registry,
+            binding_table,
+            focused_region: None,
+            is_online: true,
+            pending_chord: None,
+            pending_permanent_delete: None,
+            folder_dialog: None,
+            recipients_dialog: None,
+            move_menu: None,
+            category_menu: None,
+            thread_drag: None,
+            search_suggest: crate::ui::search_suggest::SearchSuggest::default(),
+            pending_row_action: None,
+            toolbar: crate::ui::toolbar::Toolbar::default(),
+            search_scope: crate::ui::search_scope::SearchScopeState::default(),
+            palette: Palette::new(CommandRegistry::new(), resolver),
+            undo_stack: UndoStack::default(),
+            search_state,
+            search_state_pending: true,
+            pending_search: None,
+            service_health: crate::service_client::ServiceHealth::Healthy,
+            index_rebuild_progress: None,
+            pending_reader_reload: None,
+            pending_calendar_reload: None,
+            pending_mailbox_reload: None,
+            new_mail: crate::new_mail::NewMailWatch::new(jiff::Timestamp::now().as_millisecond()),
+            pending_notified_thread: None,
+            last_focus_sync: None,
+            chat_timeline: None,
+            chat_generation: GenerationCounter::new(),
+            search_generation: GenerationCounter::new(),
+            search_query: UndoableText::new(),
+            search_sender: None,
+            search_sender_name: None,
+            favorites: crate::favorites::Favorites::default(),
+            server_searched: std::collections::HashSet::new(),
+            server_search: None,
+            search_debounce_deadline: None,
+            was_in_scope_view: false,
+            search_history: Vec::new(),
+            pinned_searches: Vec::new(),
+            editing_pinned_search: None,
+            no_accounts: false,
+            add_account_wizard: None,
+            current_modifiers: iced::keyboard::Modifiers::empty(),
+            active_chat: None,
+            sync_receiver,
+            sync_reporter,
+            body_store,
+            inline_image_store,
+            attachment_last_folders: crate::handlers::attachments::LastFolderCache::new(),
+            service_client: Some(service_client),
+            service_notifications,
+            pending_action_plans: std::collections::HashMap::new(),
+            recently_removed: Vec::new(),
+            in_flight_sends: std::collections::HashMap::new(),
+            delayed_sends: Vec::new(),
+            action_throttle: std::collections::HashMap::new(),
+            window_save_pending: false,
+            updater: crate::updater::UpdaterState::default(),
+        };
+
+        // Note: the queued-drafts sweep, pending-ops boot recovery, and
+        // per-account thread_participants backfill that used to run from
+        // here all relocated to the Service's boot sequence in Phase 1.5.
+        // The UI ActionContext below stays UI-side until Phase 6c moves
+        // the calendar action context across the boundary.
+
+        // Restore pop-out windows from previous session
+        let mut session_tasks = app.restore_pop_out_windows(&session);
+
+        let load_gen = app.nav_generation.next();
+        let bootstrap_client = app.service_client.as_ref().map(Arc::clone);
+        let mut boot_tasks = vec![
+            Task::perform(
+                async move { (load_gen, crate::helpers::load_accounts(db_ref).await) },
+                |(g, result)| Message::AccountsLoaded(g, result),
+            ),
+            Task::perform(
+                async move { db_ref2.list_pinned_searches().await },
+                Message::PinnedSearchesLoaded,
+            ),
+            // Load shared mailboxes for sidebar
+            Task::perform(
+                async move { db_ref3.get_shared_mailboxes().await },
+                Message::SharedMailboxesLoaded,
+            ),
+            // Load pinned public folders for sidebar
+            Task::perform(
+                async move { db_ref4.get_pinned_public_folders().await },
+                Message::PinnedPublicFoldersLoaded,
+            ),
+            // Phase 5 task 10: initial GAL cache population is no longer
+            // a UI-side concern. The Service's gal.kick handler runs on
+            // the first `Message::SyncTick` and gates per-account on the
+            // 24 h cache check. No bootstrap kick needed: the SyncTick
+            // subscription fires within 5 min of post-ready.
+        ];
+
+        // Phase 6a-part-2 (encryption-key handle): fetch the cold-boot
+        // bootstrap snapshots. The IPC arrives as
+        // `Message::BootstrapSnapshotsLoaded` and the handler applies
+        // it via `Settings::apply_bootstrap`. If `service_client` is
+        // None (e.g. the Service connection was unavailable at
+        // construction - a degraded-mode boot), the UI falls through
+        // to default preferences; the next launch picks up the
+        // persisted values.
+        if let Some(client) = bootstrap_client {
+            boot_tasks.push(Task::perform(
+                async move {
+                    client
+                        .read_bootstrap_snapshots()
+                        .await
+                        .map_err(|e| format!("read_bootstrap_snapshots: {e}"))
+                },
+                Message::BootstrapSnapshotsLoaded,
+            ));
+        }
+
+        // Pending-ops crash recovery, queued-drafts sweep, and thread-
+        // participants backfill all run Service-side now (Phase 1.5
+        // commits 7-9).
+
+        // Snooze resurface on boot: unsnooze threads that became due while the app was closed.
+        boot_tasks.push(Task::done(Message::SnoozeTick));
+
+        boot_tasks.push(Task::perform(
+            tokio::time::sleep(crate::updater::BOOT_CHECK_DELAY),
+            |()| Message::Updater(crate::updater::UpdaterMessage::Check { forced: true }),
+        ));
+
+        // Phase 8-1: async-init the body / inline / search stores
+        // outside the boot-ready transition. Each runs inside
+        // `spawn_blocking` because the underlying `*::init` calls
+        // synchronous file I/O (CREATE TABLE IF NOT EXISTS, mmap
+        // setup). On warm hardware these complete in tens of
+        // milliseconds; on a cold disk they could take seconds. The
+        // splash transition no longer waits for them.
+        boot_tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(db::threads::init_body_store)
+                    .await
+                    .map_err(|e| format!("body store join: {e}"))?
+            },
+            Message::BodyStoreReady,
+        ));
+        let inline_data_dir = data_dir.clone();
+        boot_tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    store::inline_image_store::InlineImageStoreReadState::init(&inline_data_dir)
+                })
+                .await
+                .map_err(|e| format!("inline store join: {e}"))?
+            },
+            Message::InlineImageStoreReady,
+        ));
+        let search_data_dir = data_dir.clone();
+        boot_tasks.push(Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    rtsk::search::SearchReadState::init(&search_data_dir).map(Arc::new)
+                })
+                .await
+                .map_err(|e| format!("search state join: {e}"))?
+            },
+            Message::SearchStateReady,
+        ));
+
+        boot_tasks.append(&mut session_tasks);
+        (app, Task::batch(boot_tasks))
+    }
+
+    pub(crate) fn title(&self, window_id: iced::window::Id) -> String {
+        if window_id == self.main_window_id {
+            return "Courly".to_string();
+        }
+        match self.pop_out_windows.get(&window_id) {
+            Some(PopOutWindow::MessageView(state)) => {
+                let subject = state
+                    .subject
+                    .as_deref()
+                    .map_or_else(|| t!("main.no_subject"), Cow::Borrowed);
+                let sender = state
+                    .from_address
+                    .as_deref()
+                    .map_or_else(|| t!("main.window.unknown_sender"), Cow::Borrowed);
+                t!(
+                    "main.window.message_title",
+                    subject = subject,
+                    sender = sender
+                )
+                .into_owned()
+            }
+            Some(PopOutWindow::Compose(state)) => state.window_title(),
+            Some(PopOutWindow::Calendar(_)) => t!("main.window.calendar_title").into_owned(),
+            None => "Courly".to_string(),
+        }
+    }
+
+    // (helper hoisted above; impl block continues)
+    pub(crate) fn daemon_theme(&self, _window_id: iced::window::Id) -> Theme {
+        self.theme()
+    }
+
+    pub(crate) fn theme(&self) -> Theme {
+        match self.settings.theme.as_str() {
+            "Light" => crate::ui::theme::light_theme(),
+            "Dark" => crate::ui::theme::dark_theme(),
+            "Theme" => {
+                let idx = self.settings.selected_theme.unwrap_or(0);
+                crate::ui::theme::theme_by_index(idx)
+            }
+            _ => match self.mode {
+                appearance::Mode::Light => crate::ui::theme::light_theme(),
+                _ => crate::ui::theme::dark_theme(),
+            },
+        }
+    }
+}
+
+/// Adapter for the two-phase spawn event receiver. Converts each
+/// `SpawnEvent` into the matching `Message` and feeds an iced `Task`
+/// stream. Lives at module scope so the type inference for
+/// `iced::stream::channel` lands on a concrete signature rather than the
+/// closure-context inference that was failing inside `App::boot`.
+fn spawn_event_stream(
+    rx: tokio::sync::mpsc::Receiver<crate::service_client::SpawnEvent>,
+) -> Task<Message> {
+    Task::stream(iced::stream::channel(
+        8,
+        move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            let mut rx = rx;
+            async move {
+                while let Some(event) = rx.recv().await {
+                    let msg = match event {
+                        crate::service_client::SpawnEvent::ChildSpawned(client) => {
+                            Message::ServiceChildSpawned(client)
+                        }
+                        crate::service_client::SpawnEvent::BootReady(response) => {
+                            Message::ServiceBootReady(response)
+                        }
+                        crate::service_client::SpawnEvent::Terminal(error) => {
+                            Message::ServiceBootFailed(
+                                crate::service_client::BootFailureReason::from_client_error(&error),
+                            )
+                        }
+                        crate::service_client::SpawnEvent::HealthChanged(health) => {
+                            Message::ServiceHealthChanged(health)
+                        }
+                    };
+                    if output.try_send(msg).is_err() {
+                        break;
+                    }
+                }
+            }
+        },
+    ))
+}
+
+/// Splash state rendered while in `Booting`. Updated on each
+/// `Message::ServiceNotification(BootProgress)` so the user sees migration
+/// progress during the slow boot.ready round-trip.
+#[derive(Debug, Default)]
+pub(crate) struct SplashState {
+    /// Current boot phase reported by the Service. None means "awaiting
+    /// first BootProgress" (typically very brief).
+    pub(crate) phase: Option<service_api::BootPhase>,
+    /// Optional human-readable message from the Service.
+    pub(crate) message: Option<String>,
+}
+
+impl SplashState {
+    fn apply(&mut self, progress: service_api::BootProgress) {
+        self.phase = Some(progress.phase);
+        self.message = progress.message;
+    }
+
+    /// Default user-visible label per phase.
+    fn label(&self) -> String {
+        match self.phase {
+            None => t!("main.splash.connecting"),
+            Some(service_api::BootPhase::LoadingKey) => t!("main.splash.loading_key"),
+            Some(service_api::BootPhase::OpeningDatabase) => t!("main.splash.opening_database"),
+            Some(service_api::BootPhase::Migrating { .. }) => t!("main.splash.migrating"),
+            Some(service_api::BootPhase::RecoveringPendingOps) => {
+                t!("main.splash.recovering_pending_ops")
+            }
+            Some(service_api::BootPhase::SweepingQueuedDrafts) => {
+                t!("main.splash.sweeping_queued_drafts")
+            }
+            Some(service_api::BootPhase::BackfillingThreadParticipants) => {
+                t!("main.splash.backfilling_participants")
+            }
+            Some(service_api::BootPhase::DrainingDraftWal) => t!("main.splash.draining_draft_wal"),
+            Some(service_api::BootPhase::OpeningBodyAndInlineStores) => {
+                t!("main.splash.opening_stores")
+            }
+            Some(service_api::BootPhase::OpeningSearchIndex) => {
+                t!("main.splash.opening_search_index")
+            }
+            Some(service_api::BootPhase::RunningInvariantPass) => {
+                t!("main.splash.running_invariant_pass")
+            }
+        }
+        .into_owned()
+    }
+}
+
+/// The `Booting` half of the App state machine. Active from `iced::daemon`
+/// startup until the Service answers `boot.ready`. Holds only what's needed
+/// to render the splash and process the boot-flow messages whitelisted in
+/// `crates/app/src/message.rs`.
+///
+/// Transitions to `App::Ready` on `Message::ServiceBootReady` via
+/// `ReadyApp::from_boot_ready`. The user's deferred preferences (the only
+/// non-default state we care about during Booting) carry over via the
+/// stashed `appearance_mode`.
+pub struct BootingApp {
+    pub(crate) main_window_id: iced::window::Id,
+    pub(crate) splash: SplashState,
+    pub(crate) service_client: Option<Arc<ServiceClient>>,
+    pub(crate) service_notifications: Option<ServiceNotificationReceiver>,
+    /// AppearanceChanged events that arrive while Booting are stashed here
+    /// and applied after ReadyApp construction so the user's first sight of
+    /// the real UI matches their system theme.
+    pub(crate) appearance_mode: Option<appearance::Mode>,
+}
+
+/// Outcome of `BootingApp::update`. The dispatcher uses this to decide
+/// whether to stay in `Booting` (returning the task as-is) or transition to
+/// `Ready` (replacing `*self` with `App::Ready(box ready)` and firing the
+/// boxed task).
+pub enum BootingUpdate {
+    Stay(Task<Message>),
+    Transition(Box<ReadyApp>, Task<Message>),
+}
+
+impl BootingApp {
+    pub(crate) fn update(&mut self, message: Message) -> BootingUpdate {
+        match message {
+            Message::ServiceChildSpawned(client) => {
+                self.service_notifications = Some(client.notifications());
+                self.service_client = Some(client);
+                self.splash.message = Some(t!("main.splash.service_connected").into_owned());
+                BootingUpdate::Stay(Task::none())
+            }
+            Message::ServiceBootReady(response) => {
+                let client = self
+                    .service_client
+                    .take()
+                    .expect("ServiceChildSpawned must precede ServiceBootReady");
+                let notifications = self.service_notifications.take().unwrap_or_else(|| {
+                    Arc::new(crate::notification_queue::NotificationQueue::new(1024))
+                });
+                let (ready, task) = ReadyApp::from_boot_ready(
+                    &response,
+                    self.main_window_id,
+                    client,
+                    notifications,
+                );
+                BootingUpdate::Transition(Box::new(ready), task)
+            }
+            Message::ServiceBootFailed(reason) => {
+                let _ = crate::service_client::surface_terminal_failure(&reason);
+                BootingUpdate::Stay(iced::exit())
+            }
+            Message::ServiceNotification(notification) => {
+                let current_gen = self
+                    .service_client
+                    .as_ref()
+                    .map(|c| c.current_generation())
+                    .unwrap_or(0);
+                if !crate::service_client::notification_should_dispatch(&notification, current_gen)
+                {
+                    return BootingUpdate::Stay(Task::none());
+                }
+                match notification {
+                    service_api::Notification::BootProgress(progress) => {
+                        self.splash.apply(progress);
+                    }
+                    // Phase 2 wire types exist but no plan is in flight
+                    // during Booting (the action service won't dispatch
+                    // until ReadyApp is constructed). Drop with a debug
+                    // log so a leaked notification is observable.
+                    service_api::Notification::OperationOutcome(_)
+                    | service_api::Notification::ActionCompleted(_)
+                    | service_api::Notification::SyncProgress(_)
+                    | service_api::Notification::SyncCompleted(_)
+                    | service_api::Notification::AccountPaused(_)
+                    | service_api::Notification::MailboxChanged(_)
+                    | service_api::Notification::IndexCommitted(_)
+                    | service_api::Notification::PushEvent(_)
+                    | service_api::Notification::CalendarRunCompleted(_)
+                    | service_api::Notification::CalendarChanged(_)
+                    | service_api::Notification::CalendarOperationOutcome(_)
+                    | service_api::Notification::CalendarActionCompleted(_)
+                    | service_api::Notification::ExtractProgress(_)
+                    | service_api::Notification::ExtractCompleted(_)
+                    | service_api::Notification::PrefetchProgress(_)
+                    | service_api::Notification::PrefetchCompleted(_)
+                    | service_api::Notification::EvictionCompleted(_)
+                    | service_api::Notification::GcCompleted(_)
+                    | service_api::Notification::IndexRebuildProgress(_)
+                    | service_api::Notification::IndexRebuildCompleted(_) => {
+                        log::debug!(
+                            "BootingApp dropped action / sync / push / calendar / extract notification (no plans in flight pre-ready, push/calendar/extract start post-ready)"
+                        );
+                    }
+                }
+                BootingUpdate::Stay(Task::none())
+            }
+            Message::WindowCloseRequested(id) if id == self.main_window_id => {
+                // The user closed the splash mid-boot. We do not have a
+                // ServiceClient in shape to issue a clean Shutdown here -
+                // ChildSpawned may not have arrived yet, and even if it has
+                // the boot.ready handler is parked on a Notify that we
+                // can't unblock from this path. Rely on the Service's
+                // kernel-managed lock release and the writer task seeing
+                // EOF on stdin when ServiceClient::Drop fires after iced
+                // unwinds. Log the exit so the next launch's diagnostics
+                // can distinguish "user cancelled" from "boot failure".
+                log::info!("user closed splash mid-boot; exiting");
+                BootingUpdate::Stay(iced::exit())
+            }
+            Message::AppearanceChanged(mode) => {
+                self.appearance_mode = Some(mode);
+                BootingUpdate::Stay(Task::none())
+            }
+            // BootingApp owns only the main window (the splash); the
+            // `WindowCloseRequested(id) if id == self.main_window_id` arm
+            // above handles it. Other window IDs cannot exist during
+            // Booting, so no fallback close-arm is needed.
+            Message::WindowResized(_, _)
+            | Message::WindowMoved(_, _)
+            | Message::Noop
+            | Message::AttachmentSaveFolderRemembered(_, _)
+            | Message::ModifiersChanged(_) => BootingUpdate::Stay(Task::none()),
+            other => {
+                // Take the variant name from the start of the Debug
+                // representation (everything before `(` or `{`) rather than
+                // `std::mem::discriminant`, which prints
+                // `Discriminant(<opaque-id>)` and leaves the operator
+                // guessing. We deliberately do not Debug-print the full
+                // message: some Message variants carry large payloads
+                // (ThreadDetailLoaded, etc.) that would noisily fill the
+                // log on every drop. The variant name is the useful signal.
+                let debug = format!("{other:?}");
+                let name = debug.split(['(', '{', ' ']).next().unwrap_or("?");
+                log::debug!(
+                    "BootingApp dropped message variant {name} (whitelist per phase-1.5-plan scope item 21)",
+                );
+                BootingUpdate::Stay(Task::none())
+            }
+        }
+    }
+
+    pub(crate) fn view(&self, window_id: iced::window::Id) -> iced::Element<'_, Message> {
+        if window_id != self.main_window_id {
+            return crate::ui::widgets::empty_placeholder("", "");
+        }
+        let label = self.splash.label();
+        // For Migrating, show the count alongside the human-readable
+        // message - the count gives concrete progress on a long migration
+        // even when the message text is generic. Suppress the trailing
+        // `(0/N)` fraction on the pre-commit "Starting migration 1 of N"
+        // frame, since the message already names the index and the
+        // appended `(0/N)` reads as a contradiction. For other phases,
+        // fall back to the optional message, then a generic placeholder.
+        let detail = match self.splash.phase {
+            Some(service_api::BootPhase::Migrating { current: 0, total }) => {
+                match self.splash.message.as_deref() {
+                    Some(msg) => msg.to_string(),
+                    None => t!("main.splash.starting_migration", total = total).into_owned(),
+                }
+            }
+            Some(service_api::BootPhase::Migrating { current, total }) => {
+                match self.splash.message.as_deref() {
+                    Some(msg) => format!("{msg} ({current}/{total})"),
+                    None => t!(
+                        "main.splash.migration_progress",
+                        current = current,
+                        total = total
+                    )
+                    .into_owned(),
+                }
+            }
+            _ => self
+                .splash
+                .message
+                .clone()
+                .unwrap_or_else(|| t!("main.splash.starting").into_owned()),
+        };
+        iced::widget::container(
+            iced::widget::column![
+                iced::widget::text("Courly").size(28),
+                iced::widget::Space::new().height(iced::Length::Fixed(12.0)),
+                iced::widget::text(label).size(16),
+                iced::widget::Space::new().height(iced::Length::Fixed(4.0)),
+                iced::widget::text(detail).size(12),
+            ]
+            .align_x(iced::Alignment::Center),
+        )
+        .center_x(iced::Length::Fill)
+        .center_y(iced::Length::Fill)
+        .into()
+    }
+
+    pub(crate) fn title(&self, _window_id: iced::window::Id) -> String {
+        t!("main.window.starting_title").into_owned()
+    }
+
+    pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
+        // The whitelist in `BootingApp::update` (and the doc-comment table in
+        // `message.rs`) declares only three categories as actionable while
+        // Booting: AppearanceChanged (forward to Ready), WindowCloseRequested
+        // (iced::exit on the main window), and ServiceNotification (drives
+        // the splash via boot.progress). WindowResized / WindowMoved are
+        // explicitly "drop" because BootingApp does not own a WindowState;
+        // not subscribing to them avoids generating events that the update
+        // path would just discard.
+        let mut subs = vec![
+            appearance::subscription().map(Message::AppearanceChanged),
+            iced::window::close_requests().map(Message::WindowCloseRequested),
+        ];
+        if let Some(notifications) = self.service_notifications.as_ref() {
+            subs.push(
+                crate::service_subscription::service_notification_subscription(notifications)
+                    .map(Message::ServiceNotification),
+            );
+        }
+        iced::Subscription::batch(subs)
+    }
+}
+
+/// Top-level state machine. `App::Booting` is the initial state; it
+/// transitions to `App::Ready` exactly once when the Service answers
+/// `boot.ready` (via `Message::ServiceBootReady`).
+pub enum App {
+    Booting(BootingApp),
+    Ready(Box<ReadyApp>),
+}
+
+impl App {
+    pub(crate) fn boot() -> (Self, Task<Message>) {
+        let data_dir = crate::APP_DATA_DIR
+            .get()
+            .expect("APP_DATA_DIR must be set before iced::daemon::run");
+        let window = window_state::WindowState::load(data_dir);
+        let (main_window_id, open_task) = iced::window::open(window.to_window_settings());
+
+        let booting = BootingApp {
+            main_window_id,
+            splash: SplashState::default(),
+            service_client: None,
+            service_notifications: None,
+            appearance_mode: None,
+        };
+
+        // Two-phase Service spawn. The receiver emits ChildSpawned ->
+        // BootReady (or Terminal on failure). BootingApp::update consumes
+        // those messages and triggers the Booting -> Ready transition.
+        let spawn_stream = spawn_event_stream(
+            crate::service_client::ServiceClient::spawn_with_events(data_dir.clone()),
+        );
+
+        (
+            App::Booting(booting),
+            Task::batch([open_task.discard(), spawn_stream]),
+        )
+    }
+
+    pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
+        match self {
+            App::Booting(booting) => match booting.update(message) {
+                BootingUpdate::Stay(task) => task,
+                BootingUpdate::Transition(mut ready, task) => {
+                    if let Some(mode) = booting.appearance_mode.take() {
+                        ready.mode = mode;
+                    }
+                    #[cfg(target_os = "macos")]
+                    ready.install_menu_bar();
+                    *self = App::Ready(ready);
+                    task
+                }
+            },
+            App::Ready(ready) => {
+                let task = ready.update(message);
+                ready.thread_list.date_groups = ready.settings.thread_date_groups;
+                ready.sidebar.text_size =
+                    crate::ui::sidebar::SidebarTextSize::from_setting(&ready.settings.font_size);
+                let density = crate::ui::layout::Density::from_setting(&ready.settings.density);
+                ready.sidebar.density = density;
+                ready.thread_list.density = density;
+                ready.sidebar_width = ready.sidebar_width.max(density.sidebar_min_width());
+                #[cfg(target_os = "macos")]
+                ready.refresh_menu_bar();
+                // Whatever loaded the list (a folder, a search), its
+                // senders are judged for a brand logo.
+                let logos = match ready.thread_list.take_new_senders() {
+                    Some(senders) => Task::perform(
+                        crate::sender_logos::warm(Arc::clone(&ready.db), senders),
+                        |()| Message::SenderLogosWarmed,
+                    ),
+                    None => Task::none(),
+                };
+                Task::batch([
+                    task,
+                    ready.sync_email_appearance(),
+                    ready.persist_preferences_if_changed(),
+                    logos,
+                ])
+            }
+        }
+    }
+
+    pub(crate) fn view(&self, window_id: iced::window::Id) -> iced::Element<'_, Message> {
+        match self {
+            App::Booting(b) => b.view(window_id),
+            App::Ready(r) => r.view(window_id),
+        }
+    }
+
+    pub(crate) fn title(&self, window_id: iced::window::Id) -> String {
+        match self {
+            App::Booting(b) => b.title(window_id),
+            App::Ready(r) => r.title(window_id),
+        }
+    }
+
+    pub(crate) fn daemon_theme(&self, window_id: iced::window::Id) -> Theme {
+        match self {
+            // Honour the AppearanceChanged event the BootingApp may have
+            // already stashed: if the OS reported Light mode before
+            // boot.ready arrived, render the splash in Light too. Without
+            // this, the splash always paints Dark and then re-themes on
+            // the Booting -> Ready transition, producing a flash. The
+            // stash is None until the first AppearanceChanged arrives,
+            // which on most systems happens within milliseconds of
+            // iced::daemon startup; falling back to Dark is the
+            // pre-existing behaviour and matches the safest default for
+            // an OS that never delivers an appearance event.
+            App::Booting(b) => match b.appearance_mode {
+                Some(crate::appearance::Mode::Light) => crate::ui::theme::light_theme(),
+                _ => crate::ui::theme::dark_theme(),
+            },
+            App::Ready(r) => r.daemon_theme(window_id),
+        }
+    }
+
+    pub(crate) fn scale_factor(&self) -> f32 {
+        match self {
+            App::Booting(_) => *crate::DEFAULT_SCALE.get().unwrap_or(&1.0),
+            App::Ready(r) => r.settings.scale,
+        }
+    }
+
+    pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
+        match self {
+            App::Booting(b) => b.subscription(),
+            App::Ready(r) => r.subscription(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod booting_update_tests {
+    use super::{BootingApp, BootingUpdate, SplashState};
+    use crate::message::Message;
+
+    fn make_booting() -> BootingApp {
+        BootingApp {
+            main_window_id: iced::window::Id::unique(),
+            splash: SplashState::default(),
+            service_client: None,
+            service_notifications: None,
+            appearance_mode: None,
+        }
+    }
+
+    fn assert_stay_noop(outcome: &BootingUpdate) {
+        match outcome {
+            BootingUpdate::Stay(_) => {}
+            BootingUpdate::Transition(_, _) => {
+                panic!("expected Stay; got Transition - whitelisted variants must not transition")
+            }
+        }
+    }
+
+    /// AppearanceChanged is "forward" per the message.rs whitelist: stash on
+    /// BootingApp, replay after Booting -> Ready transition. The stash is the
+    /// observable side effect; assert it lands.
+    #[test]
+    fn appearance_changed_is_stashed_for_replay_after_ready_transition() {
+        let mut booting = make_booting();
+        assert!(booting.appearance_mode.is_none());
+        let outcome = booting.update(Message::AppearanceChanged(crate::appearance::Mode::Light));
+        assert_stay_noop(&outcome);
+        assert_eq!(
+            booting.appearance_mode,
+            Some(crate::appearance::Mode::Light)
+        );
+    }
+
+    /// Modal-key + window-geometry events are explicit-drop arms in the
+    /// whitelist: they reach BootingApp::update, do nothing, and return
+    /// Stay(Task::none()). The catch-all is NOT involved here - that arm is
+    /// only for Message variants the explicit list doesn't name. Locks in
+    /// "drop with no panic, no state change."
+    #[test]
+    fn explicit_drop_variants_return_stay_without_state_change() {
+        let mut booting = make_booting();
+        let size = iced::Size::new(800.0, 600.0);
+        let point = iced::Point::new(0.0, 0.0);
+        let cases: Vec<Message> = vec![
+            Message::Noop,
+            Message::WindowResized(booting.main_window_id, size),
+            Message::WindowMoved(booting.main_window_id, point),
+            Message::ModifiersChanged(iced::keyboard::Modifiers::empty()),
+        ];
+        for msg in cases {
+            let label = format!("{msg:?}");
+            let outcome = booting.update(msg);
+            assert!(
+                matches!(outcome, BootingUpdate::Stay(_)),
+                "{label} must Stay, no Transition"
+            );
+            // None of these messages should populate appearance_mode or the
+            // service-client slot. The splash should also stay in its
+            // default state since no BootProgress arrived.
+            assert!(
+                booting.appearance_mode.is_none(),
+                "{label} mutated appearance"
+            );
+            assert!(booting.service_client.is_none(), "{label} populated client");
+            assert!(booting.splash.phase.is_none(), "{label} mutated splash");
+        }
+    }
+
+    /// Catch-all arm: any non-whitelisted Message must land on Stay without
+    /// panicking. The previous behavior (a `discriminant(...)` debug log)
+    /// did not crash, but we are locking in the contract that future Message
+    /// variants added without an explicit BootingApp row also do not crash.
+    /// Use a few representative variants from across the Message enum.
+    #[test]
+    fn non_whitelisted_variants_drop_safely_without_panic() {
+        let mut booting = make_booting();
+        // Pick variants from different message families that are not in
+        // the whitelist (sync, search, snooze, palette, etc.)
+        let cases: Vec<Message> = vec![
+            Message::SyncTick,
+            Message::SnoozeTick,
+            Message::Compose,
+            Message::FocusSearch,
+            Message::ToggleSettings,
+            Message::Escape,
+            Message::ChatReadMarked,
+            Message::SetAppMode(crate::app::AppMode::Mail),
+        ];
+        for msg in cases {
+            let label = format!("{msg:?}");
+            let outcome = booting.update(msg);
+            assert!(
+                matches!(outcome, BootingUpdate::Stay(_)),
+                "non-whitelisted {label} must Stay, never Transition or panic"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod splash_tests {
+    use super::SplashState;
+    use service_api::{BootPhase, BootProgress};
+
+    fn progress(phase: BootPhase, message: Option<&str>) -> BootProgress {
+        BootProgress {
+            phase,
+            message: message.map(String::from),
+            service_generation: 0,
+        }
+    }
+
+    /// Default state (before any BootProgress arrives) renders a placeholder
+    /// label so the splash isn't empty during the brief window between
+    /// ChildSpawned and the first boot.progress notification.
+    #[test]
+    fn label_for_default_state_uses_connecting_placeholder() {
+        let splash = SplashState::default();
+        assert_eq!(splash.label(), "Connecting to Service...");
+    }
+
+    /// Each `BootPhase` variant maps to a distinct splash label. The
+    /// `BootPhase::Migrating` variant collapses the structured `current` /
+    /// `total` into a single label - the `BootingApp::view` is what splices
+    /// the count back onto the line.
+    #[test]
+    fn label_covers_every_boot_phase() {
+        let cases = [
+            (BootPhase::LoadingKey, "Loading encryption key..."),
+            (BootPhase::OpeningDatabase, "Opening database..."),
+            (
+                BootPhase::Migrating {
+                    current: 0,
+                    total: 1,
+                },
+                "Migrating database...",
+            ),
+            (
+                BootPhase::Migrating {
+                    current: 5,
+                    total: 10,
+                },
+                "Migrating database...",
+            ),
+            (
+                BootPhase::RecoveringPendingOps,
+                "Recovering pending operations...",
+            ),
+            (BootPhase::SweepingQueuedDrafts, "Sweeping queued drafts..."),
+            (
+                BootPhase::BackfillingThreadParticipants,
+                "Backfilling thread participants...",
+            ),
+        ];
+        for (phase, expected) in cases {
+            let mut splash = SplashState::default();
+            splash.apply(progress(phase, None));
+            assert_eq!(
+                splash.label(),
+                expected,
+                "phase {phase:?} should produce label {expected:?}"
+            );
+        }
+    }
+
+    /// `apply` overwrites both `phase` and `message`. Locks in that a new
+    /// notification fully replaces the prior splash state rather than merging
+    /// fields - the per-phase coalesce key on the wire already deduplicates,
+    /// so the splash should always reflect the latest delivered message.
+    #[test]
+    fn apply_overwrites_phase_and_message() {
+        let mut splash = SplashState::default();
+        splash.apply(progress(
+            BootPhase::Migrating {
+                current: 1,
+                total: 5,
+            },
+            Some("Applied migration 1 of 5"),
+        ));
+        assert_eq!(
+            splash.phase,
+            Some(BootPhase::Migrating {
+                current: 1,
+                total: 5
+            })
+        );
+        assert_eq!(splash.message.as_deref(), Some("Applied migration 1 of 5"));
+
+        splash.apply(progress(BootPhase::RecoveringPendingOps, None));
+        assert_eq!(splash.phase, Some(BootPhase::RecoveringPendingOps));
+        assert_eq!(splash.message, None);
+    }
+}

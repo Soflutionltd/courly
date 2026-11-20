@@ -1,0 +1,1690 @@
+use std::sync::Arc;
+
+use iced::Task;
+use rust_i18n::t;
+use service_api::{PinnedSearchCreateOrUpdateParams, PinnedSearchUpdateParams, PinnedThreadRef};
+
+use crate::db::{self, Thread};
+use crate::ui::search_scope::{SearchScopeChoice, SearchScopeMessage};
+use crate::ui::search_suggest::{SearchSuggestMessage, SuggestRow};
+use crate::ui::sidebar::truncate_query;
+use crate::ui::thread_list::{ServerSearchStatus, ThreadListMode};
+use crate::{Message, ReadyApp};
+use rtsk::contacts::search::ContactOrigins;
+use rtsk::db::types::AccountScope;
+use rtsk::scope::ViewScope;
+
+/// Pause after which the list and the suggestions refresh when the search
+/// does not run on the key itself: an operator value being typed, undo and
+/// redo. The deadline is polled every 50 ms, so results land 100 to 150 ms
+/// after the last key.
+const SEARCH_TYPING_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
+
+#[derive(Debug, Clone)]
+pub(crate) enum SearchIntent {
+    AdHoc {
+        query: String,
+        scope: ViewScope,
+        folder_id: Option<String>,
+    },
+    SmartFolder {
+        id: String,
+        query: String,
+    },
+    PinnedActivation {
+        id: i64,
+    },
+    PinnedRefresh {
+        id: i64,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct UiSearchContext {
+    editing_pinned_search: Option<i64>,
+    entered_from_scope_view: bool,
+    pinned_searches: Vec<db::PinnedSearch>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SearchScope {
+    View(ViewScope),
+    QueryIntrinsic,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SearchExecution {
+    Query {
+        query: String,
+        scope: SearchScope,
+        folder_id: Option<String>,
+    },
+    Snapshot {
+        pinned_search_id: i64,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SearchPersistenceBehavior {
+    None,
+    CreatePinnedSnapshot {
+        scope_account_id: Option<String>,
+        scope_folder_id: Option<String>,
+    },
+    UpdatePinnedSnapshot {
+        id: i64,
+        scope_account_id: Option<String>,
+        scope_folder_id: Option<String>,
+    },
+    RefreshPinnedSnapshot {
+        id: i64,
+        scope_account_id: Option<String>,
+        scope_folder_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PinnedSearchRef {
+    Existing(i64),
+    FromPersistence,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Clear variant + id field reserved for upcoming pinned-search edits
+pub(crate) enum SearchPinnedStateBehavior {
+    Clear,
+    SmartFolder {
+        id: String,
+    },
+    PinnedSearch {
+        active: PinnedSearchRef,
+        editing: PinnedSearchRef,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SearchPostSuccessEffect {
+    None,
+    RefreshPinnedSearchList,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FolderRestoreBehavior {
+    LeaveAsIs,
+    EnterSearchFromFolderView,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchCompletionBehavior {
+    pub(crate) persistence: SearchPersistenceBehavior,
+    pub(crate) pinned_state: SearchPinnedStateBehavior,
+    pub(crate) post_success: SearchPostSuccessEffect,
+    pub(crate) folder_restore: FolderRestoreBehavior,
+    /// Results refreshed under the reader: the open conversation stays.
+    pub(crate) keep_selection: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedSearch {
+    pub intent: SearchIntent,
+    pub execution: SearchExecution,
+    pub completion: SearchCompletionBehavior,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SearchFreshness {
+    Query(rtsk::generation::GenerationToken<rtsk::generation::Search>),
+    Snapshot(rtsk::generation::GenerationToken<rtsk::generation::Nav>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ServerSearch {
+    pub(crate) address: String,
+    pub(crate) account_id: Option<String>,
+    pub(crate) status: ServerSearchStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchExecutionResult {
+    pub(crate) resolved: ResolvedSearch,
+    pub(crate) freshness: SearchFreshness,
+    pub(crate) results: Result<Vec<Thread>, String>,
+}
+
+fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> ResolvedSearch {
+    let folder_restore = if ctx.entered_from_scope_view {
+        FolderRestoreBehavior::EnterSearchFromFolderView
+    } else {
+        FolderRestoreBehavior::LeaveAsIs
+    };
+
+    match intent.clone() {
+        SearchIntent::AdHoc {
+            query,
+            scope,
+            folder_id,
+        } => {
+            let scope_account_id = scope.account_id().map(ToOwned::to_owned);
+            let scope_folder_id = folder_id.clone();
+            let (persistence, pinned_state) = if let Some(id) = ctx.editing_pinned_search {
+                (
+                    SearchPersistenceBehavior::UpdatePinnedSnapshot {
+                        id,
+                        scope_account_id,
+                        scope_folder_id,
+                    },
+                    SearchPinnedStateBehavior::PinnedSearch {
+                        active: PinnedSearchRef::Existing(id),
+                        editing: PinnedSearchRef::Existing(id),
+                    },
+                )
+            } else {
+                (
+                    SearchPersistenceBehavior::CreatePinnedSnapshot {
+                        scope_account_id,
+                        scope_folder_id,
+                    },
+                    SearchPinnedStateBehavior::PinnedSearch {
+                        active: PinnedSearchRef::FromPersistence,
+                        editing: PinnedSearchRef::FromPersistence,
+                    },
+                )
+            };
+
+            ResolvedSearch {
+                intent,
+                execution: SearchExecution::Query {
+                    query,
+                    scope: SearchScope::View(scope),
+                    folder_id,
+                },
+                completion: SearchCompletionBehavior {
+                    persistence,
+                    pinned_state,
+                    post_success: SearchPostSuccessEffect::RefreshPinnedSearchList,
+                    folder_restore,
+                    keep_selection: false,
+                },
+            }
+        }
+        SearchIntent::SmartFolder { id, query } => ResolvedSearch {
+            intent,
+            execution: SearchExecution::Query {
+                query,
+                scope: SearchScope::QueryIntrinsic,
+                folder_id: None,
+            },
+            completion: SearchCompletionBehavior {
+                persistence: SearchPersistenceBehavior::None,
+                pinned_state: SearchPinnedStateBehavior::SmartFolder { id },
+                post_success: SearchPostSuccessEffect::None,
+                folder_restore,
+                keep_selection: false,
+            },
+        },
+        SearchIntent::PinnedActivation { id } => ResolvedSearch {
+            intent,
+            execution: SearchExecution::Snapshot {
+                pinned_search_id: id,
+            },
+            completion: SearchCompletionBehavior {
+                persistence: SearchPersistenceBehavior::None,
+                pinned_state: SearchPinnedStateBehavior::PinnedSearch {
+                    active: PinnedSearchRef::Existing(id),
+                    editing: PinnedSearchRef::Existing(id),
+                },
+                post_success: SearchPostSuccessEffect::None,
+                folder_restore,
+                keep_selection: false,
+            },
+        },
+        SearchIntent::PinnedRefresh { id } => {
+            let ps = ctx
+                .pinned_searches
+                .iter()
+                .find(|ps| ps.id == id)
+                .unwrap_or_else(|| {
+                    panic!("Pinned refresh intent resolved without pinned search {id}")
+                });
+            let scope = ps
+                .scope_account_id
+                .as_ref()
+                .map_or(AccountScope::All, |id| AccountScope::Single(id.clone()));
+            let query = ps.query.clone();
+
+            ResolvedSearch {
+                intent,
+                execution: SearchExecution::Query {
+                    query,
+                    scope: match scope {
+                        AccountScope::All => SearchScope::View(ViewScope::AllAccounts),
+                        AccountScope::Single(id) => SearchScope::View(ViewScope::Account(id)),
+                        AccountScope::Multiple(_) => SearchScope::QueryIntrinsic,
+                    },
+                    folder_id: ps.scope_folder_id.clone(),
+                },
+                completion: SearchCompletionBehavior {
+                    persistence: SearchPersistenceBehavior::RefreshPinnedSnapshot {
+                        id,
+                        scope_account_id: ps.scope_account_id.clone(),
+                        scope_folder_id: ps.scope_folder_id.clone(),
+                    },
+                    pinned_state: SearchPinnedStateBehavior::PinnedSearch {
+                        active: PinnedSearchRef::Existing(id),
+                        editing: PinnedSearchRef::Existing(id),
+                    },
+                    post_success: SearchPostSuccessEffect::RefreshPinnedSearchList,
+                    folder_restore: FolderRestoreBehavior::LeaveAsIs,
+                    keep_selection: false,
+                },
+            }
+        }
+    }
+}
+
+fn execution_scope_to_account_scope(scope: &SearchScope) -> AccountScope {
+    match scope {
+        SearchScope::QueryIntrinsic => AccountScope::All,
+        SearchScope::View(ViewScope::AllAccounts) => AccountScope::All,
+        SearchScope::View(ViewScope::Account(id)) => AccountScope::Single(id.clone()),
+        SearchScope::View(ViewScope::SharedMailbox { account_id, .. })
+        | SearchScope::View(ViewScope::PublicFolder { account_id, .. }) => {
+            AccountScope::Single(account_id.clone())
+        }
+    }
+}
+
+// ── Search handling ────────────────────────────────────
+
+impl ReadyApp {
+    fn record_search_restore_origin(&mut self) {
+        if self.thread_list.mode == ThreadListMode::Scope {
+            self.was_in_scope_view = true;
+        }
+    }
+
+    fn current_ui_search_context(&self) -> UiSearchContext {
+        UiSearchContext {
+            editing_pinned_search: self.editing_pinned_search,
+            entered_from_scope_view: self.thread_list.mode == ThreadListMode::Scope,
+            pinned_searches: self.pinned_searches.clone(),
+        }
+    }
+
+    fn apply_search_folder_restore(&mut self, behavior: FolderRestoreBehavior) {
+        if matches!(behavior, FolderRestoreBehavior::EnterSearchFromFolderView) {
+            self.record_search_restore_origin();
+        }
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    pub(crate) fn dispatch_resolved_search(&mut self, resolved: ResolvedSearch) -> Task<Message> {
+        // Pre-boot race: SearchReadState::init is still in flight. Stash the
+        // resolved intent so SearchStateReady can replay it once init lands,
+        // rather than letting the search pipeline fall through to the SQL
+        // LIKE fallback. The fallback is reserved for true init-failure
+        // recovery (which stays an open design question - see
+        // `docs/search/implementation-spec.md` § "SQL fallback"). Only the
+        // Query variant uses the search index; Snapshot loads stored thread
+        // IDs from `pinned_search_threads` and is safe to run pre-boot.
+        if self.search_state_pending && matches!(resolved.execution, SearchExecution::Query { .. })
+        {
+            self.pending_search = Some(resolved);
+            return Task::none();
+        }
+
+        self.apply_search_folder_restore(resolved.completion.folder_restore);
+
+        match resolved.execution.clone() {
+            SearchExecution::Query {
+                query,
+                scope,
+                folder_id,
+            } => {
+                let generation = self.search_generation.next();
+                let db = Arc::clone(&self.db);
+                let ss = self.search_state.clone();
+                let body_store = self.body_store.clone();
+                let scope = execution_scope_to_account_scope(&scope);
+                let resolved = resolved.clone();
+                // Only the search the pill itself runs lists one message per
+                // row; a saved search that happens to name a sender does not.
+                let sender = self
+                    .search_sender
+                    .clone()
+                    .filter(|sender| query.starts_with(&sender_query(Some(sender), "")));
+
+                Task::perform(
+                    async move {
+                        let result =
+                            execute_search(db, ss, body_store, query, scope, folder_id, sender)
+                                .await;
+                        SearchExecutionResult {
+                            resolved,
+                            freshness: SearchFreshness::Query(generation),
+                            results: result,
+                        }
+                    },
+                    Message::SearchCompleted,
+                )
+            }
+            SearchExecution::Snapshot { pinned_search_id } => {
+                let db = Arc::clone(&self.db);
+                let load_gen = self.nav_generation.next();
+                let resolved = resolved.clone();
+                Task::perform(
+                    async move {
+                        let result = match db.get_pinned_search_thread_ids(pinned_search_id).await {
+                            Ok(ids) => db.get_threads_by_ids(ids).await,
+                            Err(e) => Err(e),
+                        };
+                        SearchExecutionResult {
+                            resolved,
+                            freshness: SearchFreshness::Snapshot(load_gen),
+                            results: result,
+                        }
+                    },
+                    Message::SearchCompleted,
+                )
+            }
+        }
+    }
+
+    /// What the search runs: the typed text, narrowed to the sender pill.
+    pub(crate) fn effective_search_query(&self) -> String {
+        sender_query(self.search_sender.as_deref(), self.search_query.text())
+    }
+
+    pub(crate) fn handle_search_query_changed(&mut self, query: String) -> Task<Message> {
+        self.search_query.set_text(query);
+        self.thread_list.search_query = self.search_query.text().to_string();
+        if self.search_query.text().trim().is_empty() {
+            self.search_debounce_deadline = None;
+            self.close_search_menus();
+            if self.search_sender.is_some() {
+                return self.handle_search_execute();
+            }
+            if self.thread_list.mode == ThreadListMode::Search {
+                let _ = self.nav_generation.next();
+                let _ = self.search_generation.next();
+                return self.restore_folder_view();
+            }
+        }
+
+        // Trigger typeahead based on cursor context (assume cursor at end)
+        let text = self.search_query.text().to_string();
+        let cursor_pos = text.len();
+        let ctx = smart_folder::analyze_cursor_context(&text, cursor_pos);
+        match ctx {
+            smart_folder::CursorContext::InsideOperator {
+                operator,
+                partial_value,
+                ..
+            } if !partial_value.is_empty() => {
+                // The operator menu loads first; the list refreshes on the
+                // typing pause, and only if that menu came back empty.
+                self.search_debounce_deadline =
+                    Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
+                return self.dispatch_typeahead_query(&operator, &partial_value);
+            }
+            _ => {
+                self.thread_list.typeahead.visible = false;
+            }
+        }
+        if text.trim().is_empty() {
+            return Task::none();
+        }
+        // Plain words search on every key: a search is cheap enough that
+        // waiting for a pause would be most of what the user feels, and a
+        // result that lands after a newer key is dropped by its generation.
+        self.refresh_search_suggestions()
+    }
+
+    /// Accounts and exact folder the title-bar search covers, from the
+    /// scope pill rather than from the sidebar account.
+    fn search_target(&self) -> (ViewScope, Option<String>) {
+        match self.search_scope.choice.effective(&self.sidebar.accounts) {
+            SearchScopeChoice::AllMailboxes => (ViewScope::AllAccounts, None),
+            SearchScopeChoice::Mailbox { account_id } => (ViewScope::Account(account_id), None),
+            SearchScopeChoice::ActiveFolder => {
+                let scope = self.current_scope().clone();
+                let folder_id = match scope {
+                    ViewScope::AllAccounts | ViewScope::Account(_) => {
+                        self.sidebar.selection.folder_id_for_thread_query()
+                    }
+                    ViewScope::SharedMailbox { .. } | ViewScope::PublicFolder { .. } => None,
+                };
+                (scope, folder_id)
+            }
+        }
+    }
+
+    pub(crate) fn handle_search_scope(&mut self, message: SearchScopeMessage) -> Task<Message> {
+        match message {
+            SearchScopeMessage::ToggleMenu => {
+                self.search_scope.menu_open = !self.search_scope.menu_open;
+                Task::none()
+            }
+            SearchScopeMessage::CloseMenu => {
+                self.search_scope.menu_open = false;
+                Task::none()
+            }
+            SearchScopeMessage::Select(choice) => {
+                self.search_scope.menu_open = false;
+                self.set_search_scope(choice)
+            }
+        }
+    }
+
+    /// Store the scope and rerun the search on screen under it.
+    pub(crate) fn set_search_scope(&mut self, choice: SearchScopeChoice) -> Task<Message> {
+        let persist = if self.search_scope.choice == choice {
+            Task::none()
+        } else {
+            self.search_scope.choice = choice;
+            self.persist_search_scope()
+        };
+        let rerun = if self.thread_list.mode == ThreadListMode::Search
+            && !self.effective_search_query().is_empty()
+        {
+            self.handle_search_execute()
+        } else {
+            Task::none()
+        };
+        Task::batch([persist, rerun])
+    }
+
+    fn persist_search_scope(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("settings.set: no ServiceClient yet; search scope not persisted");
+            return Task::none();
+        };
+        let json = self.search_scope.choice.to_json();
+        Task::perform(
+            async move {
+                client
+                    .set_settings(vec![service_api::SettingValue::SearchScope(json)])
+                    .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::warn!("settings.set search_scope failed: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    pub(crate) fn handle_search_execute(&mut self) -> Task<Message> {
+        self.search_debounce_deadline = None;
+        self.close_search_menus();
+        let query = self.effective_search_query();
+        if query.is_empty() {
+            return self.restore_folder_view();
+        }
+
+        let (scope, folder_id) = self.search_target();
+        let intent = SearchIntent::AdHoc {
+            query,
+            scope,
+            folder_id,
+        };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
+    }
+
+    pub(crate) fn handle_search_completed(
+        &mut self,
+        result: SearchExecutionResult,
+    ) -> Task<Message> {
+        let is_fresh = match result.freshness {
+            SearchFreshness::Query(token) => self.search_generation.is_current(token),
+            SearchFreshness::Snapshot(token) => self.nav_generation.is_current(token),
+        };
+        if !is_fresh {
+            return Task::none();
+        }
+
+        match result.results {
+            Ok(threads) => {
+                self.thread_list.mode = ThreadListMode::Search;
+                self.thread_list.search_covers_all = match &result.resolved.execution {
+                    SearchExecution::Query {
+                        scope, folder_id, ..
+                    } => {
+                        folder_id.is_none()
+                            && matches!(execution_scope_to_account_scope(scope), AccountScope::All)
+                    }
+                    SearchExecution::Snapshot { .. } => true,
+                };
+
+                self.thread_list.set_threads(threads);
+                if !result.resolved.completion.keep_selection {
+                    self.clear_thread_selection();
+                }
+                self.show_server_search_status();
+
+                match &result.resolved.intent {
+                    SearchIntent::PinnedActivation { id } | SearchIntent::PinnedRefresh { id } => {
+                        if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == *id) {
+                            let label = truncate_query(&ps.query, 30);
+                            self.search_sender = None;
+                            self.search_query.reset(ps.query.clone());
+                            self.thread_list.search_query.clone_from(&ps.query);
+                            self.thread_list.set_context(
+                                t!("main.search.pinned_title", query = label).into_owned(),
+                                pinned_search_scope_name(self, ps),
+                                false,
+                                false,
+                            );
+                            self.status = format!(
+                                "{} threads (pinned search)",
+                                self.thread_list.threads.len()
+                            );
+                        }
+                    }
+                    _ => {
+                        self.status = format!("{} results", self.thread_list.threads.len());
+                    }
+                }
+
+                let thread_ids: Vec<(String, String)> = self
+                    .thread_list
+                    .threads
+                    .iter()
+                    .map(|t| (t.id.clone(), t.account_id.clone()))
+                    .collect();
+
+                let persistence_task = match (
+                    &result.resolved.completion.persistence,
+                    &result.resolved.execution,
+                ) {
+                    (SearchPersistenceBehavior::None, _) => Task::none(),
+                    (
+                        SearchPersistenceBehavior::CreatePinnedSnapshot {
+                            scope_account_id,
+                            scope_folder_id,
+                        },
+                        SearchExecution::Query { query, .. },
+                    ) => {
+                        if let Some(client) = self.service_client.as_ref().cloned() {
+                            let query = query.clone();
+                            let scope_account_id = scope_account_id.clone();
+                            let scope_folder_id = scope_folder_id.clone();
+                            let completion = result.resolved.completion.clone();
+                            let params = PinnedSearchCreateOrUpdateParams {
+                                query,
+                                thread_ids: thread_ids
+                                    .into_iter()
+                                    .map(|(thread_id, account_id)| PinnedThreadRef {
+                                        thread_id,
+                                        account_id,
+                                    })
+                                    .collect(),
+                                scope_account_id,
+                                scope_folder_id,
+                            };
+                            Task::perform(
+                                async move {
+                                    client
+                                        .create_or_update_pinned_search(params)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                },
+                                move |save_result| {
+                                    Message::PinnedSearchCreateOrUpdateAck(
+                                        completion.clone(),
+                                        save_result,
+                                    )
+                                },
+                            )
+                        } else {
+                            log::warn!(
+                                "pinned_search.create_or_update: no ServiceClient yet; \
+                                 snapshot not persisted (next reload reconciles)"
+                            );
+                            Task::none()
+                        }
+                    }
+                    (
+                        SearchPersistenceBehavior::UpdatePinnedSnapshot {
+                            id,
+                            scope_account_id,
+                            scope_folder_id,
+                        },
+                        SearchExecution::Query { query, .. },
+                    ) => {
+                        if let Some(client) = self.service_client.as_ref().cloned() {
+                            let query = query.clone();
+                            let scope_account_id = scope_account_id.clone();
+                            let scope_folder_id = scope_folder_id.clone();
+                            let id = *id;
+                            let completion = result.resolved.completion.clone();
+                            let params = PinnedSearchUpdateParams {
+                                id,
+                                query,
+                                thread_ids: thread_ids
+                                    .into_iter()
+                                    .map(|(thread_id, account_id)| PinnedThreadRef {
+                                        thread_id,
+                                        account_id,
+                                    })
+                                    .collect(),
+                                scope_account_id,
+                                scope_folder_id,
+                            };
+                            Task::perform(
+                                async move {
+                                    client
+                                        .update_pinned_search(params)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                        .map(|()| id)
+                                },
+                                move |save_result| {
+                                    Message::PinnedSearchUpdateAck(completion.clone(), save_result)
+                                },
+                            )
+                        } else {
+                            log::warn!(
+                                "pinned_search.update: no ServiceClient yet; \
+                                 snapshot not persisted (next reload reconciles)"
+                            );
+                            Task::none()
+                        }
+                    }
+                    (
+                        SearchPersistenceBehavior::RefreshPinnedSnapshot {
+                            id,
+                            scope_account_id,
+                            scope_folder_id,
+                        },
+                        SearchExecution::Query { query, .. },
+                    ) => {
+                        if let Some(client) = self.service_client.as_ref().cloned() {
+                            let query = query.clone();
+                            let scope_account_id = scope_account_id.clone();
+                            let scope_folder_id = scope_folder_id.clone();
+                            let id = *id;
+                            let completion = result.resolved.completion.clone();
+                            let params = PinnedSearchUpdateParams {
+                                id,
+                                query,
+                                thread_ids: thread_ids
+                                    .into_iter()
+                                    .map(|(thread_id, account_id)| PinnedThreadRef {
+                                        thread_id,
+                                        account_id,
+                                    })
+                                    .collect(),
+                                scope_account_id,
+                                scope_folder_id,
+                            };
+                            Task::perform(
+                                async move {
+                                    client
+                                        .update_pinned_search(params)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                        .map(|()| id)
+                                },
+                                move |save_result| {
+                                    Message::PinnedSearchUpdateAck(completion.clone(), save_result)
+                                },
+                            )
+                        } else {
+                            log::warn!(
+                                "pinned_search.update (refresh): no ServiceClient yet; \
+                                 snapshot not persisted (next reload reconciles)"
+                            );
+                            Task::none()
+                        }
+                    }
+                    _ => Task::none(),
+                };
+
+                if matches!(
+                    result.resolved.completion.persistence,
+                    SearchPersistenceBehavior::None
+                ) {
+                    self.apply_search_pinned_state(&result.resolved.completion.pinned_state, None);
+                    let post =
+                        self.apply_search_post_success(result.resolved.completion.post_success);
+                    return post;
+                }
+
+                persistence_task
+            }
+            Err(e) => {
+                self.status = format!("Search error: {e}");
+                Task::none()
+            }
+        }
+    }
+
+    pub(crate) fn handle_search_suggest(&mut self, message: SearchSuggestMessage) -> Task<Message> {
+        match message {
+            SearchSuggestMessage::Refresh => self.refresh_search_suggestions(),
+            SearchSuggestMessage::Loaded { query, contacts } => {
+                let current = self.search_query.text().to_string();
+                if !self.thread_list.typeahead.visible {
+                    self.search_suggest.load(query, &current, contacts);
+                }
+                Task::none()
+            }
+            SearchSuggestMessage::Navigate(direction) => {
+                self.search_suggest.navigate(direction);
+                Task::none()
+            }
+            SearchSuggestMessage::Activate => {
+                let row = if self.search_suggest.open {
+                    self.search_suggest.selected_row()
+                } else {
+                    None
+                };
+                match row {
+                    Some(SuggestRow::Contact(index)) => self.pick_suggested_contact(index),
+                    Some(SuggestRow::ShowAll) | None => self.handle_search_execute(),
+                }
+            }
+            SearchSuggestMessage::PickContact(index) => self.pick_suggested_contact(index),
+            SearchSuggestMessage::ShowAll => self.handle_search_execute(),
+            SearchSuggestMessage::Close => {
+                self.close_search_menus();
+                Task::none()
+            }
+            SearchSuggestMessage::ClearSender => {
+                self.search_sender = None;
+                Task::batch([self.handle_search_execute(), self.handle_focus_search_bar()])
+            }
+            SearchSuggestMessage::ToggleFavorite => {
+                let Some(person) = self.search_person() else {
+                    return Task::none();
+                };
+                // Unstarred, the person keeps the name the card shows.
+                self.search_sender_name = Some((person.address.clone(), person.name.clone()));
+                self.favorites.toggle(&person.address, &person.name);
+                self.sync_sidebar_favorites();
+                self.persist_favorites()
+            }
+            SearchSuggestMessage::ComposeToSender => match self.search_sender.clone() {
+                Some(address) => self.open_new_message_to(address),
+                None => Task::none(),
+            },
+        }
+    }
+
+    fn close_search_menus(&mut self) {
+        self.search_suggest.close();
+        self.thread_list.typeahead.visible = false;
+    }
+
+    /// Runs on each typing pause: the list shows the results at once, and
+    /// matching people show under the search field. Nothing is saved as a
+    /// pinned search until Enter or a pick.
+    fn refresh_search_suggestions(&mut self) -> Task<Message> {
+        self.search_debounce_deadline = None;
+        let query = self.search_query.text().trim().to_string();
+        if query.is_empty() || self.thread_list.typeahead.visible {
+            self.search_suggest.close();
+            return Task::none();
+        }
+        let live = self.run_live_search();
+        let db = Arc::clone(&self.db);
+        let suggestions = Task::perform(
+            async move {
+                let contacts = db.search_contacts_for_typeahead(query.clone()).await;
+                (query, contacts)
+            },
+            |(query, contacts)| {
+                let contacts = contacts.unwrap_or_else(|e| {
+                    log::warn!("search suggestions: people lookup failed: {e}");
+                    Vec::new()
+                });
+                Message::SearchSuggest(SearchSuggestMessage::Loaded { query, contacts })
+            },
+        );
+        Task::batch([live, suggestions])
+    }
+
+    /// The typed query run into the list without saving it: Enter or a pick
+    /// still goes through `handle_search_execute`, which saves it once.
+    fn run_live_search(&mut self) -> Task<Message> {
+        self.search_without_saving(false)
+    }
+
+    fn search_without_saving(&mut self, keep_selection: bool) -> Task<Message> {
+        let query = self.effective_search_query();
+        if query.is_empty() {
+            return Task::none();
+        }
+        let (scope, folder_id) = self.search_target();
+        let ctx = self.current_ui_search_context();
+        let pinned_state = match ctx.editing_pinned_search {
+            Some(id) => SearchPinnedStateBehavior::PinnedSearch {
+                active: PinnedSearchRef::Existing(id),
+                editing: PinnedSearchRef::Existing(id),
+            },
+            None => SearchPinnedStateBehavior::Clear,
+        };
+        let mut resolved = resolve_search_intent(
+            SearchIntent::AdHoc {
+                query,
+                scope,
+                folder_id,
+            },
+            &ctx,
+        );
+        resolved.completion.persistence = SearchPersistenceBehavior::None;
+        resolved.completion.pinned_state = pinned_state;
+        resolved.completion.post_success = SearchPostSuccessEffect::None;
+        resolved.completion.keep_selection = keep_selection;
+        self.dispatch_resolved_search(resolved)
+    }
+
+    /// A person from the menu: every message they sent or received, with the person
+    /// as a pill and the field emptied for more words.
+    fn pick_suggested_contact(&mut self, index: usize) -> Task<Message> {
+        let Some(contact) = self.search_suggest.contact(index) else {
+            return Task::none();
+        };
+        let address = contact.insert_value.clone();
+        self.search_sender_name = Some((address.clone(), contact.label.clone()));
+        self.show_mail_sent_by(address)
+    }
+
+    /// Show the mail a person sent, with the person as a pill and the field
+    /// emptied for more words.
+    pub(crate) fn show_mail_sent_by(&mut self, address: String) -> Task<Message> {
+        self.record_search_restore_origin();
+        self.clear_pinned_search_context();
+        self.search_sender = Some(address.clone());
+        self.search_query.set_text(String::new());
+        self.thread_list.search_query.clear();
+        Task::batch([
+            self.handle_search_execute(),
+            self.handle_focus_search_bar(),
+            self.start_server_search(address),
+        ])
+    }
+
+    /// The person whose mail the list shows, named from the favourites or
+    /// from the suggestion they were picked in.
+    pub(crate) fn search_person(&self) -> Option<crate::ui::search_person::SearchPerson> {
+        let address = self.search_sender.as_deref()?;
+        let favorite = self.favorites.get(address);
+        let name = favorite
+            .map(|favorite| favorite.name.as_str())
+            .or_else(|| {
+                self.search_sender_name
+                    .as_ref()
+                    .filter(|(known, _)| known == address)
+                    .map(|(_, name)| name.as_str())
+            })
+            .unwrap_or(address);
+        Some(crate::ui::search_person::SearchPerson {
+            address: address.to_owned(),
+            name: name.to_owned(),
+            is_favorite: favorite.is_some(),
+        })
+    }
+
+    /// Hand the favourites to the folder column.
+    pub(crate) fn sync_sidebar_favorites(&mut self) {
+        self.sidebar.favorites = self.favorites.contacts().to_vec();
+    }
+
+    fn persist_favorites(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("settings.set: no ServiceClient yet; favourites not persisted");
+            return Task::none();
+        };
+        let json = self.favorites.to_json();
+        Task::perform(
+            async move {
+                client
+                    .set_settings(vec![service_api::SettingValue::FavoriteContacts(json)])
+                    .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::warn!("settings.set favorite_contacts failed: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    /// Ask the Microsoft server for the person's mail older than the local
+    /// window, once per person and scope in a session.
+    fn start_server_search(&mut self, address: String) -> Task<Message> {
+        if !address.contains('@') {
+            return Task::none();
+        }
+        let account_id = match self.search_target().0 {
+            ViewScope::Account(id) => Some(id),
+            _ => None,
+        };
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("sync.server_search: no ServiceClient yet; searching local mail only");
+            return Task::none();
+        };
+        let key = (account_id.clone(), address.to_lowercase());
+        if !self.server_searched.insert(key) {
+            return Task::none();
+        }
+        self.server_search = Some(ServerSearch {
+            address: address.clone(),
+            account_id: account_id.clone(),
+            status: ServerSearchStatus::Running,
+        });
+        self.show_server_search_status();
+        let reply_address = address.clone();
+        Task::perform(
+            async move {
+                client
+                    .server_search(account_id, address)
+                    .await
+                    .map(|ack| ack.fetched)
+                    .map_err(|error| error.to_string())
+            },
+            move |result| Message::ServerSearchDone(reply_address.clone(), result),
+        )
+    }
+
+    pub(crate) fn handle_server_search_done(
+        &mut self,
+        address: &str,
+        result: Result<usize, String>,
+    ) -> Task<Message> {
+        let Some(search) = self
+            .server_search
+            .as_mut()
+            .filter(|search| search.address == address)
+        else {
+            return Task::none();
+        };
+        let refresh = match result {
+            Ok(fetched) => {
+                self.server_search = None;
+                fetched > 0
+            }
+            Err(error) => {
+                log::warn!("sync.server_search for {address} failed: {error}");
+                search.status = ServerSearchStatus::Failed;
+                let key = (search.account_id.clone(), address.to_lowercase());
+                self.server_searched.remove(&key);
+                false
+            }
+        };
+        self.show_server_search_status();
+        if refresh
+            && self.thread_list.mode == ThreadListMode::Search
+            && self.search_sender.as_deref() == Some(address)
+        {
+            return self.search_without_saving(true);
+        }
+        Task::none()
+    }
+
+    /// The server search note under the results, for the person in the pill.
+    fn show_server_search_status(&mut self) {
+        self.thread_list.server_search = match &self.server_search {
+            Some(search) if self.search_sender.as_deref() == Some(search.address.as_str()) => {
+                search.status
+            }
+            _ => ServerSearchStatus::Idle,
+        };
+    }
+
+    fn apply_search_pinned_state(
+        &mut self,
+        behavior: &SearchPinnedStateBehavior,
+        persisted_id: Option<i64>,
+    ) {
+        match behavior {
+            SearchPinnedStateBehavior::Clear => {
+                self.sidebar.active_pinned_search = None;
+                self.editing_pinned_search = None;
+                self.thread_list.pinned_search_updated_at = None;
+            }
+            SearchPinnedStateBehavior::SmartFolder { .. } => {
+                self.sidebar.active_pinned_search = None;
+                self.editing_pinned_search = None;
+                self.thread_list.pinned_search_updated_at = None;
+            }
+            SearchPinnedStateBehavior::PinnedSearch { active, editing } => {
+                let resolve_ref = |r: PinnedSearchRef, persisted_id: Option<i64>| match r {
+                    PinnedSearchRef::Existing(id) => Some(id),
+                    PinnedSearchRef::FromPersistence => persisted_id,
+                };
+                let active_id = resolve_ref(*active, persisted_id);
+                self.sidebar.active_pinned_search = active_id;
+                self.editing_pinned_search = resolve_ref(*editing, persisted_id);
+                // Mirror the active pinned search's `updated_at` onto
+                // the thread list so the "Last updated …" indicator
+                // under the search bar can render. Fall back to "now"
+                // for freshly created rows whose `pinned_searches`
+                // entry has not yet round-tripped through the list
+                // reload - the subsequent `handle_pinned_searches_loaded`
+                // re-syncs the canonical value.
+                self.thread_list.pinned_search_updated_at = active_id.map(|id| {
+                    self.pinned_searches
+                        .iter()
+                        .find(|p| p.id == id)
+                        .map_or_else(|| jiff::Timestamp::now().as_second(), |ps| ps.updated_at)
+                });
+            }
+        }
+    }
+
+    fn apply_search_post_success(&mut self, effect: SearchPostSuccessEffect) -> Task<Message> {
+        match effect {
+            SearchPostSuccessEffect::None => Task::none(),
+            SearchPostSuccessEffect::RefreshPinnedSearchList => {
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move { db.list_pinned_searches().await },
+                    Message::PinnedSearchesLoaded,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn apply_search_debounce(&mut self) -> Task<Message> {
+        if self.search_query.text().trim().is_empty() {
+            self.search_debounce_deadline = None;
+        } else {
+            self.search_debounce_deadline = Some(iced::time::Instant::now() + SEARCH_TYPING_PAUSE);
+        }
+        Task::none()
+    }
+
+    pub(crate) fn handle_search_clear(&mut self) -> Task<Message> {
+        self.sidebar.active_pinned_search = None;
+        self.editing_pinned_search = None;
+        self.search_sender = None;
+        self.search_query.reset(String::new());
+        self.thread_list.search_query.clear();
+        self.search_debounce_deadline = None;
+        self.close_search_menus();
+        let _ = self.search_generation.next();
+        self.restore_folder_view()
+    }
+
+    pub(crate) fn handle_focus_search_bar(&self) -> Task<Message> {
+        iced::widget::operation::focus::<Message>("search-bar".to_string())
+    }
+
+    /// Handle smart folder selection from the sidebar - fill the search bar
+    /// and execute the query via the unified search pipeline.
+    pub(crate) fn handle_smart_folder_selected(
+        &mut self,
+        id: String,
+        query: String,
+    ) -> Task<Message> {
+        self.clear_pinned_search_context();
+        self.search_sender = None;
+        self.search_query.set_text(query.clone());
+        self.thread_list.search_query = query;
+        let intent = SearchIntent::SmartFolder {
+            id,
+            query: self.search_query.text().to_string(),
+        };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
+    }
+
+    /// Dispatch an async typeahead query based on operator type.
+    fn dispatch_typeahead_query(&mut self, operator: &str, partial: &str) -> Task<Message> {
+        use crate::ui::thread_list::{ThreadListMessage, TypeaheadItem};
+
+        let load_gen = self.thread_list.typeahead.generation.next();
+
+        // Static operators - resolve immediately
+        let static_items: Option<Vec<TypeaheadItem>> = match operator {
+            "in" => Some(
+                [
+                    "inbox", "sent", "drafts", "trash", "spam", "starred", "snoozed",
+                ]
+                .iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| TypeaheadItem {
+                    label: s.to_string(),
+                    detail: None,
+                    insert_value: s.to_string(),
+                    origins: ContactOrigins::default(),
+                })
+                .collect(),
+            ),
+            "is" => Some(
+                [
+                    "unread", "read", "starred", "snoozed", "pinned", "muted", "tagged",
+                ]
+                .iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| TypeaheadItem {
+                    label: s.to_string(),
+                    detail: None,
+                    insert_value: s.to_string(),
+                    origins: ContactOrigins::default(),
+                })
+                .collect(),
+            ),
+            "has" => Some(
+                [
+                    "attachment",
+                    "pdf",
+                    "image",
+                    "excel",
+                    "word",
+                    "document",
+                    "archive",
+                    "video",
+                    "audio",
+                    "powerpoint",
+                    "spreadsheet",
+                    "calendar",
+                    "contact",
+                ]
+                .iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| TypeaheadItem {
+                    label: s.to_string(),
+                    detail: None,
+                    insert_value: s.to_string(),
+                    origins: ContactOrigins::default(),
+                })
+                .collect(),
+            ),
+            "before" | "after" => Some(
+                [
+                    (t!("date.today"), "0"),
+                    (t!("date.yesterday"), "-1"),
+                    (t!("main.search.date.last_7_days"), "-7"),
+                    (t!("main.search.date.last_30_days"), "-30"),
+                    (t!("main.search.date.last_3_months"), "-90"),
+                    (t!("main.search.date.last_year"), "-365"),
+                ]
+                .iter()
+                .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
+                .map(|(label, value)| TypeaheadItem {
+                    label: label.to_string(),
+                    detail: Some(format!("{operator}:{value}")),
+                    insert_value: value.to_string(),
+                    origins: ContactOrigins::default(),
+                })
+                .collect(),
+            ),
+            _ => None,
+        };
+
+        if let Some(items) = static_items {
+            return Task::done(Message::ThreadList(
+                ThreadListMessage::TypeaheadItemsLoaded(load_gen, items),
+            ));
+        }
+
+        // Dynamic operators - query DB asynchronously
+        let db = Arc::clone(&self.db);
+        let partial = partial.to_string();
+        let op = operator.to_string();
+        Task::perform(
+            async move {
+                match op.as_str() {
+                    "from" | "to" | "with" => db.search_contacts_for_typeahead(partial).await,
+                    "label" | "folder" => db.search_labels_for_typeahead(partial).await,
+                    "account" => db.search_accounts_for_typeahead(partial).await,
+                    _ => Ok(Vec::new()),
+                }
+            },
+            move |result| {
+                let items = result.unwrap_or_default();
+                Message::ThreadList(ThreadListMessage::TypeaheadItemsLoaded(load_gen, items))
+            },
+        )
+    }
+
+    /// Handle typeahead selection - insert the value into the query.
+    pub(crate) fn handle_typeahead_select(&mut self, idx: usize) -> Task<Message> {
+        let Some(item) = self.thread_list.typeahead.items.get(idx) else {
+            return Task::none();
+        };
+
+        let query = self.search_query.text().to_string();
+        let cursor_pos = query.len();
+        let ctx = smart_folder::analyze_cursor_context(&query, cursor_pos);
+
+        if let smart_folder::CursorContext::InsideOperator {
+            value_start,
+            value_end,
+            ..
+        } = ctx
+        {
+            let value = if item.insert_value.contains(' ') {
+                format!("\"{}\" ", item.insert_value)
+            } else {
+                format!("{} ", item.insert_value)
+            };
+            let new_query = format!("{}{}{}", &query[..value_start], value, &query[value_end..]);
+            self.search_query.set_text(new_query.clone());
+            self.thread_list.search_query = new_query;
+            self.thread_list.typeahead.visible = false;
+
+            // Trigger search execution with the new query
+            self.search_debounce_deadline =
+                Some(iced::time::Instant::now() + std::time::Duration::from_millis(50));
+        }
+        Task::none()
+    }
+}
+
+// ── Pinned search handling ─────────────────────────────
+
+impl ReadyApp {
+    pub(crate) fn handle_pinned_searches_loaded(
+        &mut self,
+        result: Result<Vec<db::PinnedSearch>, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(searches) => {
+                self.pinned_searches = searches;
+                self.sidebar
+                    .pinned_searches
+                    .clone_from(&self.pinned_searches);
+
+                // Re-sync the staleness indicator if a pinned search is
+                // active - the list reload is the authoritative source
+                // for `updated_at` after fresh create / refresh.
+                if let Some(active_id) = self.sidebar.active_pinned_search {
+                    self.thread_list.pinned_search_updated_at = self
+                        .pinned_searches
+                        .iter()
+                        .find(|p| p.id == active_id)
+                        .map(|ps| ps.updated_at);
+                }
+
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move { db.get_recent_search_queries(10).await },
+                    Message::SearchHistoryLoaded,
+                )
+            }
+            Err(e) => {
+                self.status = format!("Pinned searches error: {e}");
+                Task::none()
+            }
+        }
+    }
+
+    pub(crate) fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
+        let _ = self.nav_generation.next();
+        let _ = self.thread_generation.next();
+        self.clear_thread_selection();
+        let intent = SearchIntent::PinnedActivation { id };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
+    }
+
+    pub(crate) fn handle_dismiss_pinned_search(&self, id: i64) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!(
+                "pinned_search.delete: no ServiceClient yet; \
+                 dismiss not persisted (next reload reconciles)"
+            );
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                let result = client
+                    .delete_pinned_search(id)
+                    .await
+                    .map_err(|e| e.to_string());
+                (id, result)
+            },
+            |(id, result)| Message::PinnedSearchDeleteAck(id, result),
+        )
+    }
+
+    pub(crate) fn handle_pinned_search_dismissed(
+        &mut self,
+        id: i64,
+        result: Result<(), String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(()) => {
+                self.pinned_searches.retain(|ps| ps.id != id);
+                self.sidebar.pinned_searches.retain(|ps| ps.id != id);
+                if self.sidebar.active_pinned_search == Some(id) {
+                    self.sidebar.active_pinned_search = None;
+                    self.editing_pinned_search = None;
+                    return self.restore_folder_view();
+                }
+                Task::none()
+            }
+            Err(e) => {
+                self.status = format!("Dismiss error: {e}");
+                Task::none()
+            }
+        }
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    pub(crate) fn handle_pinned_search_persisted(
+        &mut self,
+        completion: SearchCompletionBehavior,
+        result: Result<i64, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(id) => {
+                self.apply_search_pinned_state(&completion.pinned_state, Some(id));
+                self.apply_search_post_success(completion.post_success)
+            }
+            Err(e) => {
+                self.status = format!("Save pinned search error: {e}");
+                Task::none()
+            }
+        }
+    }
+
+    /// Clear pinned search context on navigate-away.
+    pub(crate) fn clear_pinned_search_context(&mut self) {
+        self.sidebar.active_pinned_search = None;
+        self.editing_pinned_search = None;
+        self.thread_list.pinned_search_updated_at = None;
+    }
+
+    /// Clear all search-related state without restoring pre-search threads.
+    pub(crate) fn clear_search_state(&mut self) {
+        self.search_sender = None;
+        self.search_query.reset(String::new());
+        self.thread_list.search_query.clear();
+        self.search_debounce_deadline = None;
+        let _ = self.search_generation.next();
+        self.thread_list.mode = ThreadListMode::Scope;
+        self.was_in_scope_view = false;
+    }
+
+    /// Restore the thread list to folder view after clearing search.
+    ///
+    /// Instead of restoring a stale clone of the pre-search thread list,
+    /// this reloads from the database using the current navigation state.
+    /// This avoids the O(n) clone on every search entry and ensures the
+    /// thread list reflects any changes that happened during the search.
+    pub(crate) fn restore_folder_view(&mut self) -> Task<Message> {
+        self.thread_list.mode = ThreadListMode::Scope;
+        self.search_sender = None;
+        self.search_query.reset(String::new());
+        self.thread_list.search_query.clear();
+        self.clear_pinned_search_context();
+        self.clear_thread_selection();
+        if self.was_in_scope_view {
+            self.was_in_scope_view = false;
+            let token = self.nav_generation.next();
+            return self.load_threads_for_current_view(token);
+        }
+        Task::none()
+    }
+}
+
+/// Execute search off the main thread via spawn_blocking.
+///
+/// Uses the provided SearchReadState (initialized once at boot) for Tantivy.
+/// Falls back to SQL-only if no SearchReadState is available.
+pub(crate) async fn execute_search(
+    db: Arc<db::Db>,
+    search_state: Option<Arc<rtsk::search::SearchReadState>>,
+    body_store: Option<rtsk::body_store::BodyStoreReadState>,
+    query: String,
+    scope: rtsk::db::types::AccountScope,
+    folder_id: Option<String>,
+    sender: Option<String>,
+) -> Result<Vec<Thread>, String> {
+    let queued = std::time::Instant::now();
+    db.with_read(move |conn| {
+        let waited_ms = queued.elapsed().as_millis();
+        let pipeline_started = std::time::Instant::now();
+        // M2 fix: pass body_store so per-message attribution can score body
+        // matches. Without it, body+attachment co-matches skewed toward
+        // attachment attribution and the documented "matched in body +
+        // also_matched: [Attachment]" outcome never appeared. Optional
+        // because body_store init can fail at boot; the attribution falls
+        // back to subject/from/attachments-only when None.
+        let results = rtsk::search_pipeline::search(
+            &query,
+            search_state.as_deref(),
+            conn,
+            &scope,
+            folder_id.as_deref(),
+            body_store.as_ref(),
+        )?;
+        let results = match results {
+            rtsk::search_pipeline::SearchResults::FullIndex(results) => results,
+            rtsk::search_pipeline::SearchResults::Degraded(results) => {
+                // Keep the match at the UI boundary so degraded search can
+                // grow a banner here without changing the search API again.
+                results
+            }
+        };
+        let mut threads = results
+            .into_iter()
+            .map(Thread::from_search_result)
+            .filter(|thread| thread_matches_scope(thread, &scope))
+            .collect::<Vec<_>>();
+        let pipeline_ms = pipeline_started.elapsed().as_millis();
+        let decorations_started = std::time::Instant::now();
+        crate::helpers::apply_thread_decorations(conn, &mut threads)?;
+        crate::helpers::apply_thread_folder_names(conn, &mut threads)?;
+        if let Some(sender) = sender.as_deref() {
+            threads = messages_sent_by(conn, threads, sender)?;
+        }
+        log::info!(
+            "Search timing app: waited {waited_ms} ms for a read connection, pipeline {pipeline_ms} ms, decorations {} ms, {} threads",
+            decorations_started.elapsed().as_millis(),
+            threads.len()
+        );
+        Ok(threads)
+    })
+    .await
+}
+
+/// The mail a person sent, narrowed to the typed words.
+fn sender_query(sender: Option<&str>, text: &str) -> String {
+    let text = text.trim();
+    match sender {
+        Some(email) if text.is_empty() => format!("from:{email}"),
+        Some(email) => format!("from:{email} {text}"),
+        None => text.to_string(),
+    }
+}
+
+/// Turn the conversations a person wrote in into the messages they sent, one
+/// row each, newest first: a row shows that message's subject, date, preview
+/// and folder, and opens its conversation. A conversation found through the
+/// person's contact card alone, with no message carrying the searched name
+/// or address, keeps its own row.
+fn messages_sent_by(
+    conn: &rtsk::db::ReadConn<'_>,
+    conversations: Vec<Thread>,
+    sender: &str,
+) -> Result<Vec<Thread>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT m.subject, m.snippet, m.date, m.from_name, m.from_address, m.is_read,
+                    (SELECT f.name
+                     FROM message_folders mf
+                     CROSS JOIN folders f
+                       ON f.account_id = mf.account_id AND f.id = mf.folder_id
+                     WHERE mf.account_id = m.account_id AND mf.message_id = m.id
+                     ORDER BY f.sort_order
+                     LIMIT 1),
+                    m.id
+             FROM messages m
+             WHERE m.account_id = ?1 AND m.thread_id = ?2
+               AND (m.from_address LIKE '%' || ?3 || '%' OR m.from_name LIKE '%' || ?3 || '%')
+             ORDER BY m.date DESC",
+        )
+        .map_err(|e| format!("prepare messages sent by: {e}"))?;
+    let mut messages = Vec::with_capacity(conversations.len());
+    for conversation in conversations {
+        let before = messages.len();
+        let mut rows = statement
+            .query([&conversation.account_id, &conversation.id, sender])
+            .map_err(|e| format!("query messages sent by: {e}"))?;
+        while let Some(row) = rows
+            .next()
+            .map_err(|e| format!("read messages sent by: {e}"))?
+        {
+            let read = |e| format!("map messages sent by: {e}");
+            messages.push(Thread {
+                subject: row.get(0).map_err(read)?,
+                snippet: row.get(1).map_err(read)?,
+                last_message_at: row.get(2).map_err(read)?,
+                from_name: row.get(3).map_err(read)?,
+                from_address: row.get(4).map_err(read)?,
+                is_read: row.get(5).map_err(read)?,
+                folder_name: row.get(6).map_err(read)?,
+                message_id: Some(row.get(7).map_err(read)?),
+                message_count: 1,
+                ..conversation.clone()
+            });
+        }
+        drop(rows);
+        if messages.len() == before {
+            messages.push(conversation);
+        }
+    }
+    messages.sort_by_key(|message| std::cmp::Reverse(message.last_message_at));
+    Ok(messages)
+}
+
+fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {
+    match scope {
+        AccountScope::All => true,
+        AccountScope::Single(id) => thread.account_id == *id,
+        AccountScope::Multiple(ids) => ids.contains(&thread.account_id),
+    }
+}
+
+fn pinned_search_scope_name(app: &ReadyApp, ps: &db::PinnedSearch) -> String {
+    let Some(account_id) = ps.scope_account_id.as_deref() else {
+        return t!("main.sidebar.all_accounts").into_owned();
+    };
+
+    app.sidebar
+        .accounts
+        .iter()
+        .find(|account| account.id == account_id)
+        .map(|account| {
+            account
+                .account_name
+                .clone()
+                .or_else(|| account.display_name.clone())
+                .unwrap_or_else(|| account.email.clone())
+        })
+        .unwrap_or_else(|| t!("main.sidebar.all_accounts").into_owned())
+}
+
+// ── Search phases 2+4 methods ──────────────────────────
+
+impl ReadyApp {
+    pub(crate) fn handle_refresh_pinned_search(&mut self, id: i64) -> Task<Message> {
+        if !self.pinned_searches.iter().any(|ps| ps.id == id) {
+            return Task::none();
+        }
+
+        let intent = SearchIntent::PinnedRefresh { id };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
+    }
+
+    pub(crate) fn handle_search_here(&mut self, query_prefix: String) -> Task<Message> {
+        self.record_search_restore_origin();
+        self.search_sender = None;
+        self.search_query.reset(query_prefix.clone());
+        self.thread_list.search_query = query_prefix;
+        self.clear_pinned_search_context();
+        iced::widget::operation::focus::<Message>("search-bar".to_string())
+    }
+
+    pub(crate) fn handle_save_as_smart_folder(&mut self, name: String) -> Task<Message> {
+        let query = self.effective_search_query();
+        if query.is_empty() {
+            return Task::none();
+        }
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!(
+                "smart_folder.create: no ServiceClient yet; \
+                 smart folder not saved (next reload reconciles)"
+            );
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                client
+                    .create_smart_folder(name, query)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            Message::SmartFolderCreateAck,
+        )
+    }
+
+    pub(crate) fn handle_smart_folder_saved(
+        &mut self,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(_id) => {
+                log::info!("Smart folder saved");
+
+                // Graduation: the smart folder was created from a pinned
+                // search, so the source pinned search is no longer
+                // needed. We clear the local state inline (rather than
+                // routing through handle_dismiss_pinned_search) for two
+                // reasons: (a) the dismiss-ack would call
+                // restore_folder_view, which bumps nav_generation and
+                // would invalidate the navigation reload we kick off
+                // below, dropping the new smart folder from the
+                // sidebar; (b) after graduation the thread list is
+                // already showing what the smart folder will surface,
+                // so jumping the user back to the prior folder view
+                // would be a regression. The Service-side delete is
+                // still issued; its ack runs through
+                // handle_pinned_search_dismissed but short-circuits
+                // because sidebar.active_pinned_search is now None.
+                let delete_task = if let Some(id) = self.editing_pinned_search.take() {
+                    self.pinned_searches.retain(|ps| ps.id != id);
+                    self.sidebar.pinned_searches.retain(|ps| ps.id != id);
+                    if self.sidebar.active_pinned_search == Some(id) {
+                        self.sidebar.active_pinned_search = None;
+                        self.thread_list.pinned_search_updated_at = None;
+                    }
+                    self.handle_dismiss_pinned_search(id)
+                } else {
+                    Task::none()
+                };
+
+                let token = self.nav_generation.next();
+                let nav_task = self.fire_navigation_load(token);
+                Task::batch([delete_task, nav_task])
+            }
+            Err(e) => {
+                log::error!("Save smart folder error: {e}");
+                Task::none()
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sender_query;
+
+    #[test]
+    fn the_sender_pill_narrows_the_typed_words() {
+        assert_eq!(sender_query(None, "  colis "), "colis");
+        assert_eq!(sender_query(Some("a@x.fr"), " "), "from:a@x.fr");
+        assert_eq!(sender_query(Some("a@x.fr"), "colis"), "from:a@x.fr colis");
+    }
+}

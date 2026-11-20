@@ -1,0 +1,132 @@
+# conduit-jmap deferred work
+
+Items consciously left in place. Each has a rationale and a revisit
+trigger. This file is not a TODO list - it exists so the next person
+who looks at these spots doesn't redo the analysis from scratch.
+
+Unimplemented spec work lives in the per-RFC plans (`MDN.md`,
+`SMIME.md`, `SHARING.md`). API redesign history lives in `API.md`.
+
+## Accepted micro-optimizations
+
+### `Session::capability_config()` serde round-trip
+
+`core/session.rs:286` serializes the `Capabilities` enum variant to
+`serde_json::Value` then deserializes into `C::Config`. Two serde
+passes per access.
+
+**Why accepted:** Session parsing happens once per connection.
+Capability configs are accessed infrequently. The hand-written
+accessors (`core_capabilities()`, `mail_capabilities()`, etc.) return
+`&T` with zero overhead and are the primary path; `capability_config`
+is a convenience bridge for generic code.
+
+**Revisit when:** A consumer calls `capability_config` in a hot loop,
+or the hand-written accessors get removed in favor of the generic
+path (which would require storing raw JSON alongside the enum).
+
+### `CallHandle.call_id` is a heap `String`
+
+`core/request.rs:19` stores `call_id: String` always equal to a short
+token like `"s0"` / `"s1"`. The same string is cloned into
+`RawMethodCall`.
+
+**Why accepted:** Two tiny allocations per method call, on the order
+of ~100 bytes of heap per request. Dwarfed by JSON serialization and
+HTTP transfer. Fixing means switching to `usize` internally and
+formatting to string at serialization time, which adds complexity to
+`CallHandle`, `ResultReference`, and the response lookup path.
+
+**Revisit when:** Profiling shows per-request overhead dominates at
+the sub-microsecond level.
+
+### SSE `Bytes` -> `Vec<u8>` copy at the parser boundary
+
+`transport_reqwest.rs:177` wraps reqwest's `bytes::Bytes` stream and
+calls `.to_vec()` per chunk (`transport_reqwest.rs:192`). The SSE
+parser in `event_source/parser.rs` consumes owned `Vec<u8>`.
+`HttpTransport` returns `Bytes` directly elsewhere; only the SSE path
+still copies.
+
+**Why accepted:** True zero-copy SSE would require rewriting the
+parser to use `Bytes` with an offset cursor. SSE chunks are short
+state-change notifications, not bulk data.
+
+**Revisit when:** SSE is used for high-volume event delivery, or the
+parser is rewritten for other reasons.
+
+## EventSource as the sync-layer push fallback
+
+`Client::event_source()` and `event_source/` are spec-correct (WHATWG
+parser semantics closed out in the 2026-07 protocol-objects sweep,
+including resynchronising size caps and Last-Event-ID resume) and
+hermetically pinned, but the `sync/` Account impl's push is RFC 8887
+WebSocket-only. Against a server that does not advertise the WebSocket
+extension the engine has no push at all and falls back to polling, even
+though eventSourceUrl is a mandatory RFC 8620 session property every
+server provides.
+
+The intended fix is a push-reader fallback in `sync/push.rs`: when the
+session lacks `urn:ietf:params:jmap:websocket` with `supportsPush`,
+drive the same `PushRouting` snapshot from an EventSource stream
+(`closeafter=no`, `ping` keepalives, Last-Event-ID reconnect resume)
+and advertise `push: InProcess` for that case too. This is deliberately
+NOT bundled into a bug-hunt pass: it is feature-sized, it lives in the
+push-reconciler territory the 2026-07 core/sync bug sweep settled, and
+it deserves its own review cycle.
+
+**Revisit when:** the next planned change touches `sync/push.rs`, or a
+target server without RFC 8887 push shows up in practice.
+
+## API cleanup still pending
+
+### Sentinel getters on typed structs
+
+`Mailbox::role()` returns `Option<&Role>` and `total_emails()` returns
+`Option<usize>` (`mailbox/get.rs:22,30`). The redesign called for the
+same shape across all typed-struct getters, but three sentinel cases
+remain on `Email` / `EmailBodyPart`:
+
+- `Email::size()` -> `usize`, `unwrap_or(0)` (`email/get.rs:53`).
+- `Email::has_attachment()` -> `bool`, `unwrap_or(&false)`
+  (`email/get.rs:153`).
+- `EmailBodyPart::size()` -> `usize`, `unwrap_or(&0)`
+  (`email/get.rs:188`).
+
+Fixing this is one decision plus a mechanical sweep. The open
+question is whether ratatoskr ever branches on omitted-vs-zero for
+`size` / `has_attachment`; if it doesn't, the sentinels are
+defensible and the API.md "Remaining gaps" entry can be closed.
+
+**Revisit when:** A consumer hits a real bug from the
+omitted-vs-zero collapse, or the next pre-1.0 ergonomics pass.
+
+## Recurrence coverage: the supported RRULE part set
+
+`sync/calendar_ops.rs::jmap_recurrence_rule_from_rrule` converts exactly
+`FREQ`, `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, `BYMONTH`, `BYMONTHDAY`
+between RFC 5545 RRULE text and JSCalendar `RecurrenceRule` objects.
+Every other part - `BYHOUR`, `BYMINUTE`, `BYSECOND`, `BYYEARDAY`,
+`BYWEEKNO`, `BYSETPOS`, `WKST` - makes the conversion return `None`, and
+the callers (`validate_shared_recurrence` plus the create and patch payload
+builders, which each re-check independently) turn that into a loud
+`Unsupported`. A rule that does not convert is never silently narrowed,
+cleared, or omitted: a dropped `BYHOUR` would expand to a different set of
+occurrences than the caller asked for, which is a worse failure than a
+refusal the caller can see.
+
+That is the accepted state, not an open defect. Widening the set is a
+symmetric change - anything added to the outbound mapper needs its inbound
+counterpart in `rrule_from_jmap_recurrence_rule` in the same change, or a
+read-modify-write round trip starts losing the new part - plus the
+JSCalendar shape question for each part (RFC 8984 §4.3.3 types several of
+these as string arrays rather than integers, the trap `byMonth` already
+hit).
+
+**Revisit when:** a consumer has a real calendar whose rules this set
+refuses, which is the evidence that says which parts to add first.
+
+## See also
+
+- `API.md` - archived ADR for the pre-1.0 surface redesign.
+- `MDN.md`, `SMIME.md`, `SHARING.md` - per-RFC implementation plans.

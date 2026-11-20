@@ -1,0 +1,50 @@
+[package]
+name = "conduit-sync"
+publish = false
+description = "Sync engine that drives conduit-types Account implementations: scheduler, backfill, push reconciliation, mutation pipeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+conduit-types = { path = "../types" }
+conduit-net = { path = "../net" }
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["rt"] }
+futures = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+jiff = { workspace = true }
+arc-swap = { workspace = true }
+# The debt ledger's discharge audit root. A pinned workspace dependency already
+# used by conduit-sasl, chosen over hand-rolling a hash because the additive
+# fold makes the summands' collision resistance load-bearing.
+sha2 = { workspace = true }
+
+# Protocol-crate dev-dependencies so `cross_crate_conformance.rs` can
+# construct each public factory and witness the new
+# `AccountFactory::open(AccountId)` signature composes with
+# `SyncEngine::attach`. The test only mints factories and the
+# never-polled future; no network round-trip runs.
+[dev-dependencies]
+# `start_paused = true` (virtual-time tests: reopen backoff schedule,
+# bounded lifecycle park) needs `test-util`. Declared here rather than
+# relied on through workspace feature unification, which does not hold
+# when the crate is tested on its own.
+tokio = { workspace = true, features = ["test-util"] }
+conduit-imap = { path = "../imap" }
+conduit-jmap = { path = "../jmap", features = ["sync"] }
+conduit-google = { path = "../google" }
+conduit-graph = { path = "../graph" }

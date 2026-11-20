@@ -1,0 +1,1520 @@
+//! The conduit change-stream consumer: drives a per-account
+//! `MultiplexerEvent` broadcast into the local stores, synthesizing the
+//! caught-up edge and bounding its steady-state accumulators.
+//!
+//! ## Accumulator bound vs. pause (B3c § 4.4)
+//!
+//! Under sustained push with no quiescence window the drive never reaches a
+//! clean idle edge, so the move-vs-purge (`PendingDeletions`), IMAP-threading,
+//! and deferred-ack accumulators would grow unboundedly. `resident_flush_due`
+//! plus the `RESIDENT_FLUSH_INTERVAL` / `RESIDENT_DELETION_FLUSH_INTERVAL` /
+//! `RESIDENT_DEFERRED_ACK_CAP` / `RESIDENT_PENDING_DELETION_CAP` caps force a
+//! mid-drive flush so memory stays bounded regardless of cadence (gated by
+//! `conduit-consumer-sustained-push-bound.lua`). This is a genuine
+//! steady-state memory invariant, NOT a B3b stopgap, and the caps are
+//! unchanged by B3c.
+//!
+//! Its interaction with an intervention-required `Pause` (§ 4.1,
+//! `RetryBudgetExhausted` / `OperatorOverrideRequired`) is the reconciliation
+//! B3c folds in: when the engine parks the account it flips the per-account
+//! boundary so every worker stops, so NO new `Batch` events reach this
+//! consumer. The accumulators therefore stop growing for the duration of the
+//! pause; the in-flight contents are drained by the next forced flush (the cap
+//! timer keeps ticking) or by the drive's clean exit, and nothing new
+//! accrues until a `Resume` flips the boundary back to `Run`. The caps remain
+//! the backstop purely for the NO-pause sustained-push case the gate
+//! exercises - a pause is self-limiting, an unbounded healthy push is not.
+
+pub mod hydrate;
+pub(crate) mod imap_mime;
+pub mod imap_threading;
+pub mod post_persist;
+pub mod support;
+pub mod write;
+
+#[cfg(test)]
+mod golden_test;
+
+#[cfg(test)]
+pub(crate) mod move_purge_test;
+
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+use conduit_sync::CheckpointStore;
+use conduit_sync::backfill::BackfillState;
+use conduit_sync::{Error, PublicationId, SyncEngine};
+use conduit_types::{
+    AccountErrorBuilder, AccountErrorKind, AccountId, AttemptCause, AuthCause, AuthErrorKind,
+    BackfillCheckpoint, BackfillProgress, Cause, Checkpoint, CursorScope, DiagnosticText,
+    ObjectType, Partition, Protocol, ProtocolErrorKind, RecoveryClass, ServerCause,
+    ServerErrorKind, SyncEvent, TransmissionState, WireCause,
+};
+use common::types::FolderKind;
+use service_api::OperationResult;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
+use tokio::sync::{Mutex, broadcast};
+
+use self::hydrate::HydrateBatch;
+use self::imap_threading::ImapThreadAccumulator;
+use super::SqliteCheckpointStore;
+use super::checkpoint_store::BACKFILL_COMPLETION_PARTITION;
+use super::containers;
+use super::containers::ContainerIndex;
+use super::error_map;
+
+/// The two shapes of change stream this consumer drives.
+///
+/// The engine hands out a `ChangesReceiver`, which owns the recovery half of a
+/// broadcast lag (it abandons the account's outstanding checkpoint
+/// registrations, without which every later `pause` / `checkpoint_now` on the
+/// account waits forever for acks the consumer can no longer produce). Tests
+/// and the harness inject a bare broadcast receiver, which has no engine to
+/// recover against. Both are driven by the same loop, so they share one `recv`.
+enum ChangeStream {
+    Engine(conduit_sync::multiplexer::ChangesReceiver),
+    Injected(broadcast::Receiver<conduit_sync::multiplexer::MultiplexerEvent>),
+}
+
+impl ChangeStream {
+    async fn recv(
+        &mut self,
+    ) -> Result<conduit_sync::multiplexer::MultiplexerEvent, broadcast::error::RecvError> {
+        match self {
+            Self::Engine(rx) => rx.recv().await,
+            Self::Injected(rx) => rx.recv().await,
+        }
+    }
+}
+
+/// Whether an event is the synthetic warning `ChangesReceiver` substitutes for
+/// a `RecvError::Lagged`.
+///
+/// The drive loop still needs to know a lag happened - it detaches and
+/// re-drives so the next attach reconciles from the last durable checkpoint,
+/// and the sync-harness gates assert on `report.lagged`. Keyed on the
+/// structural `WarningKind::ChangeStreamLagged` marker, which the
+/// multiplexer's `ChangesReceiver` alone mints (this replaced the
+/// message-text-prefix match the pre-marker contract forced).
+fn is_lag_warning(event: &conduit_sync::multiplexer::MultiplexerEvent) -> bool {
+    matches!(event.scope, CursorScope::Account)
+        && matches!(
+            &*event.event,
+            SyncEvent::Warning(warning)
+                if warning.kind == conduit_types::WarningKind::ChangeStreamLagged
+        )
+}
+
+const COMPLETION_IDLE_INTERVAL: Duration = Duration::from_secs(2);
+const RESIDENT_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+/// How long a Graph deletion candidate may wait for its move destination
+/// while batches keep arriving. Long enough for a hot folder's next poll
+/// to report the destination, short enough that a message deleted in
+/// Outlook disappears here within seconds.
+const RESIDENT_DELETION_FLUSH_INTERVAL: Duration = Duration::from_secs(10);
+const RESIDENT_DEFERRED_ACK_CAP: usize = 128;
+const RESIDENT_PENDING_DELETION_CAP: usize = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConduitProviderKind {
+    Gmail,
+    Graph,
+    Imap,
+    Jmap,
+}
+
+impl ConduitProviderKind {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gmail => "gmail",
+            Self::Graph => "graph",
+            Self::Imap => "imap",
+            Self::Jmap => "jmap",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ConduitConsumerStores {
+    pub db: WriteDbState,
+    pub body_store: BodyStoreWriteState,
+    pub inline_images: InlineImageStoreWriteState,
+    pub search: SearchWriteHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsumerHook {
+    StallConsumer {
+        after_ms: u64,
+    },
+    CrashBeforeAck,
+    CrashAfterAckNoSentinel,
+    CrashBeforeDriveEndThreading,
+    /// Force the drive loop to report `lagged` (and detach) on the next
+    /// event, simulating sustained structural broadcast lag without needing
+    /// a real overflow. The resident loop then re-subscribes and re-pushes a
+    /// full reconcile, matching the B3b stopgap for real `RecvError::Lagged`.
+    ForceLag,
+    /// Force the drive loop to report a terminal failure on the next event,
+    /// simulating a `SyncEvent::Terminated` broadcast without relying on
+    /// provider or mock-server timing.
+    ForceTerminated {
+        recovery: ForcedRecoveryClass,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForcedRecoveryClass {
+    AuthLost,
+    Retry,
+    UnknownPermanent,
+}
+
+#[derive(Default)]
+pub struct ConsumerHookRegistry {
+    hooks: Mutex<std::collections::HashMap<String, ConsumerHook>>,
+}
+
+impl ConsumerHookRegistry {
+    pub async fn arm(&self, account_id: impl Into<String>, hook: ConsumerHook) {
+        self.hooks.lock().await.insert(account_id.into(), hook);
+    }
+
+    async fn take(&self, account_id: &str) -> Option<ConsumerHook> {
+        self.hooks.lock().await.remove(account_id)
+    }
+
+    /// Peek (without consuming) whether the armed hook for `account_id`
+    /// will deliberately WITHHOLD the checkpoint ack for the next batch -
+    /// i.e. `CrashBeforeAck`, which exits the drive task between the search
+    /// flush and the ack. The test inject handler uses this so it does not
+    /// block waiting for a cursor advance that, by construction, will never
+    /// land.
+    pub async fn peek_withholds_ack(&self, account_id: &str) -> bool {
+        matches!(
+            self.hooks.lock().await.get(account_id),
+            Some(ConsumerHook::CrashBeforeAck | ConsumerHook::CrashBeforeDriveEndThreading)
+        )
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ConsumerDriveReport {
+    pub completed: bool,
+    pub scopes_completed: u32,
+    pub batches_acked: u32,
+    /// True once a batch or a drive-end reconcile wrote server-side changes.
+    /// `batches_acked` cannot say this: an unchanged folder still acks the
+    /// fresh delta token every re-read.
+    pub wrote_changes: bool,
+    pub lagged: bool,
+    pub terminal: Option<TerminalFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalFailure {
+    pub result: OperationResult,
+    pub message: String,
+}
+
+pub struct ChangeStreamConsumer {
+    engine: Arc<SyncEngine>,
+    account_id: AccountId,
+    provider: ConduitProviderKind,
+    stores: ConduitConsumerStores,
+    checkpoint_store: Option<Arc<SqliteCheckpointStore>>,
+    hook_registry: Option<Arc<ConsumerHookRegistry>>,
+    folder_map: HashMap<String, FolderKind>,
+    containers: Option<Arc<ContainerIndex>>,
+    /// Folder scopes already retried through one `sync_containers` refresh
+    /// (obstacle Q). Bounded by the number of distinct scopes the engine
+    /// emits, so it cannot grow without bound.
+    refreshed_scopes: HashSet<CursorScope>,
+    /// The set of scopes the consumer has OBSERVED a `MultiplexerEvent` for
+    /// on the broadcast. This is the completion-synthesis scope enumeration
+    /// (spec 4.1.2), used in place of `engine.cursors.all_scopes()`.
+    ///
+    /// Sound deviation from the spec's original `all_scopes()` phrasing,
+    /// not a smoke-test simplification: at the frozen conduit commit
+    /// `aa9172d`, `SyncEngine` exposes no public accessor for its internal
+    /// `CursorRegistry`, so `all_scopes()` is unreachable without a conduit
+    /// change, which the migration's frozen-commit discipline forbids for
+    /// the duration of this item. The observed-scope set is the better
+    /// surface anyway: the idle-cadence completion half can only reason
+    /// about scopes that actually emitted an event this kick (a warm
+    /// delta-only scope in `all_scopes()` would never produce a `Batch` to
+    /// distinguish "quiet" from "mid-burst"), and the empty-observed case is
+    /// vacuously caught-up - the empty-stream "completes immediately" edge.
+    observed_scopes: HashSet<CursorScope>,
+    imap_threading: ImapThreadAccumulator,
+    deferred_imap_acks: Vec<(CursorScope, Checkpoint, Option<PublicationId>)>,
+    imap_seen_by_scope: HashMap<CursorScope, u64>,
+    crash_before_drive_end_threading: bool,
+    /// Raised after every write of server-side changes so the resident
+    /// engine can tell the UI to reload. `Notify` keeps at most one permit,
+    /// which coalesces a burst of batches into one wake-up.
+    mutation_signal: Option<Arc<tokio::sync::Notify>>,
+    /// Set after the previous receiver lagged: the batches it lost were
+    /// published with their cursors already installed in the engine, so the
+    /// live scopes go back to their acknowledged cursors once the new
+    /// receiver is subscribed.
+    rewind_after_subscribe: bool,
+}
+
+#[derive(Default)]
+pub struct ResidentFlushTelemetry {
+    forced_flushes: AtomicU32,
+    max_deferred_acks: AtomicU32,
+    max_pending_deletions: AtomicU32,
+    batches_acked: AtomicU32,
+}
+
+impl ResidentFlushTelemetry {
+    pub fn snapshot(&self) -> ResidentFlushTelemetrySnapshot {
+        ResidentFlushTelemetrySnapshot {
+            forced_flushes: self.forced_flushes.load(Ordering::Relaxed),
+            max_deferred_acks: self.max_deferred_acks.load(Ordering::Relaxed),
+            max_pending_deletions: self.max_pending_deletions.load(Ordering::Relaxed),
+            batches_acked: self.batches_acked.load(Ordering::Relaxed),
+        }
+    }
+
+    fn observe(&self, deferred_acks: usize, pending_deletions: usize) {
+        update_max(&self.max_deferred_acks, deferred_acks);
+        update_max(&self.max_pending_deletions, pending_deletions);
+    }
+
+    fn observe_report(&self, report: &ConsumerDriveReport) {
+        self.batches_acked
+            .store(report.batches_acked, Ordering::Relaxed);
+    }
+
+    fn record_forced_flush(&self) {
+        self.forced_flushes.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResidentFlushTelemetrySnapshot {
+    pub forced_flushes: u32,
+    pub max_deferred_acks: u32,
+    pub max_pending_deletions: u32,
+    pub batches_acked: u32,
+}
+
+fn update_max(value: &AtomicU32, candidate: usize) {
+    let candidate = u32::try_from(candidate).unwrap_or(u32::MAX);
+    let mut current = value.load(Ordering::Relaxed);
+    while candidate > current {
+        match value.compare_exchange_weak(current, candidate, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+}
+
+impl ChangeStreamConsumer {
+    pub fn new(
+        engine: Arc<SyncEngine>,
+        account_id: AccountId,
+        provider: ConduitProviderKind,
+        stores: ConduitConsumerStores,
+    ) -> Self {
+        Self {
+            engine,
+            account_id,
+            provider,
+            stores,
+            checkpoint_store: None,
+            hook_registry: None,
+            folder_map: HashMap::new(),
+            containers: None,
+            refreshed_scopes: HashSet::new(),
+            observed_scopes: HashSet::new(),
+            imap_threading: ImapThreadAccumulator::default(),
+            deferred_imap_acks: Vec::new(),
+            imap_seen_by_scope: HashMap::new(),
+            crash_before_drive_end_threading: false,
+            mutation_signal: None,
+            rewind_after_subscribe: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_mutation_signal(mut self, signal: Arc<tokio::sync::Notify>) -> Self {
+        self.mutation_signal = Some(signal);
+        self
+    }
+
+    #[must_use]
+    pub fn with_rewind_after_subscribe(mut self, rewind: bool) -> Self {
+        self.rewind_after_subscribe = rewind;
+        self
+    }
+
+    fn signal_mutation(&self) {
+        if let Some(signal) = &self.mutation_signal {
+            signal.notify_one();
+        }
+    }
+
+    #[must_use]
+    pub fn with_checkpoint_store(mut self, checkpoint_store: Arc<SqliteCheckpointStore>) -> Self {
+        self.checkpoint_store = Some(checkpoint_store);
+        self
+    }
+
+    #[must_use]
+    pub fn with_hooks(mut self, hook_registry: Arc<ConsumerHookRegistry>) -> Self {
+        self.hook_registry = Some(hook_registry);
+        self
+    }
+
+    #[must_use]
+    pub fn with_folder_map(mut self, folder_map: HashMap<String, FolderKind>) -> Self {
+        self.folder_map = folder_map;
+        self
+    }
+
+    pub fn with_containers(mut self, containers: ContainerIndex) -> Self {
+        self.folder_map = containers.folder_map().clone();
+        self.containers = Some(Arc::new(containers));
+        self
+    }
+
+    pub async fn drive_to_caught_up(&mut self) -> Result<ConsumerDriveReport, Error> {
+        let mut report = ConsumerDriveReport::default();
+        let mut rx = ChangeStream::Engine(self.engine.account_changes_stream(&self.account_id)?);
+        self.drive_receiver(&mut rx, &mut report).await?;
+        Ok(report)
+    }
+
+    pub async fn drive_resident<F, Fut>(
+        &mut self,
+        mut on_caught_up: F,
+    ) -> Result<ConsumerDriveReport, Error>
+    where
+        F: FnMut(ConsumerDriveReport) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let rx = self.engine.account_changes_stream(&self.account_id)?;
+        if self.rewind_after_subscribe {
+            let rewound = self.engine.rewind_to_acknowledged(&self.account_id).await?;
+            if rewound > 0 {
+                log::info!(
+                    "rewound {rewound} scope(s) of {} to their acknowledged cursor after a lag",
+                    self.account_id.0
+                );
+                self.engine.invalidation_sink().push(
+                    self.account_id.clone(),
+                    conduit_types::WatchEvent::Invalidated {
+                        hint: conduit_types::InvalidationHint {
+                            source: conduit_types::PushSource::Coalesced,
+                            payload: conduit_types::HintPayload::Unknown,
+                        },
+                    },
+                );
+            }
+        }
+        self.drive_resident_loop(ChangeStream::Engine(rx), &mut on_caught_up, None)
+            .await
+    }
+
+    pub async fn drive_resident_injected_stream<F, Fut>(
+        &mut self,
+        rx: broadcast::Receiver<conduit_sync::multiplexer::MultiplexerEvent>,
+        mut on_caught_up: F,
+        telemetry: Option<Arc<ResidentFlushTelemetry>>,
+    ) -> Result<ConsumerDriveReport, Error>
+    where
+        F: FnMut(ConsumerDriveReport) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        self.drive_resident_loop(ChangeStream::Injected(rx), &mut on_caught_up, telemetry)
+            .await
+    }
+
+    async fn drive_resident_loop<F, Fut>(
+        &mut self,
+        mut rx: ChangeStream,
+        on_caught_up: &mut F,
+        telemetry: Option<Arc<ResidentFlushTelemetry>>,
+    ) -> Result<ConsumerDriveReport, Error>
+    where
+        F: FnMut(ConsumerDriveReport) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let mut report = ConsumerDriveReport::default();
+        let mut pending = PendingDeletions::default();
+        let mut last_forced_flush = Instant::now();
+        loop {
+            match tokio::time::timeout(COMPLETION_IDLE_INTERVAL, rx.recv()).await {
+                Ok(Ok(event)) if is_lag_warning(&event) => {
+                    log::warn!(
+                        "conduit resident consumer lagged for account {}",
+                        self.account_id.0
+                    );
+                    report.lagged = true;
+                    self.flush_drive_end(&pending, &mut report, false).await?;
+                    return Ok(report);
+                }
+                Ok(Ok(event)) => {
+                    self.observed_scopes.insert(event.scope.clone());
+                    let hook = if let Some(registry) = &self.hook_registry {
+                        registry.take(&self.account_id.0).await
+                    } else {
+                        None
+                    };
+                    if matches!(hook, Some(ConsumerHook::ForceLag)) {
+                        log::warn!(
+                            "conduit resident consumer FORCED lag for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.lagged = true;
+                        // Mirror the real `RecvError::Lagged` arm: flush pending
+                        // deletions (a per-batch-acked purge must still apply) but
+                        // skip the IMAP drive-end flush on a lagged drive, exactly
+                        // as the one-shot `drive_receiver` path does.
+                        self.flush_drive_end(&pending, &mut report, false).await?;
+                        return Ok(report);
+                    }
+                    if let Some(ConsumerHook::ForceTerminated { recovery }) = hook {
+                        log::warn!(
+                            "conduit resident consumer FORCED terminal failure for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.terminal = Some(forced_terminal_failure(recovery));
+                        self.flush_drive_end(&pending, &mut report, false).await?;
+                        return Ok(report);
+                    }
+                    let hook = if let Some(hook @ ConsumerHook::StallConsumer { .. }) = hook {
+                        apply_hook_before_batch(hook).await?;
+                        None
+                    } else {
+                        hook
+                    };
+                    if self
+                        .handle_event(event, hook, &mut report, &mut pending)
+                        .await?
+                    {
+                        self.flush_drive_end(&pending, &mut report, false).await?;
+                        return Ok(report);
+                    }
+                    if let Some(telemetry) = &telemetry {
+                        telemetry.observe(self.deferred_imap_acks.len(), pending.len());
+                        telemetry.observe_report(&report);
+                    }
+                    if self.resident_flush_due(&pending, last_forced_flush) {
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.record_forced_flush();
+                        }
+                        self.flush_drive_end(&pending, &mut report, true).await?;
+                        pending.clear();
+                        last_forced_flush = Instant::now();
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.observe(self.deferred_imap_acks.len(), pending.len());
+                            telemetry.observe_report(&report);
+                        }
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(missed))) => {
+                    log::warn!(
+                        "conduit resident consumer lagged for account {} after missing {} events",
+                        self.account_id.0,
+                        missed
+                    );
+                    report.lagged = true;
+                    self.flush_drive_end(&pending, &mut report, false).await?;
+                    return Ok(report);
+                }
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    self.flush_drive_end(&pending, &mut report, false).await?;
+                    return Ok(report);
+                }
+                Err(_) => {
+                    if self.scopes_backfill_completed() {
+                        report.completed = true;
+                        report.scopes_completed = self.completed_scope_count();
+                        self.flush_drive_end(&pending, &mut report, true).await?;
+                        on_caught_up(report.clone()).await;
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.observe_report(&report);
+                        }
+                        report = ConsumerDriveReport::default();
+                        pending.clear();
+                        self.observed_scopes.clear();
+                        last_forced_flush = Instant::now();
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn drive_injected_stream(
+        &mut self,
+        rx: broadcast::Receiver<conduit_sync::multiplexer::MultiplexerEvent>,
+    ) -> Result<ConsumerDriveReport, Error> {
+        let mut rx = ChangeStream::Injected(rx);
+        let mut report = ConsumerDriveReport::default();
+        self.drive_receiver(&mut rx, &mut report).await?;
+        Ok(report)
+    }
+
+    async fn drive_receiver(
+        &mut self,
+        rx: &mut ChangeStream,
+        report: &mut ConsumerDriveReport,
+    ) -> Result<(), Error> {
+        let mut pending = PendingDeletions::default();
+        let outcome = self.recv_loop(rx, report, &mut pending).await;
+        // Drive-end Graph deletion reconcile (finding A / spec 4.4). A Graph
+        // `ScopeChange{Removed}` is only a CANDIDATE: a folder move surfaces as
+        // `Removed` in the source folder's per-folder scope batch and as
+        // `Updated`/`Added` in the DESTINATION folder's SEPARATE batch, so the
+        // move is only distinguishable from a true purge once every batch in
+        // the drive has been observed. We therefore accumulate the candidate
+        // (`removed`) and live (`live`) id sets across the whole drive and
+        // delete only the unreconciled remainder here, at drive end.
+        //
+        // Flush on EVERY clean exit (caught-up, stream-closed, AND lagged), not
+        // just the caught-up edge: a purge's `Removed` batch is acked
+        // per-batch, so its cursor has already advanced past the deletion. If a
+        // lagged drive skipped the flush, that purge would never be re-emitted
+        // and the local row would leak forever. The narrow cost is that a move
+        // whose destination `Updated` had not yet arrived when the drive lagged
+        // is transiently deleted, then re-created on the re-kick (the
+        // destination folder's cursor never advanced, so its `Updated`
+        // re-emits) - eventual consistency, never permanent loss. On an error
+        // exit (crash hooks / real engine error) we skip the flush: a partial,
+        // un-acked drive must not apply deletions.
+        if outcome.is_ok() {
+            self.flush_drive_end(&pending, report, !report.lagged)
+                .await?;
+        }
+        outcome
+    }
+
+    async fn recv_loop(
+        &mut self,
+        rx: &mut ChangeStream,
+        report: &mut ConsumerDriveReport,
+        pending: &mut PendingDeletions,
+    ) -> Result<(), Error> {
+        loop {
+            match tokio::time::timeout(COMPLETION_IDLE_INTERVAL, rx.recv()).await {
+                Ok(Ok(event)) if is_lag_warning(&event) => {
+                    log::warn!("conduit consumer lagged for account {}", self.account_id.0);
+                    report.lagged = true;
+                    self.engine.detach(&self.account_id).await?;
+                    return Ok(());
+                }
+                Ok(Ok(event)) => {
+                    self.observed_scopes.insert(event.scope.clone());
+                    let hook = if let Some(registry) = &self.hook_registry {
+                        registry.take(&self.account_id.0).await
+                    } else {
+                        None
+                    };
+                    // ForceLag short-circuits to the lag arm WITHOUT persisting
+                    // this event, so the cursor never advances past the gap -
+                    // exactly the no-message-loss invariant a real
+                    // `RecvError::Lagged` preserves (the dropped events are
+                    // refetched from the last durable cursor on re-attach).
+                    if matches!(hook, Some(ConsumerHook::ForceLag)) {
+                        log::warn!(
+                            "conduit consumer FORCED lag for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.lagged = true;
+                        self.engine.detach(&self.account_id).await?;
+                        return Ok(());
+                    }
+                    if let Some(ConsumerHook::ForceTerminated { recovery }) = hook {
+                        log::warn!(
+                            "conduit consumer FORCED terminal failure for account {} (test hook)",
+                            self.account_id.0
+                        );
+                        report.terminal = Some(forced_terminal_failure(recovery));
+                        self.engine.detach(&self.account_id).await?;
+                        return Ok(());
+                    }
+                    let hook = if let Some(hook @ ConsumerHook::StallConsumer { .. }) = hook {
+                        apply_hook_before_batch(hook).await?;
+                        None
+                    } else {
+                        hook
+                    };
+                    if self.handle_event(event, hook, report, pending).await? {
+                        return Ok(());
+                    }
+                }
+                Ok(Err(broadcast::error::RecvError::Lagged(missed))) => {
+                    log::warn!(
+                        "conduit consumer lagged for account {} after missing {} events",
+                        self.account_id.0,
+                        missed
+                    );
+                    report.lagged = true;
+                    self.engine.detach(&self.account_id).await?;
+                    return Ok(());
+                }
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    // The engine tore the stream down (detach / shutdown /
+                    // terminated). That is NOT the caught-up edge, so do not
+                    // synthesize completion; report the state reached so far.
+                    return Ok(());
+                }
+                Err(_) => {
+                    // A full COMPLETION_IDLE_INTERVAL elapsed with no Batch.
+                    // Per 4.1.2 that is the change-stream idle observation;
+                    // it only counts as caught-up once every observed scope's
+                    // backfill is Completed (checked FIRST, authoritative).
+                    if self.scopes_backfill_completed() {
+                        report.completed = true;
+                        report.scopes_completed = self.completed_scope_count();
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Process one event. Returns `true` when the drive loop must stop
+    /// (the stream terminated).
+    async fn handle_event(
+        &mut self,
+        event: conduit_sync::multiplexer::MultiplexerEvent,
+        hook: Option<ConsumerHook>,
+        report: &mut ConsumerDriveReport,
+        pending: &mut PendingDeletions,
+    ) -> Result<bool, Error> {
+        match &*event.event {
+            SyncEvent::Batch(batch) => {
+                let attribution = self.resolve_attribution(&event.scope).await;
+                let unknown_attribution = attribution.is_none();
+                let mut hydrated = if let Some(namespace) = attribution.as_ref()
+                    && self.is_mail_scope(&event.scope)
+                {
+                    let already_cached =
+                        if matches!(batch.checkpoint, Some(Checkpoint::Backfill(_))) {
+                            self.cached_message_ids(namespace, hydrate::created_ids(&batch.items))
+                                .await?
+                        } else {
+                            HashSet::new()
+                        };
+                    HydrateBatch::from_changes_skipping(
+                        &self.engine,
+                        &self.account_id,
+                        self.provider,
+                        &self.folder_map,
+                        &batch.items,
+                        &already_cached,
+                    )
+                    .await?
+                } else {
+                    if unknown_attribution {
+                        log::warn!(
+                            "skipping un-attributed conduit scope {:?}; it will be redelivered",
+                            event.scope
+                        );
+                        // Do not acknowledge an unknown folder scope: a
+                        // later resident refresh must be able to redeliver it.
+                        return Ok(false);
+                    }
+                    // A container-object change batch (JMAP drives
+                    // `Type(Mailbox)` as a cursor scope; its items are mailbox
+                    // ObjectChanges). Containers are otherwise only persisted
+                    // at attach, so without this trigger a mailbox created or
+                    // renamed on the server after attach never reaches the
+                    // `folders` table: an EMPTY new mailbox produces no
+                    // message batch, and the unknown-scope refresh above
+                    // therefore never fires for it. The items themselves are
+                    // not hydrated - one `containers_list` re-snapshot is the
+                    // provider-agnostic way to fold them in, and it only costs
+                    // a request when mailbox state actually moved.
+                    if is_container_change_batch(&event.scope, batch.items.len()) {
+                        match containers::sync_containers(
+                            &self.engine,
+                            &self.account_id.0,
+                            &self.stores.db,
+                        )
+                        .await
+                        {
+                            Ok(containers) => {
+                                self.folder_map = containers.folder_map().clone();
+                                self.containers = Some(Arc::new(containers));
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "container refresh for changed conduit scope {:?} failed: \
+                                     {error}; leaving checkpoint unacked for redelivery",
+                                    event.scope
+                                );
+                                // Mirror the unknown-scope policy: acking would
+                                // advance the mailbox change cursor past the
+                                // only trigger for this refresh.
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    HydrateBatch::default()
+                };
+                let attribution = attribution.expect("known attribution was checked above");
+                hydrated.qualify_namespace(&attribution);
+                let batch_checkpoint = batch.checkpoint.clone();
+                if self.provider == ConduitProviderKind::Imap {
+                    let seen = u64::try_from(batch.items.len()).unwrap_or(u64::MAX);
+                    self.imap_seen_by_scope
+                        .entry(event.scope.clone())
+                        .and_modify(|total| *total = total.saturating_add(seen))
+                        .or_insert(seen);
+                }
+                // Accumulate this batch's live ids and Graph removed-candidates
+                // into the drive-level reconcile state (finding A). The actual
+                // deletion of unreconciled candidates is deferred to drive end.
+                pending.add_live(&event.scope, &hydrated.live_ids);
+                pending.add_removed(&event.scope, &hydrated.removed_ids);
+                if matches!(batch.checkpoint, Some(Checkpoint::Change(_)))
+                    && !batch.items.is_empty()
+                {
+                    log::info!(
+                        "live change for {}: scope {:?}, {} item(s), {} live, {} removed",
+                        self.account_id.0,
+                        event.scope,
+                        batch.items.len(),
+                        hydrated.live_ids.len(),
+                        hydrated.removed_ids.len()
+                    );
+                }
+                let affected = write::persist_in_namespace(
+                    &self.stores,
+                    &self.account_id.0,
+                    self.provider,
+                    &attribution,
+                    &hydrated.rows,
+                    &hydrated.deleted_ids,
+                )
+                .await
+                .map_err(|error| Error::Other(format!("conduit persist: {error}")))?;
+                let overruled = self.keep_moved_threads_out(&affected.thread_ids).await?;
+                let wrote_changes =
+                    overruled || !hydrated.rows.is_empty() || !hydrated.deleted_ids.is_empty();
+                if self.provider == ConduitProviderKind::Imap {
+                    // Key the threadable accumulator on the id each row was
+                    // PERSISTED under: the IMAP write arm adopts the existing
+                    // local id of any `(account_id, imap_folder, imap_uid)`
+                    // row before insert, and the drive-end threading pass
+                    // reassigns by message id, so it must see the adopted id
+                    // (`affected.message_ids`, 1:1 with `hydrated.rows`), not
+                    // the provisional hydrate-time id.
+                    self.imap_threading.push_rows_with_ids(
+                        &hydrated.rows,
+                        &affected.message_ids,
+                        &attribution,
+                    );
+                }
+                post_persist::run(
+                    &self.stores.db,
+                    &self.account_id.0,
+                    self.provider,
+                    &event.scope,
+                    batch_checkpoint.as_ref(),
+                    &hydrated.rows,
+                    &affected,
+                )
+                .await
+                .map_err(|error| Error::Other(format!("conduit post-persist: {error}")))?;
+                self.stores.search.flush_now().await.map_err(Error::Other)?;
+                if wrote_changes {
+                    report.wrote_changes = true;
+                    self.signal_mutation();
+                }
+                if matches!(hook, Some(ConsumerHook::CrashBeforeAck)) {
+                    return Err(Error::Other(
+                        "conduit consumer crash_before_ack hook fired".to_string(),
+                    ));
+                }
+                if matches!(hook, Some(ConsumerHook::CrashBeforeDriveEndThreading)) {
+                    self.crash_before_drive_end_threading = true;
+                }
+                if let (Some(checkpoint), false) = (batch_checkpoint, hydrated.blocked) {
+                    if self.provider == ConduitProviderKind::Imap {
+                        self.deferred_imap_acks.push((
+                            event.scope.clone(),
+                            checkpoint,
+                            event.publication,
+                        ));
+                    } else {
+                        self.ack_checkpoint(event.scope.clone(), checkpoint, event.publication)
+                            .await?;
+                        post_persist::prune_marker_window(
+                            &self.stores.db,
+                            &self.account_id.0,
+                            &event.scope,
+                        )
+                        .await
+                        .map_err(Error::Other)?;
+                        report.batches_acked = report.batches_acked.saturating_add(1);
+                        if matches!(hook, Some(ConsumerHook::CrashAfterAckNoSentinel)) {
+                            return Err(Error::Other(
+                                "conduit consumer crash_after_ack_no_sentinel hook fired"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+            SyncEvent::Terminated(error) if !terminates_account(&event.scope, error) => {
+                log::warn!(
+                    "conduit scope {:?} stopped for account {}, siblings keep syncing: {} | {:?}",
+                    event.scope,
+                    self.account_id.0,
+                    error,
+                    error.support_internal()
+                );
+                // A scope that never re-establishes never completes its
+                // backfill, which would hold back the caught-up edge forever.
+                self.observed_scopes.remove(&event.scope);
+            }
+            SyncEvent::Terminated(error) => {
+                log::warn!(
+                    "conduit consumer stream terminated for account {}: {}",
+                    self.account_id.0,
+                    error
+                );
+                report.terminal = Some(TerminalFailure {
+                    result: error_map::account_error_to_operation_result(error),
+                    message: error.message_key().to_string(),
+                });
+                return Ok(true);
+            }
+            SyncEvent::Done(checkpoint) => {
+                if let Some(checkpoint) = checkpoint.clone() {
+                    if self.provider == ConduitProviderKind::Imap {
+                        // IMAP-only: synthesize a durable Backfill COMPLETION
+                        // sentinel from the Done's Change cursor. The engine's
+                        // backfill orchestrator reads this sentinel on the next
+                        // attach (`get_backfill` -> `backfill_complete_recorded`)
+                        // to SKIP re-walking a scope's full inventory; without
+                        // it, every kick would re-fetch the whole mailbox.
+                        //
+                        // The HTTP siblings get this sentinel for free: their
+                        // backfill completion arrives as a real
+                        // `Checkpoint::Backfill` on the completion partition
+                        // (the engine's `emit_backfill_complete`, acked through
+                        // the normal batch path). The conduit IMAP data path
+                        // never emits one - both its `inventory_stream` and
+                        // `changes_stream` checkpoint exclusively with
+                        // `Checkpoint::Change` (the QRESYNC/CONDSTORE folder
+                        // cursor) and signal per-folder completion via
+                        // `Done(Change)`. So for IMAP the consumer must derive
+                        // the completion sentinel itself, mirroring the
+                        // `items_done = seen + 1` / `items_estimated = seen`
+                        // shape `emit_backfill_complete` records (the
+                        // per-scope total accumulated in `imap_seen_by_scope`).
+                        if matches!(checkpoint, Checkpoint::Change(_)) {
+                            let seen = self
+                                .imap_seen_by_scope
+                                .get(&event.scope)
+                                .copied()
+                                .unwrap_or(0);
+                            // Consumer-synthesized, so the engine issued no
+                            // publication for it: it carries no coverage claim,
+                            // and naming a publication the writer never minted
+                            // would be rejected outright.
+                            self.deferred_imap_acks.push((
+                                event.scope.clone(),
+                                Checkpoint::Backfill(completion_backfill_checkpoint(
+                                    event.scope.clone(),
+                                    seen,
+                                )),
+                                None,
+                            ));
+                        }
+                        self.deferred_imap_acks.push((
+                            event.scope.clone(),
+                            checkpoint,
+                            event.publication,
+                        ));
+                    } else {
+                        self.ack_checkpoint(event.scope.clone(), checkpoint, event.publication)
+                            .await?;
+                        post_persist::prune_marker_window(
+                            &self.stores.db,
+                            &self.account_id.0,
+                            &event.scope,
+                        )
+                        .await
+                        .map_err(Error::Other)?;
+                        report.batches_acked = report.batches_acked.saturating_add(1);
+                    }
+                }
+            }
+            SyncEvent::Progress(_) | SyncEvent::Warning(_) => {}
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    /// Folder scopes are only attributable through the attach-time container
+    /// snapshot. A newly discovered shared folder can race that snapshot, so
+    /// refresh exactly once before failing closed. The skipped batch is left
+    /// unacked and is consequently redelivered after the next healthy drive.
+    /// Provider ids among `ids` whose message is already stored with its
+    /// body. A message without a cached body is fetched again.
+    async fn cached_message_ids(
+        &self,
+        namespace: &common::types::NamespaceAttribution,
+        ids: Vec<String>,
+    ) -> Result<HashSet<String>, Error> {
+        if ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let account_id = self.account_id.0.clone();
+        let local_ids: Vec<(String, String)> = ids
+            .into_iter()
+            .map(|id| (namespace.qualified_id(&id), id))
+            .collect();
+        self.stores
+            .db
+            .with_read(move |conn| {
+                let mut statement = conn
+                    .prepare(
+                        "SELECT 1 FROM messages
+                         WHERE account_id = ?1 AND id = ?2 AND body_cached = 1",
+                    )
+                    .map_err(|error| format!("prepare cached ids: {error}"))?;
+                let mut cached = HashSet::new();
+                for (local_id, provider_id) in local_ids {
+                    let found = statement
+                        .query(rusqlite::params![account_id, local_id])
+                        .map_err(|error| format!("query cached ids: {error}"))?
+                        .next()
+                        .map_err(|error| format!("read cached ids: {error}"))?
+                        .is_some();
+                    if found {
+                        cached.insert(provider_id);
+                    }
+                }
+                Ok(cached)
+            })
+            .await
+            .map_err(|error| Error::Other(format!("conduit cached ids: {error}")))
+    }
+
+    async fn resolve_attribution(
+        &mut self,
+        scope: &CursorScope,
+    ) -> Option<common::types::NamespaceAttribution> {
+        let initial = self.containers.as_ref().map_or_else(
+            || Some(common::types::NamespaceAttribution::Personal),
+            |index| index.attribution_for_scope(scope),
+        );
+        if initial.is_some() {
+            return initial;
+        }
+        // Exactly one refresh per scope. The skipped batch is redelivered, so
+        // without this latch a permanently unknown scope would re-enumerate
+        // every container on every redelivery, forever.
+        if !self.refreshed_scopes.insert(scope.clone()) {
+            return None;
+        }
+        match containers::sync_containers(&self.engine, &self.account_id.0, &self.stores.db).await {
+            Ok(containers) => {
+                self.folder_map = containers.folder_map().clone();
+                let attribution = containers.attribution_for_scope(scope);
+                self.containers = Some(Arc::new(containers));
+                attribution
+            }
+            Err(error) => {
+                log::warn!(
+                    "failed refreshing containers for unknown conduit scope {scope:?}: {error}"
+                );
+                None
+            }
+        }
+    }
+
+    fn is_mail_scope(&self, scope: &CursorScope) -> bool {
+        if !is_email_scope(scope) {
+            return false;
+        }
+        match (self.containers.as_ref(), scope) {
+            (Some(index), CursorScope::Folder(folder)) => index.is_mail_container(&folder.0),
+            (Some(index), CursorScope::FolderType { folder, .. }) => {
+                index.is_mail_container(&folder.0)
+            }
+            _ => true,
+        }
+    }
+
+    async fn ack_checkpoint(
+        &self,
+        scope: CursorScope,
+        checkpoint: Checkpoint,
+        publication: Option<PublicationId>,
+    ) -> Result<(), Error> {
+        if let Some(store) = &self.checkpoint_store {
+            match checkpoint {
+                Checkpoint::Change(cursor) => {
+                    store.put_change_cursor(&self.account_id, cursor).await
+                }
+                Checkpoint::Backfill(backfill) => {
+                    store.put_backfill(&self.account_id, backfill).await
+                }
+                _ => Err(Error::Other(format!(
+                    "unsupported checkpoint for synthetic conduit consumer scope {scope:?}"
+                ))),
+            }
+        } else {
+            self.engine
+                .ack_checkpoint(&self.account_id, scope, checkpoint, publication)
+                .await
+        }
+    }
+
+    fn scopes_backfill_completed(&self) -> bool {
+        let registry = self.engine.backfill_registry();
+        !registry.has_running(&self.account_id)
+            && self.observed_scopes.iter().all(|scope| {
+                matches!(
+                    registry.snapshot(&self.account_id, scope),
+                    None | Some(BackfillState::Completed)
+                )
+            })
+    }
+
+    fn completed_scope_count(&self) -> u32 {
+        self.observed_scopes
+            .iter()
+            .filter(|scope| {
+                matches!(
+                    self.engine
+                        .backfill_registry()
+                        .snapshot(&self.account_id, scope),
+                    Some(BackfillState::Completed)
+                )
+            })
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX)
+    }
+
+    /// After a write, take the conversations the user just moved back out of
+    /// the folder they left (`crate::recent_moves`). Returns whether a row
+    /// changed.
+    async fn keep_moved_threads_out(&self, thread_ids: &[String]) -> Result<bool, Error> {
+        if !crate::recent_moves::concerns(&self.account_id.0) {
+            return Ok(false);
+        }
+        let account_id = self.account_id.0.clone();
+        let thread_ids = thread_ids.to_vec();
+        self.stores
+            .db
+            .with_write(move |conn| {
+                let tx = conn.transaction().map_err(|error| error.to_string())?;
+                let changed = crate::recent_moves::enforce(&tx, &account_id, &thread_ids)?;
+                tx.commit().map_err(|error| error.to_string())?;
+                Ok(changed)
+            })
+            .await
+            .map_err(|error| Error::Other(format!("conduit moved-thread hold: {error}")))
+    }
+
+    /// Apply the drive-level Graph deletion reconcile (finding A): delete every
+    /// `ScopeChange{Removed}` candidate that NO live signal (`Updated`/`Added`)
+    /// revived anywhere in this drive. A surviving move keeps its row (its
+    /// destination folder re-asserted membership); only a true purge - removed
+    /// and never seen live - is deleted. No-op for non-Graph providers (they
+    /// never populate `removed`) and when nothing needs deleting.
+    /// Returns whether anything was deleted.
+    async fn flush_pending_deletions(&self, pending: &PendingDeletions) -> Result<bool, Error> {
+        let to_delete = pending.ids_to_delete();
+        if to_delete.is_empty() {
+            return Ok(false);
+        }
+        write::persist(
+            &self.stores,
+            &self.account_id.0,
+            self.provider,
+            &[],
+            &to_delete,
+        )
+        .await
+        .map_err(|error| Error::Other(format!("conduit drive-end delete: {error}")))?;
+        self.signal_mutation();
+        Ok(true)
+    }
+
+    async fn flush_imap_drive_end(
+        &mut self,
+        report: &mut ConsumerDriveReport,
+    ) -> Result<(), Error> {
+        if self.provider != ConduitProviderKind::Imap {
+            return Ok(());
+        }
+        imap_threading::run_drive_end_threading(
+            &self.stores,
+            &self.account_id.0,
+            &self.imap_threading,
+        )
+        .await
+        .map_err(|error| Error::Other(format!("conduit IMAP threading: {error}")))?;
+        self.stores.search.flush_now().await.map_err(Error::Other)?;
+        let deferred = std::mem::take(&mut self.deferred_imap_acks);
+        for (scope, checkpoint, publication) in deferred {
+            self.ack_checkpoint(scope.clone(), checkpoint, publication)
+                .await?;
+            post_persist::prune_marker_window(&self.stores.db, &self.account_id.0, &scope)
+                .await
+                .map_err(Error::Other)?;
+            report.batches_acked = report.batches_acked.saturating_add(1);
+        }
+        self.imap_threading.clear();
+        self.imap_seen_by_scope.clear();
+        Ok(())
+    }
+
+    async fn flush_drive_end(
+        &mut self,
+        pending: &PendingDeletions,
+        report: &mut ConsumerDriveReport,
+        flush_imap: bool,
+    ) -> Result<(), Error> {
+        if self.flush_pending_deletions(pending).await? {
+            report.wrote_changes = true;
+        }
+        if self.crash_before_drive_end_threading {
+            return Err(Error::Other(
+                "conduit consumer crash_before_drive_end_threading hook fired".to_string(),
+            ));
+        }
+        if flush_imap {
+            self.flush_imap_drive_end(report).await?;
+        }
+        Ok(())
+    }
+
+    fn resident_flush_due(&self, pending: &PendingDeletions, last_flush: Instant) -> bool {
+        self.deferred_imap_acks.len() >= RESIDENT_DEFERRED_ACK_CAP
+            || pending.len() >= RESIDENT_PENDING_DELETION_CAP
+            || (!self.deferred_imap_acks.is_empty()
+                && last_flush.elapsed() >= RESIDENT_FLUSH_INTERVAL)
+            || pending.deletion_due()
+    }
+}
+
+#[cfg(test)]
+mod deletion_flush_tests {
+    use super::*;
+
+    fn pending_removed_for(age: Duration) -> PendingDeletions {
+        let mut pending = PendingDeletions::default();
+        pending.add_removed(&CursorScope::Account, &["msg".to_string()]);
+        pending.removed_since = Instant::now().checked_sub(age);
+        pending
+    }
+
+    #[test]
+    fn a_fresh_deletion_waits_for_its_move_destination() {
+        assert!(!pending_removed_for(Duration::from_secs(1)).deletion_due());
+    }
+
+    #[test]
+    fn the_wait_counts_from_the_oldest_candidate_not_the_newest() {
+        let mut pending = pending_removed_for(Duration::from_secs(11));
+        pending.add_removed(&CursorScope::Account, &["later".to_string()]);
+        assert!(pending.deletion_due());
+        pending.clear();
+        assert!(!pending.deletion_due());
+    }
+
+    fn folder(id: &str) -> CursorScope {
+        CursorScope::FolderType {
+            folder: conduit_types::FolderId(id.to_string()),
+            ty: ObjectType::Email,
+        }
+    }
+
+    #[test]
+    fn a_message_that_arrived_then_was_deleted_in_one_drive_is_deleted() {
+        let mut pending = PendingDeletions::default();
+        let ids = ["msg".to_string()];
+        pending.add_live(&folder("inbox"), &ids);
+        pending.add_removed(&folder("inbox"), &ids);
+        assert_eq!(pending.ids_to_delete(), ids);
+    }
+
+    #[test]
+    fn a_move_survives_whichever_side_arrives_first() {
+        let ids = ["msg".to_string()];
+        let mut destination_first = PendingDeletions::default();
+        destination_first.add_live(&folder("trash"), &ids);
+        destination_first.add_removed(&folder("inbox"), &ids);
+        assert!(destination_first.ids_to_delete().is_empty());
+
+        let mut source_first = PendingDeletions::default();
+        source_first.add_removed(&folder("inbox"), &ids);
+        source_first.add_live(&folder("trash"), &ids);
+        assert!(source_first.ids_to_delete().is_empty());
+    }
+}
+
+fn completion_backfill_checkpoint(scope: CursorScope, seen: u64) -> BackfillCheckpoint {
+    BackfillCheckpoint {
+        scope,
+        partition: Partition(BACKFILL_COMPLETION_PARTITION.to_vec()),
+        progress_marker: None,
+        progress: BackfillProgress {
+            items_done: seen.saturating_add(1),
+            items_estimated: Some(seen),
+        },
+        envelope_version: conduit_sync::ENGINE_VERSION,
+    }
+}
+
+/// Drive-level accumulator for the Graph move-vs-purge reconcile (finding A).
+/// `removed` collects `ScopeChange{Removed}` candidates and `live` collects the
+/// `Updated`/`Added` ids seen across every per-folder scope batch in the drive;
+/// at drive end `removed - live` is the set actually deleted.
+#[derive(Default)]
+struct PendingDeletions {
+    removed: HashSet<String>,
+    /// Each live id with the scopes that saw it live. A later removal from
+    /// one of those scopes supersedes that scope's signal, so a message that
+    /// arrived and was then deleted within one long drive is still deleted.
+    live: HashMap<String, HashSet<CursorScope>>,
+    /// When the oldest candidate still in `removed` arrived.
+    removed_since: Option<Instant>,
+}
+
+impl PendingDeletions {
+    fn add_live(&mut self, scope: &CursorScope, ids: &[String]) {
+        for id in ids {
+            self.live
+                .entry(id.clone())
+                .or_default()
+                .insert(scope.clone());
+        }
+    }
+
+    fn add_removed(&mut self, scope: &CursorScope, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        self.removed_since.get_or_insert_with(Instant::now);
+        for id in ids {
+            if let Some(scopes) = self.live.get_mut(id) {
+                scopes.remove(scope);
+                if scopes.is_empty() {
+                    self.live.remove(id);
+                }
+            }
+            self.removed.insert(id.clone());
+        }
+    }
+
+    fn ids_to_delete(&self) -> Vec<String> {
+        self.removed
+            .iter()
+            .filter(|id| !self.live.contains_key(*id))
+            .cloned()
+            .collect()
+    }
+
+    fn deletion_due(&self) -> bool {
+        self.removed_since
+            .is_some_and(|since| since.elapsed() >= RESIDENT_DELETION_FLUSH_INTERVAL)
+    }
+
+    fn clear(&mut self) {
+        self.removed.clear();
+        self.live.clear();
+        self.removed_since = None;
+    }
+
+    fn len(&self) -> usize {
+        self.removed.len().saturating_add(self.live.len())
+    }
+}
+
+/// True when a batch on `scope` signals container-object (mailbox/folder)
+/// changes that must be folded into the persisted `folders` / `labels` rows
+/// via a `containers_list` re-snapshot. Scope-shape-driven rather than
+/// provider-gated: today only JMAP exposes `Type(Mailbox)` as a cursor scope,
+/// but a provider growing one later gets the refresh for free. Empty batches
+/// (a caught-up `Mailbox/changes` page) must not trigger it - that would turn
+/// every idle delta cycle into a full container re-list.
+fn is_container_change_batch(scope: &CursorScope, item_count: usize) -> bool {
+    item_count > 0 && matches!(scope, CursorScope::Type(ObjectType::Mailbox))
+}
+
+fn is_email_scope(scope: &CursorScope) -> bool {
+    // `CursorScope::Folder(_)` is accepted unconditionally rather than gated to
+    // the IMAP provider. It is the scope IMAP drives on (the conduit IMAP
+    // `Account` emits per-folder `Folder` scopes); the HTTP providers drive
+    // `Account` / `Type(Email)` / `FolderType` scopes and never emit a bare
+    // `Folder` scope, so this arm is exercised only by IMAP. Leaving it
+    // provider-agnostic keeps this predicate from having to thread the
+    // `ConduitProviderKind` through, and is harmless because no non-IMAP
+    // provider produces a `Folder`-scoped batch to mis-route here.
+    matches!(
+        scope,
+        CursorScope::Account
+            | CursorScope::Type(ObjectType::Email)
+            | CursorScope::Folder(_)
+            | CursorScope::FolderType {
+                ty: ObjectType::Email,
+                ..
+            }
+    )
+}
+
+/// The engine reports a single folder whose cursor it gave up on with a
+/// scoped `Terminated` and keeps driving the other folders. Only the
+/// account-wide scope, or a credential or tenant failure that every folder
+/// shares, stops the whole account.
+fn terminates_account(scope: &CursorScope, error: &conduit_types::AccountError) -> bool {
+    matches!(scope, CursorScope::Account)
+        || matches!(
+            error.recovery(),
+            RecoveryClass::AuthLost
+                | RecoveryClass::NeedsAdminConsent { .. }
+                | RecoveryClass::NeedsPolicyChange
+        )
+}
+
+async fn apply_hook_before_batch(hook: ConsumerHook) -> Result<(), Error> {
+    match hook {
+        ConsumerHook::StallConsumer { after_ms } => {
+            tokio::time::sleep(Duration::from_millis(after_ms)).await;
+            Ok(())
+        }
+        ConsumerHook::CrashBeforeAck | ConsumerHook::CrashAfterAckNoSentinel => Err(Error::Other(
+            "conduit consumer crash hook fired in in-process handler".to_string(),
+        )),
+        ConsumerHook::CrashBeforeDriveEndThreading => Ok(()),
+        // ForceLag is handled inline in `drive_receiver` (it short-circuits to
+        // the lag arm before any batch work), so it never reaches here.
+        ConsumerHook::ForceLag => Ok(()),
+        ConsumerHook::ForceTerminated { .. } => Ok(()),
+    }
+}
+
+fn forced_terminal_failure(recovery: ForcedRecoveryClass) -> TerminalFailure {
+    let error = forced_account_error(recovery);
+    TerminalFailure {
+        result: error_map::account_error_to_operation_result(&error),
+        message: error.message_key().to_string(),
+    }
+}
+
+fn forced_account_error(recovery: ForcedRecoveryClass) -> conduit_types::AccountError {
+    match recovery {
+        ForcedRecoveryClass::AuthLost => AccountErrorBuilder::new(
+            AccountErrorKind::Authentication(AuthErrorKind::Revoked),
+            Cause::Auth(AuthCause::Revoked),
+        )
+        .try_build()
+        .expect("valid forced auth-lost account error"),
+        ForcedRecoveryClass::Retry => AccountErrorBuilder::new(
+            AccountErrorKind::Server(ServerErrorKind::Unavailable),
+            Cause::Server(ServerCause::Unavailable { retry_hint: None }),
+        )
+        .push_cause(Cause::Attempt(AttemptCause::new(TransmissionState::Unsent)))
+        .try_build()
+        .expect("valid forced retryable account error"),
+        ForcedRecoveryClass::UnknownPermanent => AccountErrorBuilder::new(
+            AccountErrorKind::Protocol(ProtocolErrorKind::Unknown),
+            Cause::Wire(WireCause::MalformedResponse {
+                protocol: Protocol::Jmap,
+                detail: Some(DiagnosticText::support_only("forced terminal hook")),
+            }),
+        )
+        .try_build()
+        .expect("valid forced permanent account error"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConduitProviderKind, is_email_scope};
+    use conduit_types::{CursorScope, FolderId};
+
+    #[test]
+    fn provider_kind_names_match_account_provider_values() {
+        assert_eq!(ConduitProviderKind::Gmail.as_str(), "gmail");
+        assert_eq!(ConduitProviderKind::Graph.as_str(), "graph");
+        assert_eq!(ConduitProviderKind::Imap.as_str(), "imap");
+        assert_eq!(ConduitProviderKind::Jmap.as_str(), "jmap");
+    }
+
+    #[test]
+    fn only_an_account_wide_or_credential_failure_stops_the_account() {
+        use conduit_types::{
+            AccountErrorBuilder, AccountErrorKind, Cause, ErrorScope, ObjectType, StateCause,
+            SyncStateErrorKind,
+        };
+        let folder = CursorScope::FolderType {
+            folder: FolderId("deleted-folder".to_string()),
+            ty: ObjectType::Email,
+        };
+        let cursor_invalid = AccountErrorBuilder::new(
+            AccountErrorKind::SyncState(SyncStateErrorKind::CursorInvalid),
+            Cause::State(StateCause::CursorInvalid),
+        )
+        .scope(ErrorScope::Cursor(folder.clone()))
+        .try_build()
+        .expect("cursor-invalid error");
+        let auth_lost = super::forced_account_error(super::ForcedRecoveryClass::AuthLost);
+
+        assert!(!super::terminates_account(&folder, &cursor_invalid));
+        assert!(super::terminates_account(
+            &CursorScope::Account,
+            &cursor_invalid
+        ));
+        assert!(super::terminates_account(&folder, &auth_lost));
+    }
+
+    #[test]
+    fn imap_folder_cursor_scope_is_email_scope() {
+        assert!(is_email_scope(&CursorScope::Folder(FolderId(
+            "INBOX".to_string(),
+        ))));
+    }
+
+    #[test]
+    fn mailbox_scope_batch_with_items_triggers_container_refresh() {
+        use conduit_types::ObjectType;
+        assert!(super::is_container_change_batch(
+            &CursorScope::Type(ObjectType::Mailbox),
+            1
+        ));
+    }
+
+    #[test]
+    fn empty_mailbox_scope_batch_does_not_trigger_container_refresh() {
+        use conduit_types::ObjectType;
+        assert!(!super::is_container_change_batch(
+            &CursorScope::Type(ObjectType::Mailbox),
+            0
+        ));
+    }
+
+    #[test]
+    fn email_scope_batch_never_triggers_container_refresh() {
+        use conduit_types::ObjectType;
+        assert!(!super::is_container_change_batch(
+            &CursorScope::Type(ObjectType::Email),
+            5
+        ));
+        assert!(!super::is_container_change_batch(&CursorScope::Account, 5));
+    }
+}

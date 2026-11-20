@@ -1,0 +1,1043 @@
+use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text};
+use iced::{Alignment, Element, Length, Padding};
+use rust_i18n::t;
+use std::borrow::Cow;
+
+use crate::Message;
+use crate::db::{self, ThreadMessage};
+use crate::font;
+use crate::icon;
+use crate::pop_out::session::MessageViewSessionEntry;
+use crate::ui::layout::*;
+use crate::ui::theme;
+use crate::ui::widgets;
+
+use super::PopOutMessage;
+
+pub use db::MessageViewAttachment;
+
+// ── Rendering mode ─────────────────────────────────────
+
+/// Rendering mode for the message body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderingMode {
+    PlainText,
+    #[default]
+    SimpleHtml,
+    OriginalHtml,
+    Source,
+}
+
+// ── Messages ───────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum MessageViewMessage {
+    /// Body content loaded from the body store.
+    BodyLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        Result<(Option<String>, Option<String>), String>,
+    ),
+    /// Attachments loaded for this message.
+    AttachmentsLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        Result<Vec<MessageViewAttachment>, String>,
+    ),
+    /// User changed the rendering mode toggle.
+    SetRenderingMode(RenderingMode),
+    /// Reply/Reply All/Forward button pressed.
+    Reply,
+    ReplyAll,
+    Forward,
+    /// Overflow menu actions.
+    Archive,
+    Delete,
+    Print,
+    SaveAs,
+    /// Open or close the message action context menu.
+    OpenContextMenu,
+    CloseContextMenu,
+    /// Load remote images for this message.
+    LoadRemoteContent,
+    /// The HTML body was laid out at a new width.
+    HtmlBodyResized(f32),
+    /// A background HTML render finished.
+    HtmlBodyRendered {
+        inputs: crate::ui::mail_body::RenderInputs,
+        body: Option<std::sync::Arc<crate::ui::mail_body::RenderedBody>>,
+    },
+    /// User clicked a link in the HTML body.
+    LinkClicked(String),
+    /// A link in the HTML body.
+    BodyLink(crate::ui::mail_body::LinkAction),
+    /// Copy the one-time code of the message.
+    CopyCode,
+    /// The text selection in the HTML body.
+    BodySelect(crate::ui::mail_selection::SelectAction),
+    /// User clicked Open on an attachment card. The string is the
+    /// attachment id. Stubbed: opens with the system default handler.
+    OpenAttachment(String),
+    /// User clicked Save on an attachment card. The string is the
+    /// attachment id. Stubbed: saves with file picker.
+    SaveAttachment(String),
+    /// User clicked Save All in the attachments panel header. Stubbed:
+    /// saves every attachment with a folder picker.
+    SaveAllAttachments,
+    /// Cursor entered or exited an attachment card. `Some(id)` on enter,
+    /// `None` on exit.
+    HoverAttachment(Option<String>),
+    /// No-op (placeholder for unimplemented actions).
+    Noop,
+}
+
+// ── State ──────────────────────────────────────────────
+
+/// Per-window state for a message view pop-out.
+#[derive(Debug, Clone)]
+pub struct MessageViewState {
+    // ── Identity ──
+    pub message_id: String,
+    pub message_id_header: Option<String>,
+    pub thread_id: String,
+    pub account_id: String,
+
+    // ── Header data ──
+    pub from_name: Option<String>,
+    pub from_address: Option<String>,
+    pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
+    pub subject: Option<String>,
+    pub date: Option<i64>,
+
+    // ── Body ──
+    pub body_text: Option<String>,
+    pub body_html: Option<String>,
+    /// The one-time code of a recent verification email, once the body is
+    /// loaded.
+    pub verification_code: Option<String>,
+    /// The code was just copied, for the button's feedback.
+    pub code_copied: bool,
+    /// Snippet fallback used before async body load completes.
+    pub snippet: Option<String>,
+    /// Raw email source (headers + MIME), loaded lazily on Source mode.
+    pub raw_source: Option<String>,
+    /// Inline (CID-referenced) image bytes for the rendered HTML. Empty
+    /// until pop-out wires up the inline image store; the HTML pipeline
+    /// just falls back to alt text for unknown CIDs.
+    pub inline_images: std::collections::HashMap<String, iced::widget::image::Handle>,
+
+    // ── Attachments ──
+    pub attachments: Vec<MessageViewAttachment>,
+    /// Attachment id currently under the cursor, if any. Drives the
+    /// hover-overlay (Save / Open buttons) on the compact attachment cards.
+    pub hovered_attachment_id: Option<String>,
+
+    // ── Window-local state ──
+    pub rendering_mode: RenderingMode,
+    pub context_menu_open: bool,
+    /// Render state of the HTML body.
+    pub html_body: crate::ui::mail_body::HtmlBodyState,
+    pub error_banner: Option<String>,
+
+    // ── Action context ──
+    /// The sidebar selection when the pop-out was opened. Used for action
+    /// resolution (spam toggle direction, trash undo source folder) so the
+    /// pop-out resolves against its original context, not whatever the main
+    /// window happens to show later.
+    pub source_selection: Option<types::SidebarSelection>,
+
+    // ── Window geometry ──
+    pub width: f32,
+    pub height: f32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+
+    // ── Generation tracking ──
+    /// Per-window generation token to guard against stale data loads.
+    pub generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+}
+
+impl MessageViewState {
+    pub fn from_thread_message(
+        msg: &ThreadMessage,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        source_selection: Option<types::SidebarSelection>,
+        default_rendering_mode: RenderingMode,
+    ) -> Self {
+        Self {
+            message_id: msg.id.clone(),
+            message_id_header: msg.message_id_header.clone(),
+            thread_id: msg.thread_id.clone(),
+            account_id: msg.account_id.clone(),
+            from_name: msg.from_name.clone(),
+            from_address: msg.from_address.clone(),
+            to_addresses: msg.to_addresses.clone(),
+            cc_addresses: msg.cc_addresses.clone(),
+            subject: msg.subject.clone(),
+            date: msg.date,
+            body_text: None,
+            verification_code: None,
+            code_copied: false,
+            body_html: None,
+            snippet: msg.snippet.clone(),
+            raw_source: None,
+            inline_images: std::collections::HashMap::new(),
+            attachments: Vec::new(),
+            hovered_attachment_id: None,
+            rendering_mode: default_rendering_mode,
+
+            context_menu_open: false,
+            html_body: crate::ui::mail_body::HtmlBodyState::with_original(
+                default_rendering_mode == RenderingMode::OriginalHtml,
+            ),
+            error_banner: None,
+            source_selection,
+            width: MESSAGE_VIEW_DEFAULT_WIDTH,
+            height: MESSAGE_VIEW_DEFAULT_HEIGHT,
+            x: None,
+            y: None,
+            generation,
+        }
+    }
+
+    /// Construct state from a `ChatMessage` (chat-view "View as email" path).
+    ///
+    /// `ChatMessage` doesn't carry `to_addresses` / `cc_addresses` / `snippet`
+    /// the way `ThreadMessage` does, so those fields stay `None` and the
+    /// pop-out's body/attachment loaders fill in the rest async.
+    pub fn from_chat_message(
+        msg: &rtsk::chat::ChatMessage,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        source_selection: Option<types::SidebarSelection>,
+        default_rendering_mode: RenderingMode,
+    ) -> Self {
+        Self {
+            message_id: msg.message_id.clone(),
+            message_id_header: None,
+            thread_id: msg.thread_id.clone(),
+            account_id: msg.account_id.clone(),
+            from_name: msg.from_name.clone(),
+            from_address: Some(msg.from_address.clone()),
+            to_addresses: None,
+            cc_addresses: None,
+            subject: msg.subject.clone(),
+            date: Some(msg.date),
+            body_text: None,
+            verification_code: None,
+            code_copied: false,
+            body_html: None,
+            snippet: None,
+            raw_source: None,
+            inline_images: std::collections::HashMap::new(),
+            attachments: Vec::new(),
+            hovered_attachment_id: None,
+            rendering_mode: default_rendering_mode,
+
+            context_menu_open: false,
+            html_body: crate::ui::mail_body::HtmlBodyState::with_original(
+                default_rendering_mode == RenderingMode::OriginalHtml,
+            ),
+            error_banner: None,
+            source_selection,
+            width: MESSAGE_VIEW_DEFAULT_WIDTH,
+            height: MESSAGE_VIEW_DEFAULT_HEIGHT,
+            x: None,
+            y: None,
+            generation,
+        }
+    }
+
+    /// Construct state from a session restore entry (minimal data, body loaded async).
+    pub fn from_session_entry(
+        entry: &MessageViewSessionEntry,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        default_rendering_mode: RenderingMode,
+    ) -> Self {
+        Self {
+            message_id: entry.message_id.clone(),
+            message_id_header: None,
+            thread_id: entry.thread_id.clone(),
+            account_id: entry.account_id.clone(),
+            from_name: None,
+            from_address: None,
+            to_addresses: None,
+            cc_addresses: None,
+            subject: None,
+            date: None,
+            body_text: None,
+            verification_code: None,
+            code_copied: false,
+            body_html: None,
+            snippet: None,
+            raw_source: None,
+            inline_images: std::collections::HashMap::new(),
+            attachments: Vec::new(),
+            hovered_attachment_id: None,
+            rendering_mode: default_rendering_mode,
+
+            context_menu_open: false,
+            html_body: crate::ui::mail_body::HtmlBodyState::with_original(
+                default_rendering_mode == RenderingMode::OriginalHtml,
+            ),
+            error_banner: None,
+            source_selection: None, // not available on session restore
+            width: entry.width,
+            height: entry.height,
+            x: entry.x,
+            y: entry.y,
+            generation,
+        }
+    }
+
+    /// Check if a loaded result matches this window's current generation.
+    pub fn is_current_generation(
+        &self,
+        token: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+    ) -> bool {
+        self.generation == token
+    }
+}
+
+// ── View ───────────────────────────────────────────────
+
+/// Render the message view window content.
+pub fn view_message_window<'a>(
+    window_id: iced::window::Id,
+    state: &'a MessageViewState,
+) -> Element<'a, Message> {
+    let header = message_view_header(window_id, state);
+    let body = message_view_body(window_id, state);
+
+    // Header stays pinned at the top (non-scrolling). The body card takes
+    // the leftover vertical space and scrolls its own content; attachments
+    // (when present) pin to the bottom below it. Rendering-mode picker
+    // lives inside the header's overflow context menu.
+    let mut content = column![header]
+        .spacing(SPACE_0)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    // Error banner (shown above body for failed loads / deleted messages)
+    if let Some(ref error) = state.error_banner {
+        content = content.push(error_banner_view(error));
+    }
+
+    if let Some(code) = state.verification_code.as_deref() {
+        content = content.push(crate::ui::widgets::verification_code_banner(
+            code,
+            state.code_copied,
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::CopyCode),
+            ),
+        ));
+    }
+
+    content = content.push(body);
+
+    if !state.attachments.is_empty() {
+        content = content.push(message_view_attachments(
+            window_id,
+            &state.attachments,
+            state.hovered_attachment_id.as_deref(),
+        ));
+    }
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ContainerClass::Content.style())
+        .into()
+}
+
+// ── Header ─────────────────────────────────────────────
+
+fn message_view_header<'a>(
+    window_id: iced::window::Id,
+    state: &'a MessageViewState,
+) -> Element<'a, Message> {
+    let sender_name = state
+        .from_name
+        .as_deref()
+        .or(state.from_address.as_deref())
+        .map_or_else(|| t!("compose.unknown_sender"), Cow::Borrowed);
+    let sender_email = state.from_address.as_deref().unwrap_or("");
+
+    // Action buttons + overflow menu (right-aligned on sender name row)
+    let actions = action_buttons_with_overflow(window_id, state);
+
+    let avatar = widgets::sender_avatar(
+        &sender_name,
+        state.from_address.as_deref(),
+        AVATAR_MESSAGE_CARD,
+    );
+
+    // From row: avatar + (name + email) + actions
+    let from_row = row![
+        avatar,
+        column![
+            text(sender_name)
+                .size(TEXT_LG)
+                .font(font::text_semibold())
+                .style(text::base),
+            text(sender_email)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill),
+        actions,
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Start);
+
+    // To and Cc on one line: the first recipients, then a count of the rest.
+    let mut header_fields = column![from_row].spacing(SPACE_XS);
+    if let Some(recipients) = crate::ui::recipients::line(
+        state.to_addresses.as_deref(),
+        state.cc_addresses.as_deref(),
+        None,
+    ) {
+        header_fields = header_fields.push(
+            row![
+                text(t!("compose.to_header"))
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+                recipients,
+            ]
+            .spacing(SPACE_XXS),
+        );
+    }
+
+    // Subject + date row
+    let date_str = format_date(state.date).trim().to_string();
+    let subject = state
+        .subject
+        .as_deref()
+        .map_or_else(|| t!("compose.no_subject"), Cow::Borrowed);
+    let subject_row = row![
+        text(subject)
+            .size(TEXT_HEADING)
+            .style(text::base)
+            .width(Length::Fill),
+        container(
+            text(date_str)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(Padding {
+            right: PAD_ICON_BTN.right,
+            ..Padding::ZERO
+        })
+        .align_y(Alignment::Center),
+    ]
+    .align_y(Alignment::Center);
+
+    header_fields = header_fields.push(subject_row);
+
+    container(header_fields)
+        .padding(Padding {
+            top: PAD_CONTENT.top,
+            right: SPACE_SM,
+            bottom: SPACE_XS,
+            left: SPACE_SM,
+        })
+        .width(Length::Fill)
+        .into()
+}
+
+// ── Action buttons with overflow menu ──────────────────
+
+fn action_buttons_with_overflow<'a>(
+    window_id: iced::window::Id,
+    state: &'a MessageViewState,
+) -> Element<'a, Message> {
+    let reply_btn = action_button(
+        icon::reply(),
+        t!("compose.reply"),
+        Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::Reply),
+        ),
+    );
+    let reply_all_btn = action_button(
+        icon::reply_all(),
+        t!("compose.reply_all"),
+        Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::ReplyAll),
+        ),
+    );
+    let forward_btn = action_button(
+        icon::forward(),
+        t!("compose.forward"),
+        Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::Forward),
+        ),
+    );
+    let overflow = overflow_context_menu(state.context_menu_open, state.rendering_mode, window_id);
+
+    row![reply_btn, reply_all_btn, forward_btn, overflow]
+        .spacing(SPACE_XXS)
+        .into()
+}
+
+/// `widgets::action_icon_button` with an owned label, so the label can be
+/// a translation that does not outlive this view.
+fn action_button<'a>(
+    ico: iced::widget::Text<'a>,
+    label: Cow<'a, str>,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(
+        row![
+            container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+            container(text(label).size(TEXT_SM).style(text::secondary)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Action.style())
+    .into()
+}
+
+// ── Overflow menu ──────────────────────────────────────
+
+fn overflow_context_menu<'a>(
+    open: bool,
+    current_mode: RenderingMode,
+    window_id: iced::window::Id,
+) -> Element<'a, Message> {
+    // Wrap the icon in a row with a zero-width TEXT_SM text alongside it so
+    // the trigger's content has the same line-height extent as
+    // `action_icon_button` (which packs ICON_MD + TEXT_SM label). Without
+    // this, the hamburger renders shorter than Reply/Reply All/Forward.
+    let trigger = button(
+        row![
+            icon::ellipsis_vertical()
+                .size(ICON_MD)
+                .style(text::secondary),
+            text("").size(TEXT_SM),
+        ]
+        .align_y(Alignment::Center),
+    )
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::MessageView(MessageViewMessage::OpenContextMenu),
+    ))
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::BareIcon.style());
+
+    if !open {
+        return trigger.into();
+    }
+
+    let modes = [
+        (RenderingMode::PlainText, t!("compose.mode_plain_text")),
+        (RenderingMode::SimpleHtml, t!("compose.mode_simple_html")),
+        (
+            RenderingMode::OriginalHtml,
+            t!("compose.mode_original_html"),
+        ),
+        (RenderingMode::Source, t!("compose.mode_source")),
+    ];
+
+    let mut menu_items = column![
+        context_menu_item(
+            icon::archive(),
+            t!("compose.archive"),
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::Archive),
+            ),
+        ),
+        context_menu_item(
+            icon::trash(),
+            t!("compose.delete"),
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::Delete),
+            ),
+        ),
+        context_menu_item(
+            icon::printer(),
+            t!("compose.print"),
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::Print),
+            ),
+        ),
+        context_menu_item(
+            icon::download(),
+            t!("compose.save_as"),
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::SaveAs),
+            ),
+        ),
+        widgets::divider(),
+    ]
+    .spacing(SPACE_XXS);
+
+    for (mode, label) in modes {
+        menu_items = menu_items.push(context_menu_radio_item(
+            mode == current_mode,
+            label,
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(mode)),
+            ),
+        ));
+    }
+
+    let menu = container(menu_items)
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style());
+
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
+        .popup(menu)
+        .popup_width(SIDEBAR_MIN_WIDTH)
+        .position(crate::ui::anchored_overlay::AnchorPosition::BelowRight)
+        .on_dismiss(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::CloseContextMenu),
+        ))
+        .into()
+}
+
+fn context_menu_item<'a>(
+    ico: iced::widget::Text<'a>,
+    label: Cow<'a, str>,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(
+        row![
+            container(ico.size(ICON_MD).style(text::secondary))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
+}
+
+/// Variant of `context_menu_item` that shows a radio circle in the leading
+/// slot instead of an icon. Used for single-select options inside a
+/// dropdown (e.g. the rendering-mode picker in the overflow menu).
+fn context_menu_radio_item<'a>(
+    selected: bool,
+    label: Cow<'a, str>,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(
+        row![
+            container(widgets::radio_circle(selected))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Body ───────────────────────────────────────────────
+
+fn plain_text_body<'a>(
+    window_id: iced::window::Id,
+    state: &'a MessageViewState,
+) -> Element<'a, Message> {
+    let body: Element<'a, Message> = match state.body_text.as_deref().or(state.snippet.as_deref()) {
+        Some(txt) => crate::ui::widgets::linked_text(txt, TEXT_LG, move |url| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::LinkClicked(url)),
+            )
+        }),
+        None => text(t!("compose.no_content")).size(TEXT_LG).into(),
+    };
+    container(body).width(Length::Fill).into()
+}
+
+fn message_view_body<'a>(
+    window_id: iced::window::Id,
+    state: &'a MessageViewState,
+) -> Element<'a, Message> {
+    let body_content: Element<'_, Message> = match state.rendering_mode {
+        RenderingMode::PlainText => plain_text_body(window_id, state),
+        RenderingMode::SimpleHtml | RenderingMode::OriginalHtml => {
+            if state.body_html.is_some() {
+                let view_msg =
+                    move |msg| Message::PopOut(window_id, PopOutMessage::MessageView(msg));
+                crate::ui::mail_body::view_with_link_menu(
+                    Some(&state.html_body),
+                    state.body_text.as_deref(),
+                    move |width| view_msg(MessageViewMessage::HtmlBodyResized(width)),
+                    move |action| view_msg(MessageViewMessage::BodyLink(action)),
+                    move |action| view_msg(MessageViewMessage::BodySelect(action)),
+                    view_msg(MessageViewMessage::LoadRemoteContent),
+                )
+                .stacked()
+            } else {
+                plain_text_body(window_id, state)
+            }
+        }
+        RenderingMode::Source => {
+            let src = state
+                .raw_source
+                .as_deref()
+                .map_or_else(|| t!("compose.loading_source"), Cow::Borrowed);
+            text(src)
+                .size(TEXT_SM)
+                .font(font::monospace())
+                .style(text::secondary)
+                .width(Length::Fill)
+                .into()
+        }
+    };
+
+    let showing_original = state.rendering_mode == RenderingMode::OriginalHtml
+        && state.body_html.is_some()
+        && state.html_body.dark_tone() == Some(true);
+    let body_class = if showing_original {
+        theme::ContainerClass::EmailBodyOriginal
+    } else {
+        theme::ContainerClass::EmailBody
+    };
+
+    // Inner scrollable wraps just the text so the body card itself can fill
+    // the leftover window height while overflowing text scrolls in place.
+    let scrollable_text = scrollable(body_content)
+        .spacing(SCROLLBAR_SPACING)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    let body_inset = container(scrollable_text)
+        .padding(PAD_CONTENT)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(body_class.style());
+
+    // Outer wrapper hugs the window edges more tightly than the header
+    // (12px vs the header's 24px), matching the compose pop-out so the
+    // body card visually owns the full content area.
+    container(body_inset)
+        .padding(Padding {
+            top: 0.0,
+            right: SPACE_SM,
+            bottom: SPACE_XS,
+            left: SPACE_SM,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+// ── Error banner ───────────────────────────────────────
+
+fn error_banner_view<'a>(error: &'a str) -> Element<'a, Message> {
+    container(
+        row![
+            icon::alert_triangle().size(ICON_MD).style(text::secondary),
+            text(error)
+                .size(TEXT_MD)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_CARD)
+    .style(theme::ContainerClass::Elevated.style())
+    .width(Length::Fill)
+    .into()
+}
+
+// ── Attachments ────────────────────────────────────────
+
+fn message_view_attachments<'a>(
+    window_id: iced::window::Id,
+    attachments: &'a [MessageViewAttachment],
+    hovered_id: Option<&str>,
+) -> Element<'a, Message> {
+    // ── Panel header: "Attachments (N)" left + Save All right ──
+    let title = text(t!("compose.attachments_count", count = attachments.len()))
+        .size(TEXT_MD)
+        .font(font::text_semibold())
+        .style(text::base);
+
+    let save_all_btn = action_button(
+        icon::download(),
+        t!("compose.save_all"),
+        Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::SaveAllAttachments),
+        ),
+    );
+
+    let header_row = row![
+        container(title)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        save_all_btn,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    // ── Wrapping row of compact cards ──
+    let mut cards = row![].spacing(SPACE_XS);
+    for att in attachments {
+        let is_hovered = hovered_id == Some(att.id.as_str());
+        cards = cards.push(compact_attachment_card(window_id, att, is_hovered));
+    }
+    let wrapping_cards = cards.wrap().vertical_spacing(SPACE_XS);
+
+    let scroll_area = scrollable(container(wrapping_cards).padding(Padding {
+        top: 0.0,
+        right: SCROLLBAR_SPACING,
+        bottom: 0.0,
+        left: 0.0,
+    }))
+    .spacing(SCROLLBAR_SPACING)
+    .width(Length::Fill)
+    .height(Length::Shrink);
+
+    let panel_inner = column![header_row, scroll_area].spacing(SPACE_XS);
+
+    let panel_padding = Padding {
+        top: SPACE_XXS,
+        right: SPACE_SM,
+        bottom: PAD_CONTENT.bottom,
+        left: SPACE_SM,
+    };
+
+    container(panel_inner)
+        .padding(panel_padding)
+        .width(Length::Fill)
+        .height(Length::Fit.max(
+            POPOUT_ATTACHMENT_PANEL_INNER_HEIGHT
+                + panel_padding.top
+                + panel_padding.bottom
+                + 36.0
+                + SPACE_XS,
+        ))
+        .into()
+}
+
+/// Compact attachment pill: `[icon] filename size` at rest. On hover, a
+/// semi-transparent overlay (left half = Save, right half = Open) covers
+/// the pill. Width is content-driven so cards size to their filename.
+fn compact_attachment_card<'a>(
+    window_id: iced::window::Id,
+    att: &'a MessageViewAttachment,
+    is_hovered: bool,
+) -> Element<'a, Message> {
+    let filename = att.filename.as_deref().map_or_else(
+        || t!("compose.unnamed_attachment"),
+        widgets::display_filename,
+    );
+    let file_ico = file_type_icon(att.mime_type.as_deref());
+    let size_str = format_file_size(att.size);
+
+    // ── At-rest pill content ──
+    let pill_row = row![
+        container(file_ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+        container(text(filename).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        container(
+            text(size_str)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let pill: Element<'a, Message> = container(pill_row)
+        .padding(Padding {
+            top: 0.0,
+            right: SPACE_SM,
+            bottom: 0.0,
+            left: SPACE_SM,
+        })
+        .height(Length::Fixed(POPOUT_ATTACHMENT_CARD_HEIGHT))
+        .align_y(Alignment::Center)
+        .style(theme::ContainerClass::AttachmentCard.style())
+        .into();
+
+    let id_for_enter = att.id.clone();
+
+    let inner: Element<'a, Message> = if is_hovered {
+        let save_btn = button(
+            container(
+                row![
+                    icon::download().size(ICON_MD).style(text::base),
+                    text(t!("compose.save")).size(TEXT_SM).style(text::base),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center(Length::Fill),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::SaveAttachment(att.id.clone())),
+        ))
+        .style(|theme, status| attachment_overlay_button_style(theme, status, true))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let open_btn = button(
+            container(
+                row![
+                    icon::external_link().size(ICON_MD).style(text::base),
+                    text(t!("compose.open")).size(TEXT_SM).style(text::base),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center(Length::Fill),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::OpenAttachment(att.id.clone())),
+        ))
+        .style(|theme, status| attachment_overlay_button_style(theme, status, false))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let overlay = container(row![save_btn, open_btn].spacing(0.0).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        stack![pill, overlay].into()
+    } else {
+        pill
+    };
+
+    mouse_area(inner)
+        .on_enter(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::HoverAttachment(Some(id_for_enter))),
+        ))
+        .on_exit(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::HoverAttachment(None)),
+        ))
+        .into()
+}
+
+/// Opaque button style for the hover-overlay action buttons on compact
+/// attachment cards. The two buttons share the pill's rounded corners:
+/// the left button rounds its left side, the right button rounds its
+/// right side. The shared inner edge is square so the two buttons meet
+/// flush.
+fn attachment_overlay_button_style(
+    theme: &iced::Theme,
+    status: button::Status,
+    is_left: bool,
+) -> button::Style {
+    let palette = theme.palette();
+    // Resting bg uses the strong-contrast hover color one palette step
+    // brighter than the panel base. On direct hover the bg shifts another
+    // step so the half being clicked stands out.
+    let bg = match status {
+        button::Status::Hovered | button::Status::Pressed => palette.background.strong.color,
+        _ => palette.background.weak.color,
+    };
+    let radius = if is_left {
+        iced::border::Radius::default()
+            .top_left(RADIUS_MD)
+            .bottom_left(RADIUS_MD)
+    } else {
+        iced::border::Radius::default()
+            .top_right(RADIUS_MD)
+            .bottom_right(RADIUS_MD)
+    };
+    button::Style {
+        background: Some(iced::Background::Color(bg)),
+        text_color: palette.background.base.text,
+        border: iced::Border {
+            radius,
+            ..iced::Border::default()
+        },
+        shadow: iced::Shadow::default(),
+        ..button::Style::default()
+    }
+}
+
+// ── Helpers ────────────────────────────────────────────
+
+fn format_date(timestamp: Option<i64>) -> String {
+    timestamp
+        .and_then(|ts| jiff::Timestamp::from_millisecond(ts).ok())
+        .map(|ts| {
+            let zoned = ts.to_zoned(jiff::tz::TimeZone::system());
+            t!(
+                "compose.message_date",
+                weekday = crate::i18n::weekday_short(
+                    zoned.weekday().to_monday_zero_offset().unsigned_abs()
+                ),
+                month = crate::i18n::month_short(zoned.month()),
+                day = format!("{:02}", zoned.day()),
+                year = zoned.year(),
+                time = crate::i18n::time_of_day(&zoned)
+            )
+            .into_owned()
+        })
+        .unwrap_or_default()
+}
+
+fn file_type_icon<'a>(mime_type: Option<&str>) -> iced::widget::Text<'a> {
+    match mime_type.unwrap_or("") {
+        t if t.starts_with("image/") => icon::image(),
+        t if t.contains("pdf") => icon::file_text(),
+        t if t.contains("spreadsheet") || t.contains("excel") => icon::file_spreadsheet(),
+        _ => icon::file(),
+    }
+}
+
+#[allow(dead_code)] // helper kept for upcoming attachment list redesign
+fn mime_to_type_label(mime: Option<&str>) -> &'static str {
+    match mime.unwrap_or("") {
+        t if t.starts_with("image/") => "Image",
+        t if t.contains("pdf") => "PDF",
+        t if t.contains("spreadsheet") || t.contains("excel") => "Excel",
+        t if t.contains("word") || t.contains("document") => "Word",
+        t if t.contains("zip") || t.contains("archive") => "Archive",
+        _ => "File",
+    }
+}
+
+fn format_file_size(size: Option<i64>) -> String {
+    match size {
+        None => "\u{2014}".to_string(),
+        Some(b) if b < 1024 => t!("compose.size_bytes", size = b).into_owned(),
+        Some(b) if b < 1024 * 1024 => {
+            let size = format!("{:.0}", b as f64 / 1024.0);
+            t!("compose.size_kb", size = size).into_owned()
+        }
+        Some(b) => {
+            let size = format!("{:.1}", b as f64 / (1024.0 * 1024.0));
+            t!("compose.size_mb", size = size).into_owned()
+        }
+    }
+}

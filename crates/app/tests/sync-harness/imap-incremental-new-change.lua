@@ -1,0 +1,269 @@
+-- description: IMAP delta imports scripted fixture new/change/delete/move steps
+-- expected: pass
+-- fixture: jmap-incremental.lua
+-- protocol: imap
+-- ceiling: 120s
+
+local function message_by_subject(state, subject)
+    for _, message in ipairs(state.messages) do
+        if message.subject == subject then
+            return message
+        end
+    end
+    return nil
+end
+
+local function has_value(values, expected)
+    for _, value in ipairs(values) do
+        if value == expected then
+            return true
+        end
+    end
+    return false
+end
+
+local function assert_has_value(values, expected, message)
+    harness.assert(has_value(values, expected), message)
+end
+
+local function assert_lacks_value(values, expected, message)
+    harness.assert(not has_value(values, expected), message)
+end
+
+local function fixture_email_by_id(snapshot, id)
+    for _, email in ipairs(snapshot.emails) do
+        if email.id == id then
+            return email
+        end
+    end
+    return nil
+end
+
+local function query_state(client, account_id, label)
+    local state, err = client:request("TestQueryDbState", {
+        account_id = account_id,
+        message_limit = 10,
+    })
+    harness.assert(err == nil, label .. " TestQueryDbState failed")
+    return state
+end
+
+local function read_thread(client, account_id, thread_id, label)
+    local thread, err = client:request("TestThreadRead", {
+        account_id = account_id,
+        thread_id = thread_id,
+    })
+    harness.assert(err == nil, label .. " TestThreadRead failed")
+    return thread
+end
+
+local function run_sync(client, account_id, label)
+    local result, err = client:start_sync({
+        account_id = account_id,
+    }, 30)
+    harness.assert(err == nil, label .. " start_sync failed")
+    harness.assert_eq(result.result, "completed", result.error or (label .. " sync result"))
+end
+
+local measured_sync_count = 0
+
+local function run_measured_sync(client, account_id, label)
+    harness.marker("SYNC_START")
+    run_sync(client, account_id, label)
+    harness.marker("SYNC_END")
+    measured_sync_count = measured_sync_count + 1
+end
+
+local function apply_step(endpoint, step_id)
+    local response = harness.http_json({
+        method = "POST",
+        url = harness.join_url(endpoint, "test/fixture/step"),
+        body = {
+            expect = step_id,
+        },
+    })
+    harness.assert(response.ok, "fixture step failed")
+    harness.assert_eq(response.step, step_id, "fixture step id")
+    harness.assert_eq(response.applied, 1, "fixture step applied count")
+    return response
+end
+
+local function fixture_snapshot(endpoint)
+    local snapshot = harness.snapshot_state(endpoint)
+    harness.assert_eq(snapshot.name, "jmap-incremental", "fixture snapshot name")
+    return snapshot
+end
+
+local function assert_imap_delta_checked(endpoint, label)
+    local requests = harness.mock_requests(endpoint, { stable = true })
+    harness.assert(
+        harness.request_count(requests, "imap", "UID SEARCH") >= 1,
+        label .. " did not search IMAP UIDs"
+    )
+    return requests
+end
+
+local summary_provider_requests = 0
+local summary_uid_search = 0
+local summary_uid_fetch = 0
+
+local function record_imap_requests(requests)
+    summary_provider_requests = summary_provider_requests + #requests
+    summary_uid_search =
+        summary_uid_search + harness.request_count(requests, "imap", "UID SEARCH")
+    summary_uid_fetch =
+        summary_uid_fetch + harness.request_count(requests, "imap", "UID FETCH")
+end
+
+-- saehrimnir mounts test admin routes on the always-started JMAP HTTP listener.
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
+harness.clear_mock_requests(admin_endpoint)
+
+local dir = harness.data_dir("sync_imap_incremental_new_change")
+local client, err = harness.spawn(dir)
+harness.assert(err == nil, "spawn failed")
+
+local ready, ready_err = client:request("BootReady")
+harness.assert(ready_err == nil, "boot.ready failed")
+harness.assert(ready.ready, "boot.ready returned ready=false")
+
+local account, account_err = client:request("TestSeedAccount", {
+    email = "sync-imap-incremental@example.test",
+    display_name = "Sync IMAP Incremental",
+    account_name = "Sync IMAP Incremental",
+    provider = "imap",
+})
+harness.assert(account_err == nil, "TestSeedAccount failed")
+
+run_sync(client, account.account_id, "initial")
+local initial_snapshot = fixture_snapshot(admin_endpoint)
+harness.assert(
+    fixture_email_by_id(initial_snapshot, "email-001") ~= nil,
+    "remote snapshot missing email-001"
+)
+harness.assert(
+    fixture_email_by_id(initial_snapshot, "email-002") ~= nil,
+    "remote snapshot missing email-002"
+)
+
+local initial = query_state(client, account.account_id, "initial")
+harness.assert_eq(initial.message_count, 2, "initial message count")
+harness.assert(message_by_subject(initial, "Welcome") ~= nil, "missing Welcome")
+harness.assert(message_by_subject(initial, "Status update") ~= nil, "missing Status update")
+
+harness.clear_mock_requests(admin_endpoint)
+local new_step = apply_step(admin_endpoint, "new")
+harness.assert_eq(new_step.changes.emails.created[1], "email-003", "new step created id")
+local remote_after_new = fixture_snapshot(admin_endpoint)
+local remote_lunch = fixture_email_by_id(remote_after_new, "email-003")
+harness.assert(remote_lunch ~= nil, "remote snapshot missing email-003")
+run_measured_sync(client, account.account_id, "new step")
+local new_requests = assert_imap_delta_checked(admin_endpoint, "new step")
+record_imap_requests(new_requests)
+harness.assert(
+    harness.request_count(new_requests, "imap", "UID FETCH") >= 1,
+    "new step did not fetch the new IMAP message"
+)
+local after_new = query_state(client, account.account_id, "after new")
+harness.assert_eq(after_new.message_count, 3, "message count after new")
+harness.assert(message_by_subject(after_new, "Lunch?") ~= nil, "new message missing")
+
+harness.clear_mock_requests(admin_endpoint)
+local change_step = apply_step(admin_endpoint, "change")
+harness.assert_eq(change_step.changes.emails.updated[1], "email-002", "change step updated id")
+local remote_after_change = fixture_snapshot(admin_endpoint)
+local remote_status = fixture_email_by_id(remote_after_change, "email-002")
+harness.assert(remote_status ~= nil, "remote snapshot missing email-002 after change")
+harness.assert(has_value(remote_status.keywords, "$seen"), "remote email-002 did not gain $seen")
+harness.assert(
+    has_value(remote_status.keywords, "$flagged"),
+    "remote email-002 did not gain $flagged"
+)
+run_measured_sync(client, account.account_id, "change step")
+record_imap_requests(assert_imap_delta_checked(admin_endpoint, "change step"))
+local after_change = query_state(client, account.account_id, "after change")
+local status_update = message_by_subject(after_change, "Status update")
+harness.assert(status_update ~= nil, "Status update missing after change")
+harness.assert(status_update.is_read, "Status update did not import $seen")
+harness.assert(status_update.is_starred, "Status update did not import $flagged")
+local thread_after_change =
+    read_thread(client, account.account_id, status_update.thread_id, "after change")
+harness.assert(thread_after_change.is_starred, "Status update thread did not gain STARRED")
+harness.assert(thread_after_change.is_read, "Status update thread retained UNREAD after $seen")
+
+harness.clear_mock_requests(admin_endpoint)
+local delete_step = apply_step(admin_endpoint, "delete")
+harness.assert_eq(delete_step.changes.emails.destroyed[1], "email-001", "delete step destroyed id")
+local remote_after_delete = fixture_snapshot(admin_endpoint)
+harness.assert(
+    fixture_email_by_id(remote_after_delete, "email-001") == nil,
+    "remote snapshot retained email-001 after delete"
+)
+run_measured_sync(client, account.account_id, "delete step")
+record_imap_requests(assert_imap_delta_checked(admin_endpoint, "delete step"))
+local after_delete = query_state(client, account.account_id, "after delete")
+harness.assert_eq(after_delete.message_count, 2, "message count after delete")
+harness.assert(message_by_subject(after_delete, "Welcome") == nil, "Welcome survived delete")
+
+harness.clear_mock_requests(admin_endpoint)
+local move_step = apply_step(admin_endpoint, "move")
+harness.assert_eq(move_step.changes.emails.moved[1], "email-002", "move step moved id")
+local remote_after_move = fixture_snapshot(admin_endpoint)
+local remote_moved = fixture_email_by_id(remote_after_move, "email-002")
+harness.assert(remote_moved ~= nil, "remote snapshot missing email-002 after move")
+assert_has_value(
+    remote_moved.mailbox_ids,
+    "mb-archive",
+    "remote email-002 did not move to archive"
+)
+assert_lacks_value(
+    remote_moved.mailbox_ids,
+    "mb-inbox",
+    "remote email-002 stayed in inbox after move"
+)
+run_measured_sync(client, account.account_id, "move step")
+local move_requests = assert_imap_delta_checked(admin_endpoint, "move step")
+record_imap_requests(move_requests)
+harness.assert(
+    harness.request_count(move_requests, "imap", "UID FETCH") >= 1,
+    "move step did not fetch the destination IMAP message"
+)
+local after_move = query_state(client, account.account_id, "after move")
+harness.assert_eq(after_move.message_count, 2, "message count after move")
+local moved_status = message_by_subject(after_move, "Status update")
+harness.assert(moved_status ~= nil, "Status update missing after move")
+local thread_after_move =
+    read_thread(client, account.account_id, moved_status.thread_id, "after move")
+assert_has_value(
+    thread_after_move.label_ids,
+    "archive",
+    "Status update thread did not gain archive after move"
+)
+assert_lacks_value(
+    thread_after_move.label_ids,
+    "INBOX",
+    "Status update thread stayed in INBOX after move"
+)
+
+local end_response = harness.http_json({
+    method = "POST",
+    url = harness.join_url(admin_endpoint, "test/fixture/step"),
+    body = {},
+})
+harness.assert(end_response.ok, "end-of-script response failed")
+harness.assert(end_response.step == nil, "end-of-script step should be nil")
+harness.assert(not end_response.applied, "end-of-script should not apply")
+
+harness.write_summary({
+    correct = 1,
+    measured_syncs = measured_sync_count,
+    message_count = after_move.message_count,
+    provider_requests = summary_provider_requests,
+    imap_uid_search_requests = summary_uid_search,
+    imap_uid_fetch_requests = summary_uid_fetch,
+})
+
+local ok, shutdown_err = client:shutdown()
+harness.assert(ok, "shutdown failed")
+harness.assert(shutdown_err == nil, "shutdown returned error")

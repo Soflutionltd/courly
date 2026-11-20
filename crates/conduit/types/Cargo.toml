@@ -1,0 +1,29 @@
+[package]
+name = "conduit-types"
+publish = false
+description = "Shared Account trait, sync events, and capability types for the conduit workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+encoding_rs = { workspace = true }
+jiff = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

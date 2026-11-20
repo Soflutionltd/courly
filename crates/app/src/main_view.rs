@@ -1,0 +1,551 @@
+use crate::app::{AppMode, DIVIDER_WIDTH, Divider, ReadyApp};
+use crate::command_dispatch;
+use crate::component::Component;
+use crate::message::Message;
+use crate::pop_out::{self, PopOutWindow};
+use crate::ui;
+use crate::ui::add_account::AddAccountWizard;
+use crate::ui::layout::{
+    APP_RAIL_WIDTH, DRAG_GHOST_MAX_WIDTH, ICON_MD, PAD_ICON_BTN, PANE_GAP, READING_PANE_MIN_WIDTH,
+    SIDE_PANEL_WIDTH, SPACE_SM, SPACE_XS, TEXT_MD, THREAD_LIST_MIN_WIDTH,
+};
+use cmdk::current_platform;
+use iced::widget::{Space, column, container, mouse_area, row, stack};
+use iced::{Element, Length, Padding, Point, Task};
+use rust_i18n::t;
+
+impl ReadyApp {
+    pub(crate) fn view(&self, window_id: iced::window::Id) -> Element<'_, Message> {
+        if window_id == self.main_window_id {
+            return self.view_main_window();
+        }
+
+        if let Some(pop_out) = self.pop_out_windows.get(&window_id) {
+            return match pop_out {
+                PopOutWindow::MessageView(state) => {
+                    pop_out::message_view::view_message_window(window_id, state)
+                }
+                PopOutWindow::Compose(state) => {
+                    pop_out::compose::view_compose_window(window_id, state, None)
+                }
+                PopOutWindow::Calendar(_) => ui::calendar::calendar_layout(&self.calendar)
+                    .map(|m| Message::Calendar(Box::new(m))),
+            };
+        }
+
+        ui::widgets::empty_placeholder(t!("main.window.not_found"), "")
+    }
+
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub(crate) fn view_main_window(&self) -> Element<'_, Message> {
+        let window = self.view_main_window_content();
+        match ui::update_banner::view(&self.updater) {
+            Some(banner) => stack![window, banner.map(Message::Updater)].into(),
+            None => window,
+        }
+    }
+
+    fn view_main_window_content(&self) -> Element<'_, Message> {
+        if let Some(ref wizard) = self.add_account_wizard {
+            if self.no_accounts {
+                return self.view_first_launch_modal(wizard);
+            }
+            return self.view_with_add_account_modal(wizard);
+        }
+
+        let layout = self.view_main_layout();
+
+        let main_layout: Element<'_, Message> = if self.dragging.is_some() {
+            mouse_area(layout)
+                .on_move(Message::DividerDragMove)
+                .on_release(Message::DividerDragEnd)
+                .interaction(iced::mouse::Interaction::ResizingHorizontally)
+                .into()
+        } else {
+            layout
+        };
+
+        if let Some(threads) = self.pending_permanent_delete.as_ref() {
+            use ui::dialog::{DialogAction, alert_dialog};
+            let count = threads.len();
+            let (title, body) = if count == 1 {
+                (
+                    t!("main.permanent_delete.title_one"),
+                    t!("main.permanent_delete.body_one"),
+                )
+            } else {
+                (
+                    t!("main.permanent_delete.title_other", count = count),
+                    t!("main.permanent_delete.body_other", count = count),
+                )
+            };
+            let dialog = alert_dialog(
+                title,
+                body,
+                vec![
+                    DialogAction::default_action(
+                        t!("main.permanent_delete.cancel"),
+                        Message::CancelPermanentDelete,
+                    ),
+                    DialogAction::destructive(
+                        t!("main.permanent_delete.confirm"),
+                        Message::ConfirmPermanentDelete,
+                    ),
+                ],
+                None,
+            );
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                dialog,
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
+        } else if let Some(dialog) = self.folder_dialog.as_ref() {
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                dialog.view().map(Message::FolderDialog),
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
+        } else if let Some(dialog) = self.recipients_dialog.as_ref() {
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                dialog.view().map(Message::RecipientsDialog),
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
+        } else if self.palette.is_open() {
+            let palette_widget = self.palette.view().map(Message::Palette);
+
+            let palette_positioned = container(palette_widget)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    top: ui::layout::PALETTE_TOP_OFFSET,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .align_x(iced::Alignment::Center);
+
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                palette_positioned,
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
+        } else if let Some(ref pending) = self.pending_chord {
+            let chord_display = pending.first.display(current_platform());
+            let indicator = ui::palette::chord_indicator::<Message>(&chord_display);
+            let indicator_positioned = container(indicator)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::Alignment::End);
+            stack![main_layout, indicator_positioned].into()
+        } else {
+            main_layout
+        }
+    }
+
+    pub(crate) fn view_first_launch_modal<'a>(
+        &'a self,
+        wizard: &'a AddAccountWizard,
+    ) -> Element<'a, Message> {
+        use ui::layout::{ACCOUNT_MODAL_MAX_HEIGHT, ACCOUNT_MODAL_WIDTH};
+
+        let modal_content = wizard.view().map(Message::AddAccount);
+
+        let modal = container(modal_content)
+            .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
+            .height(Length::Fit.max(ACCOUNT_MODAL_MAX_HEIGHT))
+            .padding(ui::layout::PAD_SETTINGS_CONTENT)
+            .style(ui::theme::ContainerClass::Elevated.style());
+
+        container(modal)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(ui::theme::ContainerClass::Content.style())
+            .into()
+    }
+
+    pub(crate) fn view_with_add_account_modal<'a>(
+        &'a self,
+        wizard: &'a AddAccountWizard,
+    ) -> Element<'a, Message> {
+        use ui::layout::{ACCOUNT_MODAL_MAX_HEIGHT, ACCOUNT_MODAL_WIDTH};
+
+        let base_layout = self.view_main_layout();
+
+        let modal_content = wizard.view().map(Message::AddAccount);
+
+        // `DialogCard` matches the alert/form dialogs from `ui::dialog`:
+        // opaque window-like surface with a soft drop shadow, so the
+        // wizard reads as a peer of the GNOME-HIG-style confirmation
+        // dialogs rather than a generic Elevated card.
+        let modal = container(modal_content)
+            .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
+            .height(Length::Fit.max(ACCOUNT_MODAL_MAX_HEIGHT))
+            .padding(ui::layout::PAD_SETTINGS_CONTENT)
+            .style(ui::theme::ContainerClass::DialogCard.style());
+
+        ui::modal_overlay::modal_overlay(
+            base_layout,
+            modal,
+            ui::modal_overlay::ModalSurface::Modal,
+            Message::Noop,
+        )
+    }
+
+    /// The whole main window below any modal: title bar with search, app
+    /// rail, and the floating panes for the current mode.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    pub(crate) fn view_main_layout(&self) -> Element<'_, Message> {
+        let search = ui::search_scope::search_field(
+            &self.search_scope,
+            &self.sidebar.accounts,
+            self.search_sender.as_deref(),
+            self.thread_list.search_bar().map(Message::ThreadList),
+            !self.search_query.text().is_empty() || self.search_sender.is_some(),
+        );
+        // The field stays wrapped whether or not the menu shows: changing the
+        // widget tree around it would rebuild the field and drop its focus.
+        let mut search = ui::anchored_overlay::anchored_overlay(search)
+            .on_dismiss(Message::SearchSuggest(
+                ui::search_suggest::SearchSuggestMessage::Close,
+            ))
+            .base_clicks_pass();
+        if let Some(menu) =
+            ui::search_suggest::view(&self.search_suggest, &self.thread_list.typeahead)
+        {
+            search = search.popup(menu);
+        }
+        let search: Element<'_, Message> = search.into();
+        let rail = ui::chrome::app_rail(self.app_mode, self.show_settings);
+
+        let body: Element<'_, Message> = if self.show_settings {
+            pane(self.settings.view().map(Message::Settings))
+        } else {
+            match self.app_mode {
+                AppMode::Calendar => pane(
+                    ui::calendar::calendar_layout(&self.calendar)
+                        .map(|m| Message::Calendar(Box::new(m))),
+                ),
+                AppMode::Mail if self.calendar_pop_out_id().is_none() => {
+                    ui::calendar::with_surfaces(self.view_mail_body(), &self.calendar, |message| {
+                        Message::Calendar(Box::new(message))
+                    })
+                }
+                AppMode::Mail => self.view_mail_body(),
+            }
+        };
+
+        let workspace = container(row![rail, body].height(Length::Fill))
+            .padding(Padding {
+                top: PANE_GAP,
+                right: PANE_GAP,
+                bottom: PANE_GAP,
+                left: 0.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        container(column![
+            ui::chrome::title_bar(search),
+            workspace,
+            self.status_bar_view()
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(ui::theme::ContainerClass::Canvas.style())
+        .into()
+    }
+
+    /// Mail mode: ribbon over folders, message list and reading pane (or
+    /// the chat timeline when a chat is open).
+    fn view_mail_body(&self) -> Element<'_, Message> {
+        let ctx = command_dispatch::build_context(self);
+        let ribbon = ui::toolbar::toolbar(
+            &self.toolbar,
+            &self.registry,
+            &ctx,
+            self.side_panel.open,
+            self.move_menu.as_ref(),
+            self.category_menu.as_ref(),
+        );
+        let sidebar = container(pane(self.sidebar.view().map(Message::Sidebar)))
+            .width(self.sidebar_width)
+            .height(Length::Fill);
+        let divider_sidebar = self.build_divider(Divider::Sidebar);
+
+        let panes: Element<'_, Message> = if self.active_chat.is_some() {
+            let chat_view: Element<'_, Message> = if let Some(ref timeline) = self.chat_timeline {
+                timeline.view().map(Message::ChatTimeline)
+            } else {
+                container(
+                    iced::widget::text(t!("main.chat.none_selected"))
+                        .style(ui::theme::TextClass::Muted.style()),
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+            };
+            row![sidebar, divider_sidebar, pane(chat_view)]
+                .height(Length::Fill)
+                .into()
+        } else {
+            // The person whose mail is listed is named above the results.
+            let results = self.thread_list.view().map(Message::ThreadList);
+            let results: Element<'_, Message> = match self.search_person() {
+                Some(person) => iced::widget::column![ui::search_person::card(person), results]
+                    .height(Length::Fill)
+                    .into(),
+                None => results,
+            };
+            let thread_list = container(pane(results))
+                .width(self.thread_list_width)
+                .height(Length::Fill);
+            let divider_thread = self.build_divider(Divider::ThreadList);
+            let reading_pane = match self.inline_compose_for_selected_thread() {
+                Some((id, state)) => {
+                    // The files of the message answered, from the
+                    // conversation open behind the reply.
+                    let attachments = state
+                        .reply_source_message_id
+                        .as_deref()
+                        .and_then(|message_id| self.reading_pane.attachments_of(message_id))
+                        .map(|chips| chips.map(Message::ReadingPane));
+                    pane(pop_out::compose::view_compose_window(
+                        id,
+                        state,
+                        attachments,
+                    ))
+                }
+                None => pane(self.reading_pane.view_with_commands(
+                    &self.registry,
+                    &self.binding_table,
+                    &ctx,
+                )),
+            };
+            row![
+                sidebar,
+                divider_sidebar,
+                thread_list,
+                divider_thread,
+                reading_pane
+            ]
+            .height(Length::Fill)
+            .into()
+        };
+        let panes: Element<'_, Message> = if self.side_panel.open {
+            let accounts: Vec<(&str, &str)> = self
+                .sidebar
+                .accounts
+                .iter()
+                .map(|account| {
+                    let name = account
+                        .account_name
+                        .as_deref()
+                        .or(account.display_name.as_deref())
+                        .unwrap_or(&account.email);
+                    (account.id.as_str(), name)
+                })
+                .collect();
+            row![
+                panes,
+                Space::new().width(PANE_GAP),
+                container(ui::side_panel::view(
+                    &self.side_panel,
+                    self.calendar.week_start,
+                    ui::side_panel::my_day::by_account(&self.calendar.calendars, &accounts),
+                ))
+                .width(SIDE_PANEL_WIDTH)
+                .height(Length::Fill),
+            ]
+            .height(Length::Fill)
+            .into()
+        } else {
+            panes
+        };
+
+        let body = column![ribbon, panes]
+            .spacing(PANE_GAP)
+            .height(Length::Fill);
+        match self
+            .thread_drag
+            .as_ref()
+            .and_then(crate::handlers::thread_drag::ThreadDrag::ghost)
+        {
+            Some(ghost) => ui::anchored_overlay::anchored_overlay(body)
+                .popup(self.thread_drag_ghost(&ghost))
+                .anchor_point(ghost.cursor + iced::Vector::new(SPACE_SM, SPACE_SM))
+                .popup_width(DRAG_GHOST_MAX_WIDTH)
+                .into(),
+            None => body.into(),
+        }
+    }
+
+    /// The label that follows the pointer while messages are dragged: the
+    /// subject of one message, or how many.
+    fn thread_drag_ghost(
+        &self,
+        ghost: &crate::handlers::thread_drag::DragGhost<'_>,
+    ) -> Element<'_, Message> {
+        let label = if ghost.count == 1 {
+            let (account_id, thread_id) = ghost.pressed;
+            self.thread_list
+                .threads
+                .iter()
+                .find(|t| t.account_id == account_id && t.id == thread_id)
+                .and_then(|thread| thread.subject.clone())
+                .filter(|subject| !subject.trim().is_empty())
+                .unwrap_or_else(|| t!("main.no_subject").into_owned())
+        } else {
+            t!("main.drag.messages", count = ghost.count).into_owned()
+        };
+        container(
+            row![
+                crate::icon::mail()
+                    .size(ICON_MD)
+                    .style(iced::widget::text::secondary),
+                iced::widget::text(label)
+                    .size(TEXT_MD)
+                    .style(iced::widget::text::base)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .ellipsis(iced::widget::text::Ellipsis::End),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding(PAD_ICON_BTN)
+        .style(ui::theme::ContainerClass::SelectMenu.style())
+        .into()
+    }
+
+    /// The inline compose, when it is a new message, belongs to the
+    /// conversation or draft on screen, or no conversation is selected.
+    pub(crate) fn inline_compose_for_selected_thread(
+        &self,
+    ) -> Option<(iced::window::Id, &pop_out::compose::ComposeState)> {
+        let id = self.inline_compose?;
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get(&id) else {
+            return None;
+        };
+        let Some(reply_thread_id) = state.reply_thread_id.as_deref() else {
+            return Some((id, &**state));
+        };
+        let Some(selected) = self
+            .thread_list
+            .selected_thread
+            .and_then(|idx| self.thread_list.threads.get(idx))
+        else {
+            return Some((id, &**state));
+        };
+        (selected.id == reply_thread_id || selected.id == state.draft_id).then_some((id, &**state))
+    }
+
+    pub(crate) fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {
+        // Panes start right of the app rail and stop one gap short of the
+        // window edge.
+        let point = Point::new(point.x - APP_RAIL_WIDTH, point.y);
+        // Available width for the three main panels (excludes the side
+        // panel when open, and both dividers).
+        let available = self.window.width
+            - APP_RAIL_WIDTH
+            - PANE_GAP
+            - 2.0 * DIVIDER_WIDTH
+            - self.side_panel_used();
+
+        match self.dragging {
+            Some(Divider::Sidebar) => {
+                // max: leave room for thread list min + reading pane min
+                let max_sidebar = available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH;
+                let min_sidebar = self.sidebar.density.sidebar_min_width();
+                self.sidebar_width = point.x.clamp(min_sidebar, max_sidebar.max(min_sidebar));
+            }
+            Some(Divider::ThreadList) => {
+                // max: leave room for reading pane min
+                let max_thread_list = available - self.sidebar_width - READING_PANE_MIN_WIDTH;
+                let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH).clamp(
+                    THREAD_LIST_MIN_WIDTH,
+                    max_thread_list.max(THREAD_LIST_MIN_WIDTH),
+                );
+                self.thread_list_width = new_width;
+            }
+            None => {}
+        }
+        Task::none()
+    }
+
+    /// Clamp sidebar and thread-list widths so that all three panels
+    /// respect their minimums at the current window size.  Called after
+    /// every main-window resize.
+    pub(crate) fn clamp_panel_widths(&mut self) {
+        let available = self.window.width
+            - APP_RAIL_WIDTH
+            - PANE_GAP
+            - 2.0 * DIVIDER_WIDTH
+            - self.side_panel_used();
+
+        // 1. Ensure sidebar doesn't exceed what leaves room for the other
+        //    two panels at their minimums.
+        let min_sidebar = self.sidebar.density.sidebar_min_width();
+        let max_sidebar =
+            (available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH).max(min_sidebar);
+        self.sidebar_width = self.sidebar_width.clamp(min_sidebar, max_sidebar);
+
+        // 2. Ensure thread list doesn't exceed what leaves room for the
+        //    reading pane at its minimum.
+        let max_thread_list =
+            (available - self.sidebar_width - READING_PANE_MIN_WIDTH).max(THREAD_LIST_MIN_WIDTH);
+        self.thread_list_width = self
+            .thread_list_width
+            .clamp(THREAD_LIST_MIN_WIDTH, max_thread_list);
+    }
+
+    /// Width the open side panel and its gap take from the mail panes.
+    fn side_panel_used(&self) -> f32 {
+        if self.side_panel.open {
+            SIDE_PANEL_WIDTH + PANE_GAP
+        } else {
+            0.0
+        }
+    }
+
+    pub(crate) fn build_divider(&self, divider: Divider) -> Element<'_, Message> {
+        let class = if self.hovered_divider == Some(divider) || self.dragging == Some(divider) {
+            ui::theme::ContainerClass::DividerHover
+        } else {
+            ui::theme::ContainerClass::Canvas
+        };
+        mouse_area(
+            container("")
+                .width(DIVIDER_WIDTH)
+                .height(Length::Fill)
+                .style(class.style()),
+        )
+        .on_press(Message::DividerDragStart(divider))
+        .on_release(Message::DividerDragEnd)
+        .on_enter(Message::DividerHover(divider))
+        .on_exit(Message::DividerUnhover)
+        .interaction(iced::mouse::Interaction::ResizingHorizontally)
+        .into()
+    }
+
+    /// Render the status bar, respecting the `sync_status_bar` setting.
+    /// When the setting is off, returns an empty zero-height element.
+    pub(crate) fn status_bar_view(&self) -> Element<'_, Message> {
+        if self.settings.sync_status_bar || self.status_bar.has_pending_send() {
+            self.status_bar
+                .view_with_system_status(&self.service_health, self.index_rebuild_progress.as_ref())
+                .map(Message::StatusBar)
+        } else {
+            Space::new().width(0).height(0).into()
+        }
+    }
+}
+
+/// Wraps a pane's content in the rounded card that floats on the canvas.
+fn pane<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+    ui::pane_card::pane_card(content)
+}

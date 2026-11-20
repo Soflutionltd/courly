@@ -1,0 +1,450 @@
+use std::sync::Arc;
+
+use iced::Task;
+use service_api::WritebackOutcome;
+
+use crate::db::{ContactEntry, Db};
+use crate::pop_out::PopOutMessage;
+use crate::pop_out::compose::{ComposeMessage, ComposeState};
+use crate::ui::settings::SettingsMessage;
+use crate::{Message, ReadyApp};
+
+// ── Settings-panel contact/group CRUD ──────────────────
+
+impl ReadyApp {
+    pub(crate) fn handle_load_contacts(&self, filter: String) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        let db2 = Arc::clone(&self.db);
+        let group_filter = self.settings.group_filter.clone();
+        let origin = self.settings.contact_origin_filter;
+        Task::batch([
+            Task::perform(
+                async move { db.get_contacts_for_settings(filter, origin).await },
+                |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
+            ),
+            Task::perform(
+                async move { db2.get_groups_for_settings(group_filter).await },
+                |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+            ),
+        ])
+    }
+
+    pub(crate) fn handle_load_groups(&self, filter: String) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move { db.get_groups_for_settings(filter).await },
+            |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+        )
+    }
+
+    pub(crate) fn handle_save_contact(&self, entry: ContactEntry) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.contact_save_with_writeback: no ServiceClient yet; ignoring save");
+            return Task::none();
+        };
+        let db = Arc::clone(&self.db);
+        let filter = self.settings.contact_filter.clone();
+        let origin = self.settings.contact_origin_filter;
+        let params = contact_entry_to_save_params(entry);
+
+        Task::perform(
+            async move {
+                let result = client.save_contact_with_writeback(params).await;
+                // Reload contacts regardless of outcome - on Success
+                // and LocalOnly the local row landed; on a wire/local
+                // failure the list state is unchanged but reloading is
+                // harmless and keeps the panel in sync with the DB.
+                let contacts = db.get_contacts_for_settings(filter, origin).await;
+                (result, contacts)
+            },
+            |(result, contacts)| match result {
+                Ok(WritebackOutcome::Success) => {
+                    Message::Settings(SettingsMessage::ContactsLoaded(contacts))
+                }
+                Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
+                    log::warn!("Contact save local-only: {reason}");
+                    Message::Settings(SettingsMessage::ContactWriteIncomplete(contacts, reason))
+                }
+                Err(e) => {
+                    log::error!("Contact save failed: {e}");
+                    Message::Settings(SettingsMessage::ContactSaved(Err(e.to_string())))
+                }
+            },
+        )
+    }
+
+    pub(crate) fn handle_delete_contact(&self, id: String) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.contact_delete: no ServiceClient yet; ignoring delete");
+            return Task::none();
+        };
+        let db = Arc::clone(&self.db);
+        let filter = self.settings.contact_filter.clone();
+        let origin = self.settings.contact_origin_filter;
+
+        Task::perform(
+            async move {
+                let result = client.delete_contact(id).await;
+                // Provider-first failures surface as Err here and the
+                // local row is untouched - skip the reload.
+                let contacts = match &result {
+                    Err(_) => None,
+                    Ok(_) => db.get_contacts_for_settings(filter, origin).await.ok(),
+                };
+                (result, contacts)
+            },
+            |(result, contacts)| match result {
+                Ok(WritebackOutcome::Success) => {
+                    if let Some(list) = contacts {
+                        Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
+                    } else {
+                        Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
+                    }
+                }
+                Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
+                    log::warn!("Contact delete local-only: {reason}");
+                    Message::Settings(SettingsMessage::ContactWriteIncomplete(
+                        contacts.ok_or_else(|| "contacts reload failed".to_owned()),
+                        reason,
+                    ))
+                }
+                Err(e) => {
+                    log::error!("Contact delete failed: {e}");
+                    Message::Settings(SettingsMessage::ContactDeleted(Err(e.to_string())))
+                }
+            },
+        )
+    }
+
+    pub(crate) fn handle_save_group(
+        &self,
+        group: crate::db::GroupEntry,
+        members: Vec<String>,
+    ) -> Task<Message> {
+        // Phase 6a: contacts.group_save IPC. The handler reloads the
+        // groups list after the ack arrives so the settings panel
+        // reflects the canonical Service-committed state. If the
+        // Service is not yet attached, we surface a stale list rather
+        // than silent loss; the user can retry.
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.group_save: no ServiceClient yet; ignoring save");
+            return Task::none();
+        };
+        let db = Arc::clone(&self.db);
+        let filter = self.settings.group_filter.clone();
+        let params = service_api::ContactGroupSaveParams {
+            id: group.id,
+            name: group.name,
+            member_emails: members,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+            member_count: group.member_count,
+        };
+        Task::perform(
+            async move {
+                client
+                    .save_contact_group(params)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                db.get_groups_for_settings(filter).await
+            },
+            |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+        )
+    }
+
+    pub(crate) fn handle_delete_group(&self, id: String) -> Task<Message> {
+        // Phase 6a: contacts.group_delete IPC. Same reload-on-ack
+        // pattern as group_save above.
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.group_delete: no ServiceClient yet; ignoring delete");
+            return Task::none();
+        };
+        let db = Arc::clone(&self.db);
+        let filter = self.settings.group_filter.clone();
+        Task::perform(
+            async move {
+                client
+                    .delete_contact_group(id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                db.get_groups_for_settings(filter).await
+            },
+            |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
+        )
+    }
+
+    pub(crate) fn handle_load_group_members(&self, group_id: String) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        let gid = group_id.clone();
+        Task::perform(
+            async move { db.get_group_member_emails(group_id).await },
+            move |result| {
+                Message::Settings(SettingsMessage::GroupMembersLoaded(gid.clone(), result))
+            },
+        )
+    }
+
+    pub(crate) fn handle_import_contacts(
+        &self,
+        prepared: import::PreparedImport,
+        account_id: Option<String>,
+        update_existing: bool,
+    ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        let client = self.service_client.as_ref().cloned();
+        Task::perform(
+            async move {
+                let Some(client) = client else {
+                    return Err("contacts import: ServiceClient not yet available".to_string());
+                };
+                execute_contact_import(&db, &client, prepared, account_id, update_existing).await
+            },
+            |result| {
+                let mapped = result.map(|r| crate::ui::settings::ImportResult {
+                    imported: r.0,
+                    skipped_no_email: r.1,
+                    skipped_invalid_email: r.2,
+                    skipped_duplicate: r.3,
+                    updated: r.4,
+                    groups_created: r.5,
+                });
+                Message::Settings(SettingsMessage::ImportExecuted(mapped))
+            },
+        )
+    }
+}
+
+/// Execute the contact import against the database.
+async fn execute_contact_import(
+    db: &Arc<Db>,
+    client: &crate::service_client::ServiceClient,
+    prepared: import::PreparedImport,
+    account_id: Option<String>,
+    update_existing: bool,
+) -> Result<(usize, usize, usize, usize, usize, usize), String> {
+    let mut imported = 0usize;
+    let mut skipped_no_email = prepared.stats.skipped_no_email;
+    let skipped_invalid_email = prepared.stats.skipped_invalid_email;
+    let mut skipped_duplicate = prepared.stats.skipped_duplicate;
+    let mut updated = 0usize;
+    let mut failed = 0usize;
+
+    // Per-row failures log + continue: a single transient IPC error
+    // (admission queue full, slow-disk hiccup) shouldn't abort an
+    // import of thousands of rows. The earlier behavior bubbled the
+    // first Err and left the batch half-applied with no compensating
+    // delete. A future batch-IPC redesign would let the handler
+    // commit-or-rollback as a unit; until then, log + continue
+    // matches the documented intent.
+    for contact in &prepared.contacts {
+        let Some(email) = contact.normalized_email() else {
+            skipped_no_email += 1;
+            continue;
+        };
+
+        if !email.contains('@') {
+            skipped_no_email += 1;
+            continue;
+        }
+
+        // Check for existing contact by email
+        let exists = db.find_contact_id_by_email(email.clone()).await?;
+
+        if let Some(existing_id) = exists {
+            if update_existing {
+                let entry = build_contact_entry(existing_id, &email, contact, &account_id);
+                match client
+                    .save_contact_local_only(contact_entry_to_save_params(entry))
+                    .await
+                {
+                    Ok(()) => updated += 1,
+                    Err(e) => {
+                        log::warn!("contact import: save_contact_local_only({email}): {e}");
+                        failed += 1;
+                    }
+                }
+            } else {
+                skipped_duplicate += 1;
+            }
+        } else {
+            let entry = build_contact_entry(
+                uuid::Uuid::new_v4().to_string(),
+                &email,
+                contact,
+                &account_id,
+            );
+            match client
+                .save_contact_local_only(contact_entry_to_save_params(entry))
+                .await
+            {
+                Ok(()) => imported += 1,
+                Err(e) => {
+                    log::warn!("contact import: save_contact_local_only({email}): {e}");
+                    failed += 1;
+                }
+            }
+        }
+    }
+    if failed > 0 {
+        log::warn!("contact import: {failed} row(s) failed; the rest were applied");
+    }
+
+    // Create groups from import and link members
+    let mut groups_created = 0usize;
+    let mut group_members: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    // Collect group memberships
+    for contact in &prepared.contacts {
+        let Some(email) = contact.normalized_email() else {
+            continue;
+        };
+        if !email.contains('@') {
+            continue;
+        }
+        for group_name in &contact.groups {
+            let trimmed = group_name.trim();
+            if !trimmed.is_empty() {
+                group_members
+                    .entry(trimmed.to_string())
+                    .or_default()
+                    .push(email.clone());
+            }
+        }
+    }
+
+    // Create or update each group
+    for (group_name, members) in &group_members {
+        let member_list = members.clone();
+
+        // Check if group already exists by name
+        let existing = db.find_group_id_by_name(group_name.clone()).await?;
+
+        let group_id = existing.unwrap_or_else(|| {
+            groups_created += 1;
+            uuid::Uuid::new_v4().to_string()
+        });
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        #[allow(clippy::cast_possible_wrap)]
+        let member_count = member_list.len() as i64;
+        #[allow(clippy::cast_possible_wrap)]
+        let now_signed = now as i64;
+        let params = service_api::ContactGroupSaveParams {
+            id: group_id,
+            name: group_name.clone(),
+            member_count,
+            created_at: now_signed,
+            updated_at: now_signed,
+            member_emails: member_list,
+        };
+        client
+            .save_contact_group(params)
+            .await
+            .map_err(|e| format!("save_contact_group: {e}"))?;
+    }
+
+    Ok((
+        imported,
+        skipped_no_email,
+        skipped_invalid_email,
+        skipped_duplicate,
+        updated,
+        groups_created,
+    ))
+}
+
+fn contact_entry_to_save_params(entry: crate::db::ContactEntry) -> service_api::ContactSaveParams {
+    service_api::ContactSaveParams {
+        id: entry.id,
+        email: entry.email,
+        display_name: entry.display_name,
+        email2: entry.email2,
+        phone: entry.phone,
+        company: entry.company,
+        notes: entry.notes,
+        account_id: entry.account_id,
+        account_color: entry.account_color,
+        groups: entry.groups,
+        source: entry.source,
+        server_id: entry.server_id,
+    }
+}
+
+fn build_contact_entry(
+    id: String,
+    email: &str,
+    contact: &import::ImportedContact,
+    account_id: &Option<String>,
+) -> ContactEntry {
+    let display_name = contact.effective_display_name();
+    let email2 = contact
+        .email2
+        .as_ref()
+        .map(|e| e.trim().to_lowercase())
+        .filter(|e| !e.is_empty());
+
+    ContactEntry {
+        id,
+        email: email.to_string(),
+        display_name,
+        email2,
+        phone: contact.phone.clone(),
+        company: contact.company.clone(),
+        notes: contact.notes.clone(),
+        account_id: account_id.clone(),
+        account_color: None,
+        groups: contact.groups.clone(),
+        source: None,
+        server_id: None,
+        origins: rtsk::contacts::search::ContactOrigins::default(),
+    }
+}
+
+// ── Compose autocomplete ───────────────────────────────
+
+/// Dispatch an autocomplete search for the active compose field.
+pub fn dispatch_autocomplete_search(
+    db: &Arc<Db>,
+    window_id: iced::window::Id,
+    state: &mut ComposeState,
+) -> Task<Message> {
+    let query = state.autocomplete.query.clone();
+    log::debug!("Autocomplete search: {query:?}");
+    if query.trim().is_empty() {
+        state.autocomplete.results.clear();
+        state.autocomplete.highlighted = None;
+        return Task::none();
+    }
+
+    let generation = state.autocomplete.search_generation.next();
+    let db = Arc::clone(db);
+
+    Task::perform(
+        async move { db.search_autocomplete(query, 10).await },
+        move |results| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::AutocompleteResults(generation, results)),
+            )
+        },
+    )
+}
+
+/// Check if a compose message should trigger an autocomplete search.
+pub fn should_trigger_autocomplete(msg: &ComposeMessage) -> bool {
+    matches!(
+        msg,
+        ComposeMessage::ToTokenInput(crate::ui::token_input::TokenInputMessage::TextChanged(_))
+            | ComposeMessage::CcTokenInput(crate::ui::token_input::TokenInputMessage::TextChanged(
+                _
+            ))
+            | ComposeMessage::BccTokenInput(
+                crate::ui::token_input::TokenInputMessage::TextChanged(_)
+            )
+    )
+}

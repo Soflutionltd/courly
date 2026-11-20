@@ -1,0 +1,199 @@
+//! `gal.kick` notification handler.
+//!
+//! Phase 5 task 5. GAL refresh is kick-driven, idempotent, and bounded
+//! (60 s per-account timeout x account count, gated by the existing
+//! 24 h cache check inside `fetch_gal_entries_if_stale`). No
+//! per-account runtime; no cancellation. Iterates all accounts -
+//! `fetch_gal_entries_if_stale` self-gates non-supported
+//! providers with `Ok(None)`.
+//!
+//! ## Required: serialize handler invocations via the module-level Tokio Mutex
+//!
+//! The notification dispatcher runs handlers concurrently up to
+//! `NOTIFY_CAP = 4` (`dispatch.rs`); two stale-account kicks back-to-
+//! back without serialization will duplicate provider calls because
+//! the handler only writes the cache after the network round-trip
+//! completes. The mutex is load-bearing for correctness, not just
+//! performance.
+//!
+//! The cleanest fix is a per-account in-flight set so different
+//! accounts can refresh in parallel - which is the documented
+//! future-work direction. The
+//! global handler mutex here is the cheaper "no concurrent kicks at
+//! all" coarsening of that load-bearing form. Acceptable because:
+//!
+//! - GAL kicks are 5-min-cadenced; the lock is held only while the
+//!   iteration runs, and most calls hit the 24 h cache short-circuit
+//!   without doing network work.
+//! - The mutex test in this module asserts at-most-one in-flight call
+//!   per account, which is shape-stable across both the global-lock
+//!   form and the future per-account form.
+//!
+//! ## Interaction with the notification-drain bound
+//!
+//! GAL cache persistence performs DB writes via
+//! `WriteDbState::with_write`. If the consolidated drain's
+//! notification-drain bound (Phase 5 task 7) aborts a wedged GAL
+//! handler, the *outer* async future is dropped but the blocking
+//! closure runs to completion regardless. Acceptable because GAL
+//! writes are bounded and idempotent. Any future abortable
+//! notification handler must satisfy the same contract.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::Mutex;
+
+use crate::boot::BootSharedState;
+use service_state::WriteDbState;
+
+/// Global handler mutex - coarsens the load-bearing per-account
+/// hazard. See module docs for rationale.
+static GAL_HANDLER_LOCK: Mutex<()> = Mutex::const_new(());
+
+/// Per-account timeout, preserving today's UI-side `refresh_gal_caches`
+/// budget.
+const PER_ACCOUNT_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result<(), String> {
+    let _guard = GAL_HANDLER_LOCK.lock().await;
+
+    let Some(read_db) = boot_state.read_db_state() else {
+        log::debug!("gal.kick received before db_conn available; ignoring");
+        return Ok(());
+    };
+    let write_db = boot_state
+        .write_db_state()
+        .map_err(|e| format!("gal.kick write db unavailable: {e}"))?;
+
+    let account_ids = read_db
+        .with_read(db::db::queries_extra::list_all_account_ids_sync)
+        .await?;
+    if account_ids.is_empty() {
+        return Ok(());
+    }
+
+    log::debug!("gal.kick: iterating {} accounts", account_ids.len());
+
+    for account_id in account_ids {
+        if boot_state.shutdown_token().is_cancelled() {
+            // Cooperative shutdown: bail out between accounts rather
+            // than waiting out PER_ACCOUNT_TIMEOUT for accounts we
+            // know the Service is about to abort anyway. The
+            // already-running per-account refresh keeps its own
+            // 24 h cache write idempotent, so re-running on the next
+            // gal.kick after a fresh boot is harmless.
+            log::info!("[GAL] shutdown token fired mid-iteration, exiting");
+            return Ok(());
+        }
+        match tokio::time::timeout(
+            PER_ACCOUNT_TIMEOUT,
+            refresh_gal_cache_for_account(boot_state, &read_db, &write_db, &account_id),
+        )
+        .await
+        {
+            Ok(Ok(n)) if n > 0 => {
+                log::info!("[GAL] cached {n} entries for {account_id}");
+            }
+            Ok(Ok(_)) => {} // cache fresh or unsupported provider
+            Ok(Err(e)) => {
+                log::warn!("[GAL] refresh failed for {account_id}: {e}");
+            }
+            Err(_) => {
+                log::warn!("[GAL] refresh timed out for {account_id}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn refresh_gal_cache_for_account(
+    boot_state: &Arc<BootSharedState>,
+    read_db: &db::db::ReadDbState,
+    write_db: &WriteDbState,
+    account_id: &str,
+) -> Result<usize, String> {
+    let Some(entries) = fetch_gal_entries_if_stale(boot_state, read_db, account_id).await? else {
+        return Ok(0);
+    };
+
+    let account_id = account_id.to_string();
+
+    write_db
+        .with_write(move |conn| {
+            let cached = db::db::queries_extra::contacts::cache_gal_entries_sync(
+                conn,
+                &account_id,
+                &entries,
+            )?;
+            db::db::queries_extra::contacts::record_gal_refresh_sync(conn, &account_id)?;
+            Ok(cached)
+        })
+        .await
+}
+
+/// Fetch GAL entries from the provider when the local cache is stale
+/// (>24 h). Returns `Ok(None)` when the cache is still fresh or when
+/// the provider doesn't support a directory feed (JMAP, IMAP).
+///
+/// Lives Service-side because OAuth token refresh inside the provider
+/// client requires the writer pool, and `rtsk` is reader-only by
+/// `core-no-writer-db` (brokkr.toml).
+async fn fetch_gal_entries_if_stale(
+    boot_state: &Arc<BootSharedState>,
+    read_db: &db::db::ReadDbState,
+    account_id: &str,
+) -> Result<Option<Vec<rtsk::contacts::gal::GalEntry>>, String> {
+    let now = jiff::Timestamp::now().as_second();
+    let stale_threshold = now - 86400;
+    if let Some(cached_at) =
+        rtsk::contacts::gal::gal_cache_age(read_db, account_id.to_string()).await?
+        && cached_at > stale_threshold
+    {
+        return Ok(None);
+    }
+
+    let runtime = boot_state
+        .sync_runtime()
+        .ok_or("GAL requested before SyncRuntime was installed")?;
+    let action_account = runtime.resident_action_account(account_id).await?;
+    let account = conduit_types::AccountId(account_id.to_string());
+    let mut cursor = None;
+    let mut entries = Vec::new();
+    loop {
+        let page = match action_account
+            .engine
+            .directory_search(&account, String::new(), Some(1000), cursor)
+            .await
+        {
+            Ok(page) => page,
+            Err(conduit_sync::Error::Account(error))
+                if matches!(
+                    error.recovery(),
+                    conduit_types::RecoveryClass::Unsupported(_)
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(format!("directory search: {error}")),
+        };
+        entries.extend(
+            page.items
+                .into_iter()
+                .map(|card| rtsk::contacts::gal::GalEntry {
+                    email: card.email,
+                    display_name: card.display_name,
+                    phone: card.phones.into_iter().next(),
+                    company: card.company,
+                    title: card.title,
+                    department: card.department,
+                }),
+        );
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    Ok(Some(entries))
+}

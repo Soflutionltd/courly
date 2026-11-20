@@ -1,0 +1,256 @@
+use crate::app::{CHORD_TIMEOUT, ReadyApp};
+use crate::command_dispatch::KeyEventMessage;
+use crate::handlers;
+use crate::message::Message;
+use crate::service_subscription::service_notification_subscription;
+use crate::ui::settings::SettingsMessage;
+use crate::ui::status_bar::sync_progress_subscription;
+use crate::updater::{self, UpdaterMessage};
+use crate::{appearance, component::Component};
+
+impl ReadyApp {
+    pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
+        let mut subs = vec![
+            appearance::subscription().map(Message::AppearanceChanged),
+            iced::window::resize_events().map(|(id, size)| Message::WindowResized(id, size)),
+            iced::window::close_requests().map(Message::WindowCloseRequested),
+            iced::event::listen_with(|event, _status, id| match event {
+                iced::Event::Window(iced::window::Event::Moved(point)) => {
+                    Some(Message::WindowMoved(id, point))
+                }
+                iced::Event::Window(iced::window::Event::Focused) => {
+                    Some(Message::WindowFocused(id))
+                }
+                _ => None,
+            }),
+            iced::time::every(updater::CHECK_INTERVAL)
+                .map(|_| Message::Updater(UpdaterMessage::Check { forced: true })),
+            iced::event::listen_with(|event, status, id| match &event {
+                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key, modifiers, ..
+                }) => Some(Message::KeyEvent(KeyEventMessage::KeyPressed {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                    status,
+                    window_id: id,
+                })),
+                iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                    Some(Message::ModifiersChanged(*modifiers))
+                }
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed { .. }) => {
+                    // Re-query which filter input owns focus after every
+                    // mouse press while settings is open, so the focus
+                    // border stays in sync with the actual focused widget.
+                    Some(Message::SettingsCheckFocus)
+                }
+                _ => None,
+            }),
+            self.sidebar.subscription().map(Message::Sidebar),
+            self.thread_list.subscription().map(Message::ThreadList),
+            self.reading_pane.subscription().map(Message::ReadingPane),
+            self.settings.subscription().map(Message::Settings),
+            self.status_bar.subscription().map(Message::StatusBar),
+            sync_progress_subscription(&self.sync_receiver).map(Message::SyncProgress),
+        ];
+        #[cfg(target_os = "macos")]
+        subs.push(crate::menu_bar::events());
+        subs.push(crate::desktop_notifications::clicks());
+
+        // Follow the pointer anywhere in the window while the toolbar is
+        // being customized, including over the panel, which captures the
+        // events under it: a drag starts from the last position seen.
+        if self.toolbar.customizing {
+            subs.push(iced::event::listen_with(|event, _status, _id| {
+                use crate::ui::toolbar::ToolbarMessage;
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::Toolbar(ToolbarMessage::CursorMoved(position)))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::Toolbar(ToolbarMessage::DragEnd)),
+                    _ => None,
+                }
+            }));
+        }
+
+        // Follow the pointer from a press on a message row to its release,
+        // over the sidebar folders it may be dropped on.
+        if self.thread_drag.is_some() {
+            subs.push(iced::event::listen_with(|event, _status, _id| {
+                use crate::handlers::thread_drag::ThreadDragMessage;
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::ThreadDrag(ThreadDragMessage::Moved(position)))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::ThreadDrag(ThreadDragMessage::Released)),
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                        Some(Message::ThreadDrag(ThreadDragMessage::Cancel))
+                    }
+                    _ => None,
+                }
+            }));
+        }
+
+        if self.service_client.is_some() {
+            subs.push(
+                service_notification_subscription(&self.service_notifications)
+                    .map(Message::ServiceNotification),
+            );
+        }
+
+        if self.pending_chord.is_some() {
+            subs.push(
+                iced::time::every(CHORD_TIMEOUT)
+                    .map(|_| Message::KeyEvent(KeyEventMessage::PendingChordTimeout)),
+            );
+        }
+
+        if let Some(deadline) = self.search_debounce_deadline {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(50))
+                    .with(deadline)
+                    .map(|(_, deadline)| {
+                        if iced::time::Instant::now() >= deadline {
+                            Message::SearchSuggest(
+                                crate::ui::search_suggest::SearchSuggestMessage::Refresh,
+                            )
+                        } else {
+                            Message::Noop
+                        }
+                    }),
+            );
+        }
+
+        if self.composer_is_open() && self.has_dirty_compose_drafts() {
+            subs.push(
+                iced::time::every(handlers::pop_out::DRAFT_AUTO_SAVE_INTERVAL)
+                    .map(|_| Message::ComposeDraftTick),
+            );
+        }
+
+        // Phase 6a: the dedicated 1 h `Message::ExpiryTick`
+        // subscription is gone. Pinned-search expire-stale now rides
+        // on the 5 min `SyncTick` via
+        // `Message::SyncTick -> kick_pinned_search_expire`, with the
+        // 14 day staleness gate enforced Service-side. Same one-cadence
+        // shape as `gal.kick`/`calendar.kick` - one timer, one failure
+        // mode, survives Phase 9 tray-resident move unchanged.
+
+        // Periodic sync - delta sync all accounts every 5 minutes
+        if !self.sidebar.accounts.is_empty() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(300)).map(|_| Message::SyncTick),
+            );
+        }
+
+        // My Day follows the clock past midnight while it shows.
+        if self.side_panel.shows_my_day() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(60)).map(|_| {
+                    Message::SidePanel(crate::ui::side_panel::SidePanelMessage::MyDay(
+                        crate::ui::side_panel::my_day::MyDayMessage::Tick,
+                    ))
+                }),
+            );
+        }
+
+        // Snooze resurface - check every 60 seconds for due threads.
+        // The handler fires a `pending_ops.kick` that wakes the
+        // Service-side worker; if the ServiceClient isn't attached
+        // yet the kick is a logged no-op. Phase 6d-A removed the
+        // `action_ctx` gate that previously fronted this subscription.
+        if !self.sidebar.accounts.is_empty() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::SnoozeTick),
+            );
+        }
+
+        // Phase 7-6: hourly attachment-text backfill kick. The Service
+        // handler enqueues every cached-but-unindexed attachment (up
+        // to a 1000-row LIMIT per kick) into the ExtractRuntime. The
+        // initial catch-up post-boot is fired separately on
+        // `ServiceBootReady`; this hourly cadence chips away at any
+        // residual after a prior Service crash mid-extraction. Drop
+        // class - missed kicks self-heal on the next hour.
+        if !self.sidebar.accounts.is_empty() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(3600))
+                    .map(|_| Message::ExtractBackfillTick),
+            );
+        }
+
+        // Phase 5 task 10: the dedicated 1-hour `Message::GalRefreshTick`
+        // subscription is gone. GAL refresh now rides on the 5-min
+        // `SyncTick` via `Message::SyncTick -> kick_gal_refresh`, gated
+        // Service-side by the existing 24 h cache check inside
+        // `fetch_gal_entries_if_stale`. Two cadences would mean two failure
+        // modes (one timer stops working but the other doesn't); one
+        // cadence + Service-side gating is the simpler shape.
+        //
+        // The original code-comment here flagged a TODO for tray-resident
+        // mode (a Phase 9 entry that would have moved the cadence
+        // Service-side once the UI window could close without exiting).
+        // Phase 9 was descoped at Phase 8 close-out (no plans for a tray
+        // icon), so the relocation is no longer scheduled. If tray-resident
+        // ever ships, the move is straightforward: a
+        // `tokio::time::interval` in the dispatch loop, per-account
+        // staleness gating, and the existing Service-side staleness logic
+        // (`CalendarRuntime::accounts_due_for_sync` at 1 h,
+        // `fetch_gal_entries_if_stale`'s 24 h cache check) transplants
+        // unchanged.
+
+        // Phase 3 task 17: debounced reader reload after
+        // `index.committed` notifications. Polls every 200 ms; the
+        // handler reloads the searcher only when there is a pending
+        // reload that has aged at least one tick. Cheap when idle (no
+        // pending) and bounded under heavy initial-sync pressure
+        // (~5 reloads/sec at most).
+        if self.search_state.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(200))
+                    .map(|_| Message::ReaderReloadTick),
+            );
+        }
+
+        // Phase 5 task 11: debounced calendar reload after CalendarChanged
+        // notifications. Polls every 250 ms; the handler reloads the
+        // calendar tab only when there is a pending stamp that has aged at
+        // least one tick. Collapses an N-account kick batch (one
+        // CalendarChanged per stale account) into a single reload.
+        //
+        // Gated on `pending_calendar_reload.is_some()` so the timer doesn't
+        // wake the runtime four times per second indefinitely on a system
+        // with no calendar activity. The pending stamp is set by the
+        // `Notification::CalendarChanged` arm in `update.rs`, so the next
+        // view cycle re-evaluates this subscription and arms the tick.
+        if self.pending_calendar_reload.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(250))
+                    .map(|_| Message::CalendarReloadTick),
+            );
+        }
+
+        if self.pending_mailbox_reload.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(250))
+                    .map(|_| Message::MailboxReloadTick),
+            );
+        }
+
+        if self
+            .settings
+            .sheet_anim
+            .is_animating(iced::time::Instant::now())
+        {
+            subs.push(
+                iced::window::frames()
+                    .map(|at| Message::Settings(SettingsMessage::SheetAnimTick(at))),
+            );
+        }
+
+        iced::Subscription::batch(subs)
+    }
+}

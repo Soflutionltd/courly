@@ -1,0 +1,46 @@
+[package]
+name = "conduit-net"
+publish = false
+description = "Shared HTTP transport for the conduit JMAP, Gmail, and Graph clients"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+# Publishes the in-process wire seam (`test_support`) so crates riding
+# this transport can stage canned responses below the retry, redirect,
+# and rate-limit pipeline instead of hand-rolling a double that has to
+# re-derive this crate's status contract. Dev-dependency only.
+test-support = []
+
+[dependencies]
+conduit-types = { path = "../types" }
+reqwest = { workspace = true, features = ["native-tls", "stream", "json", "http2"] }
+native-tls = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
+tokio-util = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+httpdate = { workspace = true }
+percent-encoding = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zeroize = { workspace = true }
+uuid = { workspace = true }
+# Only used to assemble canned responses in `test_support`.
+http = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "rt-multi-thread", "test-util"] }
+http = { workspace = true }

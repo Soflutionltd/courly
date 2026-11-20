@@ -1,0 +1,246 @@
+use iced::time::Instant;
+use iced::widget::{Space, button, column, container, row, scrollable, text};
+use iced::{Alignment, Element, Length};
+use rust_i18n::t;
+
+use crate::icon;
+use crate::ui::dialog::{DialogAction, alert_dialog};
+use crate::ui::layout::*;
+use crate::ui::settings::row_widgets::tr;
+use crate::ui::settings::types::*;
+use crate::ui::theme;
+use crate::ui::widgets;
+
+mod accounts;
+mod ai;
+mod behavior;
+mod contacts;
+mod general;
+mod groups;
+mod import;
+mod labels;
+mod people;
+mod reference;
+mod signatures;
+#[path = "theme.rs"]
+mod theme_panel;
+
+pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
+    let nav = tab_nav(state.active_tab);
+    let content = match state.active_tab {
+        Tab::Accounts => accounts::accounts_tab(state),
+        Tab::Appearance => theme_panel::theme_tab(state),
+        Tab::Notifications => behavior::notifications_tab(state),
+        Tab::Ai => ai::ai_tab(state),
+        Tab::Shortcuts => reference::shortcuts_tab(),
+        Tab::Layout => general::layout_tab(state),
+        Tab::Reading => general::reading_tab(state),
+        Tab::Composing => behavior::composing_tab(state),
+        Tab::Signatures => signatures::signatures_tab(state),
+        Tab::Labels => labels::labels_tab(state),
+        Tab::Sync => general::sync_tab(state),
+        Tab::People => people::people_tab(state),
+        Tab::About => reference::about_tab(state),
+    };
+
+    let now = Instant::now();
+    let sheet_t: f32 = state.sheet_anim.interpolate(0.0, 1.0, now);
+    let show_sheet = state.active_sheet.is_some() || sheet_t > 0.001;
+
+    let scrollbar_gutter = SCROLLBAR_SPACING + 8.0;
+    let content_area = container(
+        scrollable(
+            container(content)
+                .padding(PAD_SETTINGS_CONTENT)
+                .align_x(Alignment::Center),
+        )
+        .height(Length::Fill),
+    )
+    .padding(iced::Padding {
+        top: 0.0,
+        right: scrollbar_gutter,
+        bottom: 0.0,
+        left: 0.0,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(theme::ContainerClass::Content.style());
+
+    let main_content: Element<'_, SettingsMessage> = if show_sheet {
+        let sheet_content = match state.active_sheet {
+            Some(SettingsSheetPage::AccountEditor) => accounts::account_editor_sheet(state),
+            Some(SettingsSheetPage::EditSignature { .. }) => {
+                signatures::signature_editor_sheet(state)
+            }
+            Some(SettingsSheetPage::EditContact { .. }) => contacts::contact_editor_sheet(state),
+            Some(SettingsSheetPage::EditGroup { .. }) => groups::group_editor_sheet(state),
+            Some(SettingsSheetPage::ImportContacts) => import::import_wizard_sheet(state),
+            Some(SettingsSheetPage::EditLabel { .. }) => labels::label_editor_sheet(state),
+            Some(SettingsSheetPage::EditLabelGroup { .. }) => {
+                labels::label_group_editor_sheet(state)
+            }
+            None => column![].into(),
+        };
+        // Every sheet is given the width of the page and holds itself to
+        // its own maximum, centred. Asked to shrink instead, a sheet whose
+        // content fills collapses to the narrowest its rows can be.
+        let sheet_width = Length::Fill;
+
+        let sheet_panel = container(column![
+            container(
+                button(
+                    row![
+                        container(icon::arrow_left().size(ICON_XL).style(text::base))
+                            .align_y(Alignment::Center),
+                        text(t!("settings.common.back"))
+                            .size(TEXT_LG)
+                            .style(text::base)
+                            .font(iced::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..crate::font::text()
+                            }),
+                    ]
+                    .spacing(SPACE_XS)
+                    .align_y(Alignment::Center),
+                )
+                .on_press(SettingsMessage::CloseSheet)
+                .padding(PAD_NAV_ITEM)
+                .style(theme::ButtonClass::BareIcon.style()),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill),
+            scrollable(
+                container(sheet_content)
+                    .padding(PAD_SETTINGS_CONTENT)
+                    .align_x(Alignment::Center)
+                    .width(sheet_width)
+            )
+            .spacing(SCROLLBAR_SPACING)
+            .width(sheet_width)
+            .height(Length::Fill),
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ContainerClass::Content.style());
+
+        let offset = ((1.0 - sheet_t) * 2000.0).round();
+
+        let with_sheet = crate::ui::modal_overlay::modal_overlay(
+            content_area,
+            sheet_panel,
+            crate::ui::modal_overlay::ModalSurface::Sheet { offset },
+            SettingsMessage::Noop,
+        );
+
+        let with_sheet = if state.pending_discard.is_some() {
+            crate::ui::modal_overlay::modal_overlay(
+                with_sheet,
+                discard_changes_dialog(),
+                crate::ui::modal_overlay::ModalSurface::Modal,
+                SettingsMessage::Noop,
+            )
+        } else {
+            with_sheet
+        };
+
+        // Delete-account confirm sits on top of any other settings layer
+        // (sheet, discard dialog) since it represents the user's most
+        // destructive intent in this section. State lives on the editor
+        // itself so reopening the editor doesn't re-open the dialog.
+        if let Some(editor) = state.editing_account.as_ref()
+            && editor.show_delete_confirmation
+        {
+            crate::ui::modal_overlay::modal_overlay(
+                with_sheet,
+                delete_account_dialog(&editor.account_id),
+                crate::ui::modal_overlay::ModalSurface::Modal,
+                SettingsMessage::Noop,
+            )
+        } else {
+            with_sheet
+        }
+    } else {
+        content_area.into()
+    };
+
+    row![
+        nav,
+        iced::widget::rule::vertical(1).style(theme::RuleClass::SidebarDivider.style()),
+        main_content,
+    ]
+    .into()
+}
+
+fn discard_changes_dialog<'a>() -> Element<'a, SettingsMessage> {
+    alert_dialog(
+        t!("settings.common.discard_title"),
+        t!("settings.common.discard_body"),
+        vec![
+            DialogAction::default_action(
+                t!("settings.common.keep_editing"),
+                SettingsMessage::CancelDiscardEditorChanges,
+            ),
+            DialogAction::destructive(
+                t!("settings.common.discard"),
+                SettingsMessage::ConfirmDiscardEditorChanges,
+            ),
+        ],
+        None,
+    )
+}
+
+fn delete_account_dialog(account_id: &str) -> Element<'_, SettingsMessage> {
+    alert_dialog(
+        t!("settings.common.delete_account_title"),
+        t!("settings.common.delete_account_body"),
+        vec![
+            DialogAction::default_action(
+                t!("settings.common.cancel"),
+                SettingsMessage::DeleteAccountCancelled,
+            ),
+            DialogAction::destructive(
+                t!("settings.common.delete"),
+                SettingsMessage::DeleteAccountConfirmed(account_id.to_string()),
+            ),
+        ],
+        None,
+    )
+}
+
+fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {
+    let mut col = column![].spacing(SPACE_XXS).width(SETTINGS_NAV_WIDTH);
+
+    col = col.push(widgets::nav_button(
+        Some(icon::arrow_left()),
+        tr(t!("settings.common.settings")),
+        false,
+        widgets::NavSize::Regular,
+        None,
+        SettingsMessage::Close,
+    ));
+    col = col.push(Space::new().height(SPACE_XS));
+
+    for (header, tabs) in Tab::GROUPS {
+        col = col.push(widgets::section_header(tr(t!(*header))));
+        for tab in *tabs {
+            col = col.push(widgets::nav_button(
+                Some(tab.icon()),
+                tab.label(),
+                *tab == active,
+                widgets::NavSize::Regular,
+                None,
+                SettingsMessage::SelectTab(*tab),
+            ));
+        }
+    }
+
+    container(
+        scrollable(col)
+            .spacing(SCROLLBAR_SPACING)
+            .height(Length::Fill),
+    )
+    .padding(PAD_SIDEBAR)
+    .height(Length::Fill)
+    .style(theme::ContainerClass::Sidebar.style())
+    .into()
+}

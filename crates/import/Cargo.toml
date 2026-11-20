@@ -1,0 +1,22 @@
+[package]
+name = "import"
+publish = false
+description = "Contact import from CSV, XLSX, and vCard files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+quick-xml.workspace = true
+encoding_rs = "0.8"
+calcard = "0.3.3"
+zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]

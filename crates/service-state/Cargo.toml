@@ -1,0 +1,25 @@
+[package]
+name = "service-state"
+publish = false
+description = "Service-only writer-half state types. The `app` crate does NOT depend on this crate, so `WriteDbState` and friends are unreachable from UI code at the dependency-graph level."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+db = { path = "../db" }
+log = "0.4"
+rusqlite.workspace = true
+search = { path = "../search" }
+store = { path = "../stores" }
+tokio = { workspace = true, features = ["rt", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+toml = "1.1"

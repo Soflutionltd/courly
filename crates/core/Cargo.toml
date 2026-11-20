@@ -1,0 +1,66 @@
+[package]
+name = "rtsk"
+publish = false
+description = "Framework-agnostic core logic for Courly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Workspace deps
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "sync", "macros", "rt", "time"] }
+jiff.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+quick-xml.workspace = true
+
+# Extracted workspace crates
+db-read = { path = "../db-read" }
+store = { path = "../stores" }
+cmdk = { path = "../cmdk" }
+search = { path = "../search" }
+smart-folder = { path = "../smart-folder" }
+label-colors = { path = "../label-colors" }
+seen = { path = "../seen" }
+common = { path = "../common" }
+types = { path = "../types" }
+sync = { path = "../sync" }
+tokio-util = "0.7"
+# Crate-specific deps
+log = "0.4"
+futures = "0.3"
+tokio-native-tls = "0.3"
+native-tls = "0.2"
+mail-parser = "0.11.3"
+socket2 = "0.6"
+tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
+flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
+getrandom = { version = "0.4.2", features = ["std"] }
+urlencoding = "2"
+uuid = { version = "1.23.1", features = ["v4"] }
+async-trait = "0.1"
+hickory-resolver = { version = "0.26.1", features = ["tokio"] }
+sha2 = "0.11"
+unicode-segmentation = "1.12"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+regex = "1"
+url = "2"
+psl = "2"
+lol_html = "3.0.0"
+ammonia = "4"
+calcard = "0.3.3"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db-read/hotpath", "store/hotpath", "cmdk/hotpath", "search/hotpath", "smart-folder/hotpath", "label-colors/hotpath", "seen/hotpath", "common/hotpath", "sync/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db-read/hotpath-alloc", "store/hotpath-alloc", "cmdk/hotpath-alloc", "search/hotpath-alloc", "smart-folder/hotpath-alloc", "label-colors/hotpath-alloc", "seen/hotpath-alloc", "common/hotpath-alloc", "sync/hotpath-alloc"]
+
+[dev-dependencies]
+tempfile = "3"

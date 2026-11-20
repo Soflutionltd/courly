@@ -1,0 +1,263 @@
+pub mod accounts;
+pub mod calendars;
+pub mod chats;
+pub mod config;
+pub mod contacts;
+pub mod label_groups;
+pub mod people;
+pub mod pinned_searches;
+pub mod templates;
+pub mod threads;
+
+pub use config::Config;
+
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
+use std::path::Path;
+
+/// Weighted random selection over a slice of `Copy` items.
+///
+/// Shared between thread and chat seeding. The slices must have equal length;
+/// weights need not sum to 1 - they are normalised internally.
+pub fn weighted_choice<T: Copy>(rng: &mut impl RngExt, items: &[T], weights: &[f64]) -> T {
+    let total: f64 = weights.iter().sum();
+    let mut r: f64 = rng.random::<f64>() * total;
+    for (item, weight) in items.iter().zip(weights.iter()) {
+        r -= weight;
+        if r <= 0.0 {
+            return *item;
+        }
+    }
+    items[items.len() - 1]
+}
+
+/// Generate a deterministic UUID v4 from the seeded RNG.
+/// `messages.date`, `messages.internal_date`, `threads.last_message_at` and
+/// `chat_contacts.latest_message_at` hold Unix milliseconds; the generators
+/// work in seconds.
+pub fn millis(seconds: i64) -> i64 {
+    seconds * 1000
+}
+
+pub fn next_uuid(rng: &mut impl RngExt) -> String {
+    let mut bytes = [0u8; 16];
+    rng.fill(&mut bytes);
+    // Set version 4 and variant bits per RFC 4122
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        u16::from_be_bytes([bytes[4], bytes[5]]),
+        u16::from_be_bytes([bytes[6], bytes[7]]),
+        u16::from_be_bytes([bytes[8], bytes[9]]),
+        u64::from_be_bytes([
+            0, 0, bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        ])
+    )
+}
+
+/// Generate a deterministic Message-ID header.
+pub fn next_message_id(rng: &mut impl RngExt) -> String {
+    let mut bytes = [0u8; 8];
+    rng.fill(&mut bytes);
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!("<{hex}@mail.courly.test>")
+}
+
+/// Seed a fresh database at the given data directory.
+///
+/// Creates `courly.db` (with schema via migrations) and `bodies.db`
+/// (via the body store API), then populates both with synthetic data.
+pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create data dir: {e}"))?;
+
+    // The app refuses to start the action service without a key file.
+    // Dev-seed wipes the data dir on every launch, so generate a fresh
+    // deterministic key here. Dev-seed never writes encrypted data, so
+    // a zero key is sufficient.
+    write_dev_encryption_key(app_data_dir)?;
+
+    let start = std::time::Instant::now();
+    let mut rng = SmallRng::seed_from_u64(config.seed);
+
+    // ── Create main database with schema ────────────────────
+    let db_path = app_data_dir.join(db::db::DB_FILE_NAME);
+    log::info!("Dev-seed: creating {}", db_path.display());
+
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("open db: {e}"))?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 15000;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA foreign_keys = ON;
+         PRAGMA temp_store = MEMORY;",
+    )
+    .map_err(|e| format!("pragmas: {e}"))?;
+
+    db::db::migrations::run_all(&conn)?;
+
+    // ── Seed data in a single transaction ───────────────────
+    conn.execute_batch("BEGIN")
+        .map_err(|e| format!("begin: {e}"))?;
+
+    let accs = accounts::seed_accounts(&conn, &mut rng, config.accounts)?;
+    calendars::seed_calendars(&conn, &mut rng, &accs)?;
+    let pools = people::generate_pools(&mut rng);
+    let (mut pending_bodies, mut stats) = threads::generate_threads(
+        &conn,
+        &mut rng,
+        &accs,
+        &pools,
+        &config.locale,
+        config.threads,
+    )?;
+    let mut pending_inline_images: Vec<threads::PendingInlineImage> = Vec::new();
+    chats::seed_chats(
+        &conn,
+        &mut rng,
+        &accs,
+        &pools,
+        &config.locale,
+        config.chats,
+        &mut pending_bodies,
+        &mut pending_inline_images,
+        &mut stats,
+    )?;
+    calendars::seed_meeting_invite(&conn, &mut rng, &accs)?;
+    contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
+    contacts::seed_groups(&conn, &mut rng, &pools.combined, &accs)?;
+    label_groups::seed_label_groups(&conn, &mut rng, &accs)?;
+    pinned_searches::seed_pinned_searches(&conn, &accs)?;
+
+    conn.execute_batch("COMMIT")
+        .map_err(|e| format!("commit: {e}"))?;
+
+    // ── Populate body store via the stores API ──────────────
+    let body_store = store::body_store::BodyStoreReadState::init(app_data_dir)
+        .map_err(|e| format!("init body store: {e}"))?;
+
+    let bs_conn = body_store.conn();
+    let bs_conn = bs_conn
+        .lock()
+        .map_err(|e| format!("body store lock: {e}"))?;
+    bs_conn
+        .execute_batch("BEGIN")
+        .map_err(|e| format!("body begin: {e}"))?;
+
+    {
+        let mut stmt = bs_conn
+            .prepare(
+                "INSERT OR REPLACE INTO bodies (message_id, body_html, body_text)
+                 VALUES (?1, ?2, ?3)",
+            )
+            .map_err(|e| format!("prepare body insert: {e}"))?;
+
+        for body in &pending_bodies {
+            let html_blob = {
+                use flate2::Compression;
+                use flate2::write::ZlibEncoder;
+                use std::io::Write;
+                let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(3));
+                enc.write_all(body.body_html.as_bytes())
+                    .map_err(|e| format!("zlib compress html: {e}"))?;
+                enc.finish()
+                    .map_err(|e| format!("zlib compress html: {e}"))?
+            };
+            let text_blob = {
+                use flate2::Compression;
+                use flate2::write::ZlibEncoder;
+                use std::io::Write;
+                let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(3));
+                enc.write_all(body.body_text.as_bytes())
+                    .map_err(|e| format!("zlib compress text: {e}"))?;
+                enc.finish()
+                    .map_err(|e| format!("zlib compress text: {e}"))?
+            };
+            stmt.execute(rusqlite::params![body.message_id, html_blob, text_blob])
+                .map_err(|e| format!("insert body: {e}"))?;
+        }
+    }
+
+    bs_conn
+        .execute_batch("COMMIT")
+        .map_err(|e| format!("body commit: {e}"))?;
+
+    // ── Populate inline image store ─────────────────────────
+    if !pending_inline_images.is_empty() {
+        let iis = store::inline_image_store::InlineImageStoreReadState::init(app_data_dir)
+            .map_err(|e| format!("init inline image store: {e}"))?;
+        let iis_conn = iis.conn();
+        let iis_conn = iis_conn
+            .lock()
+            .map_err(|e| format!("inline image store lock: {e}"))?;
+        iis_conn
+            .execute_batch("BEGIN")
+            .map_err(|e| format!("inline image begin: {e}"))?;
+        {
+            let mut stmt = iis_conn
+                .prepare(
+                    "INSERT OR IGNORE INTO inline_images \
+                     (content_hash, data, mime_type, size) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .map_err(|e| format!("prepare inline image insert: {e}"))?;
+            for img in &pending_inline_images {
+                let size = i64::try_from(img.bytes.len()).unwrap_or(i64::MAX);
+                stmt.execute(rusqlite::params![
+                    img.content_hash,
+                    img.bytes,
+                    img.mime_type,
+                    size,
+                ])
+                .map_err(|e| format!("insert inline image: {e}"))?;
+            }
+        }
+        iis_conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("inline image commit: {e}"))?;
+    }
+
+    let elapsed = start.elapsed();
+    log::info!(
+        "Dev-seed complete: {} threads, {} messages, {} attachments, {} bodies; \
+         chats: {} contacts, {} threads, {} messages, {} inline images \
+         ({} unique blobs) in {:.1}s",
+        stats.threads,
+        stats.messages,
+        stats.attachments,
+        pending_bodies.len(),
+        stats.chat_contacts,
+        stats.chat_threads,
+        stats.chat_messages,
+        stats.chat_inline_images,
+        pending_inline_images.len(),
+        elapsed.as_secs_f64()
+    );
+
+    Ok(())
+}
+
+/// Write a deterministic 32-byte encryption key to `courly.key`.
+///
+/// `load_encryption_key` expects base64-encoded 32 bytes. The byte
+/// pattern `0xA5` is the same one Service tests use for in-process key
+/// fixtures (`crates/service/tests/dispatch_in_process.rs`); reusing it
+/// keeps the dev-seed fixture and the test fixtures aligned, and avoids
+/// the all-zero pattern that crypto-key rejects unconditionally.
+fn write_dev_encryption_key(app_data_dir: &Path) -> Result<(), String> {
+    let key_path = app_data_dir.join("courly.key");
+    // base64(b'\xA5' * 32) = ten "paWl" groups + trailing "paU=" pad.
+    const DEV_KEY_B64: &str = "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaU=";
+    std::fs::write(&key_path, DEV_KEY_B64).map_err(|e| format!("write key file: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("set key permissions: {e}"))?;
+    }
+
+    Ok(())
+}

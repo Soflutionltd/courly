@@ -1,0 +1,22 @@
+[package]
+name = "coverage"
+publish = false
+description = "Contract coverage catalog parser for Courly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "coverage"
+path = "src/lib.rs"
+
+[[bin]]
+name = "courly-coverage"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]

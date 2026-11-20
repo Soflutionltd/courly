@@ -1,0 +1,37 @@
+[package]
+name = "conduit-caldav"
+publish = false
+description = "CalDAV Account implementation for conduit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["calendar", "caldav", "icalendar", "webdav"]
+categories = ["email", "network-programming", "asynchronous"]
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+conduit-dav-core = { path = "../dav-core" }
+conduit-net = { path = "../net" }
+conduit-types = { path = "../types" }
+bytes = { workspace = true }
+caldata = { workspace = true }
+jiff = { workspace = true }
+futures = { workspace = true }
+quick-xml = "0.42.0"
+reqwest = { workspace = true, features = ["native-tls"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+conduit-dav-core = { path = "../dav-core", features = ["test-support"] }
+conduit-net = { path = "../net", features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

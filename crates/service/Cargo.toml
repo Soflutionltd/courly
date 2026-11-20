@@ -1,0 +1,110 @@
+[package]
+name = "service"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+service-api = { path = "../service-api" }
+action-types = { path = "../action-types" }
+cal = { path = "../calendar" }
+rtsk = { path = "../core" }
+db = { path = "../db" }
+crypto-key = { path = "../crypto-key" }
+process-lifetime = { path = "../process-lifetime" }
+# The action service writes locally and dispatches through resident Conduit
+# engines; it stores attachment cache + body store via `store` and indexes
+# via `search`.
+common = { path = "../common" }
+service-state = { path = "../service-state" }
+store = { path = "../stores" }
+types = { path = "../types" }
+# Phase 9 attachments roadmap: inline transparent compression at the
+# cache-write boundary (prefetch worker + attachment.fetch cache-miss
+# path). Squeeze is gated at runtime on the `compress_attachments`
+# pref so this dep is unconditional.
+squeeze = { path = "../squeeze" }
+search = { path = "../search" }
+seen = { path = "../seen" }
+sync = { path = "../sync" }
+label-colors = { path = "../label-colors" }
+rusqlite.workspace = true
+tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
+async-trait = "0.1"
+# Action service deps brought in from core: futures for batch_execute's
+# join_all, uuid for action plan/op IDs and send.rs RFC822 message-id,
+# jmap-client for the JMAP-specific contact action handlers.
+futures = "0.3"
+uuid = { version = "1.23.1", features = ["v4"] }
+# B3a-cut-jmap 4.2: the consumer re-parses the raw RFC822 the JMAP engine
+# streams (`open_raw_rfc822`) to recover the headers / attachment detail the
+# structured `Message` drops.
+mail-parser = "0.11.3"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+conduit-types.workspace = true
+conduit-net.workspace = true
+conduit-sync.workspace = true
+conduit-jmap = { workspace = true, features = ["sync"] }
+conduit-imap.workspace = true
+conduit-graph.workspace = true
+conduit-google.workspace = true
+conduit-caldav.workspace = true
+conduit-carddav.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7"
+futures-util.workspace = true
+base64.workspace = true
+bytes.workspace = true
+jiff.workspace = true
+fs2 = "0.4"
+log = "0.4"
+# conduit reports through `tracing`; with no subscriber installed, the `log`
+# feature forwards its events to the service log file.
+tracing = { version = "0.1", default-features = false, features = ["log"] }
+dirs = "7"
+sha2 = "0.11"
+blake3 = "1"
+thiserror.workspace = true
+# Phase 7: text extraction from cached attachments. All extractors run
+# inside `tokio::task::spawn_blocking`; dispatch / skip-list / truncation
+# logic is pure-Rust, no subprocess.
+pdf-extract = "0.12"
+quick-xml.workspace = true
+encoding_rs = "0.8"
+zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
+
+[target.'cfg(unix)']
+dev-dependencies = {}
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.5"
+objc2-contacts = "0.3.2"
+objc2-foundation = "0.3.2"
+
+[target.'cfg(windows)']
+dev-dependencies = {}
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+base64.workspace = true
+tempfile = "3"

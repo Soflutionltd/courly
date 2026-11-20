@@ -1,0 +1,43 @@
+pub mod account;
+pub mod auto_responses;
+pub mod constants;
+pub use store::body_store;
+pub mod caldav;
+pub mod chat;
+pub mod cloud_attachments;
+pub mod command_palette_queries;
+pub mod contacts;
+pub use cmdk as command_palette;
+pub use label_colors::preset_colors;
+pub use sync::bundling;
+pub mod db;
+pub mod discovery;
+pub mod generation;
+pub use label_colors;
+pub use store::inline_image_store;
+pub use sync::filters;
+pub mod mdn;
+pub mod oauth;
+pub use ::db_read::blob_hash;
+pub use ::db_read::progress;
+pub mod provider;
+pub mod scope;
+// Phase 2 task 6: `core::send` moved to `service::send`; consumers
+// import from `service::send` directly. The Phase 5 prerequisite
+// retired the `core::actions` shim that briefly re-exported wire-shaped
+// `SendAttachment` / `SendRequest`; those types are now reached through
+// `service::actions::{SendAttachment, SendRequest}` (or `service::send`).
+pub use search;
+pub mod search_pipeline;
+pub use seen as seen_addresses;
+pub use smart_folder;
+pub mod send_identity;
+pub mod sender_logo;
+pub use sync;
+pub use sync::smart_labels;
+pub use sync::threading;
+pub mod url_cleaning;
+pub mod verification_code;
+
+// Re-exports for app-layer convenience - avoids direct common dependency.
+pub use common::crypto::load_encryption_key;

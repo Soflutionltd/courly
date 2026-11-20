@@ -1,0 +1,1009 @@
+use iced::widget::{
+    Space, button, column, container, mouse_area, radio, row, slider, text, text_input,
+};
+use iced::{Alignment, Element, Length};
+use rust_i18n::t;
+use std::borrow::Cow;
+
+use crate::icon;
+use crate::ui::animated_toggler::animated_toggler;
+use crate::ui::layout::*;
+use crate::ui::theme;
+use crate::ui::theme::RowPosition;
+use crate::ui::undoable_text_input::undoable_text_input;
+
+use super::types::*;
+
+// ── Row builder type ────────────────────────────────────
+//
+// Each section item is a closure that receives the row's `RowPosition`
+// (Top/Middle/Bottom/Only) so its hover background can match the section's
+// `RADIUS_LG` outer corners while keeping `RADIUS_SM` on inner seams.
+pub(super) type RowBuilder<'a> = Box<dyn FnOnce(RowPosition) -> Element<'a, SettingsMessage> + 'a>;
+
+/// Wrap a pre-built `Element` so it can be passed alongside position-aware
+/// row builders. Position is ignored - used for items that don't have hover
+/// styling (sliders, info rows, externally-built elements).
+pub(super) fn static_row<'a, E>(elem: E) -> RowBuilder<'a>
+where
+    E: Into<Element<'a, SettingsMessage>> + 'a,
+{
+    Box::new(move |_pos| elem.into())
+}
+
+/// Materialize a `RowBuilder` as an `Element` outside of a section context
+/// (assumes `RowPosition::Only`). Use when a builder is pushed onto a plain
+/// `column!` rather than into a `section()` items vec.
+pub(super) fn build_row<'a>(b: RowBuilder<'a>) -> Element<'a, SettingsMessage> {
+    b(RowPosition::Only)
+}
+
+/// Returns the position for index `i` in a list of length `n`.
+pub(super) fn position_for(i: usize, n: usize) -> RowPosition {
+    match (n, i) {
+        (1, _) => RowPosition::Only,
+        (_, 0) => RowPosition::Top,
+        (_, last) if last + 1 == n => RowPosition::Bottom,
+        _ => RowPosition::Middle,
+    }
+}
+
+/// Closure factory: builds the action-button style for a settings row at
+/// the given position, capturing `position` so the closure satisfies
+/// iced's `'static`-friendly style fn signature.
+pub(super) fn settings_row_style(
+    position: RowPosition,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
+    move |theme, status| theme::style_settings_row_button(theme, status, position)
+}
+
+// ── Translated text ─────────────────────────────────────
+
+/// A translation without placeholders as `&'static str`, for widgets that
+/// borrow their labels for the element's lifetime. rust-i18n returns these
+/// borrowed from its compiled-in tables; an owned value would only come from
+/// a backend change and is leaked rather than dropped mid-frame.
+pub(super) fn tr(translated: Cow<'static, str>) -> &'static str {
+    match translated {
+        Cow::Borrowed(s) => s,
+        Cow::Owned(s) => s.leak(),
+    }
+}
+
+/// `widgets::select` over canonical option values, which are what the
+/// state holds and persists. Each value is shown through `label`; values
+/// without a translation (product and model names, percentages) show as is.
+pub(super) fn translated_select<'a>(
+    options: &[&'static str],
+    selected: &'a str,
+    label: fn(&str) -> Option<&'static str>,
+    open: bool,
+    on_toggle: SettingsMessage,
+    on_select: impl Fn(String) -> SettingsMessage + 'a,
+) -> Element<'a, SettingsMessage> {
+    let pairs: Vec<(&'static str, &'static str)> = options
+        .iter()
+        .map(|value| (label(value).unwrap_or(value), *value))
+        .collect();
+    let labels: Vec<&'static str> = pairs.iter().map(|(shown, _)| *shown).collect();
+    crate::ui::widgets::select(
+        &labels,
+        label(selected).unwrap_or(selected),
+        open,
+        on_toggle,
+        move |shown| {
+            let value = pairs
+                .iter()
+                .find(|(l, _)| *l == shown)
+                .map_or(shown, |(_, value)| (*value).to_string());
+            on_select(value)
+        },
+    )
+}
+
+/// Display name of a canonical mail category ("Primary", "Updates", ...).
+pub(super) fn category_label(category: &str) -> Cow<'static, str> {
+    match category {
+        "Primary" => t!("settings.common.category_primary"),
+        "Updates" => t!("settings.common.category_updates"),
+        "Promotions" => t!("settings.common.category_promotions"),
+        "Social" => t!("settings.common.category_social"),
+        "Newsletters" => t!("settings.common.category_newsletters"),
+        other => Cow::Owned(other.to_string()),
+    }
+}
+
+// ── Shared setting widgets ──────────────────────────────
+
+pub(super) fn section<'a>(
+    title: &'a str,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_inner(Some(title), None, None, items)
+}
+
+pub(super) fn section_with_subtitle<'a>(
+    title: &'a str,
+    subtitle: &'a str,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_inner(Some(title), Some(subtitle), None, items)
+}
+
+/// Section with an owned `String` title - for cases where the title is
+/// computed dynamically (e.g. "Members (12)").
+#[allow(dead_code)] // helper kept for upcoming dynamic-title sections
+pub(super) fn section_dynamic_title<'a>(
+    title: String,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_dynamic_inner(title, None, items)
+}
+
+/// Section with an owned `String` title and an owned `String` subtitle.
+pub(super) fn section_dynamic_with_subtitle<'a>(
+    title: String,
+    subtitle: String,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_dynamic_inner(title, Some(subtitle), items)
+}
+
+pub(super) fn section_with_help<'a>(
+    title: &'a str,
+    help: SectionHelp<'a>,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_inner(Some(title), None, Some(help), items)
+}
+
+pub(super) fn section_untitled<'a>(items: Vec<RowBuilder<'a>>) -> Element<'a, SettingsMessage> {
+    section_inner(None, None, None, items)
+}
+
+/// Help tooltip configuration for a section header.
+pub(super) struct SectionHelp<'a> {
+    pub id: &'a str,
+    pub content: Element<'a, SettingsMessage>,
+    pub visible: bool,
+}
+
+fn section_inner<'a>(
+    title: Option<&'a str>,
+    subtitle: Option<&'a str>,
+    help: Option<SectionHelp<'a>>,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    let n = items.len();
+    let mut col = column![].width(Length::Fill).padding(1);
+    for (i, builder) in items.into_iter().enumerate() {
+        if i > 0 {
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+        }
+        col = col.push(builder(position_for(i, n)));
+    }
+    let section_box = container(col)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::SettingsSection.style());
+
+    if let Some(title) = title {
+        let title_text: Element<'a, SettingsMessage> = text(title)
+            .size(TEXT_XL)
+            .style(text::base)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..crate::font::text()
+            })
+            .into();
+
+        let header_row: Element<'a, SettingsMessage> = if let Some(help_cfg) = help {
+            let help_id = help_cfg.id.to_string();
+            let help_id_hover = help_id.clone();
+            let help_id_unhover = help_id.clone();
+            let help_icon = mouse_area(
+                button(
+                    container(
+                        icon::help_circle()
+                            .size(ICON_XL)
+                            .style(theme::TextClass::Muted.style()),
+                    )
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style()),
+            )
+            .on_enter(SettingsMessage::HelpHover(help_id_hover))
+            .on_exit(SettingsMessage::HelpUnhover(help_id_unhover));
+
+            let mut pop = crate::ui::anchored_overlay::anchored_overlay(help_icon)
+                .position(crate::ui::anchored_overlay::AnchorPosition::BelowRight)
+                .popup_width(HELP_TOOLTIP_WIDTH);
+
+            if help_cfg.visible {
+                pop = pop.popup(
+                    container(help_cfg.content)
+                        .padding(PAD_SETTINGS_ROW)
+                        .width(Length::Fill)
+                        .style(theme::ContainerClass::Floating.style()),
+                );
+            }
+
+            row![title_text, Space::new().width(Length::Fill), pop,]
+                .align_y(Alignment::Center)
+                .into()
+        } else {
+            title_text
+        };
+
+        let mut header = column![header_row].spacing(SPACE_XXXS);
+
+        if let Some(subtitle) = subtitle {
+            header = header.push(
+                text(subtitle)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            );
+        }
+
+        column![header, section_box].spacing(SPACE_XS)
+    } else {
+        column![section_box]
+    }
+    .into()
+}
+
+fn section_dynamic_inner<'a>(
+    title: String,
+    subtitle: Option<String>,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    let n = items.len();
+    let mut col = column![].width(Length::Fill).padding(1);
+    for (i, builder) in items.into_iter().enumerate() {
+        if i > 0 {
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+        }
+        col = col.push(builder(position_for(i, n)));
+    }
+    let section_box = container(col)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::SettingsSection.style());
+
+    let title_text = text(title)
+        .size(TEXT_XL)
+        .style(text::base)
+        .font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..crate::font::text()
+        });
+
+    let mut header = column![title_text].spacing(SPACE_XXXS);
+    if let Some(sub) = subtitle {
+        header = header.push(
+            text(sub)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+
+    column![header, section_box].spacing(SPACE_XS).into()
+}
+
+pub(super) fn settings_row_container<'a>(
+    height: f32,
+    content: impl Into<iced::Element<'a, SettingsMessage>>,
+) -> RowBuilder<'a> {
+    let content = content.into();
+    Box::new(move |_pos| {
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(height)
+            .align_y(Alignment::Center)
+            .into()
+    })
+}
+
+pub(super) fn setting_row<'a>(
+    label: &'a str,
+    control: Element<'a, SettingsMessage>,
+    on_press: SettingsMessage,
+) -> RowBuilder<'a> {
+    setting_row_with_description(label, None, control, on_press)
+}
+
+/// `setting_row` with an optional secondary line beneath the label, matching
+/// `toggle_row`'s two-line layout. With a description, the control's vertical
+/// position is locked to the label-line baseline (multi-line descriptions
+/// grow the row downward without moving the control). Without a description,
+/// the row stays at `SETTINGS_ROW_HEIGHT` and the control centres in it.
+pub(super) fn setting_row_with_description<'a>(
+    label: &'a str,
+    description: Option<&'a str>,
+    control: Element<'a, SettingsMessage>,
+    on_press: SettingsMessage,
+) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                row![
+                    container(
+                        text(label)
+                            .size(TEXT_LG)
+                            .style(text::base)
+                            .wrapping(text::Wrapping::None)
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                    control,
+                ]
+                .align_y(Alignment::Center)
+                .height(SETTINGS_LABEL_LINE_HEIGHT)
+                .width(Length::Fill),
+                row![
+                    container(
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .into()
+        } else {
+            row![
+                container(
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .wrapping(text::Wrapping::None)
+                )
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                control,
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        };
+
+        let mut outer = container(inner)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill);
+        if description.is_none() {
+            outer = outer.height(SETTINGS_ROW_HEIGHT).align_y(Alignment::Center);
+        }
+
+        button(outer)
+            .on_press(on_press)
+            .padding(0)
+            .style(settings_row_style(position))
+            .width(Length::Fill)
+            .into()
+    })
+}
+
+pub(super) fn toggle_row<'a>(
+    label: &'a str,
+    description: impl Into<Cow<'a, str>>,
+    value: bool,
+    on_toggle: impl Fn(bool) -> SettingsMessage + 'a,
+) -> RowBuilder<'a> {
+    let description = description.into();
+    Box::new(move |position| {
+        // Compute the button's press message before on_toggle is moved into the toggler.
+        // The toggler captures its own click events, so the button only fires when the
+        // user clicks outside the knob (e.g. on the label). No double-firing.
+        let on_press_msg = on_toggle(!value);
+        // Top line: bold label + toggler on a fixed-height baseline. The
+        // toggler's Y is anchored here regardless of how many lines the
+        // optional description below wraps to, so it never moves when
+        // content grows or the window narrows.
+        let top = row![
+            container(
+                text(label)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .wrapping(text::Wrapping::None)
+            )
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+            animated_toggler(value)
+                .size(TEXT_HEADING)
+                .on_toggle(on_toggle)
+                .style(theme::TogglerClass::Settings.style()),
+        ]
+        .align_y(Alignment::Center)
+        .height(SETTINGS_LABEL_LINE_HEIGHT)
+        .width(Length::Fill);
+
+        let inner: Element<'a, SettingsMessage> = if description.is_empty() {
+            top.into()
+        } else {
+            // Description capped at 80% of the row width via
+            // FillPortion(4)/(1) so it can't grow horizontally into the
+            // toggler column. Wraps freely.
+            column![
+                top,
+                row![
+                    container(
+                        text(description)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .into()
+        };
+
+        button(
+            container(inner)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+        )
+        .on_press(on_press_msg)
+        .padding(0)
+        .style(settings_row_style(position))
+        .width(Length::Fill)
+        .into()
+    })
+}
+
+pub(super) fn info_row(label: &str, value: &str) -> RowBuilder<'static> {
+    let label_owned = label.to_string();
+    let value_owned = value.to_string();
+    Box::new(move |_pos| {
+        let value_for_clipboard = value_owned.clone();
+        container(
+            row![
+                column![
+                    text(label_owned)
+                        .size(TEXT_SM)
+                        .style(theme::TextClass::Tertiary.style()),
+                    text_input("", value_owned.clone())
+                        .on_input(|_| SettingsMessage::Noop)
+                        .size(TEXT_LG)
+                        .padding(0)
+                        .style(theme::TextInputClass::Inline.style()),
+                ]
+                .spacing(SPACE_XXXS)
+                .width(Length::Fill),
+                button(
+                    container(icon::copy().size(ICON_MD).style(text::base))
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(SettingsMessage::CopyToClipboard(value_for_clipboard))
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style()),
+            ]
+            .spacing(SPACE_SM)
+            .align_y(Alignment::Center),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into()
+    })
+}
+
+pub(super) fn input_row<'a>(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    field: InputField,
+) -> RowBuilder<'a> {
+    input_row_inner(id, label, placeholder, value, on_input, field, false)
+}
+
+/// `input_row` with `secure(true)` on the underlying text input - for
+/// password-like fields.
+pub(super) fn input_row_secure<'a>(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    field: InputField,
+) -> RowBuilder<'a> {
+    input_row_inner(id, label, placeholder, value, on_input, field, true)
+}
+
+fn input_row_inner<'a>(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    field: InputField,
+    secure: bool,
+) -> RowBuilder<'a> {
+    let id_owned = id.to_string();
+    let label_owned = label.to_string();
+    let placeholder_owned = placeholder.to_string();
+    let value_owned = value.to_string();
+    Box::new(move |position| {
+        let id_clone = id_owned.clone();
+        mouse_area(
+            button(
+                container(
+                    row![
+                        column![
+                            text(label_owned.clone())
+                                .size(TEXT_SM)
+                                .style(theme::TextClass::Tertiary.style()),
+                            undoable_text_input(placeholder_owned.clone(), value_owned.clone())
+                                .id(id_clone.clone())
+                                .on_input(on_input)
+                                .on_undo(SettingsMessage::UndoInput(field))
+                                .on_redo(SettingsMessage::RedoInput(field))
+                                .secure(secure)
+                                .size(TEXT_LG)
+                                .padding(0)
+                                .style(theme::TextInputClass::Inline.style()),
+                        ]
+                        .spacing(SPACE_XXXS)
+                        .width(Length::Fill),
+                        container(icon::pencil().size(ICON_MD).style(text::base))
+                            .align_x(Alignment::Center)
+                            .align_y(Alignment::Center),
+                    ]
+                    .spacing(SPACE_SM)
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+            )
+            .on_press(SettingsMessage::FocusInput(id_clone))
+            .padding(0)
+            .style(settings_row_style(position))
+            .width(Length::Fill),
+        )
+        .interaction(iced::mouse::Interaction::Text)
+        .into()
+    })
+}
+
+pub(super) fn coming_soon_row<'a>(feature: &'a str) -> RowBuilder<'a> {
+    Box::new(move |_pos| {
+        container(
+            text(t!("settings.common.coming_soon", feature = feature))
+                .size(TEXT_LG)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .align_y(Alignment::Center)
+        .into()
+    })
+}
+
+/// A row with a label on the left (50%) and an optional icon + slider on the right (50%).
+/// No hover effect - only direct slider interaction. The slider has a strong snap toward `default`.
+// TODO(refactor): introduce a `SliderRow` builder struct - 9 args.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn slider_row<'a>(
+    label: &'a str,
+    description: Option<&'a str>,
+    icon: Option<iced::widget::Text<'a>>,
+    range: std::ops::RangeInclusive<f32>,
+    value: f32,
+    default: f32,
+    step: f32,
+    on_change: impl Fn(f32) -> SettingsMessage + 'a,
+    on_release: Option<SettingsMessage>,
+) -> RowBuilder<'a> {
+    Box::new(move |_pos| {
+        let mut slider_widget = slider(range, value, on_change)
+            .default(default)
+            .step(step)
+            .style(theme::SliderClass::Settings.style())
+            .width(Length::Fill);
+        if let Some(msg) = on_release {
+            slider_widget = slider_widget.on_release(msg);
+        }
+
+        let right_content: Element<'a, SettingsMessage> = if let Some(ic) = icon {
+            row![
+                container(ic.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center),
+                slider_widget,
+            ]
+            .spacing(SPACE_SM)
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        } else {
+            slider_widget.into()
+        };
+
+        // Same shape as the other description-bearing row builders: the
+        // label-line is fixed-height so the slider's vertical position is
+        // anchored regardless of how many lines the description below
+        // wraps to. Without a description the row stays at
+        // `SETTINGS_ROW_HEIGHT`.
+        let label_line = row![
+            container(
+                text(label)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .wrapping(text::Wrapping::None)
+            )
+            .align_y(Alignment::Center)
+            .width(Length::FillPortion(1)),
+            container(right_content)
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1)),
+        ]
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+        let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                container(label_line).height(SETTINGS_LABEL_LINE_HEIGHT),
+                row![
+                    container(
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill)
+            .into()
+        } else {
+            label_line.into()
+        };
+
+        let mut outer = container(inner)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill);
+        if description.is_none() {
+            outer = outer.height(SETTINGS_ROW_HEIGHT).align_y(Alignment::Center);
+        }
+        outer.into()
+    })
+}
+
+/// A group of mutually exclusive radio options, rendered as rows with hover effects.
+/// Each row has a radio circle on the left, label text a fixed distance away,
+/// and an optional description below the label that wraps within an 80%
+/// width cap. Radio groups must always have their own `section()` - don't
+/// mix with other row types.
+///
+/// Tuples are `(label, description, value)`. Pass `None` for `description`
+/// when an option doesn't need a secondary line.
+pub(super) fn radio_group<'a, V>(
+    options: &[(&'a str, Option<&'a str>, V)],
+    selected: Option<V>,
+    on_select: impl Fn(V) -> SettingsMessage + 'a + Copy,
+) -> Vec<RowBuilder<'a>>
+where
+    V: Copy + Eq + 'a,
+{
+    options
+        .iter()
+        .map(|(label, description, value)| {
+            let label = *label;
+            let description = *description;
+            let value = *value;
+            let row_builder: RowBuilder<'a> = Box::new(move |position| {
+                let msg = on_select(value);
+                let radio_circle = radio("", value, selected, on_select)
+                    .size(RADIO_SIZE)
+                    .spacing(0)
+                    .style(theme::RadioClass::Settings.style());
+
+                // Pin the radio circle onto the label-line baseline by
+                // wrapping it in a fixed-height container, so multi-line
+                // descriptions below the label don't drag the circle down.
+                let radio_slot = container(radio_circle)
+                    .align_y(Alignment::Center)
+                    .height(SETTINGS_RADIO_LINE_HEIGHT);
+
+                let label_text = container(
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .wrapping(text::Wrapping::None),
+                )
+                .align_y(Alignment::Center)
+                .height(SETTINGS_RADIO_LINE_HEIGHT)
+                .width(Length::Fill);
+
+                let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+                    // Radios put their control (the circle) outside the
+                    // description column to the left, so there's no
+                    // control on the right edge to "protect" from a long
+                    // description. Let the description take the full width
+                    // of the column rather than capping at 80% like the
+                    // toggle / dropdown rows have to.
+                    column![
+                        label_text,
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style())
+                            .width(Length::Fill),
+                    ]
+                    .width(Length::Fill)
+                    .into()
+                } else {
+                    label_text.into()
+                };
+
+                let outer_row = row![radio_slot, inner]
+                    .spacing(RADIO_LABEL_SPACING)
+                    .align_y(Alignment::Start)
+                    .width(Length::Fill);
+
+                let mut wrapper = container(outer_row)
+                    .padding(PAD_SETTINGS_ROW)
+                    .width(Length::Fill);
+                if description.is_none() {
+                    wrapper = wrapper
+                        .height(SETTINGS_ROW_HEIGHT)
+                        .align_y(Alignment::Center);
+                }
+
+                button(wrapper)
+                    .on_press(msg)
+                    .padding(0)
+                    .style(settings_row_style(position))
+                    .width(Length::Fill)
+                    .into()
+            });
+            row_builder
+        })
+        .collect()
+}
+
+/// Compose an outer (section-level) position with an inner (sub-list) position
+/// so a multi-row helper that fills a section keeps the section's outer corners
+/// on its first/last rows. Only the corners aligned with the outer position
+/// can be `LG`-rounded; otherwise the inner seams stay `SM`.
+pub(super) fn compose_positions(outer: RowPosition, inner: RowPosition) -> RowPosition {
+    match (outer, inner) {
+        (RowPosition::Only, p) => p,
+        (RowPosition::Top, RowPosition::Top) => RowPosition::Top,
+        (RowPosition::Top, RowPosition::Only) => RowPosition::Top,
+        (RowPosition::Bottom, RowPosition::Bottom) => RowPosition::Bottom,
+        (RowPosition::Bottom, RowPosition::Only) => RowPosition::Bottom,
+        _ => RowPosition::Middle,
+    }
+}
+
+/// The action type determines the trailing icon and label colour.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ActionKind {
+    /// Opens an external URL - shows external_link icon.
+    Url,
+    /// In-app action or slide-in overlay - shows arrow_right icon.
+    InApp,
+    /// Destructive in-app action (delete, sign out, reset). Trailing icon
+    /// is the trash glyph; both the label and the icon render in the
+    /// danger colour to make the row visually distinct from neutral
+    /// in-app actions sharing the same section.
+    Danger,
+}
+
+/// A full-row button with optional leading icon, label + optional description,
+/// and a trailing icon indicating the action type. The entire row is the click
+/// target - no nested buttons. Follows the rule that section rows never contain buttons.
+pub(super) fn action_row<'a>(
+    label: &'a str,
+    description: Option<&'a str>,
+    icon: Option<iced::widget::Text<'a>>,
+    kind: ActionKind,
+    on_press: SettingsMessage,
+) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        let trailing = match kind {
+            ActionKind::Url => icon::external_link(),
+            ActionKind::InApp => icon::arrow_right(),
+            ActionKind::Danger => icon::trash(),
+        };
+        let label_style: fn(&iced::Theme) -> text::Style = match kind {
+            ActionKind::Danger => text::danger,
+            _ => text::base,
+        };
+        let trailing_style: fn(&iced::Theme) -> text::Style = match kind {
+            ActionKind::Danger => text::danger,
+            _ => text::base,
+        };
+
+        // Inner column lives to the right of the optional leading icon. It
+        // contains the label-line (label + trailing icon, fixed-height) and,
+        // when present, a description that wraps below at 80% of its width.
+        // Trailing icon and leading icon both anchor to the label line so
+        // they don't drift when the description wraps to multiple lines.
+        let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                row![
+                    container(
+                        text(label)
+                            .size(TEXT_LG)
+                            .style(label_style)
+                            .wrapping(text::Wrapping::None)
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                    container(trailing.size(ICON_XL).style(trailing_style))
+                        .align_y(Alignment::Center),
+                ]
+                .align_y(Alignment::Center)
+                .height(SETTINGS_LABEL_LINE_HEIGHT)
+                .width(Length::Fill)
+                .spacing(SPACE_SM),
+                row![
+                    container(
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .into()
+        } else {
+            row![
+                container(
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(label_style)
+                        .wrapping(text::Wrapping::None)
+                )
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+                container(trailing.size(ICON_XL).style(trailing_style)).align_y(Alignment::Center),
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .spacing(SPACE_SM)
+            .into()
+        };
+
+        let mut outer_row = row![].spacing(SPACE_SM).width(Length::Fill);
+        if let Some(ico) = icon {
+            // Lock the leading icon onto the label-line baseline by giving
+            // its container the same fixed height. Outer row uses Top
+            // alignment so the icon and label stay paired even when the
+            // description wraps to multiple lines below.
+            outer_row = outer_row.push(
+                container(ico.size(ICON_XL).style(text::secondary))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+                    .height(SETTINGS_LABEL_LINE_HEIGHT),
+            );
+        }
+        outer_row = outer_row.push(inner);
+        let outer_row = outer_row.align_y(Alignment::Start);
+
+        button(outer_row)
+            .on_press(on_press)
+            .padding(PAD_SETTINGS_ROW)
+            .style(settings_row_style(position))
+            .width(Length::Fill)
+            .into()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `tr` only stays leak-free while rust-i18n hands out borrowed values.
+    #[test]
+    fn translations_without_placeholders_are_borrowed() {
+        assert!(matches!(
+            t!("settings.tabs.general", locale = "fr"),
+            Cow::Borrowed("Général")
+        ));
+        assert!(matches!(
+            t!("settings.tabs.general", locale = "en"),
+            Cow::Borrowed("General")
+        ));
+    }
+
+    #[test]
+    fn position_for_classifies_endpoints() {
+        // Lone item rounds all four outer corners.
+        assert_eq!(position_for(0, 1), RowPosition::Only);
+
+        // Two-item list: first row caps the top, second caps the bottom.
+        assert_eq!(position_for(0, 2), RowPosition::Top);
+        assert_eq!(position_for(1, 2), RowPosition::Bottom);
+
+        // Five-item list: only the endpoints round; everything between
+        // stays Middle so its inner seams meet the dividers cleanly.
+        assert_eq!(position_for(0, 5), RowPosition::Top);
+        assert_eq!(position_for(1, 5), RowPosition::Middle);
+        assert_eq!(position_for(2, 5), RowPosition::Middle);
+        assert_eq!(position_for(3, 5), RowPosition::Middle);
+        assert_eq!(position_for(4, 5), RowPosition::Bottom);
+    }
+
+    #[test]
+    fn compose_positions_preserves_outer_corners_only() {
+        // A nested list that itself fills the section keeps the section's
+        // outer rounding only on the matching ends.
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Top),
+            RowPosition::Top,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Bottom),
+            RowPosition::Bottom,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Middle),
+            RowPosition::Middle,
+        );
+
+        // Top outer + Top inner keeps the LG top corner; bottom edge has
+        // siblings inside the parent section so it must stay Middle.
+        assert_eq!(
+            compose_positions(RowPosition::Top, RowPosition::Top),
+            RowPosition::Top,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Top, RowPosition::Bottom),
+            RowPosition::Middle,
+        );
+
+        // Symmetric for Bottom.
+        assert_eq!(
+            compose_positions(RowPosition::Bottom, RowPosition::Bottom),
+            RowPosition::Bottom,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Bottom, RowPosition::Top),
+            RowPosition::Middle,
+        );
+
+        // Outer Middle never picks up outer corners regardless of inner.
+        assert_eq!(
+            compose_positions(RowPosition::Middle, RowPosition::Top),
+            RowPosition::Middle,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Middle, RowPosition::Only),
+            RowPosition::Middle,
+        );
+    }
+
+    #[test]
+    fn compose_positions_handles_single_internal_row() {
+        // A nested helper that renders a single row passes its inner Only
+        // through; the section position decides the outer rounding.
+        assert_eq!(
+            compose_positions(RowPosition::Top, RowPosition::Only),
+            RowPosition::Top,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Bottom, RowPosition::Only),
+            RowPosition::Bottom,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Only),
+            RowPosition::Only,
+        );
+    }
+}

@@ -1,0 +1,332 @@
+//! Service-side draft WAL drain.
+//!
+//! Phase 6a-part-2: the UI's compose auto-save and window-close
+//! paths append to `<data_dir>/drafts.wal` synchronously. The
+//! Service drains the WAL on next boot via
+//! `BootPhase::DrainingDraftWal` before signalling boot.ready, so
+//! the UI's editor restore reads `local_drafts` against the fully-
+//! replayed state.
+//!
+//! Crash safety:
+//! - The WAL writer flushes + `sync_all`s after every line, so a
+//!   process kill mid-write leaves at most one partial trailing
+//!   line on disk. The drainer skips any unparseable line (logs a
+//!   warning) and continues.
+//! - SQLite's `ON CONFLICT(id) DO UPDATE` (in `db_save_local_draft_sync`)
+//!   makes a duplicate replay a no-op. A crash mid-drain that left
+//!   N rows persisted and the rest unprocessed is safe to re-run -
+//!   the persisted rows update with the same payload, the
+//!   unprocessed rows insert.
+//! - On successful drain the active WAL is renamed aside to
+//!   `drafts.wal.replayed.<epoch_ms>`. A repeat boot finds no
+//!   active WAL (the rename target is ignored on subsequent
+//!   drains) and skips. Old `*.replayed.*` files are not pruned
+//!   automatically; they are bounded by the user's per-session
+//!   draft turnover and can be GC'd on a future maintenance pass.
+
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+
+use db::db::WriteTarget;
+use db::db::queries_extra::{SaveLocalDraftParams, db_save_local_draft_sync};
+use serde::{Deserialize, Serialize};
+
+pub(crate) use service_api::WAL_FILENAME;
+
+/// One entry on the WAL. Matches the UI-side serializer in
+/// `crates/app/src/draft_wal.rs`. The two crates do not share a
+/// module today; the wire shape is "NDJSON of `WalEntry`," validated
+/// at each end by serde.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WalEntry {
+    epoch_ms: u64,
+    params: SaveLocalDraftParams,
+}
+
+fn wal_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(WAL_FILENAME)
+}
+
+fn rotated_path(data_dir: &Path) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    data_dir.join(format!("{WAL_FILENAME}.replayed.{stamp}"))
+}
+
+/// Drain the WAL, replaying entries into `local_drafts`.
+///
+/// Returns the count of entries persisted (excluding skipped
+/// unparseable lines). A missing WAL file is `Ok(0)`. Failures
+/// reading or replaying log a warning and the drain continues -
+/// per the boot recovery contract (log+continue is preferable to
+/// blocking the boot handshake on a broken local file).
+pub(crate) fn drain(conn: &impl WriteTarget, data_dir: &Path) -> Result<usize, String> {
+    let path = wal_path(data_dir);
+    let file = match File::open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(format!("open {}: {e}", path.display())),
+    };
+    let reader = BufReader::new(file);
+    let mut replayed: usize = 0;
+    for (idx, line_result) in reader.lines().enumerate() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                log::warn!(
+                    "drafts.wal: read error at line {}: {e}; remaining entries skipped",
+                    idx + 1,
+                );
+                break;
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: WalEntry = match serde_json::from_str(&line) {
+            Ok(e) => e,
+            Err(e) => {
+                log::warn!("drafts.wal: skipping unparseable line {}: {e}", idx + 1,);
+                continue;
+            }
+        };
+        if let Err(e) = db_save_local_draft_sync(conn, &entry.params) {
+            log::warn!(
+                "drafts.wal: replay of draft {} failed: {e}; continuing",
+                entry.params.id,
+            );
+            continue;
+        }
+        replayed += 1;
+    }
+    let target = rotated_path(data_dir);
+    if let Err(e) = fs::rename(&path, &target) {
+        log::warn!(
+            "drafts.wal: rotate {} -> {} failed: {e}; the next boot will replay these \
+             entries again (idempotent)",
+            path.display(),
+            target.display(),
+        );
+    }
+    Ok(replayed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn fresh_pool(data_dir: &Path) -> db::db::WriterPool {
+        let pool = db::db::open_writer_pool(data_dir).expect("open writer pool");
+        pool.with_write_sync(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (id, email, provider) VALUES (?1, ?2, ?3)",
+                rusqlite::params!["acct-1", "acct-1@example.com", "gmail_api"],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .expect("seed account");
+        pool
+    }
+
+    /// Pin the wire shape against the canonical golden in
+    /// `service-api`. The UI-side `app::draft_wal` test asserts the
+    /// same constant; if either side's `WalEntry` /
+    /// `SaveLocalDraftParams` shape drifts, that side's test breaks.
+    /// To intentionally evolve the wire shape, update both
+    /// `DRAFT_WAL_GOLDEN_FIXTURE_JSON` in `service-api` and the
+    /// matching params in both crates.
+    #[test]
+    fn wire_shape_pins_to_service_api_golden() {
+        let entry = WalEntry {
+            epoch_ms: service_api::DRAFT_WAL_GOLDEN_FIXTURE_EPOCH_MS,
+            params: golden_fixture_params(),
+        };
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert_eq!(serialized, service_api::DRAFT_WAL_GOLDEN_FIXTURE_JSON);
+    }
+
+    fn golden_fixture_params() -> SaveLocalDraftParams {
+        SaveLocalDraftParams {
+            id: "draft-fixture".to_string(),
+            account_id: "acct-fixture".to_string(),
+            to_addresses: Some("to@example.com".to_string()),
+            cc_addresses: Some("cc@example.com".to_string()),
+            bcc_addresses: Some("bcc@example.com".to_string()),
+            subject: Some("fixture subject".to_string()),
+            body_html: Some("<p>fixture body</p>".to_string()),
+            reply_to_message_id: Some("msg-reply".to_string()),
+            thread_id: Some("thread-fixture".to_string()),
+            from_email: Some("me@example.com".to_string()),
+            signature_id: Some("sig-1".to_string()),
+            remote_draft_id: Some("remote-1".to_string()),
+            attachments: Some("[]".to_string()),
+            signature_separator_index: Some(42),
+        }
+    }
+
+    fn fresh_params(id: &str, subject: &str) -> SaveLocalDraftParams {
+        SaveLocalDraftParams {
+            id: id.to_string(),
+            account_id: "acct-1".to_string(),
+            to_addresses: None,
+            cc_addresses: None,
+            bcc_addresses: None,
+            subject: Some(subject.to_string()),
+            body_html: None,
+            reply_to_message_id: None,
+            thread_id: None,
+            from_email: None,
+            signature_id: None,
+            remote_draft_id: None,
+            attachments: None,
+            signature_separator_index: None,
+        }
+    }
+
+    fn write_wal_lines(data_dir: &Path, entries: &[WalEntry]) {
+        let path = wal_path(data_dir);
+        let mut f = std::fs::File::create(&path).expect("create wal");
+        for entry in entries {
+            let line = serde_json::to_string(entry).expect("ser");
+            writeln!(f, "{line}").expect("write");
+        }
+        f.sync_all().expect("sync");
+    }
+
+    fn count_drafts(pool: &db::db::WriterPool) -> i64 {
+        pool.with_read_sync(|conn| {
+            conn.query_row("SELECT count(*) FROM local_drafts", [], |row| row.get(0))
+                .map_err(|e| e.to_string())
+        })
+        .expect("count")
+    }
+
+    fn subject_of(pool: &db::db::WriterPool, id: &str) -> Option<String> {
+        let id = id.to_string();
+        pool.with_read_sync(move |conn| {
+            match conn.query_row(
+                "SELECT subject FROM local_drafts WHERE id = ?",
+                [id],
+                |row| row.get(0),
+            ) {
+                Ok(value) => Ok(Some(value)),
+                Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
+                Err(error) => Err(error.to_string()),
+            }
+        })
+        .expect("subject")
+    }
+
+    #[test]
+    fn drain_replays_each_entry_into_local_drafts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let entries = vec![
+            WalEntry {
+                epoch_ms: 1,
+                params: fresh_params("draft-a", "subj-a"),
+            },
+            WalEntry {
+                epoch_ms: 2,
+                params: fresh_params("draft-b", "subj-b"),
+            },
+        ];
+        write_wal_lines(dir.path(), &entries);
+        let pool = fresh_pool(dir.path());
+        let replayed = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("drain");
+        assert_eq!(replayed, 2);
+        assert_eq!(count_drafts(&pool), 2);
+        assert_eq!(subject_of(&pool, "draft-a").as_deref(), Some("subj-a"));
+        assert_eq!(subject_of(&pool, "draft-b").as_deref(), Some("subj-b"));
+        assert!(!wal_path(dir.path()).exists(), "active WAL must be rotated");
+    }
+
+    #[test]
+    fn drain_with_no_wal_file_is_ok() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pool = fresh_pool(dir.path());
+        let replayed = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("drain empty");
+        assert_eq!(replayed, 0);
+    }
+
+    #[test]
+    fn drain_skips_unparseable_line_and_replays_the_rest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = wal_path(dir.path());
+        let mut f = std::fs::File::create(&path).expect("create");
+        let good = WalEntry {
+            epoch_ms: 1,
+            params: fresh_params("draft-good", "subj"),
+        };
+        writeln!(f, "{}", serde_json::to_string(&good).expect("ser")).expect("write");
+        writeln!(f, "this is not valid json").expect("write garbage");
+        let good2 = WalEntry {
+            epoch_ms: 2,
+            params: fresh_params("draft-good-2", "subj-2"),
+        };
+        writeln!(f, "{}", serde_json::to_string(&good2).expect("ser")).expect("write");
+        f.sync_all().expect("sync");
+
+        let pool = fresh_pool(dir.path());
+        let replayed = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("drain");
+        assert_eq!(replayed, 2);
+        assert_eq!(count_drafts(&pool), 2);
+    }
+
+    #[test]
+    fn drain_is_idempotent_under_partial_replay() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pool = fresh_pool(dir.path());
+
+        // First drain: WAL has 2 entries, both replay.
+        let entries = vec![
+            WalEntry {
+                epoch_ms: 1,
+                params: fresh_params("dup", "first"),
+            },
+            WalEntry {
+                epoch_ms: 2,
+                params: fresh_params("new", "first-new"),
+            },
+        ];
+        write_wal_lines(dir.path(), &entries);
+        let first = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("first drain");
+        assert_eq!(first, 2);
+
+        // Crash and reboot: simulate a fresh WAL containing the same
+        // first entry plus a new third one. The first entry should
+        // UPSERT (not duplicate), the third should insert.
+        let entries = vec![
+            WalEntry {
+                epoch_ms: 3,
+                params: fresh_params("dup", "second"),
+            },
+            WalEntry {
+                epoch_ms: 4,
+                params: fresh_params("third", "third-new"),
+            },
+        ];
+        write_wal_lines(dir.path(), &entries);
+        let second = pool
+            .with_write_sync(|conn| drain(conn, dir.path()))
+            .expect("second drain");
+        assert_eq!(second, 2);
+
+        assert_eq!(count_drafts(&pool), 3);
+        assert_eq!(subject_of(&pool, "dup").as_deref(), Some("second"));
+        assert_eq!(subject_of(&pool, "new").as_deref(), Some("first-new"));
+        assert_eq!(subject_of(&pool, "third").as_deref(), Some("third-new"));
+    }
+}

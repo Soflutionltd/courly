@@ -1,0 +1,51 @@
+[package]
+name = "conduit-imap"
+publish = false
+description = "IMAP Account implementation for conduit"
+version.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+keywords = ["email", "imap", "async", "tokio"]
+categories = ["email", "network-programming", "asynchronous"]
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+base64 = { workspace = true }
+conduit-types = { path = "../types" }
+conduit-net = { path = "../net" }
+conduit-caldav = { path = "../caldav" }
+conduit-carddav = { path = "../carddav" }
+conduit-sasl = { path = "../sasl" }
+conduit-smtp = { path = "../smtp", features = ["tokio"] }
+bytes = { workspace = true }
+jiff = { workspace = true }
+flate2 = "1"
+futures = { workspace = true }
+getrandom = { workspace = true }
+native-tls = { workspace = true }
+nom = { workspace = true }
+socket2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "net", "time", "sync", "macros"] }
+tokio-native-tls = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true, features = ["std"] }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1.2"
+proptest = "1"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

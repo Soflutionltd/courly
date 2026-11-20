@@ -1,0 +1,117 @@
+//! Cross-crate type-level conformance for the four protocol Account
+//! and AccountFactory implementations.
+//!
+//! Constructs each public factory, witnesses that `dyn Account` and
+//! `dyn AccountFactory` are object-safe, and verifies the four
+//! `AccountFactory::open(AccountId)` implementations compose with
+//! `SyncEngine::attach` at the type level. The attach future is
+//! constructed but never polled, so no network work runs.
+
+use std::sync::Arc;
+
+use conduit_google::account::GoogleAccountFactory;
+use conduit_graph::account::{GraphAccountFactory, GraphClient};
+use conduit_imap::{
+    AuthPolicy, Credentials, ImapConfig,
+    account::{ImapAccountConfig, ImapAccountFactory},
+};
+use conduit_jmap::sync::{JmapAccountFactory, JmapCredentials};
+use conduit_sync::SyncEngine;
+use conduit_types::{Account, AccountFactory, AccountId};
+
+fn _account_is_object_safe(_: &dyn Account) {}
+
+fn _account_factory_is_object_safe(_: &dyn AccountFactory) {}
+
+fn sync_engine() -> SyncEngine {
+    SyncEngine::builder()
+        .build()
+        .expect("default engine config is valid")
+}
+
+fn _assert_attach_accepts(engine: &SyncEngine, factory: &Arc<dyn AccountFactory>) {
+    let _future = engine.attach(
+        AccountId("cross-crate-conformance".to_owned()),
+        Arc::clone(factory),
+    );
+}
+
+fn imap_factory() -> Arc<dyn AccountFactory> {
+    let config = ImapAccountConfig::new(
+        ImapConfig::tls("imap.example.test"),
+        Credentials::password("user@example.test", "password"),
+        AuthPolicy::default(),
+    );
+    Arc::new(ImapAccountFactory::new(config))
+}
+
+fn jmap_factory() -> Arc<dyn AccountFactory> {
+    Arc::new(
+        JmapAccountFactory::builder(
+            "https://jmap.example.test/session",
+            JmapCredentials::bearer("test-token"),
+        )
+        .build(),
+    )
+}
+
+fn google_factory() -> Arc<dyn AccountFactory> {
+    Arc::new(GoogleAccountFactory::from_access_token("test-token"))
+}
+
+fn graph_factory() -> Arc<dyn AccountFactory> {
+    Arc::new(GraphAccountFactory::new(GraphClient::new("test-token")))
+}
+
+#[test]
+fn account_traits_are_object_safe() {
+    let _account: fn(&dyn Account) = _account_is_object_safe;
+    let _factory: fn(&dyn AccountFactory) = _account_factory_is_object_safe;
+}
+
+#[test]
+fn imap_factory_composes_with_engine() {
+    let engine = sync_engine();
+    let factory: Arc<dyn AccountFactory> = imap_factory();
+    _account_factory_is_object_safe(factory.as_ref());
+    _assert_attach_accepts(&engine, &factory);
+}
+
+#[test]
+fn jmap_factory_composes_with_engine() {
+    let engine = sync_engine();
+    let factory: Arc<dyn AccountFactory> = jmap_factory();
+    _account_factory_is_object_safe(factory.as_ref());
+    _assert_attach_accepts(&engine, &factory);
+}
+
+#[test]
+fn google_factory_composes_with_engine() {
+    let engine = sync_engine();
+    let factory: Arc<dyn AccountFactory> = google_factory();
+    _account_factory_is_object_safe(factory.as_ref());
+    _assert_attach_accepts(&engine, &factory);
+}
+
+#[test]
+fn graph_factory_composes_with_engine() {
+    let engine = sync_engine();
+    let factory: Arc<dyn AccountFactory> = graph_factory();
+    _account_factory_is_object_safe(factory.as_ref());
+    _assert_attach_accepts(&engine, &factory);
+}
+
+#[test]
+fn all_four_factories_share_engine_signature() {
+    let engine = sync_engine();
+    let factories: Vec<Arc<dyn AccountFactory>> = vec![
+        imap_factory(),
+        jmap_factory(),
+        google_factory(),
+        graph_factory(),
+    ];
+
+    for factory in &factories {
+        _assert_attach_accepts(&engine, factory);
+    }
+}

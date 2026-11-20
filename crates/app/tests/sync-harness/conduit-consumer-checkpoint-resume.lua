@@ -1,0 +1,71 @@
+-- description: Conduit consumer checkpoint-resume API smoke
+-- expected: pass
+-- fixture: jmap-small.toml
+-- protocol: jmap
+-- ceiling: 60s
+--
+-- The fixture is nominal: this script drives the inject path only
+-- (test.conduit_attach + test.conduit_inject_batch) and never talks to the
+-- mock. It names one anyway because `brokkr sync` discovery requires fixture
+-- frontmatter; `brokkr service` runs it identically without the mock.
+
+local dir = harness.data_dir("conduit_consumer_checkpoint_resume")
+local client, err = harness.spawn(dir)
+harness.assert(err == nil, "spawn failed")
+
+local ready, ready_err = client:request("BootReady")
+harness.assert(ready_err == nil, "boot.ready failed")
+harness.assert(ready.ready, "boot.ready returned ready=false")
+
+local seeded, seed_err = client:request("TestSeedAccount", {
+    email = "conduit-checkpoint@example.test",
+    provider = "jmap",
+})
+harness.assert(seed_err == nil, "TestSeedAccount failed")
+
+local attach, attach_err = client:request("test.conduit_attach", {
+    account_id = seeded.account_id,
+    provider_kind = "jmap",
+    detach_on_complete = false,
+})
+harness.assert(attach_err == nil, "test.conduit_attach failed")
+harness.assert(attach.subscribed, "consumer did not subscribe")
+
+local injected, inject_err = client:request("test.conduit_inject_batch", {
+    account_id = seeded.account_id,
+    session_id = attach.session_id,
+    scope = "account",
+    checkpoint = { 11 },
+    messages = {
+        {
+            id = "conduit-checkpoint-m1",
+            thread_id = "conduit-checkpoint-t1",
+            subject = "Conduit checkpoint resume",
+            from_addr = "conduit-checkpoint@example.test",
+            to_addrs = { "resume-peer@example.test" },
+            folder_ids = { "INBOX" },
+            label_ids = { "kw:checkpoint" },
+            keywords = { "checkpoint" },
+            raw_body = "checkpoint resume searchable body",
+        },
+    },
+})
+harness.assert(inject_err == nil, "test.conduit_inject_batch failed")
+harness.assert(injected.acked, "batch should ack")
+
+local probe, probe_err = client:request("test.conduit_probe", {
+    account_id = seeded.account_id,
+    scope = "account",
+    seen_address = "resume-peer@example.test",
+    searchable_message_id = "conduit-checkpoint-m1",
+})
+harness.assert(probe_err == nil, "test.conduit_probe failed")
+harness.assert(probe.durable_cursor ~= nil, "durable cursor missing after ack")
+harness.assert_eq(probe.durable_cursor.kind, "change", "cursor kind")
+harness.assert_eq(probe.durable_cursor.scope_key, "account", "cursor scope")
+harness.assert_eq(probe.times_sent_to, 1, "seen counter should be exactly once")
+harness.assert_eq(probe.is_searchable, true, "message should be queryable after inject")
+
+local ok, shutdown_err = client:shutdown()
+harness.assert(ok, "shutdown failed")
+harness.assert(shutdown_err == nil, "shutdown returned error")

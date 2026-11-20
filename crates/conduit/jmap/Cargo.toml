@@ -1,0 +1,72 @@
+[package]
+name = "conduit-jmap"
+publish = false
+description = "JMAP Account implementation for conduit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["jmap", "email", "mail", "e-mail"]
+categories = ["email"]
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-stream = { workspace = true }
+base64 = { workspace = true }
+conduit-net = { path = "../net" }
+conduit-types = { path = "../types", optional = true }
+bytes = { workspace = true }
+jiff = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true, optional = true }
+native-tls = { workspace = true, optional = true }
+percent-encoding = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "native-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
+tokio = { workspace = true, features = ["io-util", "rt", "sync", "time"], optional = true }
+tracing = { workspace = true, features = ["std"], optional = true }
+tokio-native-tls = { workspace = true, optional = true }
+tokio-util = { workspace = true, features = ["rt"], optional = true }
+tokio-websockets = { version = "0.13", default-features = false, features = ["client", "native-tls", "sha1_smol", "getrandom"], optional = true }
+
+[features]
+default = ["websockets", "mail", "calendars", "contacts", "blob", "quota"]
+websockets = [
+    "tokio",
+    "dep:tokio-websockets",
+    "dep:tokio-native-tls",
+    "dep:native-tls",
+    "dep:http",
+]
+mail = []
+calendars = []
+contacts = []
+blob = []
+quota = []
+sync = [
+    "dep:conduit-types",
+    "dep:tokio-util",
+    "dep:tracing",
+    "tokio",
+    "websockets",
+    "mail",
+    "blob",
+    "quota",
+]
+debug = []
+
+[dev-dependencies]
+conduit-net = { path = "../net", features = ["test-support"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+[[example]]
+name = "account"
+required-features = ["sync"]

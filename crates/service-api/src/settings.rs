@@ -1,0 +1,285 @@
+//! Settings wire types.
+//!
+//! The Service owns global `settings` key/value table writes. Today's only call
+//! site is `handle_settings_event::PreferencesCommitted` in the app
+//! crate, which writes seven settings in one atomic transaction.
+//!
+//! Wire shape preserves that atomicity: `SettingsSetParams` carries a
+//! `Vec<SettingValue>` and the Service-side handler writes them all in
+//! a single transaction. A partial commit on Service crash mid-write
+//! is impossible by SQLite construction.
+//!
+//! `SettingValue` is a typed enum with one variant per persisted
+//! setting. The exhaustive-match house style (mirrors `MailOperation`)
+//! makes adding a setting a compile-time-visible change at every
+//! dispatch site rather than a stringly-typed runtime check.
+
+use serde::{Deserialize, Serialize};
+
+/// One persisted setting. Each variant corresponds to one row in the
+/// global `settings` table. Adding a new persisted setting adds a
+/// variant here; the Service-side handler's exhaustive match then
+/// fails to compile until the new variant is wired through.
+///
+/// Serializes as `{ "type": "show_sync_status", "value": true }` style
+/// (serde tag/content). See the round-trip test for the wire shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum SettingValue {
+    ShowSyncStatus(bool),
+    /// Install app updates as soon as they are found instead of asking.
+    AutoUpdate(bool),
+    BlockRemoteImages(bool),
+    PhishingDetectionEnabled(bool),
+    PhishingSensitivity(String),
+    Theme(String),
+    FontSize(String),
+    /// Row density of the folder column and the message list, as its
+    /// settings value ("Compact", "Comfortable", "Spacious").
+    EmailDensity(String),
+    ReadingPanePosition(String),
+    /// Attachments roadmap Phase 6: retention window in days. Drives
+    /// both `sync_initial`'s walk-back depth (`sync_dispatch.rs`) and
+    /// the prefetch backfill kick's `window_start_unix` filter. String-
+    /// typed to match the snapshot's `sync_period_days: Option<String>`
+    /// shape; the Service parses to `i64` on read.
+    SyncPeriodDays(String),
+    /// Attachments roadmap Phase 6: squeeze pipeline master switch.
+    /// Phase 6 persists; Phase 9 reads when wiring inline squeeze
+    /// into `PackStore::put`.
+    CompressAttachments(bool),
+    /// Attachments roadmap Phase 6: allow lossy re-encoding (JPEG
+    /// quality reduction etc.). Default off so signed / regulated
+    /// content stays byte-equivalent. Phase 9 reads.
+    AllowLossyCompression(bool),
+    /// Attachments roadmap Phase 6 / Phase 8: TTL in days for files
+    /// under `<app_data>/opened_attachments/`. String-typed to match
+    /// the rest of the slider-backed numeric prefs.
+    OpenedFilesCleanupDays(String),
+    /// Reading zoom for HTML email bodies, as its percent label ("90%").
+    EmailZoom(String),
+    /// Group the thread list under Today / Yesterday / ... headers.
+    ThreadDateGroups(bool),
+    /// Open every compose with the Cc field shown.
+    ComposeAlwaysShowCc(bool),
+    /// Ask for a read receipt on every message, unless one opts out.
+    ComposeRequestReadReceipt(bool),
+    /// Sidebar folder order and separators per scope, as JSON.
+    SidebarLayout(String),
+    /// Toolbar buttons in order and label mode, as JSON.
+    ToolbarLayout(String),
+    /// Where the title-bar search looks, as JSON.
+    SearchScope(String),
+    /// Seconds between two checks for new mail on accounts without push
+    /// (Outlook, and Gmail or JMAP when push is unavailable).
+    MailCheckInterval(String),
+    /// Email body background mode, as its settings label ("Auto").
+    EmailBodyBackground(String),
+    /// Message date format in the reading pane ("Relative Offset", "Absolute").
+    DateDisplay(String),
+    /// When an opened message is marked as read
+    /// ("Instantly", "After 2 Seconds", "Manually").
+    MarkAsReadBehavior(String),
+    /// Seconds a sent message waits so it can be cancelled ("0" to "30").
+    UndoSendDelaySeconds(String),
+    /// Desktop notifications for new mail.
+    NotificationsEnabled(bool),
+    /// Notify only for VIP senders and the categories below.
+    SmartNotifications(bool),
+    /// Inbox categories that notify, comma-separated ("Primary,Updates").
+    NotifyCategories(String),
+    /// Senders that always notify, one address per line, for every account.
+    NotificationVipSenders(String),
+    /// People starred as favourites, listed in the folder column, as JSON.
+    FavoriteContacts(String),
+    /// Sections of the folder column the reader took out of it, as
+    /// comma-separated keys ("smart,starred").
+    SidebarHidden(String),
+    /// Show the brand logo of known senders. Off, no logo is fetched.
+    SenderLogos(bool),
+}
+
+impl SettingValue {
+    /// Storage key for the row in the `settings` table.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::ShowSyncStatus(_) => "show_sync_status",
+            Self::AutoUpdate(_) => "auto_update",
+            Self::BlockRemoteImages(_) => "block_remote_images",
+            Self::PhishingDetectionEnabled(_) => "phishing_detection_enabled",
+            Self::PhishingSensitivity(_) => "phishing_sensitivity",
+            Self::Theme(_) => "theme",
+            Self::FontSize(_) => "font_size",
+            Self::EmailDensity(_) => "email_density",
+            Self::ReadingPanePosition(_) => "reading_pane_position",
+            Self::SyncPeriodDays(_) => "sync_period_days",
+            Self::CompressAttachments(_) => "compress_attachments",
+            Self::AllowLossyCompression(_) => "allow_lossy_compression",
+            Self::OpenedFilesCleanupDays(_) => "opened_files_cleanup_days",
+            Self::EmailZoom(_) => "email_zoom",
+            Self::ThreadDateGroups(_) => "thread_date_groups",
+            Self::ComposeAlwaysShowCc(_) => "compose_always_show_cc",
+            Self::ComposeRequestReadReceipt(_) => "compose_request_read_receipt",
+            Self::SidebarLayout(_) => "sidebar_layout",
+            Self::ToolbarLayout(_) => "toolbar_layout",
+            Self::SearchScope(_) => "search_scope",
+            Self::MailCheckInterval(_) => "mail_check_interval",
+            Self::EmailBodyBackground(_) => "email_body_background",
+            Self::DateDisplay(_) => "date_display",
+            Self::MarkAsReadBehavior(_) => "mark_as_read_behavior",
+            Self::UndoSendDelaySeconds(_) => "undo_send_delay_seconds",
+            Self::NotificationsEnabled(_) => "notifications_enabled",
+            Self::SmartNotifications(_) => "smart_notifications",
+            Self::NotifyCategories(_) => "notify_categories",
+            Self::NotificationVipSenders(_) => "notification_vip_senders",
+            Self::FavoriteContacts(_) => "favorite_contacts",
+            Self::SidebarHidden(_) => "sidebar_hidden",
+            Self::SenderLogos(_) => "sender_logos",
+        }
+    }
+
+    /// Render the value for the storage row's `TEXT` column.
+    /// Booleans encode as `"true"` / `"false"` to match today's
+    /// `set_setting` callers.
+    pub fn render_for_storage(&self) -> String {
+        match self {
+            Self::ShowSyncStatus(v)
+            | Self::AutoUpdate(v)
+            | Self::BlockRemoteImages(v)
+            | Self::PhishingDetectionEnabled(v)
+            | Self::CompressAttachments(v)
+            | Self::AllowLossyCompression(v)
+            | Self::ThreadDateGroups(v)
+            | Self::ComposeAlwaysShowCc(v)
+            | Self::ComposeRequestReadReceipt(v)
+            | Self::NotificationsEnabled(v)
+            | Self::SmartNotifications(v)
+            | Self::SenderLogos(v) => {
+                if *v {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
+            }
+            Self::PhishingSensitivity(s)
+            | Self::Theme(s)
+            | Self::FontSize(s)
+            | Self::EmailDensity(s)
+            | Self::ReadingPanePosition(s)
+            | Self::SyncPeriodDays(s)
+            | Self::OpenedFilesCleanupDays(s)
+            | Self::EmailZoom(s)
+            | Self::SidebarLayout(s)
+            | Self::ToolbarLayout(s)
+            | Self::SearchScope(s)
+            | Self::MailCheckInterval(s)
+            | Self::EmailBodyBackground(s)
+            | Self::DateDisplay(s)
+            | Self::MarkAsReadBehavior(s)
+            | Self::UndoSendDelaySeconds(s)
+            | Self::NotifyCategories(s)
+            | Self::NotificationVipSenders(s)
+            | Self::FavoriteContacts(s)
+            | Self::SidebarHidden(s) => s.clone(),
+        }
+    }
+}
+
+/// `settings.set` request body. Carries one or more `SettingValue`s
+/// that the Service writes in a single atomic transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsSetParams {
+    pub values: Vec<SettingValue>,
+}
+
+/// `settings.set` ack. Empty struct; failure surfaces through
+/// `ServiceResponse::Error`. Transaction atomicity means a successful
+/// ack implies all values are committed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsSetAck;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setting_value_round_trips_through_serde() {
+        let cases = vec![
+            SettingValue::ShowSyncStatus(true),
+            SettingValue::BlockRemoteImages(false),
+            SettingValue::Theme("dark".to_string()),
+            SettingValue::FontSize("medium".to_string()),
+            SettingValue::ReadingPanePosition("right".to_string()),
+        ];
+        for value in cases {
+            let json = serde_json::to_value(&value).expect("serialize");
+            let recovered: SettingValue = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(value, recovered);
+        }
+    }
+
+    #[test]
+    fn settings_set_params_round_trips() {
+        let params = SettingsSetParams {
+            values: vec![
+                SettingValue::ShowSyncStatus(true),
+                SettingValue::Theme("light".to_string()),
+            ],
+        };
+        let json = serde_json::to_value(&params).expect("serialize");
+        let recovered: SettingsSetParams = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(params, recovered);
+    }
+
+    #[test]
+    fn setting_value_storage_keys_are_unique() {
+        let values = [
+            SettingValue::ShowSyncStatus(true),
+            SettingValue::AutoUpdate(false),
+            SettingValue::BlockRemoteImages(true),
+            SettingValue::PhishingDetectionEnabled(true),
+            SettingValue::PhishingSensitivity("medium".to_string()),
+            SettingValue::Theme("light".to_string()),
+            SettingValue::FontSize("medium".to_string()),
+            SettingValue::EmailDensity("Compact".to_string()),
+            SettingValue::ReadingPanePosition("right".to_string()),
+            SettingValue::MailCheckInterval("2".to_string()),
+            SettingValue::EmailBodyBackground("Auto".to_string()),
+            SettingValue::ThreadDateGroups(true),
+            SettingValue::ComposeAlwaysShowCc(true),
+            SettingValue::ComposeRequestReadReceipt(true),
+            SettingValue::DateDisplay("Absolute".to_string()),
+            SettingValue::MarkAsReadBehavior("Manually".to_string()),
+            SettingValue::UndoSendDelaySeconds("10".to_string()),
+            SettingValue::NotificationsEnabled(true),
+            SettingValue::SmartNotifications(true),
+            SettingValue::NotifyCategories("Primary".to_string()),
+            SettingValue::NotificationVipSenders(String::new()),
+            SettingValue::SenderLogos(true),
+        ];
+        let mut keys: Vec<_> = values.iter().map(SettingValue::key).collect();
+        keys.sort_unstable();
+        let original_len = keys.len();
+        keys.dedup();
+        assert_eq!(keys.len(), original_len, "setting keys must be unique");
+    }
+
+    #[test]
+    fn bool_setting_renders_as_true_false_string() {
+        assert_eq!(
+            SettingValue::ShowSyncStatus(true).render_for_storage(),
+            "true"
+        );
+        assert_eq!(
+            SettingValue::ShowSyncStatus(false).render_for_storage(),
+            "false"
+        );
+    }
+
+    #[test]
+    fn settings_set_ack_round_trips() {
+        let ack = SettingsSetAck;
+        let json = serde_json::to_value(&ack).expect("serialize");
+        let _recovered: SettingsSetAck = serde_json::from_value(json).expect("deserialize");
+    }
+}

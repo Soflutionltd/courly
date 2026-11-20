@@ -1,0 +1,1087 @@
+//! Driver task. Owns the `WireReader` and `ProtocolState` exclusively.
+//! The public API submits commands over mpsc and awaits oneshot replies.
+//!
+//! The driver task is the only code that touches the wire reader and
+//! protocol state directly. All command execution flows through
+//! `run_one_command`, which runs the dispatch loop on decomposed
+//! primitives (`WireReader`, `ProtocolState`, tag generator,
+//! `DriverEventSink`).
+
+use tokio::sync::{mpsc, oneshot, watch};
+use tracing::trace;
+
+use conduit_types::TransmissionState;
+
+use crate::codec::classification::{self, ClassificationContext, SolicitationRule};
+use crate::codec::encode::{EncodeOptions, LiteralMode};
+use crate::error::Error;
+use crate::types::Command;
+use crate::types::response::{Capability, UntaggedResponse, UntaggedStatus};
+use crate::types::validated::MailboxName;
+
+use super::NotifyFlags;
+use super::dispatch::{
+    BackpressureState, Consumer, ConsumerContext, ContinuationConsumer, ContinuationReply,
+    Finalized, StreamingConsumer,
+};
+mod events;
+mod idle;
+mod pipeline;
+mod upgrade;
+mod wire_send;
+
+use events::{
+    emit_tagged_response_code_events, emit_untagged_response_code_events,
+    has_critical_response_code,
+};
+use idle::run_idle;
+#[cfg(test)]
+use pipeline::group_into_sub_batches;
+use pipeline::run_pipeline;
+use upgrade::{logout_best_effort, run_upgrade};
+use wire_send::{send_chunked_segments, send_command_on_wire};
+
+pub(in crate::connection) use upgrade::run_starttls_upgrade;
+
+/// Per-command result type for pipelined batch execution.
+///
+/// Each element corresponds to one command in the pipeline: `Ok` holds
+/// the consumer's type-erased output, `Err` holds a per-command error
+/// (e.g., server `NO` response).
+pub(super) type PipelineResults = Vec<Result<Box<dyn std::any::Any + Send>, Error>>;
+
+/// A command submitted to the driver task over `cmd_tx`.
+///
+/// Either a regular protocol command (with a type-erased consumer for
+/// response routing) or a stream upgrade (STARTTLS / COMPRESS) that
+/// the driver handles atomically without a consumer.
+pub(super) enum DriverCommand {
+    /// Regular command  -  the driver encodes/sends it and routes responses
+    /// to the consumer via the classification-based dispatcher.
+    Run {
+        payload: DriverCommandPayload,
+        consumer: DriverConsumer,
+        result_tx: oneshot::Sender<Result<Box<dyn std::any::Any + Send>, Error>>,
+    },
+    /// Stream upgrade  -  the driver sends the protocol command, awaits
+    /// the tagged OK, then atomically swaps the stream using the
+    /// `Poisoned` sentinel (I9, I10). No consumer needed.
+    Upgrade {
+        payload: UpgradePayload,
+        result_tx: oneshot::Sender<Result<Box<dyn std::any::Any + Send>, Error>>,
+    },
+    /// Pipelined batch  -  multiple commands submitted in one write,
+    /// responses routed to each consumer by tag.
+    Pipeline {
+        /// Commands to encode and send as a batch.
+        commands: Vec<Command>,
+        /// Per-command consumers, parallel to `commands`.
+        consumers: Vec<Box<dyn ConsumerErased>>,
+        /// Channel for the per-command results.
+        result_tx: oneshot::Sender<Result<PipelineResults, Error>>,
+    },
+    /// Set TCP keepalive socket options (OS-level, not IMAP protocol).
+    ///
+    /// Delegates to `WireReader::set_keepalive` which sets `setsockopt(2)`
+    /// options on the underlying TCP socket. No data is sent on the wire.
+    SetKeepalive {
+        /// Keepalive configuration to apply.
+        keepalive: super::TcpKeepalive,
+        /// Channel for the result.
+        result_tx: oneshot::Sender<Result<(), Error>>,
+    },
+    /// Read the peer certificate DER from the owned stream (no wire I/O).
+    PeerCertificate {
+        result_tx: oneshot::Sender<Option<Vec<u8>>>,
+    },
+    /// IDLE session  -  the driver enters IDLE mode on the wire, reads
+    /// events and publishes them via the event sink, and exits when
+    /// `done_rx` fires or the server terminates IDLE (RFC 2177).
+    Idle {
+        /// Handle signals DONE via this channel.
+        done_rx: oneshot::Receiver<()>,
+        /// Driver reports how IDLE ended.
+        result_tx: oneshot::Sender<Result<IdleTermination, Error>>,
+    },
+}
+
+/// How an IDLE session ended (RFC 2177 Section 3).
+#[derive(Debug)]
+pub(super) enum IdleTermination {
+    /// Client sent DONE (normal exit).
+    ClientDone,
+    /// Server sent tagged OK (server-terminated IDLE).
+    ServerTerminated,
+}
+
+/// Payload for a [`DriverCommand::Run`].
+///
+/// Standard commands are encoded by the driver via [`encode_command`].
+/// APPEND and MULTIAPPEND carry whole messages, so they have their own payload
+/// and their own encoder, but the same rule holds: the DRIVER encodes and
+/// validates them, at execution, from the state it owns.
+pub(super) enum DriverCommandPayload {
+    /// Standard IMAP command  -  encoded and sent by the driver.
+    Standard(Command),
+    /// APPEND (`multi == false`, one message) or MULTIAPPEND (`multi == true`,
+    /// RFC 3502).
+    ///
+    /// Nothing about the wire form is decided handle-side. The driver runs
+    /// [`encode_append`](crate::codec::encode::encode_append) against LIVE
+    /// state when the command reaches the head of the queue, so the mailbox
+    /// encoding, the RFC 6855 `UTF8 (` wrapper, RFC 7888 `+` markers, literal8
+    /// eligibility, session legality, the MULTIAPPEND capability and the
+    /// BINARY requirement for NUL-bearing bodies all reflect the connection
+    /// as it is at send time. Bytes prebuilt handle-side froze those decisions
+    /// while the command sat queued behind another, which is how a queued
+    /// APPEND could be written under a protocol revision it was not encoded
+    /// for.
+    ///
+    /// The bodies are [`bytes::Bytes`] and travel to the socket by reference.
+    Append {
+        /// Destination mailbox, as the caller named it (decoded form).
+        mailbox: String,
+        /// The messages to append; exactly one unless `multi`.
+        messages: Vec<crate::types::AppendMessage>,
+        /// Whether this is MULTIAPPEND (requires the capability).
+        multi: bool,
+    },
+}
+
+/// Payload for a [`DriverCommand::Upgrade`].
+///
+/// Stream upgrades are handled atomically by the driver task using the
+/// `Poisoned` sentinel pattern (I9, I10). The driver sends the protocol
+/// command (STARTTLS / COMPRESS), awaits the tagged OK, then swaps the
+/// stream without any `.await` between the buffer check and the swap.
+pub(super) enum UpgradePayload {
+    /// STARTTLS upgrade (RFC 3501 Section 6.2.1 / RFC 9051 Section 6.2.1).
+    ///
+    /// The driver sends STARTTLS, awaits OK, verifies the buffer is empty,
+    /// mem-replaces the stream with `Poisoned`, performs the TLS handshake,
+    /// and installs a fresh `WireReader` on the TLS stream. Capabilities
+    /// are re-fetched after the upgrade.
+    StartTls {
+        /// TLS configuration for the handshake.
+        tls_connector: native_tls::TlsConnector,
+        /// Server name for TLS SNI and certificate verification.
+        server_name: String,
+    },
+    /// COMPRESS=DEFLATE upgrade (RFC 4978).
+    ///
+    /// The driver sends COMPRESS, awaits OK, takes remaining buffer bytes
+    /// (already compressed), wraps the stream in a `CompressedStream`,
+    /// and installs a fresh `WireReader`.
+    Compress,
+}
+
+/// Object-safe wrapper for [`Consumer`] that erases the `Output` type.
+///
+/// The blanket impl below bridges any `Consumer` whose `Output` is
+/// `Send + 'static` into this trait by boxing the output.
+pub(super) trait ConsumerErased: Send {
+    /// Forwards to [`Consumer::on_response`].
+    fn on_response(
+        &mut self,
+        resp: UntaggedResponse,
+        notify_snapshot: NotifyFlags,
+        ctx: &ConsumerContext,
+    );
+
+    /// Forwards to [`Consumer::finalize`], boxing the output.
+    /// Infallible, like [`Consumer::finalize`]. Only the SUCCESS value is
+    /// erased into `Any`; the error stays a typed `Error` in
+    /// `Finalized::output` so the driver can still see whether it is
+    /// connection-fatal.
+    fn finalize_erased(
+        self: Box<Self>,
+        tagged: crate::types::response::TaggedResponse,
+        ctx: &ConsumerContext,
+    ) -> Finalized<Box<dyn std::any::Any + Send>>;
+}
+
+/// Object-safe wrapper for streaming consumers that can await
+/// downstream capacity before the driver reads more wire data.
+pub(super) trait StreamingConsumerErased: ConsumerErased {
+    fn backpressure_state_erased(&self) -> BackpressureState;
+
+    fn reserve_capacity_erased(
+        &mut self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send + '_>>;
+}
+
+impl<C: StreamingConsumer + 'static> StreamingConsumerErased for C
+where
+    C::Output: 'static,
+{
+    fn backpressure_state_erased(&self) -> BackpressureState {
+        <C as StreamingConsumer>::backpressure_state(self)
+    }
+
+    fn reserve_capacity_erased(
+        &mut self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send + '_>> {
+        <C as StreamingConsumer>::reserve_capacity(self)
+    }
+}
+
+/// Blanket impl that erases `C::Output` to `Box<dyn Any + Send>`.
+impl<C: Consumer + 'static> ConsumerErased for C
+where
+    C::Output: 'static,
+{
+    fn on_response(
+        &mut self,
+        resp: UntaggedResponse,
+        notify_snapshot: NotifyFlags,
+        ctx: &ConsumerContext,
+    ) {
+        <C as Consumer>::on_response(self, resp, notify_snapshot, ctx);
+    }
+
+    fn finalize_erased(
+        self: Box<Self>,
+        tagged: crate::types::response::TaggedResponse,
+        ctx: &ConsumerContext,
+    ) -> Finalized<Box<dyn std::any::Any + Send>> {
+        let finalized = <C as Consumer>::finalize(self, tagged, ctx);
+        Finalized {
+            // Only the SUCCESS value is erased. Boxing the error too would put
+            // it behind a downcast the driver cannot perform before it decides
+            // whether the failure is connection-fatal.
+            output: finalized
+                .output
+                .map(|value| Box::new(value) as Box<dyn std::any::Any + Send>),
+            reclassified_as_events: finalized.reclassified_as_events,
+        }
+    }
+}
+
+/// Object-safe wrapper for [`ContinuationConsumer`] that extends
+/// [`ConsumerErased`] with continuation handling.
+///
+/// Used by AUTHENTICATE and future multi-round SASL commands that
+/// expect `+` continuations during the response loop.
+pub(super) trait ContinuationConsumerErased: ConsumerErased {
+    /// Forwards to [`ContinuationConsumer::on_continuation`].
+    fn on_continuation_erased(
+        &mut self,
+        cont: crate::types::response::ContinuationRequest,
+        ctx: &ConsumerContext,
+    ) -> Result<ContinuationReply, Error>;
+}
+
+/// Blanket impl that bridges any [`ContinuationConsumer`] into
+/// [`ContinuationConsumerErased`].
+impl<C: ContinuationConsumer + 'static> ContinuationConsumerErased for C
+where
+    C::Output: 'static,
+{
+    fn on_continuation_erased(
+        &mut self,
+        cont: crate::types::response::ContinuationRequest,
+        ctx: &ConsumerContext,
+    ) -> Result<ContinuationReply, Error> {
+        <C as ContinuationConsumer>::on_continuation(self, cont, ctx)
+    }
+}
+
+/// Type-erased consumer submitted to the driver task.
+///
+/// Either a regular consumer (errors on unexpected `+`) or a
+/// continuation-aware consumer (routes `+` to `on_continuation`).
+pub(super) enum DriverConsumer {
+    /// Regular consumer  -  unexpected continuations are a protocol error.
+    Regular(Box<dyn ConsumerErased>),
+    /// Streaming consumer  -  regular command with async pre-read
+    /// backpressure.
+    StreamingRegular(Box<dyn StreamingConsumerErased>),
+    /// Continuation consumer  -  `+` responses are routed to the
+    /// consumer's `on_continuation` handler (AUTHENTICATE, SASL).
+    WithContinuations(Box<dyn ContinuationConsumerErased>),
+}
+
+impl DriverConsumer {
+    /// Forwards to [`ConsumerErased::on_response`].
+    fn on_response(
+        &mut self,
+        resp: UntaggedResponse,
+        notify_snapshot: NotifyFlags,
+        ctx: &ConsumerContext,
+    ) {
+        match self {
+            Self::Regular(c) => c.on_response(resp, notify_snapshot, ctx),
+            Self::StreamingRegular(c) => c.on_response(resp, notify_snapshot, ctx),
+            Self::WithContinuations(c) => c.on_response(resp, notify_snapshot, ctx),
+        }
+    }
+
+    /// Forwards to [`ConsumerErased::finalize_erased`].
+    fn finalize_erased(
+        self,
+        tagged: crate::types::response::TaggedResponse,
+        ctx: &ConsumerContext,
+    ) -> Finalized<Box<dyn std::any::Any + Send>> {
+        match self {
+            Self::Regular(c) => c.finalize_erased(tagged, ctx),
+            Self::StreamingRegular(c) => c.finalize_erased(tagged, ctx),
+            Self::WithContinuations(c) => c.finalize_erased(tagged, ctx),
+        }
+    }
+
+    async fn prepare_to_read(&mut self) -> Result<(), Error> {
+        if let Self::StreamingRegular(c) = self
+            && matches!(
+                c.backpressure_state_erased(),
+                BackpressureState::NeedsCapacity
+            )
+        {
+            c.reserve_capacity_erased().await?;
+        }
+        Ok(())
+    }
+
+    /// Handle a `+` continuation. Returns `Err` for regular consumers
+    /// (unexpected continuation is a protocol error per RFC 3501 Section7.5).
+    fn on_continuation(
+        &mut self,
+        cont: crate::types::response::ContinuationRequest,
+        ctx: &ConsumerContext,
+    ) -> Result<ContinuationReply, Error> {
+        match self {
+            Self::Regular(_) => Err(Error::Protocol(
+                "unexpected continuation during command that does not expect one".into(),
+            )),
+            Self::StreamingRegular(_) => Err(Error::Protocol(
+                "unexpected continuation during streaming command".into(),
+            )),
+            Self::WithContinuations(c) => c.on_continuation_erased(cont, ctx),
+        }
+    }
+}
+
+/// Read-only snapshot of connection state published by the driver
+/// via `watch::Sender`.
+///
+/// Holds session state, capabilities, notify flags, selected mailbox,
+/// and enabled extensions (RFC 3501 Section3, Section7.2.1; RFC 5161 Section3.2;
+/// RFC 5465 Section5.1-5.8).
+#[derive(Debug, Clone)]
+pub(super) struct ConnectionStateSnapshot {
+    /// Current session state (RFC 3501 Section3).
+    pub session_state: super::SessionState,
+    /// Cached server capabilities (RFC 3501 Section7.2.1).
+    pub capabilities: Vec<Capability>,
+    /// Successfully `ENABLE`d extensions (RFC 5161 Section3.2).
+    pub enabled: Vec<String>,
+}
+
+impl Default for ConnectionStateSnapshot {
+    fn default() -> Self {
+        Self {
+            session_state: super::SessionState::NotAuthenticated,
+            capabilities: Vec::new(),
+            enabled: Vec::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Driver task body
+// ---------------------------------------------------------------------------
+
+/// Driver-task body. Owns the wire reader, protocol state, and tag generator.
+///
+/// Receives `DriverCommand`s from the mpsc, runs each command using
+/// the classification-based dispatch loop, and publishes events via
+/// [`DriverEventSink`](event_sink::DriverEventSink). Publishes state
+/// snapshots via `watch::Sender` after every command.
+///
+/// The caller (typically `ImapConnection::connect`) creates the wire
+/// reader and protocol state, reads the greeting, fetches initial
+/// capabilities, and then passes the pre-initialized components here.
+pub(super) async fn driver_task(
+    mut wire_reader: super::wire::WireReader,
+    mut state: super::state::ProtocolState,
+    mut tag_gen: super::tag::TagGenerator,
+    mut cmd_rx: mpsc::Receiver<DriverCommand>,
+    state_tx: watch::Sender<ConnectionStateSnapshot>,
+    mut event_sink: event_sink::DriverEventSink,
+) {
+    loop {
+        // Opportunistic drain of pending critical events (D7).
+        // Ignore CallerGone  -  the cmd_rx.recv() below will also
+        // observe the caller being gone via channel close.
+        let _ = event_sink.drain_pending_nonblocking();
+
+        tokio::select! {
+            biased;
+            maybe_cmd = cmd_rx.recv() => {
+                let Some(cmd) = maybe_cmd else { break; };
+                match cmd {
+                    DriverCommand::Run { payload, consumer, result_tx } => {
+                        // Whether a failure can have touched the wire. A
+                        // refusal made before the first byte leaves the
+                        // framing intact, so it must not retire the
+                        // connection whatever its error variant.
+                        let mut refused_before_send = false;
+                        let result = match payload {
+                            DriverCommandPayload::Standard(command) => {
+                                run_one_command(
+                                    &mut wire_reader,
+                                    &mut state,
+                                    &mut tag_gen,
+                                    &mut event_sink,
+                                    command,
+                                    consumer,
+                                ).await
+                            }
+                            DriverCommandPayload::Append { mailbox, messages, multi } => {
+                                match prepare_append(
+                                    &state,
+                                    &mut tag_gen,
+                                    &mailbox,
+                                    &messages,
+                                    multi,
+                                ) {
+                                    Ok(prepared) => {
+                                        run_append_command(
+                                            &mut wire_reader,
+                                            &mut state,
+                                            &mut event_sink,
+                                            prepared,
+                                            consumer,
+                                        ).await
+                                    }
+                                    Err(refusal) => {
+                                        refused_before_send = true;
+                                        Err(refusal)
+                                    }
+                                }
+                            }
+                        };
+                        if !refused_before_send
+                            && result.as_ref().is_err_and(Error::is_connection_fatal)
+                        {
+                            state.apply_infrastructure_failure();
+                            cmd_rx.close();
+                        }
+                        publish_then_answer(
+                            || {
+                                let _ = state_tx.send_replace(state.snapshot());
+                            },
+                            result_tx,
+                            result,
+                        );
+                    }
+                    DriverCommand::Upgrade { payload, result_tx } => {
+                        let result = run_upgrade(
+                            &mut wire_reader,
+                            &mut state,
+                            &mut tag_gen,
+                            &mut event_sink,
+                            payload,
+                        ).await;
+                        if result.as_ref().is_err_and(Error::is_connection_fatal) {
+                            state.apply_infrastructure_failure();
+                            cmd_rx.close();
+                        }
+                        let result = result.map(|()| Box::new(()) as Box<dyn std::any::Any + Send>);
+                        publish_then_answer(
+                            || {
+                                let _ = state_tx.send_replace(state.snapshot());
+                            },
+                            result_tx,
+                            result,
+                        );
+                    }
+                    DriverCommand::Pipeline { commands, consumers, result_tx } => {
+                        let result = run_pipeline(
+                            &mut wire_reader,
+                            &mut state,
+                            &mut tag_gen,
+                            &mut event_sink,
+                            commands,
+                            consumers,
+                        ).await;
+                        if result.as_ref().is_err_and(Error::is_connection_fatal) {
+                            state.apply_infrastructure_failure();
+                            cmd_rx.close();
+                        }
+                        publish_then_answer(
+                            || {
+                                let _ = state_tx.send_replace(state.snapshot());
+                            },
+                            result_tx,
+                            result,
+                        );
+                    }
+                    DriverCommand::SetKeepalive { keepalive, result_tx } => {
+                        let result = wire_reader.set_keepalive(&keepalive);
+                        let _ = result_tx.send(result);
+                        // No protocol state changed  -  skip snapshot publish.
+                        continue;
+                    }
+                    DriverCommand::PeerCertificate { result_tx } => {
+                        let _ = result_tx.send(wire_reader.peer_certificate_der());
+                        // No protocol state changed  -  skip snapshot publish.
+                        continue;
+                    }
+                    DriverCommand::Idle { done_rx, result_tx } => {
+                        let result = run_idle(
+                            &mut wire_reader,
+                            &mut state,
+                            &mut tag_gen,
+                            &mut event_sink,
+                            done_rx,
+                        ).await;
+                        if result.as_ref().is_err_and(Error::is_connection_fatal) {
+                            state.apply_infrastructure_failure();
+                            cmd_rx.close();
+                        }
+                        publish_then_answer(
+                            || {
+                                let _ = state_tx.send_replace(state.snapshot());
+                            },
+                            result_tx,
+                            result,
+                        );
+                    }
+                }
+
+                // RFC 3501 Section3.4: once the session reaches Logout state
+                // (either via BYE or tagged OK for LOGOUT), the
+                // connection is closing. Exit the driver loop so
+                // cmd_rx is dropped and subsequent submit calls
+                // observe DriverGone instead of hanging.
+                if state.session_state() == super::SessionState::Logout {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Graceful shutdown: send LOGOUT if still authenticated.
+    // Best-effort; ignore errors. The drain is bounded: this runs on a
+    // detached task after the last handle dropped, so nothing can abort
+    // it, and an unbounded read loop against a stalled or half-open peer
+    // would leak the task and its socket for the process lifetime (the
+    // same hazard the IDLE DONE handshake bounds one layer up). On
+    // timeout the socket is simply dropped, which is an acceptable
+    // teardown for a peer that is not answering LOGOUT.
+    let _ = tokio::time::timeout(
+        LOGOUT_DRAIN_TIMEOUT,
+        logout_best_effort(&mut wire_reader, &mut state, &mut tag_gen, &mut event_sink),
+    )
+    .await;
+}
+
+/// Upper bound on the terminal LOGOUT write + BYE/OK drain.
+const LOGOUT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+// ---------------------------------------------------------------------------
+// Command execution
+// ---------------------------------------------------------------------------
+
+/// Execute a single command through the classification-based dispatcher.
+///
+/// Encodes and sends the command (handling literal synchronization
+/// per RFC 3501 Section4.3),
+/// reads responses in a loop, classifies each untagged response via
+/// [`classify`](crate::codec::classification::classify), and routes it
+/// to either the consumer (solicited / ambiguous) or the event sink
+/// (unsolicited / impossible). Errors on unexpected continuations
+/// (RFC 3501 Section7.5).
+pub(in crate::connection) async fn run_one_command(
+    wire_reader: &mut super::wire::WireReader,
+    state: &mut super::state::ProtocolState,
+    tag_gen: &mut super::tag::TagGenerator,
+    event_sink: &mut event_sink::DriverEventSink,
+    cmd: Command,
+    consumer: DriverConsumer,
+) -> Result<Box<dyn std::any::Any + Send>, Error> {
+    let cmd_kind = cmd.kind();
+    let cmd_target: Option<MailboxName> = cmd.mailbox_target().cloned();
+
+    // RFC 3501 Section6.1.3: tell apply_tagged to transition to Logout on
+    // the tagged OK. Must be set before the dispatch loop so the
+    // side-effect handler sees it when the tagged response arrives.
+    if matches!(cmd, Command::Logout) {
+        state.set_in_logout(true);
+    }
+
+    // RFC 3501 Section6.2.2, Section6.2.3: tell apply_tagged to transition to
+    // Authenticated on the tagged OK for LOGIN or AUTHENTICATE.
+    if matches!(cmd, Command::Login { .. } | Command::Authenticate { .. }) {
+        state.set_in_auth(true);
+    }
+
+    // RFC 3501 Section6.3.1-Section6.3.2: tell apply_tagged to transition to
+    // Selected on tagged OK, or Authenticated on tagged NO, for
+    // SELECT or EXAMINE.
+    if matches!(cmd, Command::Select { .. } | Command::Examine { .. }) {
+        state.set_in_select(cmd_target.clone());
+    }
+
+    // RFC 3501 Section6.4.2, RFC 3691 Section3, RFC 9051 Section6.4.2: tell apply_tagged
+    // to transition to Authenticated on tagged OK for CLOSE or UNSELECT.
+    if matches!(cmd, Command::Close | Command::Unselect) {
+        state.set_in_close(true);
+    }
+
+    // RFC 8437 Section2: tell apply_tagged to transition to NotAuthenticated
+    // on tagged OK for UNAUTHENTICATE.
+    if matches!(cmd, Command::Unauthenticate) {
+        state.set_in_unauthenticate(true);
+    }
+
+    // RFC 5465 Section3: tell apply_tagged to update NOTIFY per-type flags
+    // on tagged OK. NOTIFY SET computes flags from the registration
+    // params; NOTIFY NONE resets to default (no notifications).
+    if let Command::NotifySet(ref params) = cmd {
+        let (list, status, metadata) = super::extensions::compute_notify_flags(params);
+        state.set_in_notify_set(Some(super::NotifyFlags {
+            list,
+            status,
+            metadata,
+        }));
+    }
+    if matches!(cmd, Command::NotifyNone) {
+        state.set_in_notify_set(Some(super::NotifyFlags::default()));
+    }
+
+    // Encode, tag, and send the command (handles literal sync).
+    // Encoding / send errors: the command bytes may not have reached the
+    // server, so these are Unsent. The `?` propagates without further
+    // decoration; send_command_on_wire owns the pre-send phase.
+    let tag = send_command_on_wire(wire_reader, state, tag_gen, event_sink, &cmd).await?;
+
+    dispatch_response_loop(
+        wire_reader,
+        state,
+        event_sink,
+        &tag,
+        cmd_kind,
+        cmd_target,
+        consumer,
+        ContinuationPolicy::Consumer,
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum ContinuationPolicy {
+    Consumer,
+    RejectAfterSend,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_response_loop(
+    wire_reader: &mut super::wire::WireReader,
+    state: &mut super::state::ProtocolState,
+    event_sink: &mut event_sink::DriverEventSink,
+    tag: &str,
+    cmd_kind: crate::types::CommandKind,
+    cmd_target: Option<MailboxName>,
+    mut consumer: DriverConsumer,
+    continuation: ContinuationPolicy,
+) -> Result<Box<dyn std::any::Any + Send>, Error> {
+    // After a successful send, any transport failure is InFlight: the
+    // command bytes crossed the side-effect boundary.
+    loop {
+        let notify_before = state.notify();
+        let utf8 = utf8_mode(state);
+        consumer
+            .prepare_to_read()
+            .await
+            .map_err(|e| e.with_attempt(TransmissionState::InFlight))?;
+        let resp = wire_reader
+            .read_one(utf8)
+            .await
+            .map_err(|e| e.with_attempt(TransmissionState::InFlight))?;
+        let digest = state.apply_side_effects(&resp);
+
+        match resp {
+            crate::types::Response::Tagged(t) if t.tag == tag => {
+                // (I13): emit alert/notification overflow from
+                // tagged response codes before finalization.
+                emit_tagged_response_code_events(&t, event_sink);
+                let ctx = build_consumer_context(state, cmd_target.as_ref(), tag);
+                // Tagged response received: the server acknowledged the
+                // command. Errors from finalization (NO/BAD status) carry
+                // Acknowledged so recovery can distinguish them from
+                // in-flight drops.
+                let finalized = consumer.finalize_erased(t, &ctx);
+                // Re-emit any responses the consumer marked as events, on the
+                // FAILURE path as much as the success one. That ordering is the
+                // fix: finalization used to be able to return `Err` before this
+                // loop ran, so a command that failed took its consumer's
+                // buffered `Either` responses down with it.
+                //
+                // Skip those whose critical code (ALERT/NOTIFICATIONOVERFLOW)
+                // was already emitted in the pre-classification pass
+                //  -  re-emitting would double-deliver the alert.
+                for resp in finalized.reclassified_as_events {
+                    if !has_critical_response_code(&resp) {
+                        let _ = event_sink.emit(resp.into());
+                    }
+                }
+                return finalized
+                    .output
+                    .map_err(|e| e.with_attempt(TransmissionState::Acknowledged));
+            }
+            crate::types::Response::Tagged(t) => {
+                return Err(Error::Protocol(format!(
+                    "unexpected tag {:?} (expected {:?})",
+                    t.tag, tag,
+                )));
+            }
+            crate::types::Response::Untagged(u) => {
+                // (I13): emit alert/notification overflow before
+                // classification so they reach the event queue even
+                // when the response is routed to a consumer.
+                // The command is on the wire: a BYE here is InFlight.
+                let code_emitted =
+                    process_untagged_prefix(digest, &u, event_sink, TransmissionState::InFlight)?;
+
+                let class_ctx = ClassificationContext {
+                    notify: notify_before,
+                    command_target: cmd_target.as_ref(),
+                };
+                let rule = classification::classify(cmd_kind, &u, &class_ctx);
+                match rule {
+                    SolicitationRule::OnlySolicited | SolicitationRule::Either => {
+                        let ctx = build_consumer_context(state, cmd_target.as_ref(), tag);
+                        consumer.on_response(*u, notify_before, &ctx);
+                    }
+                    SolicitationRule::OnlyUnsolicited | SolicitationRule::Impossible => {
+                        // Skip event_sink.emit for responses whose
+                        // critical content (ALERT / NOTIFICATIONOVERFLOW)
+                        // was already emitted above  -  avoid double-emit.
+                        if !code_emitted {
+                            let _ = event_sink.emit((*u).into());
+                        }
+                    }
+                }
+            }
+            crate::types::Response::Continuation(c) => match continuation {
+                ContinuationPolicy::Consumer => {
+                    let ctx = build_consumer_context(state, cmd_target.as_ref(), tag);
+                    let ContinuationReply::Write(bytes) = consumer.on_continuation(c, &ctx)?;
+                    wire_reader
+                        .write_all(&bytes)
+                        .await
+                        .map_err(|e| e.with_attempt(TransmissionState::InFlight))?;
+                }
+                ContinuationPolicy::RejectAfterSend => {
+                    return Err(Error::Protocol(
+                        "unexpected continuation after pre-built command fully sent".into(),
+                    ));
+                }
+            },
+            crate::types::Response::Greeting(_) => {
+                return Err(Error::Protocol("unexpected greeting mid-command".into()));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// APPEND / MULTIAPPEND execution
+// ---------------------------------------------------------------------------
+
+/// Execute APPEND or MULTIAPPEND: validate, encode and send against LIVE state,
+/// then run the same classification-based response loop as
+/// [`run_one_command`].
+///
+/// Every decision the wire bytes depend on is made here, from the state this
+/// task owns, at the moment the command reaches the head of the queue. That is
+/// the property the prebuilt path lacked: it froze those decisions on the
+/// handle while the command waited behind another, and the snapshot they were
+/// read from is only republished when a command COMPLETES.
+///
+/// Split in two so the driver loop can tell the two kinds of failure apart:
+/// [`prepare_append`] refuses BEFORE a byte is written, and its refusals leave
+/// the connection's framing intact whatever their error variant; only a
+/// failure from here on can have desynchronized the stream. The loop applies
+/// `is_connection_fatal` to the second kind alone, so a refusal made before
+/// the first byte never retires the connection whatever its variant. (The
+/// Logout refusal is `Closed`, a fatal variant, but there the session is
+/// already over and the loop exits on Logout regardless.)
+pub(in crate::connection) async fn run_append_command(
+    wire_reader: &mut super::wire::WireReader,
+    state: &mut super::state::ProtocolState,
+    event_sink: &mut event_sink::DriverEventSink,
+    prepared: PreparedAppend,
+    consumer: DriverConsumer,
+) -> Result<Box<dyn std::any::Any + Send>, Error> {
+    let PreparedAppend { tag, encoded } = prepared;
+    let cmd_kind = crate::types::CommandKind::Append;
+
+    // No routing: an APPEND is dispatched alone, so its own tagged response is
+    // the only one that can arrive during the send. Errors before a tagged
+    // response are Unsent or InFlight depending on where in the send they
+    // occur; the sender stamps them. After the send, responses are InFlight.
+    send_chunked_segments(wire_reader, state, event_sink, encoded.segments(), &tag).await?;
+
+    dispatch_response_loop(
+        wire_reader,
+        state,
+        event_sink,
+        &tag,
+        cmd_kind,
+        None,
+        consumer,
+        ContinuationPolicy::RejectAfterSend,
+    )
+    .await
+}
+
+/// An APPEND encoded against live state and ready for the wire.
+pub(in crate::connection) struct PreparedAppend {
+    tag: String,
+    encoded: crate::codec::encode::ChunkedCommand,
+}
+
+/// Validate and encode an APPEND from the state this task owns, writing
+/// nothing. Every `Err` here is a refusal before the first byte, so the caller
+/// may safely re-issue against the new state and the connection stays usable.
+/// (`MissingCapability` and `InvalidInput` carry no transmission evidence, so
+/// there is nothing to stamp: `with_attempt` leaves those variants unchanged;
+/// `StateChangedBeforeSend` reports `Unsent` by construction.)
+pub(in crate::connection) fn prepare_append(
+    state: &super::state::ProtocolState,
+    tag_gen: &mut super::tag::TagGenerator,
+    mailbox: &str,
+    messages: &[crate::types::AppendMessage],
+    multi: bool,
+) -> Result<PreparedAppend, Error> {
+    let cmd_kind = crate::types::CommandKind::Append;
+
+    // Session legality (RFC 3501 Section 6.3.11, RFC 3502 Section 3): valid in
+    // Authenticated and Selected. The handle checks this too as a cheap early
+    // refusal, but only THIS check is authoritative: a LOGOUT or a BYE
+    // completing ahead of a queued APPEND moves the session out from under
+    // any handle-side read. That is state moving under a queued command,
+    // `StateChangedBeforeSend`, which the caller may re-issue after a state
+    // refresh - except Logout, where the connection itself is gone and the
+    // honest answer is `Closed` with `Unsent` evidence.
+    match state.session_state() {
+        super::SessionState::Authenticated | super::SessionState::Selected => {}
+        super::SessionState::Logout => {
+            return Err(Error::closed().with_attempt(TransmissionState::Unsent));
+        }
+        other => {
+            return Err(Error::StateChangedBeforeSend(format!(
+                "session moved to {other:?}, out of the Authenticated/Selected \
+                 states, before {cmd_kind:?} could be sent"
+            )));
+        }
+    }
+
+    let tag = tag_gen.next();
+    trace!(
+        tag,
+        ?cmd_kind,
+        multi,
+        "driver: encoding APPEND from live state"
+    );
+    // Capability, BINARY, flag and date validation live in the encoder, so
+    // they see the same live options the markers are chosen from.
+    let opts = build_encode_options(state);
+    let encoded = crate::codec::encode::encode_append(&tag, mailbox, messages, multi, &opts)
+        .map_err(|e| e.with_attempt(TransmissionState::Unsent))?;
+    Ok(PreparedAppend { tag, encoded })
+}
+
+/// Publish the state snapshot before waking the command caller.
+///
+/// A oneshot send may schedule the caller on another runtime worker
+/// immediately, so the watch snapshot must be visible first.
+///
+/// The ordering is a convention every completion arm must follow, not a
+/// type-level guarantee: nothing stops a future arm from calling
+/// `result_tx.send` directly and answering a caller that then reads a stale
+/// snapshot. Making it unrepresentable (a result oneshot that cannot be
+/// answered without publishing) was considered and ruled not worth its
+/// machinery while every completion arm lives in the one `match cmd` in
+/// `driver_task` directly above, where the deviation is visible by reading a
+/// single function. Revisit if a new state-changing driver command lane is
+/// added somewhere else.
+fn publish_then_answer<T>(publish: impl FnOnce(), result_tx: oneshot::Sender<T>, result: T) {
+    publish();
+    let _ = result_tx.send(result);
+}
+
+/// Turn a side-effect digest for an untagged response into the fatal BYE
+/// result every active driver read loop must honor.
+///
+/// Private on purpose: the ordering constraint below (response-code events
+/// first, so an ALERT carried by BYE reaches the event queue before the
+/// command exits) is only safe if every read loop applies it the same way.
+/// `process_untagged_prefix` is that single application point, and keeping
+/// this unexported is what stops a fifth hand-rolled copy of the pair from
+/// drifting out of order again.
+///
+/// `phase` is how far the active command had got when the read happened.
+/// An untagged BYE does not complete that command, so its outcome is unknown
+/// once any of it is on the wire: every read loop today reads only after
+/// writing, and passes `InFlight`. The BYE used to carry no attempt at all,
+/// which reads as `Unsent` and let a non-idempotent command the server may
+/// have executed be retried blind.
+fn short_circuit_on_bye(
+    digest: super::state::SideEffectDigest,
+    response: &UntaggedResponse,
+    phase: conduit_types::TransmissionState,
+) -> Result<(), Error> {
+    if !digest.had_bye() {
+        return Ok(());
+    }
+
+    let UntaggedResponse::Status { status, text, code } = response else {
+        debug_assert!(false, "only an untagged BYE may set the BYE digest");
+        // Raised mid-read, with the state machine already marked for BYE:
+        // the connection retires.
+        return Err(Error::internal_mid_exchange(
+            "BYE digest without a status response",
+            phase,
+        ));
+    };
+    debug_assert!(matches!(status, UntaggedStatus::Bye));
+    Err(Error::bye_with_code(text.clone(), code.clone()).with_attempt(phase))
+}
+
+/// The shared prologue every driver read loop runs on an untagged response:
+/// emit response-code events, then fail the command if the response was a BYE.
+/// Returns whether a code event was emitted, which the caller uses to decide
+/// whether the response still needs a plain event of its own.
+///
+/// `phase` stamps the BYE error (see `short_circuit_on_bye`); each loop
+/// states how far its command had got rather than leaving it unstamped.
+pub(super) fn process_untagged_prefix(
+    digest: super::state::SideEffectDigest,
+    response: &UntaggedResponse,
+    event_sink: &mut event_sink::DriverEventSink,
+    phase: conduit_types::TransmissionState,
+) -> Result<bool, Error> {
+    let code_emitted = emit_untagged_response_code_events(response, event_sink);
+    short_circuit_on_bye(digest, response, phase)?;
+    Ok(code_emitted)
+}
+
+/// The whole untagged arm of a read loop that has no consumer to route to:
+/// run the shared prologue, then forward the response as a typed event unless
+/// the prologue already published its critical code as one.
+///
+/// Four read loops always answer an untagged response this way - IDLE's
+/// wait for its `+` grant, the IDLE loop, the post-DONE IDLE drain, and the
+/// best-effort LOGOUT drain - and a fifth, the synchronizing-literal
+/// continuation wait, does so only WHEN IT HAS NO ROUTING CONTEXT, i.e. for
+/// single-command dispatch. Under a pipelined batch
+/// that same wait does have consumers to route to - earlier commands in the
+/// batch are still outstanding - and takes the router instead; answering those
+/// responses here is what silently truncated a batch's results. The five
+/// differ in how they terminate and in what they do with a tagged response,
+/// but not here, so the "prologue, then forward iff no code event" pairing
+/// lives once. Loops that DO have a consumer (command dispatch, the pipeline
+/// batch, and the pipelined continuation wait) cannot use this: for them the
+/// forward is conditional on classification, and they call
+/// `process_untagged_prefix` directly.
+pub(super) fn process_untagged_as_event(
+    digest: super::state::SideEffectDigest,
+    response: Box<UntaggedResponse>,
+    event_sink: &mut event_sink::DriverEventSink,
+    phase: conduit_types::TransmissionState,
+) -> Result<(), Error> {
+    let code_emitted = process_untagged_prefix(digest, &response, event_sink, phase)?;
+    if !code_emitted {
+        let _ = event_sink.emit((*response).into());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers  -  derive protocol context from ProtocolState
+// ---------------------------------------------------------------------------
+
+/// Derive whether the connection is in `IMAP4rev2` mode.
+///
+/// RFC 9051 Section6.3.1, via the single authority in `crate::types::profile`.
+/// The rule is NOT restated here. This is the driver's view of it, and it is
+/// the one that decides wire bytes - `utf8_mode`, `literal_mode` and the
+/// `allow_literal8` choice all read it - so a copy that drifted here would send
+/// bytes the server's active revision does not accept.
+fn is_rev2(state: &super::state::ProtocolState) -> bool {
+    crate::types::profile::imap4rev2_active(state.capabilities(), state.enabled())
+}
+
+/// Derive the UTF-8 wire mode from protocol state.
+///
+/// True when `UTF8=ACCEPT` (RFC 6855 Section3) has been enabled or `IMAP4rev2`
+/// is active (RFC 9051 Section7).
+fn utf8_mode(state: &super::state::ProtocolState) -> bool {
+    state
+        .enabled()
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case("UTF8=ACCEPT"))
+        || is_rev2(state)
+}
+
+/// Derive the literal negotiation mode from capabilities.
+///
+/// RFC 7888 Section4 (LITERAL+), Section5 (LITERAL-), RFC 3501 Section4.3 (synchronizing).
+fn literal_mode(state: &super::state::ProtocolState) -> LiteralMode {
+    let usable = |capability: &Capability| {
+        crate::types::profile::supports(state.capabilities(), state.enabled(), capability)
+    };
+    // Both arms ask the authority. Its rev2 baseline folds in LITERAL- and
+    // not LITERAL+ (RFC 9051 Appendix E), so pure rev2 lands on the
+    // 4096-octet LITERAL- behaviour and unbounded LITERAL+ needs the token.
+    if usable(&Capability::LiteralPlus) {
+        LiteralMode::LiteralPlus
+    } else if usable(&Capability::LiteralMinus) {
+        LiteralMode::LiteralMinus
+    } else {
+        LiteralMode::Synchronizing
+    }
+}
+
+/// Build an [`EncodeOptions`] snapshot from protocol state.
+///
+/// The driver builds encode options from the state it owns; there is no
+/// second builder on the connection handle.
+fn build_encode_options(state: &super::state::ProtocolState) -> EncodeOptions {
+    EncodeOptions {
+        utf8_mode: utf8_mode(state),
+        literal_mode: literal_mode(state),
+        capabilities: state.capabilities().to_vec(),
+        enabled: state.enabled().to_vec(),
+    }
+}
+
+/// Build a [`ConsumerContext`] from protocol state.
+///
+/// The driver constructs this inline from the state it owns; there is no
+/// method on `ImapConnection` that builds one.
+fn build_consumer_context<'a>(
+    state: &'a super::state::ProtocolState,
+    command_target: Option<&'a MailboxName>,
+    command_tag: &'a str,
+) -> ConsumerContext<'a> {
+    ConsumerContext {
+        capabilities: state.capabilities(),
+        enabled: state.enabled(),
+        command_target,
+        command_tag,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Submodules
+// ---------------------------------------------------------------------------
+
+pub(super) mod event_sink;
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

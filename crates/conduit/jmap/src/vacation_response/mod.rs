@@ -1,0 +1,196 @@
+// The Account impl reads/writes the singleton vacation response; the
+// builder helpers on the get/set request structs not driven by the
+// Account path are retained for symmetry with the rest of the crate.
+#![allow(dead_code)]
+
+pub(crate) mod get;
+pub(crate) mod set;
+
+use std::fmt::Display;
+
+use crate::core::field::Field;
+use crate::core::set::skip_if_empty_str;
+use crate::core::set::skip_if_zero_date;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
+
+mod marker {
+    pub(crate) enum VacationResponse {}
+}
+/// Strongly-typed VacationResponse ID (singleton; spec mandates "singleton").
+pub(crate) type VacationResponseId = crate::core::id::Id<marker::VacationResponse>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct VacationResponse {
+    #[serde(rename = "id")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) id: Option<VacationResponseId>,
+
+    #[serde(rename = "isEnabled")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) is_enabled: Option<bool>,
+
+    #[serde(rename = "fromDate")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) from_date: Option<Timestamp>,
+
+    #[serde(rename = "toDate")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) to_date: Option<Timestamp>,
+
+    #[serde(rename = "subject")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) subject: Option<String>,
+
+    #[serde(rename = "textBody")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) text_body: Option<String>,
+
+    #[serde(rename = "htmlBody")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) html_body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct VacationResponseCreate {
+    #[serde(skip)]
+    pub(super) _create_id: Option<usize>,
+
+    #[serde(rename = "isEnabled")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) is_enabled: Option<bool>,
+
+    #[serde(rename = "fromDate")]
+    #[serde(skip_serializing_if = "skip_if_zero_date")]
+    pub(super) from_date: Option<Timestamp>,
+
+    #[serde(rename = "toDate")]
+    #[serde(skip_serializing_if = "skip_if_zero_date")]
+    pub(super) to_date: Option<Timestamp>,
+
+    #[serde(rename = "subject")]
+    #[serde(skip_serializing_if = "skip_if_empty_str")]
+    pub(super) subject: Option<String>,
+
+    #[serde(rename = "textBody")]
+    #[serde(skip_serializing_if = "skip_if_empty_str")]
+    pub(super) text_body: Option<String>,
+
+    #[serde(rename = "htmlBody")]
+    #[serde(skip_serializing_if = "skip_if_empty_str")]
+    pub(super) html_body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub(crate) struct VacationResponsePatch {
+    #[serde(rename = "isEnabled")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) is_enabled: Option<bool>,
+
+    #[serde(rename = "fromDate")]
+    #[serde(skip_serializing_if = "Field::is_omitted")]
+    pub(super) from_date: Field<Timestamp>,
+
+    #[serde(rename = "toDate")]
+    #[serde(skip_serializing_if = "Field::is_omitted")]
+    pub(super) to_date: Field<Timestamp>,
+
+    #[serde(rename = "subject")]
+    #[serde(skip_serializing_if = "Field::is_omitted")]
+    pub(super) subject: Field<String>,
+
+    #[serde(rename = "textBody")]
+    #[serde(skip_serializing_if = "Field::is_omitted")]
+    pub(super) text_body: Field<String>,
+
+    #[serde(rename = "htmlBody")]
+    #[serde(skip_serializing_if = "Field::is_omitted")]
+    pub(super) html_body: Field<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Copy)]
+#[non_exhaustive]
+pub(crate) enum Property {
+    #[serde(rename = "id")]
+    Id,
+    #[serde(rename = "isEnabled")]
+    IsEnabled,
+    #[serde(rename = "fromDate")]
+    FromDate,
+    #[serde(rename = "toDate")]
+    ToDate,
+    #[serde(rename = "subject")]
+    Subject,
+    #[serde(rename = "textBody")]
+    TextBody,
+    #[serde(rename = "htmlBody")]
+    HtmlBody,
+}
+
+impl Display for Property {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Property::Id => write!(f, "id"),
+            Property::IsEnabled => write!(f, "isEnabled"),
+            Property::FromDate => write!(f, "fromDate"),
+            Property::ToDate => write!(f, "toDate"),
+            Property::Subject => write!(f, "subject"),
+            Property::TextBody => write!(f, "textBody"),
+            Property::HtmlBody => write!(f, "htmlBody"),
+        }
+    }
+}
+
+impl crate::core::Object for VacationResponse {
+    type Property = Property;
+    type Id = VacationResponseId;
+    fn requires_account_id() -> bool {
+        true
+    }
+}
+
+impl crate::core::changes::ChangesObject for VacationResponse {
+    type ChangesResponse = ();
+}
+
+impl crate::core::get::GetObject for VacationResponse {
+    type GetArguments = ();
+}
+
+impl crate::core::set::SetObject for VacationResponse {
+    type Create = VacationResponseCreate;
+    type Patch = VacationResponsePatch;
+    type SetArguments = ();
+}
+
+impl crate::core::SetCreate for VacationResponseCreate {
+    fn create_id(&self) -> Option<String> {
+        self._create_id.map(|id| format!("c{id}"))
+    }
+
+    fn new(create_id: Option<usize>) -> Self {
+        use crate::core::set::from_timestamp;
+        VacationResponseCreate {
+            _create_id: create_id,
+            is_enabled: None,
+            from_date: from_timestamp(0).into(),
+            to_date: from_timestamp(0).into(),
+            subject: String::new().into(),
+            text_body: String::new().into(),
+            html_body: String::new().into(),
+        }
+    }
+}
+
+crate::define_get_method!(
+    VacationResponseGet,
+    VacationResponse,
+    "VacationResponse/get",
+    crate::core::capability::VacationResponseCap
+);
+crate::define_set_method!(
+    VacationResponseSet,
+    VacationResponse,
+    "VacationResponse/set",
+    crate::core::capability::VacationResponseCap
+);

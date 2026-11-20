@@ -1,0 +1,159 @@
+-- description: Conduit consumer lag-recovery API smoke
+-- expected: pass
+-- fixture: jmap-small.toml
+-- protocol: jmap
+-- ceiling: 60s
+--
+-- The fixture is nominal: this script drives the inject path only and never
+-- talks to the mock. Named because `brokkr sync` discovery requires fixture
+-- frontmatter; `brokkr service` runs it identically without the mock.
+--
+-- This gate exercises the INJECT path (test.conduit_attach + inject + manual
+-- re-attach): it proves no-message-loss / last-safe-cursor across a bounded-
+-- broadcast lag. It does NOT drive the production resident_consumer_loop, so
+-- it cannot observe that loop's exponential re-drive backoff. The § 4.3
+-- bounded re-drive ("does not hot-loop", clean caught-up edge resets the
+-- backoff) is gated against the real resident loop, on the re-drive telemetry,
+-- by jmap-production-lag-backoff.lua.
+
+local dir = harness.data_dir("conduit_consumer_lag_recovery")
+local client, err = harness.spawn(dir)
+harness.assert(err == nil, "spawn failed")
+
+local ready, ready_err = client:request("BootReady")
+harness.assert(ready_err == nil, "boot.ready failed")
+harness.assert(ready.ready, "boot.ready returned ready=false")
+
+local seeded, seed_err = client:request("TestSeedAccount", {
+    email = "conduit-lag@example.test",
+    provider = "jmap",
+})
+harness.assert(seed_err == nil, "TestSeedAccount failed")
+
+local armed, arm_err = client:request("test.conduit_arm_hook", {
+    account_id = seeded.account_id,
+    hook = { kind = "stall_consumer", after_ms = 800 },
+})
+harness.assert(arm_err == nil, "test.conduit_arm_hook failed")
+harness.assert(armed.armed, "hook was not armed")
+
+local attach, attach_err = client:request("test.conduit_attach", {
+    account_id = seeded.account_id,
+    provider_kind = "jmap",
+    detach_on_complete = false,
+})
+harness.assert(attach_err == nil, "test.conduit_attach failed")
+
+local first, first_err = client:request("test.conduit_inject_batch", {
+    account_id = seeded.account_id,
+    session_id = attach.session_id,
+    scope = "account",
+    checkpoint = { 61 },
+    messages = {
+        {
+            id = "conduit-lag-m1",
+            thread_id = "conduit-lag-t1",
+            subject = "Conduit lag before gap",
+            from_addr = "conduit-lag@example.test",
+            to_addrs = { "lag-peer@example.test" },
+            folder_ids = { "INBOX" },
+            label_ids = { "kw:lag" },
+            keywords = { "lag" },
+            raw_body = "lag before gap",
+        },
+    },
+})
+harness.assert(first_err == nil, "first inject failed")
+harness.assert(first.acked, "first batch should ack")
+
+local requests = {}
+for i = 2, 24 do
+    requests[i] = client:request_async("test.conduit_inject_batch", {
+        account_id = seeded.account_id,
+        session_id = attach.session_id,
+        scope = "account",
+        checkpoint = { 60 + i },
+        messages = {
+            {
+                id = "conduit-lag-m" .. tostring(i),
+                thread_id = "conduit-lag-t" .. tostring(i),
+                subject = "Conduit lag gap " .. tostring(i),
+                from_addr = "conduit-lag@example.test",
+                to_addrs = { "lag-peer@example.test" },
+                folder_ids = { "INBOX" },
+                label_ids = { "kw:lag" },
+                keywords = { "lag" },
+                raw_body = "lag gap " .. tostring(i),
+            },
+        },
+    })
+end
+for i = 2, 24 do
+    local _, req_err = requests[i]:await(5)
+    if req_err ~= nil then
+        -- Once the bounded broadcast lags, the consumer stops and later
+        -- inject calls can time out waiting for intentionally dropped rows.
+        local _ignored = req_err
+    end
+end
+
+local probe, probe_err = client:request("test.conduit_probe", {
+    account_id = seeded.account_id,
+    scope = "account",
+    seen_address = "lag-peer@example.test",
+    searchable_message_id = "conduit-lag-m1",
+})
+harness.assert(probe_err == nil, "test.conduit_probe failed")
+harness.assert(probe.durable_cursor ~= nil, "lag gate should keep last safe cursor")
+harness.assert_eq(probe.durable_cursor.kind, "change", "cursor kind")
+harness.assert_eq(probe.is_searchable, true, "pre-gap message should persist")
+harness.assert(probe.times_sent_to >= 1, "seen counter should include pre-gap message")
+
+local recovery_attach, recovery_attach_err = client:request("test.conduit_attach", {
+    account_id = seeded.account_id,
+    provider_kind = "jmap",
+    detach_on_complete = false,
+})
+harness.assert(recovery_attach_err == nil, "recovery test.conduit_attach failed")
+
+local replayed = {}
+for i = 2, 24 do
+    replayed[#replayed + 1] = {
+        id = "conduit-lag-m" .. tostring(i),
+        thread_id = "conduit-lag-t" .. tostring(i),
+        subject = "Conduit lag gap " .. tostring(i),
+        from_addr = "conduit-lag@example.test",
+        to_addrs = { "lag-peer@example.test" },
+        folder_ids = { "INBOX" },
+        label_ids = { "kw:lag" },
+        keywords = { "lag" },
+        raw_body = "lag gap " .. tostring(i),
+    }
+end
+
+local recovery, recovery_err = client:request("test.conduit_inject_batch", {
+    account_id = seeded.account_id,
+    session_id = recovery_attach.session_id,
+    scope = "account",
+    checkpoint = { 90 },
+    messages = replayed,
+})
+harness.assert(recovery_err == nil, "recovery inject failed")
+harness.assert(recovery.acked, "recovery batch should ack")
+
+local recovered_probe, recovered_probe_err = client:request("test.conduit_probe", {
+    account_id = seeded.account_id,
+    scope = "account",
+    seen_address = "lag-peer@example.test",
+    searchable_message_id = "conduit-lag-m24",
+})
+harness.assert(recovered_probe_err == nil, "recovered test.conduit_probe failed")
+harness.assert_eq(recovered_probe.is_searchable, true, "lagged message should land after re-drive")
+harness.assert(
+    recovered_probe.times_sent_to >= 24,
+    "seen counter should include replayed lagged messages"
+)
+
+local ok, shutdown_err = client:shutdown()
+harness.assert(ok, "shutdown failed")
+harness.assert(shutdown_err == nil, "shutdown returned error")

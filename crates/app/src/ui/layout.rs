@@ -1,0 +1,906 @@
+#![allow(dead_code)] // Layout token library; not all constants are wired in yet.
+
+use iced::Padding;
+
+// ── Spacing scale (geometric progression) ───────────────
+// Values: 0, 2, 4, 8, 12, 16, 24, 32, 48, 64
+// Every padding/spacing in the app must use one of these.
+
+/// 0px - No space
+pub const SPACE_0: f32 = 0.0;
+/// 2px - Hairline: badge padding, dot offsets
+pub const SPACE_XXXS: f32 = 2.0;
+/// 4px - Related elements: icon+text gap
+pub const SPACE_XXS: f32 = 4.0;
+/// 8px - Standard element gap, compact lists
+pub const SPACE_XS: f32 = 8.0;
+/// 12px - Comfortable list items, card sections
+pub const SPACE_SM: f32 = 12.0;
+/// 16px - Panel padding, section separators
+pub const SPACE_MD: f32 = 16.0;
+/// 24px - Major sections within a panel
+pub const SPACE_LG: f32 = 24.0;
+/// 32px - Panel margins, generous padding
+pub const SPACE_XL: f32 = 32.0;
+/// 48px - Large layout gaps
+pub const SPACE_XXL: f32 = 48.0;
+/// 64px - Page-level spacing
+pub const SPACE_XXXL: f32 = 64.0;
+
+// ── Type scale ─────────────────────────────────────────
+// Every text .size() call must reference one of these.
+
+/// 10px - Badges, section headers, tertiary metadata
+pub const TEXT_XS: f32 = 10.0;
+/// 11px - Snippets, timestamps, captions
+pub const TEXT_SM: f32 = 11.0;
+/// 12px - Body text, nav items, labels
+pub const TEXT_MD: f32 = 12.0;
+/// 13px - Emphasized body, compose button
+pub const TEXT_LG: f32 = 13.0;
+/// 14px - Icons at standard size
+pub const TEXT_XL: f32 = 14.0;
+/// 16px - Empty state titles, section titles
+pub const TEXT_TITLE: f32 = 16.0;
+/// 18px - Page titles, thread subject
+pub const TEXT_HEADING: f32 = 18.0;
+
+// ── Icon sizes ─────────────────────────────────────────
+// Every icon .size() call must reference one of these.
+
+/// 10px - Inline indicators (chevrons in section headers, attachment clips)
+pub const ICON_XS: f32 = 10.0;
+/// 11px - Compact UI icons (chevron in dropdown trigger)
+pub const ICON_SM: f32 = 11.0;
+/// 12px - Standard small icons (action bar, settings, nav)
+pub const ICON_MD: f32 = 12.0;
+/// 13px - Compose button icon
+pub const ICON_LG: f32 = 13.0;
+/// 14px - Dropdown items, reply buttons, leading slot icons
+pub const ICON_XL: f32 = 14.0;
+/// 28px - Mode switcher hero icon
+pub const ICON_HERO: f32 = 28.0;
+/// Height of an attachment chip under a message header in the reading pane.
+pub const ATTACHMENT_CHIP_HEIGHT: f32 = 28.0;
+/// Width an attachment chip gives a filename longer than
+/// `ATTACHMENT_CHIP_NAME_MAX_CHARS`, elided in the middle.
+pub const ATTACHMENT_CHIP_NAME_MAX_WIDTH: f32 = 200.0;
+pub const ATTACHMENT_CHIP_NAME_MAX_CHARS: usize = 32;
+/// Width of the Preview / Open / Download menu of an attachment chip.
+pub const ATTACHMENT_MENU_WIDTH: f32 = 180.0;
+/// Height of a compact attachment pill in the pop-out message viewer.
+/// Single-row content (`[icon] filename size`), shorter than the reading
+/// pane card since there is no meta line or version list.
+pub const POPOUT_ATTACHMENT_CARD_HEIGHT: f32 = 36.0;
+/// Visible inner-scroll height of the pinned attachments panel in the
+/// pop-out message viewer. Sized to expose ~1.8 rows of cards so the
+/// scrollbar's existence is self-evident.
+pub const POPOUT_ATTACHMENT_PANEL_INNER_HEIGHT: f32 =
+    POPOUT_ATTACHMENT_CARD_HEIGHT * 1.8 + SPACE_XS;
+
+// ── Avatar sizes ───────────────────────────────────────
+// Every avatar_circle() call must reference one of these.
+
+/// 20px - Dropdown menu items
+pub const AVATAR_DROPDOWN_ITEM: f32 = 20.0;
+/// 24px - Dropdown trigger, compact inline
+pub const AVATAR_DROPDOWN_TRIGGER: f32 = 24.0;
+/// 28px - Thread list cards
+pub const AVATAR_THREAD_CARD: f32 = 28.0;
+/// 24px - Thread list cards at compact density
+pub const AVATAR_THREAD_CARD_COMPACT: f32 = 24.0;
+/// 32px - Thread list cards at spacious density
+pub const AVATAR_THREAD_CARD_SPACIOUS: f32 = 32.0;
+/// 32px - Message cards in reading pane
+pub const AVATAR_MESSAGE_CARD: f32 = 32.0;
+/// Avatar text size as a fraction of the circle diameter.
+pub const AVATAR_ONE_LETTER_FONT_RATIO: f32 = 0.45;
+pub const AVATAR_TWO_LETTER_FONT_RATIO: f32 = 0.38;
+/// 56px - Contact sidebar hero
+pub const AVATAR_CONTACT_HERO: f32 = 56.0;
+
+/// 14px - Radio button circle in dropdown rows / picker rows. Outer ring
+/// at this size, inner filled disk at ~50% of this size when selected.
+pub const RADIO_CIRCLE_SIZE: f32 = 14.0;
+
+// ── Leading slot widths ────────────────────────────────
+// When a list item has an icon or avatar on the left,
+// wrap it in a fixed-width container using these values
+// so all labels in the list align vertically.
+
+/// Icon/avatar slot width for all dropdown rows (trigger and items).
+/// Must be >= the largest avatar used in dropdowns.
+pub const SLOT_DROPDOWN: f32 = AVATAR_DROPDOWN_TRIGGER;
+
+// ── Color dot ──────────────────────────────────────────
+
+/// Label color dot diameter
+pub const DOT_SIZE: f32 = 8.0;
+
+// ── Border radii ───────────────────────────────────────
+// Every border::rounded() or radius value must use one of these.
+
+/// 4px - Buttons, nav items, input fields
+pub const RADIUS_SM: f32 = 4.0;
+/// 6px - Elevated containers
+pub const RADIUS_MD: f32 = 6.0;
+/// 8px - Cards, floating menus, badges, primary button
+pub const RADIUS_LG: f32 = 8.0;
+
+// ── Item heights ────────────────────────────────────────
+
+pub const DROPDOWN_ITEM_HEIGHT: f32 = 32.0;
+/// Right-click menu on a thread row: denser than a dropdown, like a
+/// native context menu, so its twenty entries fit on a laptop screen.
+pub const ROW_MENU_ITEM_HEIGHT: f32 = 26.0;
+pub const ROW_MENU_ITEM_PADDING: Padding = Padding {
+    top: 0.0,
+    right: SPACE_XS,
+    bottom: 0.0,
+    left: SPACE_XS,
+};
+pub const ROW_MENU_WIDTH: f32 = 280.0;
+/// Toolbar "…" menu and button right-click menu.
+pub const TOOLBAR_MENU_WIDTH: f32 = 260.0;
+/// The ribbon's Move menu: folder search and list.
+pub const MOVE_MENU_WIDTH: f32 = 300.0;
+/// The label following the pointer while messages are dragged.
+pub const DRAG_GHOST_MAX_WIDTH: f32 = 280.0;
+/// Customize-toolbar panel under the ribbon.
+pub const TOOLBAR_CUSTOMIZE_WIDTH: f32 = 860.0;
+pub const TOOLBAR_CUSTOMIZE_COLUMNS: usize = 4;
+/// Drop slot after the last button while customizing.
+pub const TOOLBAR_END_SLOT_WIDTH: f32 = 120.0;
+/// Gap that opens between two buttons where a dragged one would land.
+pub const TOOLBAR_DROP_GAP: f32 = 72.0;
+/// Height of a toolbar button: `PAD_ICON_BTN` around one line of `TEXT_SM`.
+pub const TOOLBAR_SLOT_HEIGHT: f32 = 22.0;
+/// Scrollbar under the customizing bar when its buttons don't all fit.
+pub const TOOLBAR_SCROLLBAR_WIDTH: f32 = 3.0;
+/// Rounding headroom when deciding which buttons fit before "…".
+pub const TOOLBAR_MEASURE_SLACK: f32 = 2.0;
+/// Search scope menu under the title-bar pill.
+pub const SEARCH_SCOPE_MENU_WIDTH: f32 = 260.0;
+pub const PAD_SEARCH_SCOPE_PILL: Padding = Padding {
+    top: SPACE_XXXS,
+    right: SPACE_XS,
+    bottom: SPACE_XXXS,
+    left: SPACE_XS,
+};
+pub const PAD_CHIP: Padding = Padding {
+    top: SPACE_XXS,
+    right: SPACE_SM,
+    bottom: SPACE_XXS,
+    left: SPACE_SM,
+};
+pub const DROPDOWN_TRIGGER_HEIGHT: f32 = 40.0;
+
+// ── Panel widths ────────────────────────────────────────
+
+pub const SIDEBAR_WIDTH: f32 = 180.0;
+pub const THREAD_LIST_WIDTH: f32 = 400.0;
+pub const SIDE_PANEL_WIDTH: f32 = 280.0;
+
+/// Label dot diameter on thread cards (line 3 indicators)
+pub const LABEL_DOT_SIZE: f32 = 6.0;
+
+/// Unread dot left of the avatar on thread cards. Read cards keep the same
+/// gutter empty, so every avatar lines up.
+pub const UNREAD_DOT_SIZE: f32 = 6.0;
+/// Air on each side of the unread dot: from the card's edge to the dot, and
+/// from the dot to the avatar.
+pub const UNREAD_DOT_GAP: f32 = SPACE_XS;
+
+/// Thread card fixed height (three lines + padding)
+pub const THREAD_CARD_HEIGHT: f32 = 68.0;
+/// Thread card height at compact density: three lines, no gaps.
+pub const THREAD_CARD_HEIGHT_COMPACT: f32 = 56.0;
+/// Thread card height at spacious density.
+pub const THREAD_CARD_HEIGHT_SPACIOUS: f32 = 82.0;
+/// Thickness of the line between two sidebar sections.
+pub const SECTION_BREAK_THICKNESS: f32 = 2.0;
+/// Thickness of a user-added sidebar separator.
+pub const SIDEBAR_SEPARATOR_THICKNESS: f32 = 3.0;
+/// User-added separator line between sidebar folders.
+pub const PAD_SIDEBAR_SEPARATOR: Padding = Padding {
+    top: 6.0,
+    right: 8.0,
+    bottom: 6.0,
+    left: 8.0,
+};
+/// Header of an all-accounts tree section ("All Accounts", an account).
+pub const PAD_SIDEBAR_SECTION_TITLE: Padding = Padding {
+    top: 6.0,
+    right: 8.0,
+    bottom: 4.0,
+    left: 4.0,
+};
+/// Fold chevron slot of a tree section header; the account email below
+/// the name is indented by the same width.
+pub const SIDEBAR_SECTION_CHEVRON_SLOT: f32 = 16.0;
+/// Space between the sections of the all-accounts tree.
+pub const SIDEBAR_SECTION_GAP: f32 = SPACE_SM;
+/// Date group header above thread cards ("Today", "Yesterday", ...).
+pub const PAD_THREAD_GROUP_HEADER: Padding = Padding {
+    top: 10.0,
+    right: 12.0,
+    bottom: 4.0,
+    left: 12.0,
+};
+/// Fold chevron slot of a date group header.
+pub const THREAD_GROUP_CHEVRON_SLOT: f32 = 10.0;
+/// Inset of the hairline between two thread cards.
+pub const PAD_THREAD_SEPARATOR: Padding = Padding {
+    top: 0.0,
+    right: 12.0,
+    bottom: 0.0,
+    left: 12.0,
+};
+/// Label column of the meeting invite card ("When", "Organizer", ...).
+pub const INVITE_LABEL_WIDTH: f32 = 84.0;
+/// Accept / Tentative / Decline buttons on the meeting invite card.
+pub const INVITE_RESPONSE_BUTTON_WIDTH: f32 = 128.0;
+/// Date field of the propose-new-time row (YYYY-MM-DD).
+pub const INVITE_DATE_INPUT_WIDTH: f32 = 120.0;
+/// Time fields of the propose-new-time row (HH:MM).
+pub const INVITE_TIME_INPUT_WIDTH: f32 = 72.0;
+/// Time column of the day agenda beside an invite.
+pub const INVITE_AGENDA_TIME_WIDTH: f32 = 96.0;
+/// Width of the day agenda beside an invite.
+pub const INVITE_AGENDA_WIDTH: f32 = 280.0;
+
+/// Side panel header and module content.
+pub const PAD_SIDE_PANEL: Padding = Padding {
+    top: 8.0,
+    right: 12.0,
+    bottom: 8.0,
+    left: 12.0,
+};
+/// Time column of a My Day agenda row ("14:00" over "25 min").
+pub const MY_DAY_TIME_WIDTH: f32 = 52.0;
+/// Calendar color bar of a My Day agenda row.
+/// Height of the body field when writing a template in the side panel.
+pub const TEMPLATE_EDITOR_HEIGHT: f32 = 220.0;
+pub const MY_DAY_BAR_WIDTH: f32 = 3.0;
+
+/// Starred thread card warm background alpha
+pub const STARRED_BG_ALPHA: f32 = 0.25;
+
+// ── Per-pane minimum widths (for resize clamping) ──────
+
+pub const SIDEBAR_MIN_WIDTH: f32 = 220.0;
+pub const SIDEBAR_MIN_WIDTH_COMPACT: f32 = 180.0;
+pub const SIDEBAR_MIN_WIDTH_SPACIOUS: f32 = 240.0;
+/// Height of the sidebar header (mode button + dropdown + compose stack)
+pub const SIDEBAR_HEADER_HEIGHT: f32 = 76.0;
+pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
+pub const READING_PANE_MIN_WIDTH: f32 = 300.0;
+
+// ── Window chrome (title bar, ribbon, app rail) ────────
+
+/// Custom title bar holding the search field. On macOS it runs under the
+/// traffic lights (transparent system title bar).
+pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+/// Left inset that keeps title bar content clear of the macOS traffic lights.
+pub const TRAFFIC_LIGHTS_INSET: f32 = 84.0;
+pub const TITLE_SEARCH_MAX_WIDTH: f32 = 560.0;
+pub const APP_RAIL_WIDTH: f32 = 48.0;
+pub const RAIL_BUTTON_SIZE: f32 = 36.0;
+/// Glyph size for app rail and ribbon-primary icons.
+pub const ICON_RAIL: f32 = 18.0;
+/// Gap between the floating panes and around the window edge.
+pub const PANE_GAP: f32 = 6.0;
+
+// ── Padding presets ─────────────────────────────────────
+// Named by usage, not by raw values. All values land on
+// the spacing scale above.
+
+/// Compact inline element: icon buttons, badges, tags.
+pub const PAD_ICON_BTN: Padding = Padding {
+    top: 4.0,
+    right: 8.0,
+    bottom: 4.0,
+    left: 8.0,
+};
+
+/// Nav / sidebar item.
+pub const PAD_NAV_ITEM: Padding = Padding {
+    top: 4.0,
+    right: 8.0,
+    bottom: 4.0,
+    left: 8.0,
+};
+
+/// Sidebar folder row at compact density.
+pub const PAD_NAV_ITEM_COMPACT: Padding = Padding {
+    top: SPACE_XXXS,
+    bottom: SPACE_XXXS,
+    ..PAD_NAV_ITEM
+};
+
+/// Sidebar folder row at spacious density.
+pub const PAD_NAV_ITEM_SPACIOUS: Padding = Padding {
+    top: SPACE_XS,
+    bottom: SPACE_XS,
+    ..PAD_NAV_ITEM
+};
+
+/// Standard button (e.g. compose, reply).
+pub const PAD_BUTTON: Padding = Padding {
+    top: 8.0,
+    right: 16.0,
+    bottom: 8.0,
+    left: 16.0,
+};
+
+/// Sidebar wrapper.
+pub const PAD_SIDEBAR: Padding = Padding {
+    top: 8.0,
+    right: 4.0,
+    bottom: 8.0,
+    left: 4.0,
+};
+
+/// Panel header area (search bar, title row).
+pub const PAD_PANEL_HEADER: Padding = Padding {
+    top: 12.0,
+    right: 12.0,
+    bottom: 12.0,
+    left: 12.0,
+};
+
+/// Toolbar / action bar.
+pub const PAD_TOOLBAR: Padding = Padding {
+    top: 8.0,
+    right: 16.0,
+    bottom: 8.0,
+    left: 16.0,
+};
+
+/// Content section (thread header, message list margins).
+pub const PAD_CONTENT: Padding = Padding {
+    top: 16.0,
+    right: 24.0,
+    bottom: 16.0,
+    left: 24.0,
+};
+
+/// Card internal padding (message cards, elevated panels).
+pub const PAD_CARD: Padding = Padding {
+    top: 12.0,
+    right: 16.0,
+    bottom: 12.0,
+    left: 16.0,
+};
+
+/// Thread card internal content.
+pub const PAD_THREAD_CARD: Padding = Padding {
+    top: 8.0,
+    right: 12.0,
+    bottom: 8.0,
+    left: 12.0,
+};
+
+/// Thread card internal content at compact density.
+pub const PAD_THREAD_CARD_COMPACT: Padding = Padding {
+    top: SPACE_XXXS,
+    bottom: SPACE_XXXS,
+    ..PAD_THREAD_CARD
+};
+
+/// Thread card internal content at spacious density.
+pub const PAD_THREAD_CARD_SPACIOUS: Padding = Padding {
+    top: SPACE_SM,
+    bottom: SPACE_SM,
+    ..PAD_THREAD_CARD
+};
+
+// ── Density ─────────────────────────────────────────────
+
+/// How tightly the folder column and the message list pack their rows,
+/// picked in Settings > General and in View > Density.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+    Spacious,
+}
+
+impl Density {
+    /// Settings values, in menu order.
+    pub const SETTINGS: [&'static str; 3] = ["Compact", "Comfortable", "Spacious"];
+
+    /// Reads a stored value case-insensitively. Before the levels were
+    /// named, the middle one was stored as "Default"; it and any unknown
+    /// value read as `Comfortable`.
+    pub fn from_setting(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("Compact") {
+            Self::Compact
+        } else if value.eq_ignore_ascii_case("Spacious") {
+            Self::Spacious
+        } else {
+            Self::Comfortable
+        }
+    }
+
+    pub fn setting(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact",
+            Self::Comfortable => "Comfortable",
+            Self::Spacious => "Spacious",
+        }
+    }
+
+    /// Padding inside a folder row of the sidebar.
+    pub fn nav_item_padding(self) -> Padding {
+        match self {
+            Self::Compact => PAD_NAV_ITEM_COMPACT,
+            Self::Comfortable => PAD_NAV_ITEM,
+            Self::Spacious => PAD_NAV_ITEM_SPACIOUS,
+        }
+    }
+
+    /// Gap between two folder rows of the sidebar.
+    pub fn nav_row_gap(self) -> f32 {
+        match self {
+            Self::Compact => SPACE_XXXS,
+            Self::Comfortable | Self::Spacious => SPACE_XXS,
+        }
+    }
+
+    pub fn sidebar_min_width(self) -> f32 {
+        match self {
+            Self::Compact => SIDEBAR_MIN_WIDTH_COMPACT,
+            Self::Comfortable => SIDEBAR_MIN_WIDTH,
+            Self::Spacious => SIDEBAR_MIN_WIDTH_SPACIOUS,
+        }
+    }
+
+    pub fn thread_card_height(self) -> f32 {
+        match self {
+            Self::Compact => THREAD_CARD_HEIGHT_COMPACT,
+            Self::Comfortable => THREAD_CARD_HEIGHT,
+            Self::Spacious => THREAD_CARD_HEIGHT_SPACIOUS,
+        }
+    }
+
+    pub fn thread_card_padding(self) -> Padding {
+        match self {
+            Self::Compact => PAD_THREAD_CARD_COMPACT,
+            Self::Comfortable => PAD_THREAD_CARD,
+            Self::Spacious => PAD_THREAD_CARD_SPACIOUS,
+        }
+    }
+
+    /// Gap between the sender, subject and snippet lines of a thread card.
+    pub fn thread_card_line_gap(self) -> f32 {
+        match self {
+            Self::Compact => SPACE_0,
+            Self::Comfortable => SPACE_XXXS,
+            Self::Spacious => SPACE_XXS,
+        }
+    }
+
+    pub fn thread_card_avatar(self) -> f32 {
+        match self {
+            Self::Compact => AVATAR_THREAD_CARD_COMPACT,
+            Self::Comfortable => AVATAR_THREAD_CARD,
+            Self::Spacious => AVATAR_THREAD_CARD_SPACIOUS,
+        }
+    }
+}
+
+/// Search / text input field.
+pub const PAD_INPUT: Padding = Padding {
+    top: 8.0,
+    right: 12.0,
+    bottom: 8.0,
+    left: 12.0,
+};
+
+/// Section header in a sidebar or panel.
+pub const PAD_SECTION_HEADER: Padding = Padding {
+    top: 8.0,
+    right: 12.0,
+    bottom: 8.0,
+    left: 12.0,
+};
+
+/// Collapsible section header (tighter horizontal padding).
+pub const PAD_COLLAPSIBLE_HEADER: Padding = Padding {
+    top: 0.0,
+    right: 8.0,
+    bottom: 0.0,
+    left: 8.0,
+};
+
+/// Stat row / key-value pair.
+pub const PAD_STAT_ROW: Padding = Padding {
+    top: 2.0,
+    right: 12.0,
+    bottom: 2.0,
+    left: 12.0,
+};
+
+/// Badge / count pill.
+pub const PAD_BADGE: Padding = Padding {
+    top: 2.0,
+    right: 4.0,
+    bottom: 2.0,
+    left: 4.0,
+};
+
+/// Dropdown: trigger button and menu wrapper.
+pub const PAD_DROPDOWN: Padding = Padding::new(8.0);
+
+/// Settings content area (generous margins around fieldsets).
+pub const PAD_SETTINGS_CONTENT: Padding = Padding {
+    top: 32.0,
+    right: 48.0,
+    bottom: 32.0,
+    left: 48.0,
+};
+
+/// Minimum height for settings rows (ensures consistent row height
+/// whether the row contains a control or just text).
+pub const SETTINGS_ROW_HEIGHT: f32 = 52.0;
+/// Slim row reserved for in-list section headers (e.g. per-account
+/// dividers inside the Mail Rules > Labels list). Shorter than a normal
+/// row so the header reads as a separator, not an entry.
+pub const SETTINGS_SECTION_HEADER_HEIGHT: f32 = 36.0;
+/// Toggle rows with label + description need more room.
+pub const SETTINGS_TOGGLE_ROW_HEIGHT: f32 = 64.0;
+/// Height of the title-line inside a settings row that pairs the label
+/// with an inline control on the right (toggle, dropdown trigger, slider).
+/// Sized just above the toggler glyph so the title rides high in the row
+/// and the description hangs immediately below without a dead band.
+/// Controls anchored to this line keep a fixed vertical position
+/// regardless of how many lines the description wraps to.
+pub const SETTINGS_LABEL_LINE_HEIGHT: f32 = 22.0;
+
+/// Title-line height for radio rows where the label pairs with a circle
+/// on the left. Slightly taller than `SETTINGS_LABEL_LINE_HEIGHT` because
+/// the radio circle wants more breathing room beside the label than a
+/// toggle or dropdown trigger does.
+pub const SETTINGS_RADIO_LINE_HEIGHT: f32 = 27.0;
+
+/// Settings row (label + control).
+pub const PAD_SETTINGS_ROW: Padding = Padding {
+    top: 12.0,
+    right: 16.0,
+    bottom: 12.0,
+    left: 16.0,
+};
+
+/// Select trigger padding (vertical only - sits inside a padded row).
+pub const PAD_SELECT_TRIGGER: Padding = Padding {
+    top: 4.0,
+    right: 0.0,
+    bottom: 4.0,
+    left: 0.0,
+};
+
+/// Message body inner padding.
+pub const PAD_BODY: Padding = Padding {
+    top: 12.0,
+    right: 16.0,
+    bottom: 12.0,
+    left: 16.0,
+};
+
+// ── Settings-specific sizes ────────────────────────────
+
+/// Settings nav sidebar width
+pub const SETTINGS_NAV_WIDTH: f32 = 200.0;
+
+/// Settings content max width
+pub const SETTINGS_CONTENT_MAX_WIDTH: u32 = 600;
+
+/// Max width of a settings sheet that edits wide content (a signature).
+pub const SETTINGS_WIDE_SHEET_MAX_WIDTH: u32 = 1100;
+
+/// Width of the panel under a formatting toolbar's "more" button, which
+/// holds the tools the bar had no room for: three icons a row.
+pub const FORMAT_OVERFLOW_PANEL_WIDTH: f32 = 132.0;
+
+/// Smallest height of the signature editor; it grows with its content.
+pub const SIGNATURE_EDITOR_MIN_HEIGHT: f32 = 120.0;
+
+/// Width for editor action buttons (Save, Cancel, Delete).
+pub const EDITOR_BUTTON_WIDTH: f32 = 100.0;
+
+/// Minimum width for select widget (trigger + menu)
+pub const SELECT_MIN_WIDTH: f32 = 140.0;
+
+/// Help tooltip popup width
+pub const HELP_TOOLTIP_WIDTH: f32 = 300.0;
+
+/// Slider handle radius
+pub const SLIDER_HANDLE_RADIUS: f32 = 7.0;
+/// Slider rail width (height of the track)
+pub const SLIDER_RAIL_WIDTH: f32 = 4.0;
+
+/// Radio button outer circle size
+pub const RADIO_SIZE: f32 = 16.0;
+/// Spacing between radio circle and label
+pub const RADIO_LABEL_SPACING: f32 = SPACE_SM;
+
+/// Width of the grip handle slot in editable lists
+pub const GRIP_SLOT_WIDTH: f32 = 16.0;
+
+/// Space between scrollbar and content (embeds scrollbar instead of overlaying)
+pub const SCROLLBAR_SPACING: f32 = SPACE_XXXS;
+
+// ── Palette overlay ─────────────────────────────────────
+
+/// Search typeahead popup max height.
+pub const TYPEAHEAD_MAX_HEIGHT: f32 = 300.0;
+
+/// Palette card width.
+pub const PALETTE_WIDTH: f32 = 600.0;
+/// Palette card max height.
+pub const PALETTE_MAX_HEIGHT: f32 = 400.0;
+/// Palette vertical offset from top of window.
+pub const PALETTE_TOP_OFFSET: f32 = 80.0;
+/// Individual result row height.
+pub const PALETTE_RESULT_HEIGHT: f32 = 36.0;
+/// Category badge column width.
+pub const PALETTE_CATEGORY_WIDTH: f32 = 80.0;
+/// Keybinding hint column width.
+pub const PALETTE_KEYBINDING_WIDTH: f32 = 100.0;
+
+// ── Status bar ──────────────────────────────────────────
+
+// ── Dialog (alert / form) ──────────────────────────────
+
+/// Default width for `alert_dialog` (title + text body + actions).
+pub const DIALOG_CONFIRM_WIDTH: f32 = 380.0;
+/// Default width for `form_dialog` (title + form body + actions).
+pub const DIALOG_FORM_WIDTH: f32 = 480.0;
+
+// ── Account modal ───────────────────────────────────────
+
+/// Add Account modal width
+pub const ACCOUNT_MODAL_WIDTH: f32 = 520.0;
+/// Add Account modal max height
+pub const ACCOUNT_MODAL_MAX_HEIGHT: f32 = 640.0;
+/// Color swatch size in the palette picker
+pub const COLOR_SWATCH_SIZE: f32 = 28.0;
+/// Color palette grid columns
+pub const COLOR_PALETTE_COLUMNS: usize = 5;
+/// Protocol selection card height
+pub const PROTOCOL_CARD_HEIGHT: f32 = 64.0;
+/// Welcome icon size on the first-launch email input screen.
+pub const WELCOME_ICON_SIZE: f32 = 96.0;
+/// Color swatch button padding (around the canvas).
+pub const PAD_COLOR_SWATCH: f32 = 4.0;
+/// Alpha for dimmed (already-used) color swatches.
+pub const COLOR_SWATCH_DIMMED_ALPHA: f32 = 0.35;
+/// Proportional factor for check-mark size relative to swatch radius.
+pub const COLOR_SWATCH_CHECK_SCALE: f32 = 0.35;
+
+/// Status bar fixed height (one line of text + padding).
+pub const STATUS_BAR_HEIGHT: f32 = 28.0;
+
+/// Status bar internal padding (compact vertical, standard horizontal).
+pub const PAD_STATUS_BAR: Padding = Padding {
+    top: 4.0,
+    right: 12.0,
+    bottom: 4.0,
+    left: 12.0,
+};
+
+// ── Token input ─────────────────────────────────────────
+
+/// Token chip height.
+pub const TOKEN_HEIGHT: f32 = 24.0;
+/// Token chip border radius.
+pub const TOKEN_RADIUS: f32 = RADIUS_SM;
+/// Token chip internal padding.
+pub const PAD_TOKEN: Padding = Padding {
+    top: 2.0,
+    right: 8.0,
+    bottom: 2.0,
+    left: 8.0,
+};
+/// Spacing between tokens (horizontal).
+pub const TOKEN_SPACING: f32 = SPACE_XXS;
+/// Spacing between token rows (vertical).
+pub const TOKEN_ROW_SPACING: f32 = SPACE_XXS;
+/// Token input field internal padding. Horizontal sides match `PAD_INPUT`
+/// so the placeholder/text align with iced's default `text_input` (e.g.
+/// the Subject field next to To/Cc/Bcc in the compose window).
+pub const PAD_TOKEN_INPUT: Padding = Padding {
+    top: 4.0,
+    right: 12.0,
+    bottom: 4.0,
+    left: 12.0,
+};
+/// Minimum width for the text input portion before wrapping.
+pub const TOKEN_TEXT_MIN_WIDTH: f32 = 120.0;
+
+// ── Calendar ────────────────────────────────────────────
+
+/// Minimum height for a day cell in the month grid.
+pub const CALENDAR_CELL_MIN_HEIGHT: f32 = 80.0;
+/// Height of a single event entry row in the month grid.
+pub const CALENDAR_EVENT_HEIGHT: f32 = 20.0;
+/// Height of the day-of-week header row in the month grid.
+/// Calendar sidebar header height (matches mail sidebar dropdown + gap + compose)
+pub const CALENDAR_HEADER_HEIGHT: f32 = 64.0;
+/// Cell size (width and height) for the mini-month date grid.
+pub const MINI_MONTH_CELL_SIZE: f32 = 28.0;
+
+// ── Time grid (day/work-week/week views) ─────────────
+
+/// Width of the hour-label column on the left of the time grid.
+pub const TIME_GRID_HOUR_LABEL_WIDTH: f32 = 60.0;
+/// Vertical pixels per hour in the time grid.
+pub const TIME_GRID_PIXELS_PER_HOUR: f32 = 60.0;
+/// Minimum rendered height for very short events.
+pub const TIME_GRID_MIN_EVENT_HEIGHT: f32 = 20.0;
+/// Height of each day-column header (date + weekday label).
+pub const TIME_GRID_HEADER_HEIGHT: f32 = 48.0;
+/// Height of the all-day event bar above the time grid.
+pub const TIME_GRID_ALL_DAY_HEIGHT: f32 = 32.0;
+/// Thickness of the current-time indicator line.
+pub const TIME_GRID_NOW_LINE_WIDTH: f32 = 2.0;
+
+// ── Calendar overlay (event detail / editor) ────────────
+/// Width of the event detail/editor modal.
+pub const CALENDAR_OVERLAY_WIDTH: f32 = 420.0;
+/// Maximum height of the event detail/editor modal.
+pub const CALENDAR_OVERLAY_MAX_HEIGHT: f32 = 560.0;
+/// Height of a form row in the event editor.
+pub const CALENDAR_FORM_ROW_HEIGHT: f32 = 36.0;
+/// Width of the label column in the event editor form.
+pub const CALENDAR_FORM_LABEL_WIDTH: f32 = 80.0;
+/// Group icon size on group tokens.
+pub const TOKEN_GROUP_ICON_SIZE: f32 = ICON_XS;
+
+// ── Autocomplete dropdown ───────────────────────────────
+
+/// Maximum height of the autocomplete dropdown.
+pub const AUTOCOMPLETE_MAX_HEIGHT: f32 = 300.0;
+/// Height of each autocomplete suggestion row.
+pub const AUTOCOMPLETE_ROW_HEIGHT: f32 = 32.0;
+
+// ── Message view pop-out window ─────────────────────────
+pub const MESSAGE_VIEW_DEFAULT_WIDTH: f32 = 800.0;
+pub const MESSAGE_VIEW_DEFAULT_HEIGHT: f32 = 600.0;
+pub const MESSAGE_VIEW_MIN_WIDTH: f32 = 480.0;
+pub const MESSAGE_VIEW_MIN_HEIGHT: f32 = 320.0;
+
+// ── Compose pop-out window ─────────────────────────────
+pub const COMPOSE_DEFAULT_WIDTH: f32 = 720.0;
+pub const COMPOSE_DEFAULT_HEIGHT: f32 = 560.0;
+pub const COMPOSE_MIN_WIDTH: f32 = 480.0;
+pub const COMPOSE_MIN_HEIGHT: f32 = 360.0;
+/// Width of the label column (From, To, Cc, Bcc, Subject) in compose.
+pub const COMPOSE_LABEL_WIDTH: f32 = 52.0;
+/// Around the compose fields. No bottom padding: the rule under the header
+/// closes the last row.
+pub const PAD_COMPOSE_HEADER: Padding = Padding {
+    top: SPACE_XS,
+    right: SPACE_LG,
+    bottom: 0.0,
+    left: SPACE_LG,
+};
+/// Breathing room above and below one compose field, between hairlines.
+pub const PAD_COMPOSE_FIELD_ROW: Padding = Padding {
+    top: SPACE_XXS,
+    right: 0.0,
+    bottom: SPACE_XXS,
+    left: 0.0,
+};
+/// Height of an empty reply editor: a few lines above the signature, as in
+/// Outlook. It grows with the text, and the quoted original scrolls with it
+/// as one page.
+pub const COMPOSE_EDITOR_MIN_HEIGHT: f32 = 96.0;
+
+// ── Emoji picker ────────────────────────────────────────
+
+/// Emoji picker popup width.
+pub const EMOJI_PICKER_WIDTH: f32 = 300.0;
+/// Emoji picker popup max height.
+pub const EMOJI_PICKER_MAX_HEIGHT: f32 = 350.0;
+/// Individual emoji button size (width and height).
+pub const EMOJI_BUTTON_SIZE: f32 = 36.0;
+/// Number of columns in the emoji grid.
+pub const EMOJI_GRID_COLUMNS: usize = 8;
+/// Font size for emoji glyphs in the picker grid.
+pub const EMOJI_FONT_SIZE: f32 = 20.0;
+
+// ── Chat timeline ───────────────────────────────────────
+/// Maximum width for a chat bubble (prevents full-width stretch).
+pub const CHAT_BUBBLE_MAX_WIDTH: f32 = 480.0;
+/// Border radius for chat bubbles (larger than card radius).
+pub const CHAT_BUBBLE_RADIUS: f32 = 12.0;
+/// Internal padding for chat bubble content.
+pub const PAD_CHAT_BUBBLE: Padding = Padding {
+    top: 8.0,
+    right: 12.0,
+    bottom: 8.0,
+    left: 12.0,
+};
+/// Spacing between consecutive same-sender bubbles.
+pub const CHAT_BUBBLE_SPACING: f32 = 4.0;
+/// Spacing between sender changes (larger gap).
+pub const CHAT_GROUP_SPACING: f32 = 12.0;
+/// Spacing around date separator lines.
+pub const CHAT_DATE_SEPARATOR_SPACING: f32 = 16.0;
+
+// ── People tab list panel ──────────────────────────────
+/// Fixed height of every recessed scrollable list panel in the People
+/// tab and its group editor (Contacts / Groups / Add Members / Members).
+/// Targets ~5 minimal cards visible at a glance.
+pub const PEOPLE_PANEL_HEIGHT: f32 = 380.0;
+/// Vertical spacing between contact / group pills inside their panel.
+pub const PEOPLE_PILL_SPACING: f32 = 8.0;
+
+// ── HTML email body ─────────────────────────────────────
+
+/// HTML email body padding. Horizontal is zero: emails carry their own
+/// margins, and the card padding already separates them from the border.
+/// Vertical matches the body sheet's corner radius so the square rendered
+/// page never cuts into a rounded corner.
+pub const PAD_HTML_BODY: Padding = Padding {
+    top: RADIUS_MD,
+    right: 0.0,
+    bottom: RADIUS_MD,
+    left: 0.0,
+};
+
+/// Space reserved for an HTML email body while it renders.
+pub const HTML_BODY_PLACEHOLDER_HEIGHT: f32 = 160.0;
+/// Padding inside the "remote images blocked" banner above an email body.
+pub const PAD_REMOTE_BANNER: Padding = Padding {
+    top: 6.0,
+    right: 6.0,
+    bottom: 6.0,
+    left: 10.0,
+};
+
+// ── Update banner ───────────────────────────────────────
+
+/// Width of the floating "update available" card.
+pub const UPDATE_BANNER_WIDTH: f32 = 400.0;
+/// Distance between the update card and the bottom of the window.
+pub const UPDATE_BANNER_BOTTOM_OFFSET: f32 = 40.0;
+/// Thickness of the download progress bar.
+pub const UPDATE_PROGRESS_HEIGHT: f32 = 4.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The label-line that hosts inline controls (toggle, dropdown trigger)
+    /// must be at least as tall as the toggler glyph, otherwise the toggler
+    /// gets vertically clipped inside its fixed-height container.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn settings_label_line_holds_toggler_glyph() {
+        assert!(
+            SETTINGS_LABEL_LINE_HEIGHT >= TEXT_HEADING,
+            "SETTINGS_LABEL_LINE_HEIGHT ({SETTINGS_LABEL_LINE_HEIGHT}) must be \
+             at least the toggler glyph size ({TEXT_HEADING}) so the toggler \
+             fits without clipping inside the fixed-height label line",
+        );
+    }
+
+    /// Radio rows pair the label with a circle on the left, not a control
+    /// on the right - they want a slightly taller label-line than toggle /
+    /// dropdown rows. Guard against the constants drifting back to equality.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn settings_radio_line_is_taller_than_label_line() {
+        assert!(
+            SETTINGS_RADIO_LINE_HEIGHT > SETTINGS_LABEL_LINE_HEIGHT,
+            "SETTINGS_RADIO_LINE_HEIGHT ({SETTINGS_RADIO_LINE_HEIGHT}) should \
+             be larger than SETTINGS_LABEL_LINE_HEIGHT ({SETTINGS_LABEL_LINE_HEIGHT}) \
+             so radios keep their roomier baseline while toggle / dropdown \
+             rows ride tighter against the row top",
+        );
+    }
+}

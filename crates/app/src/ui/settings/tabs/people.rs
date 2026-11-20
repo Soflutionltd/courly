@@ -1,0 +1,620 @@
+use iced::widget::{
+    Space, button, column, container, mouse_area, row, scrollable, text, text_input,
+};
+use iced::{Alignment, Element, Length};
+use rtsk::contacts::search::ContactOrigins;
+use rtsk::db::queries_extra::ContactOriginFilter;
+use rust_i18n::t;
+
+use super::accounts::tr;
+use crate::icon;
+use crate::ui::layout::*;
+use crate::ui::settings::row_widgets::*;
+use crate::ui::settings::types::*;
+use crate::ui::theme;
+use crate::ui::widgets;
+
+pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH));
+
+    col = col.push(section_untitled(vec![action_row(
+        tr(t!("settings.people.import_contacts")),
+        Some(tr(t!("settings.people.import_contacts_description"))),
+        Some(icon::upload()),
+        ActionKind::InApp,
+        SettingsMessage::ImportContactsOpen,
+    )]));
+
+    col = col.push(section_untitled(vec![toggle_row(
+        tr(t!("settings.people.sender_logos")),
+        t!("settings.people.sender_logos_description"),
+        state.sender_logos,
+        SettingsMessage::ToggleSenderLogos,
+    )]));
+
+    if let Some(issue) = &state.contact_issue {
+        col = col.push(section_untitled(vec![static_row(contact_issue_banner(
+            issue,
+        ))]));
+    }
+
+    let contact_items: Vec<RowBuilder<'_>> = vec![
+        static_row(contact_filter_row(
+            &state.contact_filter,
+            state.focused_filter == Some(FilterId::Contacts),
+        )),
+        static_row(contact_origin_chips(state)),
+        static_row(contact_list_panel(state)),
+        people_add_button(
+            tr(t!("settings.people.new_contact")),
+            SettingsMessage::ContactCreate,
+        ),
+    ];
+
+    col = col.push(section(tr(t!("settings.people.contacts")), contact_items));
+
+    let group_items: Vec<RowBuilder<'_>> = vec![
+        static_row(group_filter_row(
+            &state.group_filter,
+            state.focused_filter == Some(FilterId::Groups),
+        )),
+        static_row(group_list_panel(state)),
+        people_add_button(
+            tr(t!("settings.people.new_group")),
+            SettingsMessage::GroupCreate,
+        ),
+    ];
+
+    col = col.push(section(tr(t!("settings.people.groups")), group_items));
+
+    col.into()
+}
+
+/// Why the last contact write left an address book behind.
+fn contact_issue_banner(issue: &str) -> Element<'_, SettingsMessage> {
+    container(
+        row![
+            column![
+                text(t!("settings.people.write_issue"))
+                    .size(TEXT_LG)
+                    .style(text::danger),
+                text(issue)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill),
+            button(icon::x().size(ICON_MD).style(text::secondary))
+                .on_press(SettingsMessage::DismissContactIssue)
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style()),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center),
+    )
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+fn contact_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
+    container(filter_row(
+        "contact-filter",
+        tr(t!("settings.people.filter_contacts")),
+        filter,
+        SettingsMessage::ContactFilterChanged,
+        FilterId::Contacts,
+        focused,
+    ))
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+/// Narrows the list to one address book. Outlook and Google show only
+/// when an account of that kind is set up.
+fn contact_origin_chips(state: &Settings) -> Element<'_, SettingsMessage> {
+    let has_provider = |provider: &str| {
+        state
+            .managed_accounts
+            .iter()
+            .any(|account| account.provider == provider)
+    };
+    let mut choices = vec![(
+        ContactOriginFilter::All,
+        tr(t!("settings.people.origin_all")),
+        ContactOrigins::default(),
+    )];
+    if cfg!(target_os = "macos") {
+        choices.push((
+            ContactOriginFilter::Apple,
+            tr(t!("settings.people.origin_apple")),
+            ContactOrigins {
+                apple: true,
+                ..ContactOrigins::default()
+            },
+        ));
+    }
+    if has_provider("graph") {
+        choices.push((
+            ContactOriginFilter::Microsoft,
+            tr(t!("settings.people.origin_microsoft")),
+            ContactOrigins {
+                microsoft: true,
+                ..ContactOrigins::default()
+            },
+        ));
+    }
+    if has_provider("gmail_api") {
+        choices.push((
+            ContactOriginFilter::Google,
+            tr(t!("settings.people.origin_google")),
+            ContactOrigins {
+                google: true,
+                ..ContactOrigins::default()
+            },
+        ));
+    }
+    choices.push((
+        ContactOriginFilter::Courly,
+        tr(t!("settings.people.origin_courly")),
+        ContactOrigins {
+            courly: true,
+            ..ContactOrigins::default()
+        },
+    ));
+
+    let mut chips = row![].spacing(SPACE_XS).align_y(Alignment::Center);
+    for (filter, label, origins) in choices {
+        let mut content = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+        if let Some(marks) = widgets::contact_origin_marks(origins, ICON_SM) {
+            content = content.push(marks);
+        }
+        content = content.push(text(label).size(TEXT_SM));
+        chips = chips.push(
+            button(content)
+                .on_press(SettingsMessage::ContactOriginFilterChanged(filter))
+                .padding(PAD_CHIP)
+                .style(
+                    theme::ButtonClass::Chip {
+                        active: state.contact_origin_filter == filter,
+                    }
+                    .style(),
+                ),
+        );
+    }
+    container(chips)
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .into()
+}
+
+fn group_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
+    container(filter_row(
+        "group-filter",
+        tr(t!("settings.people.filter_groups")),
+        filter,
+        SettingsMessage::GroupFilterChanged,
+        FilterId::Groups,
+        focused,
+    ))
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill)
+    .into()
+}
+
+pub(super) fn filter_row<'a>(
+    id: &'a str,
+    placeholder: &'a str,
+    value: &'a str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    filter_id: FilterId,
+    focused: bool,
+) -> Element<'a, SettingsMessage> {
+    let id_owned = id.to_string();
+    let has_value = !value.is_empty();
+
+    let trailing_slot_width = ICON_SM + PAD_ICON_BTN.left + PAD_ICON_BTN.right;
+    let trailing: Element<'a, SettingsMessage> = if has_value {
+        button(
+            container(icon::x().size(ICON_SM).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::FilterCleared(filter_id))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style())
+        .into()
+    } else {
+        Space::new()
+            .width(Length::Fixed(trailing_slot_width))
+            .height(Length::Fixed(
+                ICON_SM + PAD_ICON_BTN.top + PAD_ICON_BTN.bottom,
+            ))
+            .into()
+    };
+
+    let content = row![
+        container(icon::search().size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+        text_input(placeholder, value)
+            .id(id_owned)
+            .on_input(on_input)
+            .size(TEXT_LG)
+            .padding(0)
+            .style(theme::TextInputClass::Inline.style())
+            .width(Length::Fill),
+        trailing,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let body = container(content)
+        .padding(PAD_INPUT)
+        .width(Length::Fill)
+        .style(move |theme| theme::style_filter_container(theme, focused));
+
+    mouse_area(body)
+        .on_press(SettingsMessage::FilterFocused(filter_id))
+        .into()
+}
+
+fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
+    let panel: Element<'_, SettingsMessage> = if state.contacts.is_empty() {
+        let msg = if state.contact_filter.trim().is_empty() {
+            t!("settings.people.no_contacts")
+        } else {
+            t!("settings.people.no_contacts_match")
+        };
+        container(
+            text(msg)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    } else {
+        let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
+        for contact in &state.contacts {
+            col = col.push(contact_card(contact, &state.managed_accounts));
+        }
+
+        container(
+            scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
+                .direction(iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new()
+                        .width(6)
+                        .scroller_width(6)
+                        .margin(SPACE_XXS),
+                ))
+                .height(Length::Fill),
+        )
+        .padding(iced::Padding {
+            top: SPACE_XS,
+            right: 0.0,
+            bottom: SPACE_XS,
+            left: 0.0,
+        })
+        .width(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .clip(true)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    };
+
+    container(panel)
+        .padding(SPACE_XS)
+        .width(Length::Fill)
+        .into()
+}
+
+fn contact_card<'a>(
+    contact: &'a crate::db::ContactEntry,
+    accounts: &'a [ManagedAccount],
+) -> Element<'a, SettingsMessage> {
+    let name = contact
+        .display_name
+        .as_deref()
+        .unwrap_or(tr(t!("settings.people.no_name")));
+    let id = contact.id.clone();
+
+    let mut name_row = row![text(name).size(TEXT_LG).style(text::base)]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+    if let Some(marks) = widgets::contact_origin_marks(contact.origins, ICON_MD) {
+        name_row = name_row.push(marks);
+    }
+    let header = row![
+        container(name_row)
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+        text(&contact.email).size(TEXT_SM).style(text::secondary),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    let email2_row: Option<Element<'a, SettingsMessage>> = contact.email2.as_ref().map(|e2| {
+        row![
+            Space::new().width(Length::Fill),
+            text(e2)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_SM)
+        .into()
+    });
+
+    let mut details = column![].spacing(SPACE_XXXS);
+    if let Some(ref phone) = contact.phone {
+        details = details.push(
+            text(t!("settings.people.phone", phone = phone))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
+    }
+    if let Some(ref company) = contact.company {
+        details = details.push(
+            text(t!("settings.people.company", company = company))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
+    }
+    if let Some(ref notes) = contact.notes {
+        details = details.push(
+            text(t!("settings.people.notes", notes = notes))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
+    }
+
+    let groups_row: Option<Element<'a, SettingsMessage>> = if contact.groups.is_empty() {
+        None
+    } else {
+        let mut r = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+        for group_name in &contact.groups {
+            r = r.push(
+                container(text(group_name).size(TEXT_XS).style(text::primary))
+                    .padding(iced::Padding {
+                        top: 1.0,
+                        right: 6.0,
+                        bottom: 1.0,
+                        left: 6.0,
+                    })
+                    .style(theme::ContainerClass::Badge.style()),
+            );
+        }
+        Some(r.into())
+    };
+
+    let account_row: Option<Element<'a, SettingsMessage>> =
+        contact.account_id.as_deref().and_then(|aid| {
+            let account = accounts.iter().find(|a| a.id == aid)?;
+            let account_label = account
+                .account_name
+                .as_deref()
+                .or(account.display_name.as_deref())
+                .unwrap_or(&account.email);
+            let pill = match account.account_color.as_deref() {
+                Some(hex) => {
+                    let color = crate::ui::theme::hex_to_color(hex);
+                    container(
+                        row![
+                            widgets::color_dot::<SettingsMessage>(color),
+                            text(account_label.to_string())
+                                .size(TEXT_XS)
+                                .style(text::secondary),
+                        ]
+                        .spacing(SPACE_XXS)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding(iced::Padding {
+                        top: 1.0,
+                        right: 6.0,
+                        bottom: 1.0,
+                        left: 6.0,
+                    })
+                    .style(theme::ContainerClass::Badge.style())
+                }
+                None => container(
+                    text(account_label.to_string())
+                        .size(TEXT_XS)
+                        .style(text::secondary),
+                )
+                .padding(iced::Padding {
+                    top: 1.0,
+                    right: 6.0,
+                    bottom: 1.0,
+                    left: 6.0,
+                })
+                .style(theme::ContainerClass::Badge.style()),
+            };
+            Some(
+                row![pill]
+                    .spacing(SPACE_XXS)
+                    .align_y(Alignment::Center)
+                    .into(),
+            )
+        });
+
+    let mut col = column![header].spacing(SPACE_XXXS);
+    if let Some(e2) = email2_row {
+        col = col.push(e2);
+    }
+    col = col.push(details);
+    if let Some(gr) = groups_row {
+        col = col.push(gr);
+    }
+    if let Some(ar) = account_row {
+        col = col.push(ar);
+    }
+
+    button(
+        container(col)
+            .padding(PAD_CARD)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::ContactClick(id))
+    .padding(0)
+    .style(theme::style_pill_card_button)
+    .width(Length::Fill)
+    .into()
+}
+
+fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
+    let id = group.id.clone();
+    let member_label = if group.member_count == 1 {
+        t!("settings.people.members_one", count = group.member_count)
+    } else {
+        t!("settings.people.members_other", count = group.member_count)
+    };
+    let format_date = |ts: i64| -> String {
+        jiff::Timestamp::from_second(ts)
+            .map(|instant| {
+                let zoned = instant.to_zoned(jiff::tz::TimeZone::system());
+                t!(
+                    "settings.people.date",
+                    month = crate::i18n::month_short(zoned.month()),
+                    day = zoned.day(),
+                    year = zoned.year()
+                )
+                .into_owned()
+            })
+            .unwrap_or_default()
+    };
+    let created_label = t!(
+        "settings.people.created",
+        date = format_date(group.created_at)
+    );
+    let updated_label = t!(
+        "settings.people.updated",
+        date = format_date(group.updated_at)
+    );
+
+    let top_row = row![
+        container(text(&group.name).size(TEXT_LG).style(text::base))
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+        text(member_label).size(TEXT_SM).style(text::secondary),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    let bottom_row = row![
+        container(
+            text(created_label)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style()),
+        )
+        .align_y(Alignment::Center)
+        .width(Length::Fill),
+        text(updated_label)
+            .size(TEXT_SM)
+            .style(theme::TextClass::Muted.style()),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    let content = column![top_row, bottom_row].spacing(SPACE_XXXS);
+
+    button(
+        container(content)
+            .padding(PAD_CARD)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::GroupClick(id))
+    .padding(0)
+    .style(theme::style_pill_card_button)
+    .width(Length::Fill)
+    .into()
+}
+
+fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
+    let panel: Element<'_, SettingsMessage> = if state.groups.is_empty() {
+        let msg = if state.group_filter.trim().is_empty() {
+            t!("settings.people.no_groups")
+        } else {
+            t!("settings.people.no_groups_match")
+        };
+        container(
+            text(msg)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    } else {
+        let mut col = column![].spacing(PEOPLE_PILL_SPACING).width(Length::Fill);
+        for group in &state.groups {
+            col = col.push(group_card(group));
+        }
+
+        container(
+            scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
+                .direction(iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new()
+                        .width(6)
+                        .scroller_width(6)
+                        .margin(SPACE_XXS),
+                ))
+                .height(Length::Fill),
+        )
+        .padding(iced::Padding {
+            top: SPACE_XS,
+            right: 0.0,
+            bottom: SPACE_XS,
+            left: 0.0,
+        })
+        .width(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .clip(true)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    };
+
+    container(panel)
+        .padding(SPACE_XS)
+        .width(Length::Fill)
+        .into()
+}
+
+fn people_add_button(label: &str, on_press: SettingsMessage) -> RowBuilder<'_> {
+    Box::new(move |position| {
+        button(
+            container(
+                row![
+                    icon::plus().size(ICON_MD).style(text::base),
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..crate::font::text()
+                        }),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center_x(Length::Fill)
+            .align_y(Alignment::Center),
+        )
+        .on_press(on_press)
+        .padding(PAD_SETTINGS_ROW)
+        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .into()
+    })
+}

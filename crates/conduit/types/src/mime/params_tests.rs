@@ -1,0 +1,1009 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use super::*;
+
+fn p(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|&(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
+}
+
+// --- Plain passthrough ---
+
+#[test]
+fn plain_passthrough() {
+    let params = p(&[("charset", "utf-8"), ("name", "file.txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result, p(&[("charset", "utf-8"), ("name", "file.txt")]));
+}
+
+// --- Standalone charset-encoded ---
+
+#[test]
+fn standalone_charset_encoded() {
+    // RFC 2231 Section 4 example: title*=us-ascii'en-us'This%20is%20fun
+    let params = p(&[("title*", "us-ascii'en-us'This%20is%20fun")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "This is fun");
+}
+
+// --- Continuation reassembly ---
+
+#[test]
+fn continuation_reassembly() {
+    // RFC 2231 Section 3: name*0="first"; name*1="second"
+    let params = p(&[("name*0", "first"), ("name*1", "second")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    assert_eq!(result[0].1, "firstsecond");
+}
+
+// --- Combined charset + continuation ---
+
+#[test]
+fn charset_continuation_combined() {
+    // RFC 2231 combined: first segment has charset, subsequent are percent-encoded.
+    // "Language and character set information only appear at the beginning"
+    let params = p(&[
+        ("title*0*", "us-ascii'en'This%20is"),
+        ("title*1*", "%20fun"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "This is fun");
+}
+
+// --- Out-of-order indices ---
+
+#[test]
+fn out_of_order_indices() {
+    let params = p(&[("name*1", "second"), ("name*0", "first")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    // BTreeMap orders by key, so segments are reassembled in order.
+    assert_eq!(result[0].1, "firstsecond");
+}
+
+// --- Non-UTF-8 charset (ISO-8859-1) ---
+
+#[test]
+fn non_utf8_charset_iso8859_1() {
+    // ISO-8859-1: 0xe9 = 'é'
+    let params = p(&[("title*", "iso-8859-1'en'caf%E9")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "café");
+}
+
+// --- Unknown charset (lossy fallback) ---
+
+#[test]
+fn unknown_charset_lossy_fallback() {
+    let params = p(&[("title*", "x-nonexistent'en'hello%20world")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "hello world");
+}
+
+// --- Mixed plain + encoded ordering ---
+
+#[test]
+fn mixed_plain_and_encoded_ordering() {
+    let params = p(&[
+        ("charset", "utf-8"),
+        ("name*0", "long"),
+        ("name*1", "file.txt"),
+        ("disposition", "inline"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].0, "charset");
+    assert_eq!(result[0].1, "utf-8");
+    // Continuation group appears at position of first segment.
+    assert_eq!(result[1].0, "name");
+    assert_eq!(result[1].1, "longfile.txt");
+    assert_eq!(result[2].0, "disposition");
+    assert_eq!(result[2].1, "inline");
+}
+
+// --- Charset from non-first encoded section ---
+
+/// RFC 2231 Section 3: when section 0 is plain (non-encoded) and a later
+/// section is the first charset-encoded one, the charset must be extracted
+/// from that later section.  Previously, charset extraction only triggered
+/// for section 0 (via `first_encoded`), so a plain section 0 caused the
+/// charset prefix to be included verbatim in the decoded value.
+#[test]
+fn charset_from_non_first_encoded_section() {
+    // Section *0 is plain, section *1* is the first encoded section.
+    let params = p(&[("name*0", "hello "), ("name*1*", "UTF-8''w%C3%B6rld.txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    assert_eq!(
+        result[0].1, "hello wörld.txt",
+        "RFC 2231 Section 3: charset from the first encoded section (not section 0) \
+             must be used to decode percent-encoded bytes"
+    );
+}
+
+// --- Empty params ---
+
+#[test]
+fn empty_params() {
+    let params: Vec<(String, String)> = Vec::new();
+    let result = decode_rfc2231_params(&params);
+    assert!(result.is_empty());
+}
+
+// --- Missing language tag ---
+
+#[test]
+fn missing_language_tag() {
+    // charset present, language empty: charset''encoded
+    let params = p(&[("title*", "utf-8''hello%20world")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "hello world");
+}
+
+// --- Malformed value (graceful passthrough) ---
+
+#[test]
+fn malformed_value_no_quotes() {
+    // No single quotes - graceful fallback: value returned as-is.
+    let params = p(&[("title*", "just-some-value")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "just-some-value");
+}
+
+// --- Case-insensitive key grouping ---
+
+#[test]
+fn case_insensitive_key_grouping() {
+    let params = p(&[("Name*0", "hello"), ("NAME*1", " world")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    // Base name uses the case from the first occurrence.
+    assert_eq!(result[0].0, "Name");
+    assert_eq!(result[0].1, "hello world");
+}
+
+// --- percent_decode unit tests ---
+
+#[test]
+fn percent_decode_basic() {
+    assert_eq!(percent_decode("hello%20world"), b"hello world");
+    assert_eq!(percent_decode("%2A%2A%2A"), b"***");
+    assert_eq!(percent_decode("no-encoding"), b"no-encoding");
+}
+
+#[test]
+fn percent_decode_truncated_sequence() {
+    // Truncated % at end - pass through.
+    assert_eq!(percent_decode("abc%2"), b"abc%2");
+    assert_eq!(percent_decode("abc%"), b"abc%");
+}
+
+#[test]
+fn percent_decode_invalid_hex() {
+    // Invalid hex chars - pass through.
+    assert_eq!(percent_decode("%GG"), b"%GG");
+}
+
+// --- Edge cases ---
+
+#[test]
+fn continuation_missing_segment_0() {
+    // Only segment 1 exists - no segment 0. RFC 2231 Section 3 requires
+    // continuations to start at 0, so the malformed group is skipped.
+    let params = p(&[("name*1", "world")]);
+    let result = decode_rfc2231_params(&params);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn continuation_requires_segment_zero() {
+    let params = p(&[("name*1", "world")]);
+    let result = decode_rfc2231_params(&params);
+    assert!(
+        result.iter().all(|(key, _)| key != "name"),
+        "RFC 2231 Section 3: continuation groups without section 0 must not be reassembled"
+    );
+}
+
+#[test]
+fn continuation_stops_at_first_gap() {
+    let params = p(&[("name*0", "first"), ("name*2", "third")]);
+    let result = decode_rfc2231_params(&params);
+    let name_val = result
+        .iter()
+        .find(|(key, _)| key == "name")
+        .map(|(_, value)| value.as_str());
+    assert_eq!(
+        name_val,
+        Some("first"),
+        "RFC 2231 Section 3: continuation reassembly must stop at the first missing index"
+    );
+}
+
+#[test]
+fn continuation_mixed_encoded_plain() {
+    // Segment 0 is charset-encoded, segment 1 is plain (unencoded).
+    // RFC 2231 Section 4: "Language and character set information only appear
+    // at the beginning of a given parameter value."
+    // Charset from segment 0 applies to the whole reassembled value.
+    let params = p(&[("name*0*", "utf-8'en'caf%C3%A9"), ("name*1", ".txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    assert_eq!(result[0].1, "café.txt");
+}
+
+#[test]
+fn standalone_empty_charset_empty_language() {
+    // Both charset and language empty: `title*=''hello%20world`
+    // split_charset_value returns charset=None, so lossy UTF-8 applies.
+    let params = p(&[("title*", "''hello%20world")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "title");
+    assert_eq!(result[0].1, "hello world");
+}
+
+#[test]
+fn empty_base_name_key() {
+    // Key is `*0` - empty base name. classify_key extracts base_name="".
+    // Should not panic; produces a parameter with empty key name.
+    let params = p(&[("*0", "value")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "");
+    assert_eq!(result[0].1, "value");
+}
+
+// --- L10: RFC 2231 continuation gap detection ---
+
+#[test]
+fn continuation_gap_assembles_all_segments() {
+    // RFC 2231 Section 3 forbids gaps. Keep only the contiguous prefix
+    // beginning at section 0.
+    let params = p(&[("name*0", "first"), ("name*2", "third")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    assert_eq!(result[0].1, "first");
+}
+
+#[test]
+fn continuation_gap_mid_sequence_assembles_all() {
+    // Stop once section 2 is missing instead of stitching section 3 on.
+    let params = p(&[("f*0", "A"), ("f*1", "B"), ("f*3", "D")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].1, "AB");
+}
+
+#[test]
+fn continuation_no_gap() {
+    // Contiguous segments - no gap, straightforward reassembly.
+    let params = p(&[("f*0", "A"), ("f*1", "B"), ("f*2", "C")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].1, "ABC");
+}
+
+// --- Postel's law: tolerate non-contiguous continuation indices ---
+
+#[test]
+fn continuation_gap_tolerates_non_contiguous_indices() {
+    // RFC 2231 Section 3: a missing section terminates the usable prefix.
+    let params = p(&[("name*0", "first"), ("name*2", "third")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    assert_eq!(result[0].1, "first");
+}
+
+#[test]
+fn continuation_gap_mid_sequence_tolerates() {
+    // Segments 0, 1, 3 present but 2 missing. Stop at the gap.
+    let params = p(&[("f*0", "A"), ("f*1", "B"), ("f*3", "D")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].1, "AB");
+}
+
+// --- L11: RFC 2047 encoded-word fallback in BODYSTRUCTURE parameters ---
+
+#[test]
+fn rfc2047_encoded_word_fallback_base64() {
+    // Some servers put RFC 2047 encoded words in parameter values instead
+    // of using RFC 2231. Verify the fallback decodes them.
+    // "test.txt" in base64 = "dGVzdC50eHQ="
+    let params = p(&[("filename", "=?UTF-8?B?dGVzdC50eHQ=?=")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "filename");
+    assert_eq!(result[0].1, "test.txt");
+}
+
+#[test]
+fn rfc2047_encoded_word_fallback_quoted_printable() {
+    // RFC 2047 Q-encoding: =?UTF-8?Q?caf=C3=A9.txt?=
+    let params = p(&[("filename", "=?UTF-8?Q?caf=C3=A9.txt?=")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "filename");
+    assert_eq!(result[0].1, "caf\u{e9}.txt");
+}
+
+#[test]
+fn rfc2047_fallback_does_not_corrupt_plain_values() {
+    // Plain values without =? ... ?= markers must be left untouched.
+    let params = p(&[("filename", "report.pdf")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result[0].1, "report.pdf");
+}
+
+// --- L12: decode_without_bom_handling preserves leading U+FEFF ---
+
+#[test]
+fn non_utf8_charset_preserves_leading_feff() {
+    // U+FEFF encoded in UTF-16LE is 0xFF 0xFE. When present as genuine
+    // content (not a BOM), it must be preserved.
+    // Build: iso-8859-1 value with byte 0xEF 0xBB 0xBF (UTF-8 BOM) should
+    // NOT be stripped - decode_without_bom_handling preserves it.
+    //
+    // We use windows-1252 which maps bytes 1:1 for 0x00-0xFF.
+    // Byte 0xC0 in windows-1252 = U+00C0 (À).
+    // We verify a BOM-like prefix (0xEF 0xBB 0xBF) is preserved when
+    // re-decoded from windows-1252.
+    let bom_bytes_hex = "%EF%BB%BF%C0"; // 0xEF 0xBB 0xBF 0xC0
+    let params = p(&[("title*", &format!("windows-1252''{bom_bytes_hex}"))]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    // In windows-1252: 0xEF=ï, 0xBB=», 0xBF=¿, 0xC0=À
+    // With decode_without_bom_handling, all bytes are preserved.
+    assert_eq!(result[0].1, "ï»¿À");
+}
+
+// --- Issue #10: RFC 2231-decoded values must not be double-decoded as RFC 2047 ---
+
+#[test]
+fn rfc2231_decoded_value_not_double_decoded_as_rfc2047() {
+    // A value that literally contains =?...?= after RFC 2231 decoding
+    // should NOT be re-decoded by the RFC 2047 fallback.
+    // "=?UTF-8?B?dGVzdA==?=" percent-encoded: %3D%3FUTF-8%3FB%3FdGVzdA%3D%3D%3F%3D
+    let params = p(&[("name*", "utf-8''%3D%3FUTF-8%3FB%3FdGVzdA%3D%3D%3F%3D")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    // Should be the literal string, NOT "test"
+    assert_eq!(result[0].1, "=?UTF-8?B?dGVzdA==?=");
+}
+
+// --- Issue #11: Duplicate continuation indices must keep first value ---
+
+#[test]
+fn duplicate_continuation_index_keeps_first() {
+    // RFC 2231 Section 3: each index appears exactly once.
+    // When duplicates exist, first value should win.
+    let params = p(&[("name*0", "correct"), ("name*0", "wrong")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "name");
+    assert_eq!(result[0].1, "correct"); // First value should win
+}
+
+// --- RFC 2231 Section 5: encoded params override plain duplicates ---
+
+#[test]
+fn rfc2231_section5_encoded_overrides_plain_duplicate() {
+    // RFC 2231 Section 5: when both `name` (plain) and `name*` (charset-
+    // encoded) exist, the RFC 2231 form takes precedence. The plain form
+    // is a fallback for clients that don't understand RFC 2231.
+    let params = p(&[
+        ("name", "fallback.txt"),
+        ("name*", "utf-8''encoded%2Dname.txt"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(
+        result,
+        p(&[("name", "encoded-name.txt")]),
+        "RFC 2231 Section 5: encoded form should override plain duplicate"
+    );
+}
+
+#[test]
+fn rfc2231_section5_plain_without_encoded_kept() {
+    // Plain parameter without any RFC 2231 version must be kept as-is.
+    let params = p(&[("name", "plain.txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result, p(&[("name", "plain.txt")]));
+}
+
+#[test]
+fn rfc2231_section5_encoded_without_plain_kept() {
+    // RFC 2231 parameter without any plain version must be kept as-is.
+    let params = p(&[("name*", "utf-8''encoded.txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result, p(&[("name", "encoded.txt")]));
+}
+
+#[test]
+fn rfc2231_section5_case_insensitive_dedup() {
+    // RFC 2231 Section 5: deduplication should be case-insensitive.
+    let params = p(&[("Name", "fallback.txt"), ("NAME*", "utf-8''encoded.txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(
+        result.len(),
+        1,
+        "RFC 2231 Section 5: case-insensitive dedup should produce one entry; got {result:?}"
+    );
+    assert_eq!(result[0].1, "encoded.txt");
+}
+
+#[test]
+fn rfc2231_section5_continuation_overrides_plain() {
+    // RFC 2231 Section 5: continuation groups (`name*0*=...`, `name*1=...`)
+    // also override a plain `name` parameter.
+    let params = p(&[
+        ("name", "fallback.txt"),
+        ("name*0*", "utf-8''encoded"),
+        ("name*1", ".txt"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(
+        result.len(),
+        1,
+        "RFC 2231 Section 5: continuation group should override plain; got {result:?}"
+    );
+    assert_eq!(result[0].1, "encoded.txt");
+}
+
+#[test]
+fn rfc2231_section5_plain_before_encoded_preserves_order() {
+    // When the plain entry appears before the encoded form, the encoded
+    // form should replace it and unrelated params keep their positions.
+    let params = p(&[
+        ("charset", "utf-8"),
+        ("name", "fallback.txt"),
+        ("name*", "utf-8''real%2Dname.txt"),
+        ("disposition", "attachment"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    // "charset" and "disposition" must be kept; only one "name" entry.
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0], ("charset".to_owned(), "utf-8".to_owned()));
+    assert_eq!(
+        result[2],
+        ("disposition".to_owned(), "attachment".to_owned())
+    );
+    // The sole "name" entry should be the RFC 2231 decoded value.
+    let name_entries: Vec<_> = result.iter().filter(|(k, _)| k == "name").collect();
+    assert_eq!(name_entries.len(), 1);
+    assert_eq!(name_entries[0].1, "real-name.txt");
+}
+
+// --- split_charset_value: single-quote edge cases ---
+
+#[test]
+fn split_charset_value_one_quote_only() {
+    // RFC 2231 Section 4: malformed value with only one single-quote.
+    // split_charset_value should return (None, raw_bytes) as a graceful fallback.
+    let (cs, bytes) = split_charset_value("utf-8'hello");
+    assert!(cs.is_none());
+    assert_eq!(bytes, b"utf-8'hello");
+}
+
+// --- hex_val: lowercase hex digits ---
+
+#[test]
+fn percent_decode_lowercase_hex() {
+    // RFC 2231 Section 4: ext-octet = "%" 2(DIGIT / "A"..."F").
+    // Real-world servers may emit lowercase hex digits; Postel's law says
+    // we should accept them.
+    assert_eq!(percent_decode("%2a%2b%2c"), b"*+,");
+    assert_eq!(percent_decode("caf%c3%a9"), "café".as_bytes());
+}
+
+// --- standalone charset-encoded value with no encoded parts ---
+
+#[test]
+fn standalone_charset_no_encoded_bytes() {
+    // RFC 2231 Section 4: `name*=charset'lang'value` where value has no
+    // percent-encoded parts - the value is plain ASCII.
+    let params = p(&[("filename*", "us-ascii'en'plain-text-file.txt")]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "filename");
+    assert_eq!(result[0].1, "plain-text-file.txt");
+}
+
+// --- Postel's law: gap and leading-zero tolerance ---
+
+/// RFC 2231 Section 3 forbids gaps in continuation indices. Preserve only
+/// the contiguous prefix before the first missing section.
+#[test]
+fn continuation_gap_tolerance() {
+    let params = vec![
+        ("name*0".to_string(), "part0".to_string()),
+        ("name*2".to_string(), "part2".to_string()),
+    ];
+    let result = decode_rfc2231_params(&params);
+    let name_val = result
+        .iter()
+        .find(|(k, _)| k == "name")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(
+        name_val,
+        Some("part0"),
+        "RFC 2231 Section 3: reassembly must stop at the first gap"
+    );
+}
+
+/// RFC 2231 Section 3 forbids leading zeroes in continuation indices.
+/// Verify the parser rejects them: `name*00` and `name*01` are not
+/// recognized as continuation segments and fall through as plain
+/// parameters rather than being reassembled.
+#[test]
+fn continuation_leading_zeros_rejected() {
+    let params = vec![
+        ("name*00".to_string(), "part0".to_string()),
+        ("name*01".to_string(), "part1".to_string()),
+    ];
+    let result = decode_rfc2231_params(&params);
+    // Leading-zero keys are rejected by classify_key(), so they are
+    // treated as plain (non-RFC-2231) parameters and passed through
+    // unchanged - they should NOT be reassembled into "name".
+    let reassembled = result.iter().any(|(k, v)| k == "name" && v == "part0part1");
+    assert!(
+        !reassembled,
+        "leading zeros in continuation indices (*00, *01) must be rejected \
+             per RFC 2231 Section 3, not silently normalized; got {result:?}"
+    );
+}
+
+// ===== Spec audit: prior deviations =====
+
+#[test]
+fn spec_audit_m6_leading_zeroes_in_continuation_rejected() {
+    // RFC 2231 Section 3/7: "neither leading zeroes nor gaps in the
+    // sequence are allowed."
+    //
+    // Keys with leading zeroes like `name*00` and `name*01` must be
+    // rejected. The classify_key() function validates this at line 259
+    // by checking `digits.len() > 1 && digits.starts_with('0')`.
+    let params = p(&[("name*00", "first"), ("name*01", "second")]);
+    let result = decode_rfc2231_params(&params);
+
+    // If leading zeroes were properly rejected, these segments would NOT
+    // be reassembled into a single "name" parameter with value "firstsecond".
+    let has_reassembled = result
+        .iter()
+        .any(|(k, v)| k == "name" && v == "firstsecond");
+    assert!(
+        !has_reassembled,
+        "Leading zeroes in continuation indices (*00, *01) should be rejected \
+             per RFC 2231 Section 3, not silently normalized; got {result:?}"
+    );
+}
+
+#[test]
+fn spec_audit_m6_leading_zero_collision() {
+    // RFC 2231 Section 3/7: "neither leading zeroes nor gaps in the
+    // sequence are allowed."
+    //
+    // When both `name*0` (valid) and `name*00` (invalid, leading zero)
+    // are present, the valid form `*0` must win. The classify_key()
+    // function rejects `*00` (leading zero), so only `*0` is accepted.
+    let params = p(&[("name*0", "correct"), ("name*00", "wrong")]);
+    let result = decode_rfc2231_params(&params);
+    let name_value = result.iter().find(|(k, _)| k == "name");
+    assert!(
+        name_value.is_some(),
+        "Expected a 'name' parameter in the result"
+    );
+    assert_eq!(
+        name_value.unwrap().1,
+        "correct",
+        "name*0 (valid) should take precedence over name*00 (leading zero); \
+             got {result:?}"
+    );
+}
+
+// ===== Edge-case bug probe tests =====
+
+/// RFC 2231 Section 3: Continuation parameters with `*0`, `*1` suffixes
+/// must be reassembled in index order into a single parameter value.
+/// This verifies that three segments are concatenated correctly and the
+/// original base name is preserved.
+#[test]
+fn edge_continuation_three_segments_reassembled() {
+    let params = p(&[
+        ("name*0", "first_"),
+        ("name*1", "second_"),
+        ("name*2", "third"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(
+        result.len(),
+        1,
+        "three continuation segments must reassemble into one parameter; got {result:?}"
+    );
+    assert_eq!(
+        result[0].0, "name",
+        "reassembled param key must be the base name (RFC 2231 Section 3)"
+    );
+    assert_eq!(
+        result[0].1, "first_second_third",
+        "continuation segments must be concatenated in index order \
+             (RFC 2231 Section 3)"
+    );
+}
+
+/// RFC 2231 Sections 3-4: Continuation parameters with charset encoding
+/// on the first segment (`*0*`) must decode the charset prefix and
+/// percent-encoded bytes, then concatenate with subsequent segments.
+#[test]
+fn edge_continuation_with_charset_encoding() {
+    let params = p(&[
+        ("filename*0*", "UTF-8''caf%C3%A9_"),
+        ("filename*1", "report.pdf"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(
+        result.len(),
+        1,
+        "charset-encoded continuation must reassemble into one parameter; got {result:?}"
+    );
+    assert_eq!(result[0].0, "filename");
+    assert_eq!(
+        result[0].1, "caf\u{e9}_report.pdf",
+        "first segment must be charset-decoded, then concatenated with \
+             subsequent plain segments (RFC 2231 Sections 3-4)"
+    );
+}
+
+/// RFC 2231 Section 3: Continuation parameters mixed with plain parameters.
+/// Plain parameters must pass through unchanged while continuations are
+/// reassembled. The output order must place the reassembled parameter at
+/// the position of its first segment.
+#[test]
+fn edge_continuation_mixed_with_plain_params() {
+    let params = p(&[
+        ("charset", "utf-8"),
+        ("name*0", "long_"),
+        ("name*1", "value.txt"),
+        ("format", "flowed"),
+    ]);
+    let result = decode_rfc2231_params(&params);
+    assert_eq!(
+        result.len(),
+        3,
+        "one plain + one reassembled + one plain = 3 params; got {result:?}"
+    );
+    assert_eq!(result[0], ("charset".to_string(), "utf-8".to_string()));
+    assert_eq!(
+        result[1],
+        ("name".to_string(), "long_value.txt".to_string()),
+        "continuation must be reassembled at the position of its first segment"
+    );
+    assert_eq!(result[2], ("format".to_string(), "flowed".to_string()));
+}
+
+#[test]
+fn content_type_missing_defaults_to_text_plain_us_ascii() {
+    // RFC 2045 section 5.2: an unparseable or absent type is us-ascii text.
+    assert_eq!(
+        parse_content_type("garbage"),
+        ContentType::text_plain_us_ascii()
+    );
+    assert_eq!(parse_content_type(""), ContentType::text_plain_us_ascii());
+    assert_eq!(
+        ContentType::text_plain_us_ascii().charset(),
+        Some("us-ascii")
+    );
+}
+
+#[test]
+fn content_type_tokenizer_handles_quoted_semicolon() {
+    let parsed = parse_content_type("multipart/mixed; boundary=\"a;b=c\"; charset=UTF-8");
+    assert_eq!(parsed.essence(), "multipart/mixed");
+    assert_eq!(parsed.boundary(), Some("a;b=c"));
+    assert_eq!(parsed.charset(), Some("UTF-8"));
+}
+
+#[test]
+fn content_type_tokenizer_keeps_utf8_in_a_quoted_value() {
+    // Each quoted octet used to be widened through `as char`, which turns a
+    // UTF-8 filename into latin1 mojibake.
+    let parsed = parse_content_type("application/pdf; name=\"rapport æ.pdf\"");
+    assert_eq!(parsed.param("name"), Some("rapport æ.pdf"));
+}
+
+#[test]
+fn content_type_tokenizer_reassembles_rfc2231_continuation() {
+    let parsed = parse_content_type(
+        "application/pdf; name*0*=utf-8''report%20; name*1*=%C3%A6.pdf; charset=us-ascii",
+    );
+    assert_eq!(parsed.param("name"), Some("report æ.pdf"));
+    assert_eq!(parsed.charset(), Some("us-ascii"));
+}
+
+#[test]
+fn rfc2231_continuation_bomb_is_linear_and_capped() {
+    // Thousands of DISTINCT base names must not cost a scan per group.
+    let many: Vec<(String, String)> = (0..4000)
+        .map(|index| (format!("a{index}*0"), "v".to_string()))
+        .collect();
+    assert_eq!(decode_rfc2231_params(&many).len(), 4000);
+
+    // One group whose reassembled length runs past `max_header_bytes` drops
+    // the overflow rather than allocating it.
+    let cap = super::super::limits::MimeLimits::default().max_header_bytes;
+    let segment = "x".repeat(64 * 1024);
+    let bomb: Vec<(String, String)> = (0..64)
+        .map(|index| (format!("name*{index}"), segment.clone()))
+        .collect();
+    let decoded = decode_rfc2231_params(&bomb);
+    assert_eq!(decoded.len(), 1);
+    assert!(
+        decoded[0].1.len() <= cap,
+        "reassembled value must stay inside the header-block budget"
+    );
+}
+
+// ===== Structure-aware generative pass (imap-T4) =====
+//
+// The hand-written cases above each pin one named shape. This pass instead
+// builds well-formed RFC 2231 parameter lists from a grammar, applies targeted
+// mutations to them, and asserts the invariants that must hold for *every*
+// input - the ones a hand-written case can only sample. Deterministic by
+// construction: a fixed-seed SplitMix64 and a fixed iteration count, no
+// wall-clock and no I/O.
+
+/// SplitMix64. Deterministic, seeded, and small enough to keep the generator
+/// auditable; the point is reproducible coverage, not statistical quality.
+struct Rng(u64);
+
+impl Rng {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        assert!(n > 0);
+        usize::try_from(self.next_u64() % u64::try_from(n).unwrap()).unwrap()
+    }
+
+    fn pick<'a, T>(&mut self, options: &'a [T]) -> &'a T {
+        &options[self.below(options.len())]
+    }
+}
+
+const BASE_NAMES: [&str; 4] = ["name", "Filename", "boundary", "charset"];
+const CHARSETS: [&str; 4] = ["utf-8", "iso-8859-1", "shift_jis", "x-not-a-charset"];
+const SEGMENT_TEXT: [&str; 6] = ["plain", "a%20b", "%C3%A6", "", "%%%", "=?utf-8?B?QQ==?="];
+
+/// Build one well-formed parameter list: a handful of base names, each given
+/// one of the four RFC 2231 shapes (plain, Section 4 standalone-encoded,
+/// Section 3 continuation, or a mixed continuation with a leading charset).
+fn generate_params(rng: &mut Rng) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    let count = 1 + rng.below(4);
+    for _ in 0..count {
+        let base = *rng.pick(&BASE_NAMES);
+        match rng.below(4) {
+            0 => params.push((base.to_owned(), (*rng.pick(&SEGMENT_TEXT)).to_owned())),
+            1 => {
+                let charset = *rng.pick(&CHARSETS);
+                let text = *rng.pick(&SEGMENT_TEXT);
+                params.push((format!("{base}*"), format!("{charset}''{text}")));
+            }
+            2 => {
+                let segments = 1 + rng.below(3);
+                for index in 0..segments {
+                    let text = *rng.pick(&SEGMENT_TEXT);
+                    params.push((format!("{base}*{index}"), text.to_owned()));
+                }
+            }
+            _ => {
+                let charset = *rng.pick(&CHARSETS);
+                let segments = 1 + rng.below(3);
+                for index in 0..segments {
+                    let text = *rng.pick(&SEGMENT_TEXT);
+                    if index == 0 {
+                        params.push((format!("{base}*0*"), format!("{charset}''{text}")));
+                    } else {
+                        params.push((format!("{base}*{index}*"), text.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    params
+}
+
+/// Damage a well-formed list the way a non-conformant server would: drop a
+/// pair, duplicate one, renumber a continuation index (including the leading
+/// zero and out-of-range forms), truncate a value, or splice in stray
+/// delimiters.
+fn mutate_params(rng: &mut Rng, params: &mut Vec<(String, String)>) {
+    if params.is_empty() {
+        return;
+    }
+    let slot = rng.below(params.len());
+    match rng.below(6) {
+        0 => {
+            params.remove(slot);
+        }
+        1 => {
+            let clone = params[slot].clone();
+            params.insert(slot, clone);
+        }
+        2 => {
+            let suffix = *rng.pick(&["*0", "*00", "*1", "*9", "*4294967296", "*-1", "**"]);
+            let key = params[slot].0.clone();
+            let base = key.split('*').next().unwrap_or("").to_owned();
+            params[slot].0 = format!("{base}{suffix}");
+        }
+        3 => {
+            let length = params[slot].1.len();
+            let mut keep = if length == 0 { 0 } else { rng.below(length) };
+            let value = &mut params[slot].1;
+            while keep > 0 && !value.is_char_boundary(keep) {
+                keep -= 1;
+            }
+            value.truncate(keep);
+        }
+        4 => {
+            let stray = *rng.pick(&["'", "''", "%", "%A", "\"", ";", "*"]);
+            params[slot].1.push_str(stray);
+        }
+        _ => {
+            params[slot].0.clear();
+        }
+    }
+}
+
+/// How an input key claims a slot in the result, restated independently of
+/// `classify_key` so the test is an oracle rather than an echo.
+enum SlotClaim {
+    /// The key carries no parseable RFC 2231 suffix, so it is emitted as-is.
+    Verbatim,
+    /// `name*` - RFC 2231 Section 4, its own slot under the base name.
+    Own(String),
+    /// `name*N[*]` - RFC 2231 Section 3, shares one slot per base name.
+    Shared(String),
+}
+
+fn slot_claim(key: &str) -> SlotClaim {
+    let Some((base, suffix)) = key.split_once('*') else {
+        return SlotClaim::Verbatim;
+    };
+    if suffix.is_empty() {
+        return SlotClaim::Own(base.to_owned());
+    }
+    let digits = suffix.strip_suffix('*').unwrap_or(suffix);
+    if digits.len() > 1 && digits.starts_with('0') {
+        return SlotClaim::Verbatim;
+    }
+    if digits.parse::<u32>().is_err() {
+        return SlotClaim::Verbatim;
+    }
+    SlotClaim::Shared(base.to_owned())
+}
+
+/// The keys of the result slots, in the order the input reserves them. The
+/// decoder may drop slots (an unterminated continuation, a plain duplicate of
+/// an encoded name), but it must never reorder or rename them - so the real
+/// output has to be a subsequence of this.
+fn expected_slot_keys(params: &[(String, String)]) -> Vec<String> {
+    let mut slots = Vec::new();
+    let mut shared_seen: Vec<String> = Vec::new();
+    for (key, _) in params {
+        match slot_claim(key) {
+            SlotClaim::Verbatim => slots.push(key.clone()),
+            SlotClaim::Own(base) => slots.push(base),
+            SlotClaim::Shared(base) => {
+                let lower = base.to_ascii_lowercase();
+                if !shared_seen.contains(&lower) {
+                    shared_seen.push(lower);
+                    slots.push(base);
+                }
+            }
+        }
+    }
+    slots
+}
+
+/// Invariants that must hold for any parameter list, well-formed or not.
+fn assert_decode_invariants(params: &[(String, String)]) {
+    let decoded = decode_rfc2231_params(params);
+
+    // Pure function: no interior mutability, no global state, no ordering
+    // dependence on hash iteration leaking into the result.
+    assert_eq!(
+        decoded,
+        decode_rfc2231_params(params),
+        "decode_rfc2231_params must be deterministic for {params:?}"
+    );
+
+    // Every RFC 2231 shape either passes a pair through or collapses several
+    // into one, so the decoder can never manufacture entries.
+    assert!(
+        decoded.len() <= params.len(),
+        "decoding invented parameters for {params:?}"
+    );
+
+    let cap = super::super::limits::MimeLimits::default().max_header_bytes;
+    for (key, value) in &decoded {
+        // Reassembly stays inside the header budget. Charset decoding can
+        // widen the assembled octets, but only by a bounded UTF-8 factor.
+        assert!(
+            value.len() <= cap.saturating_mul(4),
+            "value for {key:?} escaped the allocation budget"
+        );
+    }
+
+    // Provenance and ordering in one shot: every output key was claimed by
+    // some input key, and the claims are consumed left to right.
+    let expected = expected_slot_keys(params);
+    let mut cursor = 0;
+    for (key, _) in &decoded {
+        let offset = expected[cursor..].iter().position(|slot| slot == key);
+        let Some(offset) = offset else {
+            panic!("output key {key:?} is not a remaining slot of {expected:?} for {params:?}");
+        };
+        cursor += offset + 1;
+    }
+}
+
+#[test]
+fn generated_wellformed_param_lists_hold_the_decode_invariants() {
+    let mut rng = Rng(0x5EED_0001);
+    for _ in 0..2000 {
+        let params = generate_params(&mut rng);
+        assert_decode_invariants(&params);
+    }
+}
+
+#[test]
+fn mutated_param_lists_hold_the_decode_invariants() {
+    let mut rng = Rng(0x5EED_0002);
+    for _ in 0..4000 {
+        let mut params = generate_params(&mut rng);
+        for _ in 0..=rng.below(3) {
+            mutate_params(&mut rng, &mut params);
+        }
+        assert_decode_invariants(&params);
+    }
+}
+
+/// The generator itself must be reproducible, or a failure found in CI cannot
+/// be replayed locally.
+#[test]
+fn the_param_generator_is_seed_deterministic() {
+    let mut left = Rng(0x5EED_0001);
+    let mut right = Rng(0x5EED_0001);
+    for _ in 0..64 {
+        assert_eq!(generate_params(&mut left), generate_params(&mut right));
+    }
+}

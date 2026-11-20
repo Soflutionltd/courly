@@ -1,0 +1,149 @@
+mod account;
+mod action;
+pub mod actions;
+mod attachment;
+mod boot;
+mod cal_action;
+mod calendar;
+mod client_notification;
+mod contacts;
+mod draft_wal;
+mod error;
+mod extract;
+mod folder;
+mod framing;
+mod internal;
+mod label;
+mod notification;
+mod oauth;
+mod pinned_search;
+mod push;
+mod redacted;
+mod request;
+mod response;
+mod settings;
+mod signature;
+mod smart_folder;
+mod sync;
+mod template;
+mod thread_ui_state;
+mod version;
+
+pub use account::{
+    AccountCreateAck, AccountCreateParams, AccountCredentials, AccountDeleteAck,
+    AccountDeleteParams, AccountReorderAck, AccountReorderEntry, AccountReorderParams,
+    AccountUpdateAck, AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams,
+    VerifyAccountAck, VerifyAccountParams, VerifyFailureReason,
+};
+pub use action::{
+    ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, JobStatusResponse,
+    MarkChatReadAck, OperationId, OperationOutcome, OperationResult, PlanId, PlanSummary,
+    RemoteFailure, SendAck, SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage,
+    SendWireRequest, SyncProgress, WireFolderId, WireJobStatus, WireLabelGroupId, WireLabelId,
+    WireMailOperation,
+};
+pub use attachment::{
+    AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentClearCacheAck,
+    AttachmentClearCacheParams, AttachmentFetchAck, AttachmentFetchParams, EvictionCompleted,
+    GcCompleted,
+};
+pub use boot::{
+    BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
+};
+pub use cal_action::{
+    CalendarActionCompleted, CalendarActionPlan, CalendarActionPlanAck,
+    CalendarActionWireOperation, CalendarOperationOutcome, CalendarOperationResult, RsvpResponse,
+    WireCalendarEventInput, WireCalendarOperation, WireRsvpReply,
+};
+pub use calendar::{
+    CalendarCancelAccountSyncParams, CalendarCancelAck, CalendarChanged, CalendarRunCompleted,
+    CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
+    CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
+};
+pub use client_notification::{ClientNotification, JsonRpcClientNotification};
+pub use contacts::{
+    ContactDeleteAck, ContactDeleteParams, ContactGroupDeleteAck, ContactGroupDeleteParams,
+    ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck, ContactSaveParams,
+    ContactSaveWithWritebackAck, WritebackOutcome,
+};
+pub use draft_wal::{
+    DRAFT_WAL_GOLDEN_FIXTURE_EPOCH_MS, DRAFT_WAL_GOLDEN_FIXTURE_JSON, WAL_FILENAME,
+};
+pub use error::{JsonRpcErrorObject, ServiceError};
+pub use extract::{
+    ExtractCompleted, ExtractProgress, ExtractStatusAck, ExtractStatusParams, IndexRebuildAck,
+    IndexRebuildCompleted, IndexRebuildParams, IndexRebuildProgress, PrefetchCompleted,
+    PrefetchProgress, RebuildPolicy,
+};
+pub use folder::{
+    FolderContentsAck, FolderContentsParams, FolderCreateParams, FolderDeleteParams, FolderDoneAck,
+    FolderMoveParams, FolderRenameParams, FolderWriteAck,
+};
+pub use framing::{
+    BoundedLineReader, FrameError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse,
+    ParsedClientMessage, ParsedServiceMessage, RequestParseError, ServiceResponse, encode_message,
+    parse_client_message, parse_service_message, write_message,
+};
+pub use internal::{
+    DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
+    ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
+};
+pub use label::{
+    LabelDeleteAck, LabelDeleteParams, LabelGroupDeleteAck, LabelGroupDeleteParams,
+    LabelGroupReorderAck, LabelGroupReorderParams, LabelGroupSaveAck, LabelGroupSaveParams,
+    LabelSaveAck,
+    LabelSaveParams,
+};
+pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
+pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
+pub use pinned_search::{
+    PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
+    PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
+    PinnedSearchUpdateAck, PinnedSearchUpdateParams, PinnedThreadRef,
+};
+pub use push::PushEvent;
+pub use redacted::{RedactedBytes, RedactedString};
+pub use request::{
+    DeleteDraftAck, DeleteDraftParams, RequestParams, RequestTimeoutKind, RescheduleSendParams,
+    ScheduledSendAck, ScheduledSendHandleParams,
+};
+pub use request::{
+    TestConduitArmHookAck, TestConduitArmHookParams, TestConduitAttachAck, TestConduitAttachParams,
+    TestConduitChangeKind, TestConduitDurableCursor, TestConduitFactoryOpenAck,
+    TestConduitFactoryOpenParams, TestConduitHook, TestConduitInjectBatchAck,
+    TestConduitInjectBatchParams, TestConduitItemOutcome, TestConduitProbeAck,
+    TestConduitProbeParams, TestConduitProviderKind, TestConduitRecovery,
+    TestConduitSyntheticMessage, TestContactPullAck, TestContactPullParams, TestContainerCrudAck,
+    TestContainerCrudParams, TestCounterReadAck, TestCrashAfterNWritesAck,
+    TestCrashAfterNWritesParams, TestDbAccountRow, TestDbAttachmentRow, TestDbCalendarEventRow,
+    TestDbCalendarRow, TestDbContactClaimRow, TestDbContactGroupRow, TestDbContactRow,
+    TestDbFolderRow, TestDbGalCacheRow, TestDbLabelRow, TestDbLocalDraftRow,
+    TestDbMessageReactionRow, TestDbMessageRow, TestDbSeenAddressRow, TestDbSettingRow,
+    TestDbSharedMailboxRow, TestDbSignatureRow, TestDelayNextWriteAck, TestDelayNextWriteParams,
+    TestDiscardDraftAck, TestDiscardDraftParams, TestGalKickAck, TestGraphAuxPassAck,
+    TestGraphAuxPassParams, TestGroupPullAck, TestGroupPullParams, TestPendingOpRow,
+    TestPendingOpsReadAck, TestPendingOpsReadParams, TestQueryBlobTombstoneStateAck,
+    TestQueryBlobTombstoneStateParams, TestQueryDbStateAck, TestQueryDbStateParams,
+    TestRemoveCachedAttachmentBytesAck, TestRemoveCachedAttachmentBytesParams,
+    TestRunDiscoveryParams, TestSearchIndexAck, TestSearchIndexParams, TestSearchIndexResult,
+    TestSeedAccountAck, TestSeedAccountParams, TestSeedCachedAttachmentAck,
+    TestSeedCachedAttachmentParams, TestSeedRemoteAttachmentAck, TestSeedRemoteAttachmentParams,
+    TestSeedThreadAck, TestSeedThreadParams, TestStartSyncParams, TestThreadReadAck,
+    TestThreadReadParams,
+};
+pub use response::{HealthPingResponse, ShutdownResponse};
+pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
+pub use signature::{
+    SignatureCreateAck, SignatureCreateParams, SignatureDeleteAck, SignatureDeleteParams,
+    SignatureReorderAck, SignatureReorderParams, SignatureUpdateAck, SignatureUpdateParams,
+};
+pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
+pub use sync::{
+    AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCancelAccountParams,
+    SyncCancelAck, SyncCompleted, SyncFocusFolderAck, SyncFocusFolderParams, SyncPauseReason,
+    SyncResult, SyncResumeAccountParams, SyncResumeAck, SyncResyncAccountParams, SyncResyncAck,
+    SyncRunId, SyncServerSearchAck, SyncServerSearchParams, SyncStartAccountParams, SyncStartAck,
+};
+pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams};
+pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
+pub use version::{MAX_FRAME_BYTES, PROTOCOL_VERSION};

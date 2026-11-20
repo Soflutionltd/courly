@@ -1,0 +1,50 @@
+use std::env;
+use std::sync::Arc;
+
+use conduit_graph::account::{GraphAccountFactory, GraphClient};
+use conduit_types::{AccountFactory, AccountId};
+
+#[tokio::main]
+async fn main() {
+    let access_token = env::var("CONDUIT_GRAPH_ACCESS_TOKEN")
+        .expect("set CONDUIT_GRAPH_ACCESS_TOKEN to a Microsoft Graph OAuth token");
+    let api_base = env::var("CONDUIT_GRAPH_API_BASE")
+        .unwrap_or_else(|_| "https://graph.microsoft.com/v1.0".to_string());
+
+    let client = GraphClient::with_api_base(api_base, access_token);
+    let factory: Arc<dyn AccountFactory> = Arc::new(GraphAccountFactory::new(client));
+    let account_id = AccountId(
+        env::var("CONDUIT_GRAPH_ACCOUNT_ID").unwrap_or_else(|_| "graph-example".to_string()),
+    );
+
+    let opened = match factory.open(account_id).await {
+        Ok(opened) => opened,
+        Err(error) => {
+            eprintln!("failed to open Graph account: {error:?}");
+            return;
+        }
+    };
+    let account = opened.account;
+    for skip in &opened.skipped_scopes {
+        eprintln!(
+            "open skipped {:?}: {}",
+            skip.scope,
+            skip.error.message_key()
+        );
+    }
+
+    let capabilities = account.capabilities();
+    println!(
+        "graph account supports search: {}",
+        capabilities.pim_methods.search
+    );
+
+    match account.containers_list().await {
+        Ok(list) => println!("graph account has {} mail folders", list.containers.len()),
+        Err(error) => eprintln!("failed to list Graph containers: {error:?}"),
+    }
+
+    if let Err(error) = account.close().await {
+        eprintln!("failed to close Graph account: {error:?}");
+    }
+}

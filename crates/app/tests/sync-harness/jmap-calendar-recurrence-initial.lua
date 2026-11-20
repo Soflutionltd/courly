@@ -1,0 +1,143 @@
+-- description: JMAP calendar initial sync imports recurrence rules from the small fixture
+-- expected: pass
+-- fixture: calendar-recurrence-small.toml
+-- protocol: jmap
+-- ceiling: 120s
+
+local function calendar_by_remote_id(calendars, remote_id)
+    for _, calendar in ipairs(calendars) do
+        if calendar.remote_id == remote_id then
+            return calendar
+        end
+    end
+    return nil
+end
+
+local function event_by_remote_id(events, remote_id)
+    for _, event in ipairs(events) do
+        if event.remote_event_id == remote_id then
+            return event
+        end
+    end
+    return nil
+end
+
+local function assert_rule_contains(event, needle, label)
+    local rule = event.recurrence_rule or ""
+    harness.assert(
+        string.find(rule, needle, 1, true) ~= nil,
+        label .. " recurrence rule missing " .. needle .. ": " .. rule
+    )
+end
+
+local admin_endpoint = harness.env("COURLY_TEST_JMAP_ENDPOINT")
+harness.assert(admin_endpoint ~= nil, "saehrimnir admin endpoint missing")
+harness.clear_mock_requests(admin_endpoint)
+
+local dir = harness.data_dir("sync_jmap_calendar_recurrence_initial")
+local client, err = harness.spawn(dir)
+harness.assert(err == nil, "spawn failed")
+
+local ready, ready_err = client:request("BootReady")
+harness.assert(ready_err == nil, "boot.ready failed")
+harness.assert(ready.ready, "boot.ready returned ready=false")
+
+local account, account_err = client:request("TestSeedAccount", {
+    email = "sync-jmap-calendar-recurrence@example.test",
+    display_name = "Sync JMAP Calendar Recurrence",
+    account_name = "Sync JMAP Calendar Recurrence",
+    provider = "jmap",
+})
+harness.assert(account_err == nil, "TestSeedAccount failed")
+
+harness.marker("SYNC_START")
+local completed, sync_err = client:start_calendar_sync({
+    account_id = account.account_id,
+}, 30)
+harness.marker("SYNC_END")
+harness.assert(sync_err == nil, "start_calendar_sync failed")
+harness.assert_eq(completed.result, "completed", completed.error or "calendar sync result")
+
+local state, state_err = client:request("TestQueryDbState", {
+    account_id = account.account_id,
+    calendar_limit = 10,
+})
+harness.assert(state_err == nil, "TestQueryDbState failed")
+harness.assert_eq(state.calendar_count, 1, "calendar count")
+harness.assert_eq(state.calendar_event_count, 5, "calendar event count")
+
+local work = calendar_by_remote_id(state.calendars, "cal-work")
+harness.assert(work ~= nil, "missing Work calendar")
+harness.assert_eq(work.provider, "jmap", "Work calendar provider")
+harness.assert_eq(work.display_name, "Work", "Work calendar name")
+
+local daily = event_by_remote_id(state.calendar_events, "ev-daily")
+harness.assert(daily ~= nil, "missing daily event")
+harness.assert_eq(daily.summary, "Morning standup", "daily summary")
+harness.assert_eq(daily.start_time, 1768206600, "daily start_time")
+harness.assert_eq(daily.end_time, 1768207200, "daily end_time")
+assert_rule_contains(daily, "FREQ=DAILY", "daily")
+assert_rule_contains(daily, "COUNT=5", "daily")
+
+local weekly = event_by_remote_id(state.calendar_events, "ev-weekly")
+harness.assert(weekly ~= nil, "missing weekly event")
+harness.assert_eq(weekly.summary, "Team sync", "weekly summary")
+harness.assert_eq(weekly.start_time, 1768813200, "weekly start_time")
+harness.assert_eq(weekly.end_time, 1768815000, "weekly end_time")
+assert_rule_contains(weekly, "FREQ=WEEKLY", "weekly")
+assert_rule_contains(weekly, "BYDAY=MO,WE,FR", "weekly")
+assert_rule_contains(weekly, "COUNT=10", "weekly")
+
+local monthly = event_by_remote_id(state.calendar_events, "ev-monthly")
+harness.assert(monthly ~= nil, "missing monthly event")
+harness.assert_eq(monthly.summary, "Pay-day reminder", "monthly summary")
+harness.assert_eq(monthly.start_time, 1768496400, "monthly start_time")
+harness.assert_eq(monthly.end_time, 1768497300, "monthly end_time")
+harness.assert_eq(
+    monthly.description,
+    "Salary lands and budget envelopes get reset.",
+    "monthly description"
+)
+harness.assert_eq(monthly.location, "Finance bot", "monthly location")
+harness.assert_eq(monthly.organizer_email, "alice@example.com", "monthly organizer_email")
+assert_rule_contains(monthly, "FREQ=MONTHLY", "monthly")
+assert_rule_contains(monthly, "BYMONTHDAY=15", "monthly")
+-- conduit normalizes the JSCalendar LocalDateTime `until` through the
+-- event timeZone (UTC here) into the RRULE UTC form.
+assert_rule_contains(monthly, "UNTIL=20261215T170000Z", "monthly")
+
+local yearly = event_by_remote_id(state.calendar_events, "ev-yearly")
+harness.assert(yearly ~= nil, "missing yearly event")
+harness.assert_eq(yearly.summary, "Christmas Eve", "yearly summary")
+harness.assert_eq(yearly.start_time, 1798135200, "yearly start_time")
+harness.assert_eq(yearly.end_time, 1798149600, "yearly end_time")
+assert_rule_contains(yearly, "FREQ=YEARLY", "yearly")
+-- Pins the RFC 8984 byMonth String[] round-trip (the shape whose absence
+-- turned the whole sync into Unsupported(EventsInRange)).
+assert_rule_contains(yearly, "BYMONTH=12", "yearly")
+assert_rule_contains(yearly, "BYMONTHDAY=24", "yearly")
+assert_rule_contains(yearly, "COUNT=3", "yearly")
+
+local single = event_by_remote_id(state.calendar_events, "ev-single")
+harness.assert(single ~= nil, "missing single event")
+harness.assert_eq(single.summary, "Annual retreat planning", "single summary")
+harness.assert(single.recurrence_rule == nil, "single event should not have recurrence")
+
+local requests = harness.mock_requests(admin_endpoint)
+local calendar_get_requests = harness.request_count(requests, "jmap", "Calendar/get")
+local event_get_requests = harness.request_count(requests, "jmap", "CalendarEvent/get")
+harness.assert(calendar_get_requests >= 1, "JMAP sync did not call Calendar/get")
+harness.assert(event_get_requests >= 1, "JMAP sync did not call CalendarEvent/get")
+
+harness.write_summary({
+    correct = 1,
+    calendar_count = state.calendar_count,
+    calendar_event_count = state.calendar_event_count,
+    provider_requests = #requests,
+    jmap_calendar_get_requests = calendar_get_requests,
+    jmap_calendar_event_get_requests = event_get_requests,
+})
+
+local ok, shutdown_err = client:shutdown()
+harness.assert(ok, "shutdown failed")
+harness.assert(shutdown_err == nil, "shutdown returned error")

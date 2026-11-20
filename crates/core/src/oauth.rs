@@ -1,0 +1,1264 @@
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use reqwest::header::AUTHORIZATION;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+pub const OAUTH_CALLBACK_PORT: u16 = 17248;
+const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
+const GOOGLE_SCOPES: &str = concat!(
+    "https://www.googleapis.com/auth/gmail.readonly ",
+    "https://www.googleapis.com/auth/gmail.modify ",
+    "https://www.googleapis.com/auth/gmail.send ",
+    "https://www.googleapis.com/auth/gmail.labels ",
+    "https://www.googleapis.com/auth/userinfo.email ",
+    "https://www.googleapis.com/auth/userinfo.profile ",
+    "https://www.googleapis.com/auth/calendar.readonly ",
+    "https://www.googleapis.com/auth/calendar.events ",
+    "https://www.googleapis.com/auth/drive.file ",
+    "https://www.googleapis.com/auth/contacts.readonly ",
+    "https://www.googleapis.com/auth/contacts.other.readonly"
+);
+/// Default Microsoft Entra app registration for Courly (Soflution tenant,
+/// any Entra tenant plus personal accounts, public client whose only
+/// redirect URI is `http://127.0.0.1:17248`).
+/// Users can override per-account via oauth_client_id in the accounts table.
+pub const MICROSOFT_DEFAULT_CLIENT_ID: &str = "178b55ed-5064-4094-a26e-c081f946e49c";
+
+pub fn default_microsoft_client_id() -> &'static str {
+    MICROSOFT_DEFAULT_CLIENT_ID
+}
+const MICROSOFT_GRAPH_AUTH_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
+const MICROSOFT_GRAPH_TOKEN_URL: &str =
+    "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MICROSOFT_GRAPH_ME_URL: &str =
+    "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName,proxyAddresses";
+const MICROSOFT_GRAPH_SCOPES: [&str; 13] = [
+    "Mail.ReadWrite",
+    "Mail.ReadWrite.Shared",
+    "Mail.Send",
+    "Mail.Send.Shared",
+    "Mail.Read.Shared",
+    "MailboxSettings.ReadWrite",
+    "Calendars.ReadWrite",
+    "Contacts.ReadWrite",
+    "offline_access",
+    "openid",
+    "profile",
+    "User.Read",
+    "User.ReadBasic.All",
+];
+
+use common::http::{oauth_token_http_client, shared_http_client};
+
+type OAuthFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+#[derive(Serialize)]
+pub struct OAuthResult {
+    pub code: String,
+    pub state: String,
+    pub actual_port: u16,
+}
+
+pub struct OAuthAuthorizationRequest {
+    pub auth_url: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub use_pkce: bool,
+    pub extra_auth_params: Vec<(String, String)>,
+}
+
+pub struct OAuthAuthorizationFlow {
+    pub code: String,
+    pub redirect_uri: String,
+    pub code_verifier: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthProviderAuthorizationRequest {
+    pub provider_id: String,
+    pub auth_url: String,
+    pub token_url: String,
+    pub scopes: Vec<String>,
+    pub user_info_url: Option<String>,
+    pub use_pkce: bool,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OAuthUserInfo {
+    pub email: String,
+    pub name: String,
+    pub picture: Option<String>,
+    /// Other addresses of the signed-in mailbox (Microsoft sign-in name
+    /// and SMTP aliases).
+    pub aliases: Vec<String>,
+}
+
+impl OAuthUserInfo {
+    /// Whether the signed-in mailbox receives mail at `address`, ignoring
+    /// case.
+    pub fn owns_address(&self, address: &str) -> bool {
+        let address = address.trim();
+        std::iter::once(&self.email)
+            .chain(&self.aliases)
+            .any(|own| own.trim().eq_ignore_ascii_case(address))
+    }
+}
+
+pub struct OAuthAuthorizationBundle {
+    pub tokens: TokenExchangeResult,
+    pub user_info: OAuthUserInfo,
+}
+
+pub struct PendingOAuthAuthorization {
+    pub tokens: TokenExchangeResult,
+    pub created_at: std::time::Instant,
+}
+
+pub type PendingOAuthAuthorizations =
+    std::sync::Mutex<std::collections::HashMap<String, PendingOAuthAuthorization>>;
+
+/// Maximum age for pending OAuth entries before they are swept.
+const PENDING_OAUTH_MAX_AGE: Duration = Duration::from_secs(600);
+
+/// Insert a pending OAuth authorization, sweeping stale entries first.
+pub fn insert_pending_oauth(
+    store: &PendingOAuthAuthorizations,
+    key: String,
+    tokens: TokenExchangeResult,
+) -> Result<(), String> {
+    let mut map = store
+        .lock()
+        .map_err(|_| "Pending OAuth store is poisoned".to_string())?;
+    let now = std::time::Instant::now();
+    map.retain(|_, entry| now.duration_since(entry.created_at) < PENDING_OAUTH_MAX_AGE);
+    map.insert(
+        key,
+        PendingOAuthAuthorization {
+            tokens,
+            created_at: now,
+        },
+    );
+    Ok(())
+}
+
+pub trait OAuthIdentityProvider {
+    fn authorization_request(&self) -> OAuthAuthorizationRequest;
+    fn token_request(&self) -> OAuthTokenRequest;
+    fn fetch_user_info<'a>(
+        &'a self,
+        tokens: &'a TokenExchangeResult,
+    ) -> OAuthFuture<'a, Result<OAuthUserInfo, String>>;
+}
+
+pub struct OAuthTokenRequest {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub scope: Option<String>,
+}
+
+pub struct GoogleOAuthProvider {
+    client_id: String,
+    client_secret: String,
+}
+
+impl GoogleOAuthProvider {
+    pub fn new(client_id: String, client_secret: String) -> Self {
+        Self {
+            client_id,
+            client_secret,
+        }
+    }
+}
+
+pub struct GenericOAuthProvider {
+    provider_id: String,
+    auth_url: String,
+    token_url: String,
+    scopes: Vec<String>,
+    user_info_url: Option<String>,
+    use_pkce: bool,
+    client_id: String,
+    client_secret: Option<String>,
+    is_microsoft: bool,
+}
+
+impl GenericOAuthProvider {
+    pub fn from_request(request: OAuthProviderAuthorizationRequest) -> Self {
+        let is_microsoft =
+            request.provider_id == "microsoft" || request.provider_id == "microsoft_graph";
+        Self {
+            provider_id: request.provider_id,
+            auth_url: request.auth_url,
+            token_url: request.token_url,
+            scopes: request.scopes,
+            user_info_url: request.user_info_url,
+            use_pkce: request.use_pkce,
+            client_id: request.client_id,
+            client_secret: request.client_secret,
+            is_microsoft,
+        }
+    }
+
+    pub fn microsoft_graph(client_id: String) -> Self {
+        Self {
+            provider_id: "microsoft_graph".to_string(),
+            auth_url: MICROSOFT_GRAPH_AUTH_URL.to_string(),
+            token_url: MICROSOFT_GRAPH_TOKEN_URL.to_string(),
+            scopes: MICROSOFT_GRAPH_SCOPES
+                .iter()
+                .map(|scope| (*scope).to_string())
+                .collect(),
+            user_info_url: None,
+            use_pkce: true,
+            client_id,
+            client_secret: None,
+            is_microsoft: true,
+        }
+    }
+
+    pub fn microsoft_graph_default() -> Self {
+        Self::microsoft_graph(MICROSOFT_DEFAULT_CLIENT_ID.to_string())
+    }
+}
+
+impl OAuthIdentityProvider for GoogleOAuthProvider {
+    fn authorization_request(&self) -> OAuthAuthorizationRequest {
+        OAuthAuthorizationRequest {
+            auth_url: GOOGLE_AUTH_URL.to_string(),
+            client_id: self.client_id.clone(),
+            scopes: vec![GOOGLE_SCOPES.to_string()],
+            use_pkce: true,
+            extra_auth_params: vec![
+                ("access_type".to_string(), "offline".to_string()),
+                ("prompt".to_string(), "consent".to_string()),
+            ],
+        }
+    }
+
+    fn token_request(&self) -> OAuthTokenRequest {
+        OAuthTokenRequest {
+            token_url: GOOGLE_TOKEN_URL.to_string(),
+            client_id: self.client_id.clone(),
+            client_secret: Some(self.client_secret.clone()),
+            scope: None,
+        }
+    }
+
+    fn fetch_user_info<'a>(
+        &'a self,
+        tokens: &'a TokenExchangeResult,
+    ) -> OAuthFuture<'a, Result<OAuthUserInfo, String>> {
+        Box::pin(async move { fetch_google_userinfo(&tokens.access_token).await })
+    }
+}
+
+impl OAuthIdentityProvider for GenericOAuthProvider {
+    fn authorization_request(&self) -> OAuthAuthorizationRequest {
+        // Microsoft hands out refresh tokens through `offline_access`, so it
+        // must not force `prompt=consent`: in organisations where users may
+        // not consent, that shows "admin approval required" even after an
+        // administrator approved the app.
+        let extra_auth_params = if self.is_microsoft {
+            vec![
+                ("prompt".to_string(), "select_account".to_string()),
+                ("response_mode".to_string(), "query".to_string()),
+            ]
+        } else {
+            vec![("access_type".to_string(), "offline".to_string())]
+        };
+
+        OAuthAuthorizationRequest {
+            auth_url: self.auth_url.clone(),
+            client_id: self.client_id.clone(),
+            scopes: self.scopes.clone(),
+            use_pkce: self.use_pkce,
+            extra_auth_params,
+        }
+    }
+
+    fn token_request(&self) -> OAuthTokenRequest {
+        OAuthTokenRequest {
+            token_url: self.token_url.clone(),
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
+            scope: self.is_microsoft.then(|| self.scopes.join(" ")),
+        }
+    }
+
+    fn fetch_user_info<'a>(
+        &'a self,
+        tokens: &'a TokenExchangeResult,
+    ) -> OAuthFuture<'a, Result<OAuthUserInfo, String>> {
+        Box::pin(async move { fetch_provider_userinfo(self, tokens).await })
+    }
+}
+
+/// Build the full authorization URL and PKCE parameters for an OAuth flow.
+/// Returns `(auth_url, redirect_uri, code_verifier, state)`.
+pub fn build_authorization_url(
+    request: &OAuthAuthorizationRequest,
+    redirect_uri: &str,
+) -> Result<(String, Option<String>, String), String> {
+    let code_verifier = if request.use_pkce {
+        Some(random_base64url(32)?)
+    } else {
+        None
+    };
+    let code_challenge = code_verifier
+        .as_deref()
+        .map(|verifier| sha256_base64url(verifier.as_bytes()));
+    let state = random_base64url(32)?;
+
+    let scope_joined = request.scopes.join(" ");
+    let mut params = vec![
+        ("client_id", request.client_id.as_str()),
+        ("redirect_uri", redirect_uri),
+        ("response_type", "code"),
+        ("scope", scope_joined.as_str()),
+        ("state", &state),
+    ];
+    // Collect owned strings for code_challenge params
+    let challenge_str;
+    if let Some(challenge) = &code_challenge {
+        challenge_str = challenge.clone();
+        params.push(("code_challenge", &challenge_str));
+        params.push(("code_challenge_method", "S256"));
+    }
+
+    let extra_owned: Vec<(String, String)> = request.extra_auth_params.clone();
+    let extra_refs: Vec<(&str, &str)> = extra_owned
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    let all_params: Vec<(&str, &str)> = params.into_iter().chain(extra_refs).collect();
+
+    let auth_url = format!(
+        "{}?{}",
+        request.auth_url,
+        all_params
+            .into_iter()
+            .map(|(key, value)| format!(
+                "{}={}",
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            ))
+            .collect::<Vec<_>>()
+            .join("&")
+    );
+
+    Ok((auth_url, code_verifier, state))
+}
+
+/// Run the full OAuth authorization flow. The `open_url` callback is called to
+/// open the authorization URL in the user's browser (framework-specific).
+pub async fn run_oauth_authorization_flow(
+    request: OAuthAuthorizationRequest,
+    open_url: &(dyn Fn(&str) -> Result<(), String> + Send + Sync),
+) -> Result<OAuthAuthorizationFlow, String> {
+    let (listener, actual_port) = bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
+    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
+
+    let (auth_url, code_verifier, state) = build_authorization_url(&request, &redirect_uri)?;
+
+    open_url(&auth_url)?;
+    let result = await_oauth_callback(listener, &state).await?;
+
+    Ok(OAuthAuthorizationFlow {
+        code: result.code,
+        redirect_uri,
+        code_verifier,
+    })
+}
+
+/// High-level: run authorization flow + token exchange + user info fetch.
+pub async fn authorize_with_provider<P: OAuthIdentityProvider>(
+    provider: &P,
+    open_url: &(dyn Fn(&str) -> Result<(), String> + Send + Sync),
+) -> Result<OAuthAuthorizationBundle, String> {
+    let auth = run_oauth_authorization_flow(provider.authorization_request(), open_url).await?;
+    exchange_code_with_provider(provider, auth).await
+}
+
+/// Run only the token-exchange + userinfo phase against a provider,
+/// given an already-captured auth code. Used Service-side by Phase
+/// 6b's `oauth.exchange_code` IPC: the UI does the bind / open /
+/// wait dance locally (the listener has to live in the visible app)
+/// and ships the captured auth code over IPC; the Service runs the
+/// HTTPS round-trips.
+pub async fn exchange_code_with_provider<P: OAuthIdentityProvider>(
+    provider: &P,
+    auth: OAuthAuthorizationFlow,
+) -> Result<OAuthAuthorizationBundle, String> {
+    let token_request = provider.token_request();
+    let tokens = oauth_exchange_token(
+        token_request.token_url,
+        auth.code,
+        token_request.client_id,
+        auth.redirect_uri,
+        auth.code_verifier,
+        token_request.client_secret,
+        token_request.scope,
+    )
+    .await?;
+    let user_info = provider.fetch_user_info(&tokens).await?;
+
+    Ok(OAuthAuthorizationBundle { tokens, user_info })
+}
+
+/// Bind to a localhost port for an OAuth callback. Tries the given port first,
+/// falls back to nearby ports if taken. Returns the listener and the port it bound to.
+pub async fn bind_oauth_listener(port: u16) -> Result<(TcpListener, u16), String> {
+    // A sign-in that was just stopped can hold the port for a moment, and
+    // Microsoft only accepts the registered one.
+    let mut listener = None;
+    for _ in 0..5 {
+        if let Ok(l) = TcpListener::bind(format!("127.0.0.1:{port}")).await {
+            listener = Some(l);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    for p in [port + 1, port + 2, port + 3] {
+        if listener.is_some() {
+            break;
+        }
+        listener = TcpListener::bind(format!("127.0.0.1:{p}")).await.ok();
+    }
+
+    let listener = listener.ok_or("Failed to bind to any port for OAuth callback")?;
+    let actual_port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?
+        .port();
+
+    log::info!("OAuth callback server listening on port {actual_port}");
+    Ok((listener, actual_port))
+}
+
+/// Have a Microsoft 365 administrator approve Courly's Graph permissions for
+/// their whole organisation, so its users can then sign in without being
+/// asked for an admin. `tenant` is a domain of the organisation. Nothing is
+/// signed in: the admin's account is not added to Courly.
+pub async fn run_microsoft_admin_consent_flow(
+    tenant: &str,
+    client_id: &str,
+    scopes: &[String],
+    open_url: &(dyn Fn(&str) -> Result<(), String> + Send + Sync),
+) -> Result<(), String> {
+    let (listener, actual_port) = bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
+    let redirect_uri = format!("http://127.0.0.1:{actual_port}");
+    let state = random_base64url(32)?;
+    open_url(&microsoft_admin_consent_url(
+        tenant,
+        client_id,
+        scopes,
+        &redirect_uri,
+        &state,
+    ))?;
+    await_callback(
+        listener,
+        |request| parse_admin_consent_callback(request, &state),
+        admin_consent_success_html(),
+    )
+    .await
+}
+
+fn microsoft_admin_consent_url(
+    tenant: &str,
+    client_id: &str,
+    scopes: &[String],
+    redirect_uri: &str,
+    state: &str,
+) -> String {
+    let scope = scopes
+        .iter()
+        .map(|scope| match scope.as_str() {
+            "openid" | "profile" | "email" | "offline_access" => scope.clone(),
+            graph => format!("https://graph.microsoft.com/{graph}"),
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut url = url::Url::parse("https://login.microsoftonline.com/")
+        .expect("static URL")
+        .join(&format!(
+            "{}/v2.0/adminconsent",
+            urlencoding::encode(tenant)
+        ))
+        .expect("encoded tenant");
+    url.query_pairs_mut()
+        .append_pair("client_id", client_id)
+        .append_pair("scope", &scope)
+        .append_pair("redirect_uri", redirect_uri)
+        .append_pair("state", state);
+    url.into()
+}
+
+/// Wait for the OAuth callback on an already-bound listener, validate the
+/// CSRF state, send a success page, and return the auth code. Requests that
+/// do not carry our state (a favicon fetch, or any web page pointing an
+/// `<img>` at the loopback port) get a 400 and the wait goes on, so they
+/// cannot abort the sign-in.
+pub async fn await_oauth_callback(
+    listener: TcpListener,
+    state: &str,
+) -> Result<OAuthResult, String> {
+    let actual_port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get OAuth listener addr: {e}"))?
+        .port();
+    let code = await_callback(
+        listener,
+        |request| parse_callback(request, state),
+        oauth_success_html(),
+    )
+    .await?;
+    Ok(OAuthResult {
+        code,
+        state: state.to_string(),
+        actual_port,
+    })
+}
+
+async fn await_callback<T>(
+    listener: TcpListener,
+    parse: impl Fn(&str) -> CallbackOutcome<T>,
+    success_html: &str,
+) -> Result<T, String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+
+    loop {
+        let (mut stream, _) = tokio::time::timeout_at(deadline, listener.accept())
+            .await
+            .map_err(|_| "OAuth timed out - please try again".to_string())?
+            .map_err(|e| format!("Failed to accept OAuth connection: {e}"))?;
+
+        let request = match read_callback_request(&mut stream).await {
+            Ok(request) => request,
+            Err(error) => {
+                log::debug!("ignoring unreadable OAuth callback connection: {error}");
+                continue;
+            }
+        };
+
+        match parse(&request) {
+            CallbackOutcome::Done(value) => {
+                let html_len = success_html.len();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {html_len}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{success_html}"
+                );
+                _ = stream.write_all(response.as_bytes()).await;
+                _ = stream.flush().await;
+                return Ok(value);
+            }
+            CallbackOutcome::ProviderError(error) => {
+                _ = stream.write_all(CALLBACK_DONE_RESPONSE.as_bytes()).await;
+                return Err(format!("OAuth error: {error}"));
+            }
+            CallbackOutcome::Unrelated => {
+                _ = stream
+                    .write_all(CALLBACK_REJECTED_RESPONSE.as_bytes())
+                    .await;
+            }
+        }
+    }
+}
+
+const CALLBACK_DONE_RESPONSE: &str =
+    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const CALLBACK_REJECTED_RESPONSE: &str =
+    "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+async fn read_callback_request(stream: &mut tokio::net::TcpStream) -> Result<String, String> {
+    const MAX_REQUEST_SIZE: usize = 16384;
+    let mut buf = Vec::with_capacity(4096);
+    let mut tmp = [0u8; 4096];
+    loop {
+        let n = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut tmp))
+            .await
+            .map_err(|_| "Timed out reading OAuth callback request".to_string())?
+            .map_err(|e| format!("Failed to read OAuth request: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.len() > MAX_REQUEST_SIZE {
+            return Err("OAuth callback request too large".to_string());
+        }
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CallbackOutcome<T> {
+    Done(T),
+    ProviderError(String),
+    /// No state, or not ours: not the provider's redirect.
+    Unrelated,
+}
+
+/// The query of a redirect carrying our state, or how to answer it.
+fn callback_params<T>(
+    request: &str,
+    expected_state: &str,
+) -> Result<HashMap<String, String>, CallbackOutcome<T>> {
+    let Some(path) = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+    else {
+        return Err(CallbackOutcome::Unrelated);
+    };
+    let params = parse_query_string(path);
+    if params.get("state").map(String::as_str) != Some(expected_state) {
+        return Err(CallbackOutcome::Unrelated);
+    }
+    if let Some(error) = params.get("error") {
+        return Err(CallbackOutcome::ProviderError(error.clone()));
+    }
+    Ok(params)
+}
+
+fn parse_callback(request: &str, expected_state: &str) -> CallbackOutcome<String> {
+    let params = match callback_params(request, expected_state) {
+        Ok(params) => params,
+        Err(outcome) => return outcome,
+    };
+    match params.get("code").filter(|code| !code.is_empty()) {
+        Some(code) => CallbackOutcome::Done(code.clone()),
+        None => CallbackOutcome::Unrelated,
+    }
+}
+
+fn parse_admin_consent_callback(request: &str, expected_state: &str) -> CallbackOutcome<()> {
+    let params = match callback_params(request, expected_state) {
+        Ok(params) => params,
+        Err(outcome) => return outcome,
+    };
+    match params.get("admin_consent") {
+        Some(granted) if granted.eq_ignore_ascii_case("true") => CallbackOutcome::Done(()),
+        _ => CallbackOutcome::Unrelated,
+    }
+}
+
+fn admin_consent_success_html() -> &'static str {
+    r#"<!DOCTYPE html>
+<html>
+<head><title>Courly</title></head>
+<body style="font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0;">
+<div style="text-align: center;">
+<h1 style="margin-bottom: 8px;">Courly Approved</h1>
+<p style="opacity: 0.7;">Your organization can now use Courly. You can close this tab and return to Courly.</p>
+</div>
+</body>
+</html>"#
+}
+
+fn oauth_success_html() -> &'static str {
+    r#"<!DOCTYPE html>
+<html>
+<head><title>Courly</title></head>
+<body style="font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0;">
+<div style="text-align: center;">
+<h1 style="margin-bottom: 8px;">Account Connected!</h1>
+<p style="opacity: 0.7;">You can close this tab and return to Courly.</p>
+</div>
+</body>
+</html>"#
+}
+
+fn parse_query_string(path: &str) -> HashMap<String, String> {
+    // Prepend a dummy base so `url::Url` can parse a relative path with query string.
+    let full = format!("http://localhost{path}");
+    let Ok(parsed) = url::Url::parse(&full) else {
+        return HashMap::new();
+    };
+    parsed
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect()
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TokenExchangeResult {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: u64,
+    pub token_type: String,
+    pub scope: Option<String>,
+    pub id_token: Option<String>,
+}
+
+/// Exchange an OAuth authorization code for tokens.
+pub async fn oauth_exchange_token(
+    token_url: String,
+    code: String,
+    client_id: String,
+    redirect_uri: String,
+    code_verifier: Option<String>,
+    client_secret: Option<String>,
+    scope: Option<String>,
+) -> Result<TokenExchangeResult, String> {
+    let mut params = vec![
+        ("code", code),
+        ("client_id", client_id),
+        ("redirect_uri", redirect_uri),
+        ("grant_type", "authorization_code".to_string()),
+    ];
+    if let Some(verifier) = code_verifier {
+        params.push(("code_verifier", verifier));
+    }
+    if let Some(secret) = client_secret
+        && !secret.is_empty()
+    {
+        params.push(("client_secret", secret));
+    }
+    if let Some(s) = scope {
+        params.push(("scope", s));
+    }
+
+    let response = oauth_token_http_client()
+        .post(&token_url)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("Token exchange request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(format!("Token exchange failed (HTTP {status})"));
+    }
+
+    response
+        .json::<TokenExchangeResult>()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {e}"))
+}
+
+// Phase 6b verification: `oauth_refresh_token` deleted. The
+// previously planned Phase 4 `oauth.refresh_request` IPC was never
+// shipped (`crates/service/src/push.rs:29` documents the removal
+// during Phase 4 close-out). Today's Service-side refresh flows
+// through per-provider `ensure_valid_token` helpers in
+// gmail/graph/jmap (each reads the token row, calls the provider
+// token endpoint, writes the new tokens back). The generic
+// helper this module used to expose had no callers.
+
+async fn fetch_google_userinfo(access_token: &str) -> Result<OAuthUserInfo, String> {
+    let response = shared_http_client()
+        .get(GOOGLE_USERINFO_URL)
+        .header(AUTHORIZATION, format!("Bearer {access_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Google user info: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err("Failed to fetch Google user info".to_string());
+    }
+
+    response
+        .json::<GoogleUserInfo>()
+        .await
+        .map(|user| OAuthUserInfo {
+            email: user.email,
+            name: user.name,
+            picture: user.picture,
+            aliases: Vec::new(),
+        })
+        .map_err(|e| format!("Failed to parse Google user info: {e}"))
+}
+
+async fn fetch_provider_userinfo(
+    provider: &GenericOAuthProvider,
+    tokens: &TokenExchangeResult,
+) -> Result<OAuthUserInfo, String> {
+    if provider.is_microsoft {
+        if provider.provider_id == "microsoft_graph" {
+            return fetch_microsoft_userinfo(&tokens.access_token).await;
+        }
+        return microsoft_userinfo_from_id_token(tokens.id_token.as_deref());
+    }
+
+    let user_info_url = provider.user_info_url.as_deref().ok_or_else(|| {
+        format!(
+            "Provider {} has no user info endpoint",
+            provider.provider_id
+        )
+    })?;
+    let response = shared_http_client()
+        .get(user_info_url)
+        .header(AUTHORIZATION, format!("Bearer {}", tokens.access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch provider user info: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(format!(
+            "Failed to fetch provider user info (HTTP {status})"
+        ));
+    }
+
+    let data = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse provider user info: {e}"))?;
+
+    let email = data
+        .get("email")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Provider {} did not return an email address",
+                provider.provider_id
+            )
+        })?
+        .to_string();
+
+    Ok(OAuthUserInfo {
+        email,
+        name: data
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| data.get("nickname").and_then(serde_json::Value::as_str))
+            .unwrap_or_default()
+            .to_string(),
+        picture: data
+            .get("picture")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+        aliases: Vec::new(),
+    })
+}
+
+async fn fetch_microsoft_userinfo(access_token: &str) -> Result<OAuthUserInfo, String> {
+    let response = shared_http_client()
+        .get(MICROSOFT_GRAPH_ME_URL)
+        .header(AUTHORIZATION, format!("Bearer {access_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Microsoft user info: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(format!(
+            "Failed to fetch Microsoft user info (HTTP {status})"
+        ));
+    }
+
+    let data = response
+        .json::<MicrosoftGraphMe>()
+        .await
+        .map_err(|e| format!("Failed to parse Microsoft user info: {e}"))?;
+
+    microsoft_userinfo_from_me(data)
+}
+
+fn microsoft_userinfo_from_me(data: MicrosoftGraphMe) -> Result<OAuthUserInfo, String> {
+    let email = data
+        .mail
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            data.user_principal_name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+        })
+        .ok_or("Microsoft user info did not contain a mail or userPrincipalName value")?
+        .to_string();
+    let aliases = data
+        .user_principal_name
+        .into_iter()
+        .chain(data.proxy_addresses.iter().filter_map(|proxy| {
+            proxy
+                .split_once(':')
+                .filter(|(kind, _)| kind.eq_ignore_ascii_case("smtp"))
+                .map(|(_, address)| address.to_string())
+        }))
+        .filter(|alias| !alias.is_empty())
+        .collect();
+
+    Ok(OAuthUserInfo {
+        email,
+        name: data.display_name.unwrap_or_default(),
+        picture: None,
+        aliases,
+    })
+}
+
+/// The IMAP access token is issued for outlook.office.com, so Graph `/me`
+/// rejects it. The ID token from the same token response names the
+/// account; it came straight from the token endpoint over TLS, which
+/// OpenID Connect accepts without checking its signature.
+fn microsoft_userinfo_from_id_token(id_token: Option<&str>) -> Result<OAuthUserInfo, String> {
+    let payload = id_token
+        .and_then(|token| token.split('.').nth(1))
+        .ok_or("Microsoft did not return an ID token")?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| format!("Invalid Microsoft ID token: {e}"))?;
+    let claims: MicrosoftIdTokenClaims =
+        serde_json::from_slice(&bytes).map_err(|e| format!("Invalid Microsoft ID token: {e}"))?;
+    let preferred_username = claims.preferred_username.filter(|s| !s.is_empty());
+    let email = claims
+        .email
+        .filter(|s| !s.is_empty())
+        .or_else(|| preferred_username.clone())
+        .ok_or("Microsoft ID token did not contain an email address")?;
+
+    Ok(OAuthUserInfo {
+        email,
+        name: claims.name.unwrap_or_default(),
+        picture: None,
+        aliases: preferred_username.into_iter().collect(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct MicrosoftIdTokenClaims {
+    email: Option<String>,
+    preferred_username: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleUserInfo {
+    email: String,
+    name: String,
+    picture: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MicrosoftGraphMe {
+    mail: Option<String>,
+    user_principal_name: Option<String>,
+    display_name: Option<String>,
+    #[serde(default)]
+    proxy_addresses: Vec<String>,
+}
+
+pub fn random_base64url(size: usize) -> Result<String, String> {
+    let mut buf = vec![0u8; size];
+    getrandom::fill(&mut buf).map_err(|e| format!("Failed to generate random bytes: {e}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(buf))
+}
+
+pub fn sha256_base64url(input: &[u8]) -> String {
+    let digest = Sha256::digest(input);
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        GenericOAuthProvider, MICROSOFT_GRAPH_SCOPES, MicrosoftGraphMe, OAuthIdentityProvider,
+        microsoft_userinfo_from_id_token, microsoft_userinfo_from_me,
+    };
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    #[test]
+    fn admin_consent_callback_needs_our_state_and_the_grant() {
+        use super::{CallbackOutcome, parse_admin_consent_callback};
+
+        let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        assert_eq!(
+            parse_admin_consent_callback(&get("/?admin_consent=True&tenant=t&state=s1"), "s1"),
+            CallbackOutcome::Done(())
+        );
+        assert_eq!(
+            parse_admin_consent_callback(
+                &get("/?admin_consent=True&error=consent_required&state=s1"),
+                "s1"
+            ),
+            CallbackOutcome::ProviderError("consent_required".to_string())
+        );
+        for unrelated in [
+            "/?admin_consent=True&state=other",
+            "/?state=s1",
+            "/favicon.ico",
+        ] {
+            assert_eq!(
+                parse_admin_consent_callback(&get(unrelated), "s1"),
+                CallbackOutcome::Unrelated,
+                "{unrelated}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_consent_url_names_graph_permissions_for_the_organisation() {
+        let scopes = ["Mail.ReadWrite", "offline_access", "openid"].map(String::from);
+        let url = url::Url::parse(&super::microsoft_admin_consent_url(
+            "example.org",
+            "client",
+            &scopes,
+            "http://127.0.0.1:17248",
+            "s1",
+        ))
+        .expect("valid URL");
+        assert_eq!(url.path(), "/example.org/v2.0/adminconsent");
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            query["scope"],
+            "https://graph.microsoft.com/Mail.ReadWrite offline_access openid"
+        );
+        assert_eq!(query["client_id"], "client");
+        assert_eq!(query["redirect_uri"], "http://127.0.0.1:17248");
+        assert_eq!(query["state"], "s1");
+    }
+
+    #[test]
+    fn callback_requests_without_our_state_are_unrelated() {
+        use super::{CallbackOutcome, parse_callback};
+
+        let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        assert_eq!(
+            parse_callback(&get("/?code=abc&state=s1"), "s1"),
+            CallbackOutcome::Done("abc".to_string())
+        );
+        assert_eq!(
+            parse_callback(&get("/?error=access_denied&state=s1"), "s1"),
+            CallbackOutcome::ProviderError("access_denied".to_string())
+        );
+        for unrelated in [
+            "/?error=x",
+            "/?code=abc&state=other",
+            "/?code=abc",
+            "/favicon.ico",
+            "/?state=s1",
+        ] {
+            assert_eq!(
+                parse_callback(&get(unrelated), "s1"),
+                CallbackOutcome::Unrelated,
+                "{unrelated}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stray_request_does_not_abort_the_sign_in() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (listener, port) = super::bind_oauth_listener(0).await.expect("bind");
+        let waiter = tokio::spawn(super::await_oauth_callback(listener, "s1"));
+        for path in ["/?error=x", "/?code=abc&state=s1"] {
+            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .expect("connect");
+            stream
+                .write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+                .await
+                .expect("write");
+            let mut reply = Vec::new();
+            let _ = stream.read_to_end(&mut reply).await;
+        }
+        let result = waiter.await.expect("join").expect("sign-in completes");
+        assert_eq!(result.code, "abc");
+    }
+
+    fn id_token(claims: &str) -> String {
+        format!("e30.{}.c2ln", URL_SAFE_NO_PAD.encode(claims))
+    }
+
+    #[test]
+    fn microsoft_imap_userinfo_reads_the_id_token() {
+        let token = id_token(r#"{"email":"bob@outlook.com","name":"Bob"}"#);
+        let user = microsoft_userinfo_from_id_token(Some(&token)).expect("claims should parse");
+        assert_eq!(user.email, "bob@outlook.com");
+        assert_eq!(user.name, "Bob");
+
+        let token = id_token(r#"{"email":"","preferred_username":"bob@hotmail.com"}"#);
+        let user = microsoft_userinfo_from_id_token(Some(&token)).expect("claims should parse");
+        assert_eq!(user.email, "bob@hotmail.com");
+
+        assert!(microsoft_userinfo_from_id_token(None).is_err());
+        assert!(microsoft_userinfo_from_id_token(Some(&id_token(r#"{"name":"Bob"}"#))).is_err());
+    }
+
+    /// `GroupMember.Read.All` needs a tenant admin's consent, so requesting
+    /// it at sign-in blocks every ordinary user of a tenant that has not
+    /// granted it. The directory-group pull reports `NoPermission` instead.
+    /// The two Microsoft scope lists are maintained separately - they have
+    /// already drifted from each other elsewhere (`User.Read` vs `email`),
+    /// so each is asserted on its own.
+    #[test]
+    fn microsoft_scopes_exclude_admin_consent_group_read() {
+        const SCOPE: &str = "GroupMember.Read.All";
+        assert!(
+            !MICROSOFT_GRAPH_SCOPES.contains(&SCOPE),
+            "MICROSOFT_GRAPH_SCOPES must not request {SCOPE}"
+        );
+
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(
+            !scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry must not request {SCOPE}"
+        );
+    }
+
+    /// The contact pull reads `/me/contacts`, which answers 403 unless the
+    /// token carries a contacts scope.
+    #[test]
+    fn microsoft_graph_scopes_allow_reading_contacts() {
+        const SCOPE: &str = "Contacts.ReadWrite";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(
+            scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry must request {SCOPE}"
+        );
+    }
+
+    /// The account's address comes from Graph `/me`, which answers 403
+    /// unless the token carries `User.Read`.
+    #[test]
+    fn microsoft_graph_scopes_allow_reading_the_profile() {
+        const SCOPE: &str = "User.Read";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(
+            scopes.iter().any(|scope| scope == SCOPE),
+            "Outlook discovery registry entry must request {SCOPE}"
+        );
+    }
+
+    /// The organisation directory search (`/users`) needs `User.ReadBasic.All`.
+    #[test]
+    fn microsoft_graph_scopes_allow_directory_search() {
+        const SCOPE: &str = "User.ReadBasic.All";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(scopes.iter().any(|scope| scope == SCOPE));
+    }
+
+    /// Calendar sync and invite responses read and write `/me/events`,
+    /// which Graph refuses without `Calendars.ReadWrite`.
+    #[test]
+    fn microsoft_graph_scopes_allow_calendar_sync() {
+        const SCOPE: &str = "Calendars.ReadWrite";
+        assert!(MICROSOFT_GRAPH_SCOPES.contains(&SCOPE));
+        let registry = crate::discovery::registry::oauth_config_for_provider("microsoft_graph")
+            .expect("microsoft_graph registry entry");
+        let crate::discovery::types::AuthMethod::OAuth2 { scopes, .. } = registry else {
+            panic!("microsoft_graph must be an OAuth2 entry");
+        };
+        assert!(scopes.iter().any(|scope| scope == SCOPE));
+    }
+
+    #[test]
+    fn microsoft_userinfo_prefers_mail() {
+        let user = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: Some("alice@example.com".to_string()),
+            user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
+            display_name: Some("Alice".to_string()),
+            proxy_addresses: Vec::new(),
+        })
+        .expect("userinfo should parse");
+
+        assert_eq!(user.email, "alice@example.com");
+        assert_eq!(user.name, "Alice");
+    }
+
+    #[test]
+    fn microsoft_userinfo_falls_back_to_upn() {
+        let user = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: None,
+            user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
+            display_name: None,
+            proxy_addresses: Vec::new(),
+        })
+        .expect("userinfo should parse");
+
+        assert_eq!(user.email, "alice@tenant.onmicrosoft.com");
+        assert!(user.name.is_empty());
+    }
+
+    #[test]
+    fn microsoft_userinfo_requires_identity() {
+        let err = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: None,
+            user_principal_name: None,
+            display_name: Some("Alice".to_string()),
+            proxy_addresses: Vec::new(),
+        })
+        .expect_err("userinfo should fail without an email-like identity");
+
+        assert!(err.contains("mail or userPrincipalName"));
+    }
+
+    #[test]
+    fn microsoft_userinfo_owns_its_aliases_only() {
+        let user = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: Some("alice@example.org".to_string()),
+            user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
+            display_name: None,
+            proxy_addresses: vec![
+                "SMTP:alice@example.org".to_string(),
+                "smtp:contact@example.org".to_string(),
+                "SIP:alice@example.org".to_string(),
+                "X500:/o=Example".to_string(),
+            ],
+        })
+        .expect("userinfo should parse");
+
+        assert!(user.owns_address("Contact@Example.org"));
+        assert!(user.owns_address("alice@tenant.onmicrosoft.com"));
+        assert!(user.owns_address(" alice@example.org "));
+        assert!(!user.owns_address("bob@example.org"));
+        assert!(!user.owns_address("/o=Example"));
+    }
+
+    #[test]
+    fn microsoft_sign_in_never_forces_user_consent() {
+        let provider = GenericOAuthProvider::microsoft_graph_default();
+        let request = provider.authorization_request();
+
+        assert!(
+            request
+                .extra_auth_params
+                .contains(&("prompt".to_string(), "select_account".to_string()))
+        );
+        assert!(
+            !request
+                .extra_auth_params
+                .iter()
+                .any(|(key, value)| key == "prompt" && value == "consent")
+        );
+    }
+}

@@ -1,0 +1,795 @@
+//! B6a verification: the role-mapping unit test and the
+//! `containers_persist_equals_legacy` golden.
+//!
+//! The golden is a CHECKED-IN snapshot (not a live legacy call - the legacy
+//! `sync_*_folder_map` functions are deleted in the same landing). It pins
+//! the `folders` / `labels` rows (ids, names, parents, `is_undeletable`,
+//! `server_color_*`) `sync_containers` produces from a per-provider
+//! `containers_list` fixture against what the legacy passes produced from
+//! the equivalent payload, including the Gmail `CATEGORY_*` / `IMPORTANT` /
+//! `CHAT` system-label-as-folder rows and the `user_color_*` / `importance:*`
+//! preservation semantics.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use conduit_types::{
+    Container, ContainerContentClass, ContainerId, ContainerKind, ContainerNamespace,
+    ContainerRights, ContainerStyle, CursorScope, FolderId, FolderRole, MailboxId, ObjectType,
+    ProtocolKind, Provenance,
+};
+use common::types::{FolderKind, NamespaceAttribution, SystemFolderId};
+use rusqlite::Connection;
+use service_state::WriteDbState;
+use tempfile::TempDir;
+
+use super::{
+    ContainerIndex, build_container_rows, folder_ids_to_reap, folder_kind_for, persist_containers,
+    role_to_system_folder_id,
+};
+
+const ACCOUNT: &str = "acct-1";
+
+#[test]
+fn role_destination_resolves_within_source_namespace() {
+    let mut index = ContainerIndex::default();
+    let personal = NamespaceAttribution::Personal;
+    let shared = NamespaceAttribution::Shared {
+        owner: "alice@example.test".to_string(),
+    };
+    index.roles.insert(
+        (personal.clone(), FolderRole::Trash),
+        "personal-trash".to_string(),
+    );
+    index.roles.insert(
+        (shared.clone(), FolderRole::Trash),
+        "alice-trash".to_string(),
+    );
+
+    assert_eq!(
+        index.role_target(&personal, FolderRole::Trash),
+        Some("personal-trash")
+    );
+    assert_eq!(
+        index.role_target(&shared, FolderRole::Trash),
+        Some("alice-trash")
+    );
+}
+
+fn provenance(provider: ProtocolKind, kind: ContainerKind, native: &str) -> Provenance {
+    Provenance {
+        provider,
+        kind,
+        native: native.to_string(),
+    }
+}
+
+/// A Gmail label/system container (Gmail is label-shaped on the wire).
+fn gmail(
+    native: &str,
+    name: &str,
+    role: Option<FolderRole>,
+    system: bool,
+    style: Option<ContainerStyle>,
+) -> Container {
+    Container::new(
+        ContainerId(native.to_string()),
+        ContainerKind::Label,
+        role,
+        provenance(ProtocolKind::Gmail, ContainerKind::Label, native),
+        name.to_string(),
+        None,
+    )
+    .with_system(system)
+    .with_style(style)
+}
+
+/// A folder-shaped container (Graph / JMAP / IMAP).
+fn folder(
+    provider: ProtocolKind,
+    native: &str,
+    name: &str,
+    role: Option<FolderRole>,
+    parent: Option<&str>,
+) -> Container {
+    Container::new(
+        ContainerId(native.to_string()),
+        ContainerKind::Folder,
+        role,
+        provenance(provider, ContainerKind::Folder, native),
+        name.to_string(),
+        parent.map(|p| ContainerId(p.to_string())),
+    )
+    // JMAP marks role-bearing mailboxes system; the others leave it false.
+    .with_system(matches!(provider, ProtocolKind::Jmap) && role.is_some())
+}
+
+/// A namespaced (shared or public) folder container, built through the
+/// builder setters B12-SQ added rather than a widened `Container::new`.
+fn namespaced(
+    provider: ProtocolKind,
+    native: &str,
+    name: &str,
+    namespace: ContainerNamespace,
+    owner: Option<&str>,
+    owner_local_id: Option<&str>,
+    content_class: Option<ContainerContentClass>,
+) -> Container {
+    folder(provider, native, name, None, None)
+        .with_namespace(namespace)
+        .with_owner(owner.map(|owner| MailboxId(owner.to_string())))
+        .with_owner_local_id(owner_local_id.map(str::to_string))
+        .with_content_class(content_class)
+}
+
+#[test]
+fn container_index_attributes_scope_to_namespace() {
+    let containers = vec![
+        folder(
+            ProtocolKind::Imap,
+            "INBOX",
+            "Inbox",
+            Some(FolderRole::Inbox),
+            None,
+        ),
+        namespaced(
+            ProtocolKind::Imap,
+            "#user/alice/INBOX",
+            "Alice Inbox",
+            ContainerNamespace::Shared,
+            Some("alice"),
+            Some("#user/alice/INBOX"),
+            None,
+        ),
+        namespaced(
+            ProtocolKind::Graph,
+            "pf-notices",
+            "Notices",
+            ContainerNamespace::Public,
+            None,
+            None,
+            Some(ContainerContentClass::Mail),
+        ),
+        namespaced(
+            ProtocolKind::Graph,
+            "pf-calendar",
+            "Calendar",
+            ContainerNamespace::Public,
+            None,
+            None,
+            Some(ContainerContentClass::Calendar),
+        ),
+    ];
+    let (rows, _, index) = build_container_rows(ACCOUNT, &containers).unwrap();
+
+    // Account-level scopes are personal by construction: conduit cannot
+    // express a foreign account-level scope.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Account),
+        Some(NamespaceAttribution::Personal)
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("INBOX".into()))),
+        Some(NamespaceAttribution::Personal)
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("#user/alice/INBOX".into()))),
+        Some(NamespaceAttribution::Shared {
+            owner: "alice".into()
+        })
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::FolderType {
+            folder: FolderId("pf-notices".into()),
+            ty: ObjectType::Email,
+        }),
+        Some(NamespaceAttribution::Public {
+            folder_storage_id: "public:pf-notices".into()
+        })
+    );
+
+    // Obstacle Q: an unknown folder scope NEVER defaults to personal.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("#user/bob/INBOX".into()))),
+        None
+    );
+
+    // conduit's owner-qualified foreign scope ids (`owner<US>local`, US =
+    // \u{1f}) attribute by their OWNER half even when no container carries
+    // the exact id. The empty-local form is the foreign account's own
+    // account-level scope and is the case an exact match can never serve.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("account-team\u{1f}".into()))),
+        Some(NamespaceAttribution::Shared {
+            owner: "account-team".into()
+        })
+    );
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId(
+            "account-team\u{1f}mb-unknown".into()
+        ))),
+        Some(NamespaceAttribution::Shared {
+            owner: "account-team".into()
+        })
+    );
+    // An empty owner half is malformed, not personal, not shared.
+    assert_eq!(
+        index.attribution_for_scope(&CursorScope::Folder(FolderId("\u{1f}mb-x".into()))),
+        None
+    );
+
+    // Obstacle T: a non-mail public container is not a mail scope.
+    assert!(index.is_mail_container("pf-notices"));
+    assert!(!index.is_mail_container("pf-calendar"));
+
+    // Obstacle C: the storage ids are namespace-prefixed and carry the id
+    // WITHIN the owner namespace, never the foreign-encoded native id.
+    assert_eq!(
+        index.storage_id_for_native("#user/alice/INBOX"),
+        Some("shared:alice:folder-#user/alice/INBOX")
+    );
+    assert_eq!(
+        index.storage_id_for_native("pf-notices"),
+        Some("public:pf-notices")
+    );
+
+    let shared_row = find_folder(&rows, "shared:alice:folder-#user/alice/INBOX");
+    assert_eq!(shared_row.namespace_type.as_deref(), Some("shared"));
+    assert_eq!(shared_row.owner_id.as_deref(), Some("alice"));
+    let public_row = find_folder(&rows, "public:pf-calendar");
+    assert_eq!(public_row.namespace_type.as_deref(), Some("public"));
+    assert_eq!(public_row.content_class.as_deref(), Some("Calendar"));
+    assert_eq!(find_folder(&rows, "INBOX").namespace_type, None);
+}
+
+fn find_folder<'a>(
+    rows: &'a [db::db::queries_extra::FolderWriteRow],
+    id: &str,
+) -> &'a db::db::queries_extra::FolderWriteRow {
+    rows.iter()
+        .find(|row| row.id == id)
+        .unwrap_or_else(|| panic!("expected folder row {id}; have {:?}", ids(rows)))
+}
+
+fn ids(rows: &[db::db::queries_extra::FolderWriteRow]) -> Vec<&str> {
+    rows.iter().map(|r| r.id.as_str()).collect()
+}
+
+// ── Role-mapping unit test ──────────────────────────────
+
+#[test]
+fn container_role_maps_to_canonical_id() {
+    // Every known conduit FolderRole maps to its glossary canonical id.
+    // `FolderRole` is `#[non_exhaustive]`, so a wildcard arm is forced; the
+    // pairs below pin every variant the migration knows.
+    let pairs = [
+        (FolderRole::Inbox, SystemFolderId::Inbox, "INBOX"),
+        (FolderRole::Sent, SystemFolderId::Sent, "SENT"),
+        (FolderRole::Drafts, SystemFolderId::Draft, "DRAFT"),
+        (FolderRole::Archive, SystemFolderId::Archive, "archive"),
+        (FolderRole::Trash, SystemFolderId::Trash, "TRASH"),
+        (FolderRole::Spam, SystemFolderId::Spam, "SPAM"),
+    ];
+    for (role, system, canonical) in pairs {
+        assert_eq!(
+            role_to_system_folder_id(role),
+            Some(system),
+            "role {role:?} must map to {system:?}"
+        );
+        assert_eq!(
+            FolderKind::System(system).storage_id(),
+            canonical,
+            "system {system:?} must carry storage id {canonical}"
+        );
+    }
+
+    // Prefixed-native fallback per provider for a non-system (role == None)
+    // container, pinned against the glossary Identity table.
+    let graph = folder(ProtocolKind::Graph, "GUID9", "Work", None, None);
+    assert_eq!(folder_kind_for(&graph).unwrap().storage_id(), "graph-GUID9");
+
+    let jmap = folder(ProtocolKind::Jmap, "mb9", "Projects", None, None);
+    assert_eq!(folder_kind_for(&jmap).unwrap().storage_id(), "jmap-mb9");
+
+    let imap = folder(ProtocolKind::Imap, "INBOX/Work", "Work", None, None);
+    assert_eq!(
+        folder_kind_for(&imap).unwrap().storage_id(),
+        "folder-INBOX/Work"
+    );
+
+    // Gmail user label keeps its native id (no prefix); Gmail non-role
+    // system labels resolve to their canonical / GmailSystem storage id.
+    let category = gmail("CATEGORY_PROMOTIONS", "Promotions", None, true, None);
+    assert_eq!(
+        folder_kind_for(&category).unwrap().storage_id(),
+        "CATEGORY_PROMOTIONS"
+    );
+    let important = gmail("IMPORTANT", "Important", None, true, None);
+    assert_eq!(
+        folder_kind_for(&important).unwrap().storage_id(),
+        "IMPORTANT"
+    );
+}
+
+// ── The equality golden ─────────────────────────────────
+
+fn gmail_fixture() -> Vec<Container> {
+    vec![
+        // Synthetic conduit archive (Gmail models archive as the absence of
+        // INBOX). Role-bearing, so it lands as a folder.
+        gmail("archive", "Archive", Some(FolderRole::Archive), false, None),
+        gmail("INBOX", "Inbox", Some(FolderRole::Inbox), true, None),
+        gmail("SENT", "Sent", Some(FolderRole::Sent), true, None),
+        // Non-role system labels: role alone cannot route these, `system`
+        // does (the § 2.5 blocker the golden exists to catch).
+        gmail("CATEGORY_PROMOTIONS", "Promotions", None, true, None),
+        gmail("IMPORTANT", "Important", None, true, None),
+        gmail("CHAT", "Chat", None, true, None),
+        // Message-state ids are filtered before the folder/label split, so a
+        // Gmail STARRED system label never lands as a container row.
+        gmail("STARRED", "Starred", None, true, None),
+        gmail("UNREAD", "Unread", None, true, None),
+        // User label with a server color.
+        gmail(
+            "Label_42",
+            "Work",
+            None,
+            false,
+            Some(ContainerStyle::new("#16a766", "#ffffff")),
+        ),
+    ]
+}
+
+#[test]
+fn containers_persist_equals_legacy() {
+    // Gmail: the system-label-as-folder split + colors + message-state filter.
+    let (folders, labels, folder_map) = build_container_rows(ACCOUNT, &gmail_fixture()).unwrap();
+
+    // Folder rows: every system label (role-bearing OR `system`) lands here.
+    let mut folder_ids = ids(&folders);
+    folder_ids.sort_unstable();
+    assert_eq!(
+        folder_ids,
+        [
+            "CATEGORY_PROMOTIONS",
+            "CHAT",
+            "IMPORTANT",
+            "INBOX",
+            "SENT",
+            "archive"
+        ],
+        "Gmail CATEGORY_*/IMPORTANT/CHAT must land as folders, STARRED/UNREAD filtered"
+    );
+    for row in &folders {
+        assert!(
+            row.is_undeletable,
+            "Gmail system folder {} must be undeletable",
+            row.id
+        );
+        assert_eq!(row.account_id, ACCOUNT);
+    }
+    assert_eq!(
+        find_folder(&folders, "CATEGORY_PROMOTIONS").name,
+        "Promotions"
+    );
+
+    // Label rows: only the user label, carrying its server color, deletable.
+    assert_eq!(labels.len(), 1, "only the Gmail user label is a label row");
+    let work = &labels[0];
+    assert_eq!(work.id, "Label_42");
+    assert_eq!(work.name, "Work");
+    assert_eq!(work.server_color_bg.as_deref(), Some("#16a766"));
+    assert_eq!(work.server_color_fg.as_deref(), Some("#ffffff"));
+    assert_eq!(work.user_color_bg, None);
+    assert!(!work.is_undeletable);
+
+    // Folder map: native-id keyed, folders only.
+    assert_eq!(folder_map.len(), 6);
+    assert_eq!(
+        folder_map.get("INBOX"),
+        Some(&FolderKind::System(SystemFolderId::Inbox))
+    );
+    assert!(!folder_map.contains_key("Label_42"));
+    assert!(!folder_map.contains_key("STARRED"));
+
+    // Graph: hierarchy + two-pass parent resolution.
+    let graph = vec![
+        folder(
+            ProtocolKind::Graph,
+            "g-inbox",
+            "Inbox",
+            Some(FolderRole::Inbox),
+            None,
+        ),
+        folder(ProtocolKind::Graph, "g-work", "Work", None, Some("g-inbox")),
+        folder(ProtocolKind::Graph, "g-sub", "Sub", None, Some("g-work")),
+    ];
+    let (gfolders, glabels, _) = build_container_rows(ACCOUNT, &graph).unwrap();
+    assert!(glabels.is_empty());
+    assert_eq!(find_folder(&gfolders, "INBOX").parent_id, None);
+    assert_eq!(
+        find_folder(&gfolders, "graph-g-work").parent_id.as_deref(),
+        Some("INBOX")
+    );
+    assert_eq!(
+        find_folder(&gfolders, "graph-g-sub").parent_id.as_deref(),
+        Some("graph-g-work")
+    );
+    assert!(!find_folder(&gfolders, "graph-g-work").is_undeletable);
+
+    // JMAP: user mailbox is a folder by `kind`, even with no role/system.
+    let jmap = vec![
+        folder(
+            ProtocolKind::Jmap,
+            "mb1",
+            "Inbox",
+            Some(FolderRole::Inbox),
+            None,
+        ),
+        folder(ProtocolKind::Jmap, "mb2", "Projects", None, None),
+    ];
+    let (jfolders, _, _) = build_container_rows(ACCOUNT, &jmap).unwrap();
+    let mut jids = ids(&jfolders);
+    jids.sort_unstable();
+    assert_eq!(jids, ["INBOX", "jmap-mb2"]);
+    assert!(!find_folder(&jfolders, "jmap-mb2").is_undeletable);
+
+    // IMAP: path-native folders, special-use carried for system folders.
+    let imap = vec![
+        folder(
+            ProtocolKind::Imap,
+            "INBOX",
+            "Inbox",
+            Some(FolderRole::Inbox),
+            None,
+        ),
+        folder(
+            ProtocolKind::Imap,
+            "INBOX/Work",
+            "Work",
+            None,
+            Some("INBOX"),
+        ),
+    ];
+    let (ifolders, _, _) = build_container_rows(ACCOUNT, &imap).unwrap();
+    let inbox = find_folder(&ifolders, "INBOX");
+    assert_eq!(inbox.imap_folder_path.as_deref(), Some("INBOX"));
+    assert_eq!(inbox.imap_special_use.as_deref(), Some("\\Inbox"));
+    let work = find_folder(&ifolders, "folder-INBOX/Work");
+    assert_eq!(work.imap_folder_path.as_deref(), Some("INBOX/Work"));
+    assert_eq!(work.parent_id.as_deref(), Some("INBOX"));
+
+    // Preservation semantics through the real upsert seam: a pre-seeded
+    // `user_color_*` override and an `importance:*` undeletable row must
+    // survive a re-sync.
+    assert_preservation_semantics();
+}
+
+/// B6-FIX: a JMAP mailbox's `myRights` / `isSubscribed` must flow from the
+/// conduit `Container` into the `folders` row's `right_*` (as 0/1) and
+/// `is_subscribed` columns, which `navigation::rights_from_folder` reads to
+/// gate shared-mailbox submit. Other providers leave `Container::rights` /
+/// `is_subscribed` `None`, so their rows stay `None`.
+#[test]
+fn jmap_folder_rights_and_subscription_map_to_columns() {
+    let rights = ContainerRights {
+        may_read_items: Some(true),
+        may_add_items: Some(false),
+        may_remove_items: Some(true),
+        may_set_seen: Some(true),
+        may_set_keywords: Some(false),
+        may_create_child: Some(true),
+        may_rename: Some(false),
+        may_delete: Some(false),
+        may_submit: Some(true),
+    };
+    let shared = Container::new(
+        ContainerId("mbShared".to_string()),
+        ContainerKind::Folder,
+        None,
+        provenance(ProtocolKind::Jmap, ContainerKind::Folder, "mbShared"),
+        "Shared".to_string(),
+        None,
+    )
+    .with_rights(Some(rights))
+    .with_subscription(Some(true));
+
+    let (folders, _, _) = build_container_rows(ACCOUNT, &[shared]).unwrap();
+    let row = find_folder(&folders, "jmap-mbShared");
+    assert_eq!(row.right_read, Some(1));
+    assert_eq!(row.right_add, Some(0));
+    assert_eq!(row.right_remove, Some(1));
+    assert_eq!(row.right_set_seen, Some(1));
+    assert_eq!(row.right_set_keywords, Some(0));
+    assert_eq!(row.right_create_child, Some(1));
+    assert_eq!(row.right_rename, Some(0));
+    assert_eq!(row.right_delete, Some(0));
+    assert_eq!(row.right_submit, Some(1));
+    assert_eq!(row.is_subscribed, Some(1));
+
+    // A provider that surfaces no rights (Graph here) leaves every column
+    // `None`, matching the legacy "only JMAP wrote rights" behaviour.
+    let graph = folder(ProtocolKind::Graph, "g1", "Work", None, None);
+    let (gfolders, _, _) = build_container_rows(ACCOUNT, &[graph]).unwrap();
+    let grow = find_folder(&gfolders, "graph-g1");
+    assert_eq!(grow.right_read, None);
+    assert_eq!(grow.right_submit, None);
+    assert_eq!(grow.is_subscribed, None);
+}
+
+fn assert_preservation_semantics() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    db::db::migrations::run_all(&conn).unwrap();
+
+    // Pre-seed: a user color override on the very label the sync will touch,
+    // and an importance:high synth row marked undeletable (never appears in
+    // `containers_list`, so the sync must not clobber it).
+    conn.execute(
+        "INSERT INTO labels (id, account_id, name, user_color_bg, user_color_fg, is_undeletable) \
+         VALUES ('Label_42', ?1, 'Work', '#abcdef', '#123456', 0)",
+        rusqlite::params![ACCOUNT],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO labels (id, account_id, name, is_undeletable) \
+         VALUES ('importance:high', ?1, 'High importance', 1)",
+        rusqlite::params![ACCOUNT],
+    )
+    .unwrap();
+
+    let (folder_rows, label_rows, _) = build_container_rows(ACCOUNT, &gmail_fixture()).unwrap();
+    let tx = conn.transaction().unwrap();
+    db::db::queries_extra::insert_folders_batch(&tx, &folder_rows).unwrap();
+    db::db::queries_extra::upsert_labels(&tx, &label_rows).unwrap();
+    tx.commit().unwrap();
+
+    // Server color now set from the container style; user override preserved.
+    let (sbg, ubg): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT server_color_bg, user_color_bg FROM labels WHERE id = 'Label_42' AND account_id = ?1",
+            rusqlite::params![ACCOUNT],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(sbg.as_deref(), Some("#16a766"), "server color synced");
+    assert_eq!(ubg.as_deref(), Some("#abcdef"), "user override preserved");
+
+    // The importance synth row's undeletable flag survived the re-sync.
+    let importance_undeletable: i64 = conn
+        .query_row(
+            "SELECT is_undeletable FROM labels WHERE id = 'importance:high' AND account_id = ?1",
+            rusqlite::params![ACCOUNT],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(importance_undeletable, 1, "importance:* stays undeletable");
+
+    // The Gmail folder rows landed in the folders table.
+    let folder_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM folders WHERE account_id = ?1",
+            rusqlite::params![ACCOUNT],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(folder_count, 6, "six Gmail system folders persisted");
+}
+
+#[test]
+fn owner_email_populates_shared_mailbox_cache() {
+    let temp = TempDir::new().unwrap();
+    let write_db = WriteDbState::from_pool(db::db::open_writer_pool(temp.path()).unwrap());
+    let shared = namespaced(
+        ProtocolKind::Jmap,
+        "shared-inbox",
+        "Shared inbox",
+        ContainerNamespace::Shared,
+        Some("foreign-account"),
+        Some("shared-inbox"),
+        Some(ContainerContentClass::Mail),
+    )
+    .with_owner_email(Some("owner@example.test".to_string()));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let first_snapshot = shared.clone();
+    let first_write_db = write_db.clone();
+    let email = runtime
+        .block_on(async move {
+            first_write_db
+                .with_write(move |conn| {
+                    conn.execute(
+                        "INSERT INTO accounts (id, email) VALUES (?1, ?2)",
+                        rusqlite::params![ACCOUNT, "account@example.test"],
+                    )
+                    .map_err(|error| format!("seed account: {error}"))?;
+                    persist_containers(conn, ACCOUNT, &[first_snapshot])?;
+                    conn.query_row(
+                        "SELECT email_address FROM shared_mailboxes \
+                 WHERE account_id = ?1 AND mailbox_id = 'foreign-account'",
+                        [ACCOUNT],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|error| format!("read owner email: {error}"))
+                })
+                .await
+        })
+        .unwrap();
+    assert_eq!(email.as_deref(), Some("owner@example.test"));
+
+    // Legacy principal resolution was write-once. A later container snapshot
+    // must not churn or replace the compose sender identity.
+    let updated = shared.with_owner_email(Some("new@example.test".to_string()));
+    let email = runtime
+        .block_on(async move {
+            write_db
+                .with_write(move |conn| {
+                    persist_containers(conn, ACCOUNT, &[updated])?;
+                    conn.query_row(
+                        "SELECT email_address FROM shared_mailboxes \
+                 WHERE account_id = ?1 AND mailbox_id = 'foreign-account'",
+                        [ACCOUNT],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|error| format!("read retained owner email: {error}"))
+                })
+                .await
+        })
+        .unwrap();
+    assert_eq!(email.as_deref(), Some("owner@example.test"));
+}
+
+#[test]
+fn reap_decision_deletes_only_stale_non_system_personal_ids() {
+    let existing = vec![
+        "jmap-stale".to_string(),
+        "jmap-live".to_string(),
+        "INBOX".to_string(),
+        // System rows seeded outside the container sync survive even when
+        // the provider snapshot never advertises them.
+        "IMPORTANT".to_string(),
+        "CATEGORY_FORUMS".to_string(),
+        "CHAT".to_string(),
+    ];
+    let snapshot = ["jmap-live", "INBOX"].into_iter().collect();
+    assert_eq!(folder_ids_to_reap(&existing, &snapshot), vec!["jmap-stale"]);
+}
+
+#[test]
+fn persist_reaps_destroyed_personal_folder_and_keeps_seeded_and_shared_rows() {
+    let temp = TempDir::new().unwrap();
+    let write_db = WriteDbState::from_pool(db::db::open_writer_pool(temp.path()).unwrap());
+    let inbox = folder(
+        ProtocolKind::Jmap,
+        "mbx-inbox",
+        "Inbox",
+        Some(FolderRole::Inbox),
+        None,
+    );
+    let scratch = folder(ProtocolKind::Jmap, "mbx-scratch", "Scratch", None, None);
+    let shared = namespaced(
+        ProtocolKind::Jmap,
+        "shared-inbox",
+        "Shared inbox",
+        ContainerNamespace::Shared,
+        Some("foreign-account"),
+        Some("shared-inbox"),
+        Some(ContainerContentClass::Mail),
+    );
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let first = vec![inbox.clone(), scratch, shared.clone()];
+    let second = vec![inbox, shared];
+    let survivors = runtime
+        .block_on(async move {
+            write_db
+                .with_write(move |conn| {
+                    conn.execute(
+                        "INSERT INTO accounts (id, email) VALUES (?1, ?2)",
+                        rusqlite::params![ACCOUNT, "account@example.test"],
+                    )
+                    .map_err(|error| format!("seed account: {error}"))?;
+                    // A system row seeded outside the container sync (account
+                    // creation / harness seed); never in any JMAP snapshot.
+                    conn.execute(
+                        "INSERT INTO folders (id, account_id, name, visible) \
+                         VALUES ('SENT', ?1, 'Sent', 1)",
+                        rusqlite::params![ACCOUNT],
+                    )
+                    .map_err(|error| format!("seed SENT row: {error}"))?;
+                    persist_containers(conn, ACCOUNT, &first)?;
+                    // The provider destroyed the scratch mailbox: the second
+                    // snapshot no longer carries it.
+                    persist_containers(conn, ACCOUNT, &second)?;
+                    let mut stmt = conn
+                        .prepare("SELECT id FROM folders WHERE account_id = ?1 ORDER BY id")
+                        .map_err(|error| format!("prepare survivors: {error}"))?;
+                    let mapped = stmt
+                        .query_map([ACCOUNT], |row| row.get::<_, String>(0))
+                        .map_err(|error| format!("query survivors: {error}"))?;
+                    mapped
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| format!("collect survivors: {error}"))
+                })
+                .await
+        })
+        .unwrap();
+    assert!(
+        !survivors.iter().any(|id| id == "jmap-mbx-scratch"),
+        "destroyed personal folder must be reaped, survivors: {survivors:?}"
+    );
+    assert!(survivors.iter().any(|id| id == "INBOX"), "role folder kept");
+    assert!(
+        survivors.iter().any(|id| id == "SENT"),
+        "seeded system row absent from the snapshot must survive"
+    );
+    assert!(
+        survivors
+            .iter()
+            .any(|id| id == "shared:foreign-account:jmap-shared-inbox"),
+        "shared-namespace row is not the personal reap's to manage, survivors: {survivors:?}"
+    );
+}
+
+fn graph_folder(native: &str, role: Option<FolderRole>) -> Container {
+    Container::new(
+        ContainerId(native.to_string()),
+        ContainerKind::Folder,
+        role,
+        Provenance {
+            provider: ProtocolKind::Graph,
+            kind: ContainerKind::Folder,
+            native: native.to_string(),
+        },
+        native.to_string(),
+        None,
+    )
+}
+
+#[test]
+fn the_hot_cadence_covers_every_personal_system_folder_and_nothing_else() {
+    let (_, _, index) = build_container_rows(
+        ACCOUNT,
+        &[
+            graph_folder("AAMkInbox", Some(FolderRole::Inbox)),
+            graph_folder("AAMkSent", Some(FolderRole::Sent)),
+            graph_folder("AAMkTrash", Some(FolderRole::Trash)),
+            graph_folder("AAMkProjects", None),
+            graph_folder("AAMkSharedInbox", Some(FolderRole::Inbox))
+                .with_namespace(ContainerNamespace::Shared)
+                .with_owner(Some(MailboxId("alice@example.test".to_string())))
+                .with_owner_local_id(Some("AAMkSharedInbox".to_string())),
+        ],
+    )
+    .unwrap();
+
+    let mut hot = index.personal_system_folders();
+    hot.sort();
+    assert_eq!(hot, ["AAMkInbox", "AAMkSent", "AAMkTrash"]);
+}
+
+#[test]
+fn a_sidebar_folder_id_resolves_to_its_graph_folder() {
+    let (_, _, index) = build_container_rows(
+        ACCOUNT,
+        &[
+            graph_folder("AAMkInbox", Some(FolderRole::Inbox)),
+            graph_folder("AAMkProjects", None),
+        ],
+    )
+    .unwrap();
+    let projects_storage = index
+        .storage_id_for_native("AAMkProjects")
+        .unwrap()
+        .to_string();
+
+    assert_eq!(
+        index.native_for_storage_id(&projects_storage),
+        Some("AAMkProjects")
+    );
+    assert_eq!(index.native_for_storage_id("INBOX"), Some("AAMkInbox"));
+    assert_eq!(index.native_for_storage_id("not-a-folder"), None);
+}

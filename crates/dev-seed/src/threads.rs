@@ -1,0 +1,599 @@
+use std::collections::HashMap;
+
+use rand::RngExt;
+use rusqlite::Connection;
+
+use db::db::queries_extra::{NonReactionMessage, ThreadAggregate};
+use types::{ImportanceLevel, MailProviderKind};
+
+use crate::accounts::Account;
+use crate::contacts;
+use crate::people::{I18N_LOCALES, PeoplePools, Person};
+use crate::templates::{self, CATEGORIES, CATEGORY_WEIGHTS, Category};
+
+/// Fixed reference timestamp for deterministic output.
+/// 2026-03-15 12:00:00 UTC - arbitrary but stable across runs.
+const FIXED_NOW: i64 = 1_773_768_000;
+
+struct AttachmentInfo {
+    filename: &'static str,
+    mime_type: &'static str,
+    base_size: i64,
+}
+
+static ATTACHMENT_POOL: &[AttachmentInfo] = &[
+    AttachmentInfo {
+        filename: "report.pdf",
+        mime_type: "application/pdf",
+        base_size: 245_000,
+    },
+    AttachmentInfo {
+        filename: "screenshot.png",
+        mime_type: "image/png",
+        base_size: 890_000,
+    },
+    AttachmentInfo {
+        filename: "proposal.docx",
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        base_size: 156_000,
+    },
+    AttachmentInfo {
+        filename: "data.xlsx",
+        mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        base_size: 78_000,
+    },
+    AttachmentInfo {
+        filename: "design-v3.fig",
+        mime_type: "application/octet-stream",
+        base_size: 2_400_000,
+    },
+    AttachmentInfo {
+        filename: "meeting-notes.md",
+        mime_type: "text/markdown",
+        base_size: 4_200,
+    },
+    AttachmentInfo {
+        filename: "invoice-2024.pdf",
+        mime_type: "application/pdf",
+        base_size: 67_000,
+    },
+    AttachmentInfo {
+        filename: "photo.jpg",
+        mime_type: "image/jpeg",
+        base_size: 3_100_000,
+    },
+    AttachmentInfo {
+        filename: "logo.svg",
+        mime_type: "image/svg+xml",
+        base_size: 12_000,
+    },
+    AttachmentInfo {
+        filename: "archive.zip",
+        mime_type: "application/zip",
+        base_size: 15_600_000,
+    },
+    AttachmentInfo {
+        filename: "presentation.pptx",
+        mime_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        base_size: 4_500_000,
+    },
+    AttachmentInfo {
+        filename: "contract-final.pdf",
+        mime_type: "application/pdf",
+        base_size: 189_000,
+    },
+    AttachmentInfo {
+        filename: "wireframes.pdf",
+        mime_type: "application/pdf",
+        base_size: 1_200_000,
+    },
+    AttachmentInfo {
+        filename: "budget.csv",
+        mime_type: "text/csv",
+        base_size: 23_000,
+    },
+];
+
+use crate::weighted_choice;
+
+/// Body to be inserted into the body store after the main transaction.
+pub struct PendingBody {
+    pub message_id: String,
+    pub body_html: String,
+    pub body_text: String,
+}
+
+/// Inline image blob to be inserted into `inline_images.db` after the main
+/// transaction. `content_hash` is the primary key and is content-addressed
+/// (xxh3 of the bytes) so identical images dedupe naturally.
+pub struct PendingInlineImage {
+    pub content_hash: String,
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+}
+
+pub struct SeedStats {
+    pub threads: u32,
+    pub messages: u32,
+    pub attachments: u32,
+    pub chat_contacts: u32,
+    pub chat_threads: u32,
+    pub chat_messages: u32,
+    pub chat_inline_images: u32,
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn generate_threads(
+    conn: &Connection,
+    rng: &mut impl RngExt,
+    accounts: &[Account],
+    pools: &PeoplePools,
+    locale_mode: &str,
+    num_threads: u32,
+) -> Result<(Vec<PendingBody>, SeedStats), String> {
+    let mut bodies = Vec::new();
+    let mut stats = SeedStats {
+        threads: 0,
+        messages: 0,
+        attachments: 0,
+        chat_contacts: 0,
+        chat_threads: 0,
+        chat_messages: 0,
+        chat_inline_images: 0,
+    };
+    let mut imap_uid_counter: HashMap<(String, String), u32> = HashMap::new();
+    let now = FIXED_NOW;
+
+    for _ in 0..num_threads {
+        let acc = &accounts[rng.random_range(0..accounts.len())];
+        let cat = weighted_choice(rng, CATEGORIES, CATEGORY_WEIGHTS);
+
+        // Pick locale for this thread
+        let locale_idx: Option<usize> = match locale_mode {
+            "latin" => None,
+            "intl" => Some(rng.random_range(0..I18N_LOCALES.len())),
+            _ => {
+                // mixed: ~30% non-Latin
+                if rng.random::<f64>() < 0.30 {
+                    Some(rng.random_range(0..I18N_LOCALES.len()))
+                } else {
+                    None
+                }
+            }
+        };
+
+        let locale_data = locale_idx.map(|i| &I18N_LOCALES[i]);
+        let re_prefix = locale_data.map_or("Re:", |l| l.re_prefix);
+        let thread_people: &[Person] = if let Some(idx) = locale_idx {
+            &pools.i18n[idx]
+        } else {
+            &pools.latin
+        };
+
+        if thread_people.is_empty() {
+            continue;
+        }
+
+        let subject = templates::generate_subject(rng, cat, locale_data);
+
+        // Thread timing: random start within last 365 days
+        let days_back = rng.random_range(0..365);
+        let hours_back = rng.random_range(0..24);
+        let mins_back = rng.random_range(0..60);
+        let thread_start = now - (days_back * 86400 + hours_back * 3600 + mins_back * 60) as i64;
+
+        // Number of messages
+        let num_msgs: u32 = match cat {
+            Category::Newsletter | Category::Notification => 1,
+            Category::Commerce => weighted_choice(rng, &[1, 2, 3], &[0.7, 0.2, 0.1]),
+            Category::Work => weighted_choice(
+                rng,
+                &[1, 2, 3, 4, 5, 6, 7, 8, 9, 12],
+                &[0.10, 0.12, 0.12, 0.10, 0.13, 0.10, 0.10, 0.10, 0.08, 0.05],
+            ),
+            Category::Personal => weighted_choice(
+                rng,
+                &[1, 2, 3, 4, 5, 8, 12],
+                &[0.30, 0.25, 0.15, 0.10, 0.10, 0.05, 0.05],
+            ),
+        };
+
+        // Participants
+        let max_participants = thread_people.len().min(5);
+        let num_participants: usize =
+            weighted_choice(rng, &[1usize, 2, 3, 4, 5], &[0.1, 0.4, 0.25, 0.15, 0.1])
+                .min(max_participants);
+
+        // Sample participants (Fisher-Yates partial shuffle on indices)
+        let mut indices: Vec<usize> = (0..thread_people.len()).collect();
+        for i in 0..num_participants {
+            let j = rng.random_range(i..indices.len());
+            indices.swap(i, j);
+        }
+        let participants: Vec<&Person> = indices[..num_participants]
+            .iter()
+            .map(|&i| &thread_people[i])
+            .collect();
+
+        // Versioning: ~30% of multi-message Work/Personal/Commerce threads
+        // carry a "shared filename" attached to 2-3 messages with varied
+        // sizes per occurrence, so the dedup / "N versions" UI path is
+        // exercised in dev-seed. Without this, identical filenames across
+        // messages in the same thread are vanishingly rare given the random
+        // 14-entry pool.
+        let version_attachment: Option<&AttachmentInfo> = if num_msgs >= 2
+            && matches!(
+                cat,
+                Category::Work | Category::Personal | Category::Commerce
+            )
+            && rng.random::<f64>() < 0.30
+        {
+            Some(&ATTACHMENT_POOL[rng.random_range(0..ATTACHMENT_POOL.len())])
+        } else {
+            None
+        };
+        let version_message_indices: Vec<u32> = if version_attachment.is_some() {
+            let want: u32 = if num_msgs >= 3 { 3 } else { 2 };
+            let count = want.min(num_msgs) as usize;
+            let mut picks: Vec<u32> = (0..num_msgs).collect();
+            for i in 0..count {
+                let j = rng.random_range(i..picks.len());
+                picks.swap(i, j);
+            }
+            picks.into_iter().take(count).collect()
+        } else {
+            Vec::new()
+        };
+
+        let thread_id = crate::next_uuid(rng);
+        let is_read = rng.random::<f64>() < 0.7;
+        let is_starred = rng.random::<f64>() < 0.08;
+        let is_pinned = rng.random::<f64>() < 0.02;
+        let is_snoozed = rng.random::<f64>() < 0.03;
+        let snooze_until: Option<i64> = if is_snoozed {
+            Some(now + i64::from(rng.random_range(1..15)) * 86400)
+        } else {
+            None
+        };
+        let is_important = rng.random::<f64>() < 0.05;
+        let is_muted = rng.random::<f64>() < 0.01;
+        // Derived from the id, not drawn from `rng`, so every value seeded
+        // after this point stays the same as before the column existed.
+        let is_flag_complete =
+            !is_starred && thread_id.bytes().map(u32::from).sum::<u32>() % 25 == 0;
+
+        // ~8% of multi-message threads end with a forward, so the ↪ glyph
+        // and the "Fwd: …" subject derivation get exercised in dev. Picked
+        // here at thread scope so the message loop can match on `mi` and
+        // rewrite the subject in the same place it would otherwise apply
+        // the Re: prefix.
+        let forward_target_mi: Option<u32> = if num_msgs >= 2 && rng.random::<f64>() < 0.08 {
+            Some(num_msgs - 1)
+        } else {
+            None
+        };
+
+        // Folder
+        let folder_name = weighted_choice(
+            rng,
+            &["INBOX", "Sent", "Archive", "Trash", "Spam", "Drafts"],
+            &[0.70, 0.10, 0.12, 0.03, 0.02, 0.03],
+        );
+
+        // Insert thread first (FK target for messages), update with final values after
+        conn.execute(
+            "INSERT INTO threads (id, account_id, subject, snippet, last_message_at,
+             message_count, is_read, is_starred, has_attachments,
+             is_important, is_pinned, is_snoozed, snooze_until, is_muted, is_flag_complete)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13)",
+            rusqlite::params![
+                thread_id,
+                acc.id,
+                subject,
+                crate::millis(thread_start),
+                num_msgs,
+                is_read as i32,
+                is_starred as i32,
+                is_important as i32,
+                is_pinned as i32,
+                is_snoozed as i32,
+                snooze_until,
+                is_muted as i32,
+                is_flag_complete as i32,
+            ],
+        )
+        .map_err(|e| format!("insert thread: {e}"))?;
+        stats.threads += 1;
+
+        // Build messages
+        let mut msg_refs: Vec<String> = Vec::new();
+        let mut aggregate_messages = Vec::new();
+
+        for mi in 0..num_msgs {
+            let msg_id = crate::next_uuid(rng);
+            let msg_id_header = crate::next_message_id(rng);
+
+            let in_reply_to = if mi == 0 {
+                None
+            } else {
+                msg_refs.last().cloned()
+            };
+            let references = if mi == 0 {
+                None
+            } else {
+                Some(msg_refs.join(" "))
+            };
+            msg_refs.push(msg_id_header.clone());
+
+            // Alternate sender between participants and self
+            let (sender_name, sender_email, to_addr);
+            if num_msgs == 1 {
+                sender_name = participants[0].display_name.clone();
+                sender_email = participants[0].email.clone();
+                to_addr = format!("{} <{}>", acc.display_name, acc.email);
+            } else if mi % 2 == 0 {
+                let p = &participants[(mi as usize) % participants.len()];
+                sender_name = p.display_name.clone();
+                sender_email = p.email.clone();
+                to_addr = format!("{} <{}>", acc.display_name, acc.email);
+            } else {
+                sender_name = acc.display_name.clone();
+                sender_email = acc.email.clone();
+                to_addr = participants
+                    .iter()
+                    .take(3)
+                    .map(|p| format!("{} <{}>", p.display_name, p.email))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+            }
+
+            // CC sometimes
+            let cc: Option<String> = if num_participants > 2 && rng.random::<f64>() < 0.3 {
+                Some(
+                    participants[2..participants.len().min(4)]
+                        .iter()
+                        .map(|p| format!("{} <{}>", p.display_name, p.email))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
+            } else {
+                None
+            };
+
+            // Message date
+            let msg_date = thread_start
+                + i64::from(mi) * i64::from(rng.random_range(1..49)) * 3600
+                + i64::from(rng.random_range(0..60)) * 60;
+
+            let is_forward_msg = forward_target_mi == Some(mi);
+            let msg_subject = if mi == 0 {
+                subject.clone()
+            } else if is_forward_msg {
+                format!("Fwd: {subject}")
+            } else {
+                format!("{re_prefix} {subject}")
+            };
+            // Mirror Gmail's parser: the bit lives on the self-sent reply
+            // (mi > 0, sender alternation puts self on odd indices). The
+            // thread-level MAX(is_replied) decoration in thread_detail.rs
+            // turns this into the ↩ glyph in cards.rs:94.
+            let msg_is_replied = mi > 0 && mi % 2 == 1 && !is_forward_msg;
+            let msg_is_forwarded = is_forward_msg;
+            let snippet = msg_subject.chars().take(200).collect::<String>();
+
+            let msg_is_read = if mi < num_msgs - 1 { true } else { is_read };
+
+            // Attachments (~20% of work/personal/commerce)
+            let mut msg_attachment_ids: Vec<(String, &'static str, &'static str, i64)> = Vec::new();
+
+            // Version carrier: if this thread has versioning and this message
+            // is one of the chosen carrier indices, attach the shared filename
+            // with a varied size.
+            if let Some(att) = version_attachment
+                && version_message_indices.contains(&mi)
+            {
+                let size_var = att.base_size / 4;
+                let size = att.base_size + rng.random_range(-size_var..size_var);
+                msg_attachment_ids.push((crate::next_uuid(rng), att.filename, att.mime_type, size));
+            }
+
+            if rng.random::<f64>() < 0.20
+                && matches!(
+                    cat,
+                    Category::Work | Category::Personal | Category::Commerce
+                )
+            {
+                let num_att: u32 = weighted_choice(rng, &[1, 2, 3], &[0.6, 0.3, 0.1]);
+                for _ in 0..num_att {
+                    let att = &ATTACHMENT_POOL[rng.random_range(0..ATTACHMENT_POOL.len())];
+                    let size_var = att.base_size / 4;
+                    let size = att.base_size + rng.random_range(-size_var..size_var);
+                    msg_attachment_ids.push((
+                        crate::next_uuid(rng),
+                        att.filename,
+                        att.mime_type,
+                        size,
+                    ));
+                }
+            }
+            let msg_has_attachments = !msg_attachment_ids.is_empty();
+
+            // IMAP UID
+            let folder_key = (acc.id.clone(), folder_name.to_string());
+            let uid_counter = imap_uid_counter.entry(folder_key).or_insert(0);
+            *uid_counter += 1;
+            let imap_uid = *uid_counter;
+
+            // List-Unsubscribe for newsletters
+            let (list_unsub, list_unsub_post) = if cat == Category::Newsletter {
+                let mut bytes = [0u8; 6];
+                rng.fill(&mut bytes);
+                let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                (
+                    Some(format!(
+                        "<https://newsletter.example.com/unsubscribe/{hex}>"
+                    )),
+                    Some("List-Unsubscribe=One-Click".to_string()),
+                )
+            } else {
+                (None, None)
+            };
+
+            let raw_size = rng.random_range(2000..50001);
+            let msg_is_starred = is_starred && mi == 0;
+
+            // Insert message
+            conn.execute(
+                "INSERT INTO messages (id, account_id, thread_id, from_address, from_name,
+                 to_addresses, cc_addresses, subject, snippet, date,
+                 is_read, is_starred, is_replied, is_forwarded, body_cached, raw_size, internal_date,
+                 message_id_header, references_header, in_reply_to_header,
+                 imap_uid, imap_folder, list_unsubscribe, list_unsubscribe_post)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                         ?11, ?12, ?13, ?14, 1, ?15, ?10, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                rusqlite::params![
+                    msg_id,
+                    acc.id,
+                    thread_id,
+                    sender_email,
+                    sender_name,
+                    to_addr,
+                    cc,
+                    msg_subject,
+                    snippet,
+                    crate::millis(msg_date),
+                    msg_is_read as i32,
+                    msg_is_starred as i32,
+                    msg_is_replied as i32,
+                    msg_is_forwarded as i32,
+                    raw_size,
+                    msg_id_header,
+                    references,
+                    in_reply_to,
+                    imap_uid,
+                    folder_name,
+                    list_unsub,
+                    list_unsub_post,
+                ],
+            )
+            .map_err(|e| format!("insert message: {e}"))?;
+            stats.messages += 1;
+            aggregate_messages.push(NonReactionMessage::new(
+                Some(msg_subject),
+                snippet.clone(),
+                crate::millis(msg_date),
+                msg_is_read,
+                msg_is_starred,
+                msg_has_attachments,
+            ));
+
+            // Generate body
+            let body_html = templates::generate_body(rng, cat, locale_data);
+            let body_text = templates::strip_html(&body_html);
+            bodies.push(PendingBody {
+                message_id: msg_id.clone(),
+                body_html,
+                body_text,
+            });
+
+            // Insert attachments
+            for (att_id, filename, mime_type, size) in &msg_attachment_ids {
+                conn.execute(
+                    "INSERT INTO attachments (id, message_id, account_id, filename, mime_type, size)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    rusqlite::params![att_id, msg_id, acc.id, filename, mime_type, size],
+                )
+                .map_err(|e| format!("insert attachment: {e}"))?;
+                stats.attachments += 1;
+            }
+
+            // Upsert sender into contacts
+            contacts::upsert_contact(conn, rng, &sender_email, &sender_name, &acc.id, msg_date)?;
+
+            // Upsert recipients into contacts
+            for p in &participants {
+                contacts::upsert_contact(conn, rng, &p.email, &p.display_name, &acc.id, msg_date)?;
+            }
+        }
+
+        // Update thread with final computed values
+        let (first_aggregate_message, rest_aggregate_messages) =
+            aggregate_messages
+                .split_first()
+                .ok_or_else(|| "seed thread missing aggregate messages".to_string())?;
+        let aggregate = ThreadAggregate::compute_from_messages(
+            first_aggregate_message,
+            rest_aggregate_messages,
+        );
+        conn.execute(
+            "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3,
+             message_count = ?4, is_read = ?5, is_starred = ?6, has_attachments = ?7
+             WHERE account_id = ?8 AND id = ?9",
+            rusqlite::params![
+                aggregate.subject(),
+                aggregate.snippet(),
+                aggregate.last_date(),
+                aggregate.message_count(),
+                aggregate.is_read() as i32,
+                aggregate.is_starred() as i32,
+                aggregate.has_attachments() as i32,
+                acc.id,
+                thread_id,
+            ],
+        )
+        .map_err(|e| format!("update thread: {e}"))?;
+
+        // Thread folders: primary folder only. All Mail is a virtual no-filter view.
+        if let Some((_, folder_id)) = acc.folders.iter().find(|(name, _)| name == folder_name) {
+            conn.execute(
+                "INSERT OR IGNORE INTO thread_folders (thread_id, account_id, folder_id)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![thread_id, acc.id, folder_id],
+            )
+            .map_err(|e| format!("insert thread_folder: {e}"))?;
+        }
+
+        // Thread labels: user label based on category
+        let category_label = match cat {
+            Category::Work => acc.category_labels.work,
+            Category::Personal => acc.category_labels.personal,
+            Category::Newsletter => acc.category_labels.newsletters,
+            Category::Commerce => acc.category_labels.receipts,
+            Category::Notification => None,
+        };
+        if let Some(target) = category_label
+            && rng.random::<f64>() < 0.6
+            && let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == target)
+        {
+            conn.execute(
+                "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![thread_id, acc.id, label_id],
+            )
+            .map_err(|e| format!("insert thread_label (user): {e}"))?;
+        }
+
+        // Graph importance: mutually exclusive high/low, ~12%/4% of threads.
+        // See `reference/glossary/folders-labels.md` (Microsoft Graph row).
+        if MailProviderKind::parse(&acc.provider) == Ok(MailProviderKind::Graph) {
+            let roll = rng.random::<f64>();
+            let level = if roll < 0.12 {
+                Some(ImportanceLevel::High)
+            } else if roll < 0.16 {
+                Some(ImportanceLevel::Low)
+            } else {
+                None
+            };
+            if let Some(level) = level {
+                conn.execute(
+                    "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![thread_id, acc.id, level.label_id()],
+                )
+                .map_err(|e| format!("insert thread_label (importance): {e}"))?;
+            }
+        }
+    }
+
+    Ok((bodies, stats))
+}

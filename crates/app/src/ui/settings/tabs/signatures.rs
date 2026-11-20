@@ -1,0 +1,487 @@
+use iced::widget::{Space, button, column, container, row, text};
+use iced::{Alignment, Element, Length};
+use rust_i18n::t;
+
+use rte::{Action as RteAction, BlockKind, EditAction, InlineStyle, rich_text_editor};
+
+use super::accounts::tr;
+use crate::icon;
+use crate::ui::layout::*;
+use crate::ui::settings::row_widgets::*;
+use crate::ui::settings::types::*;
+use crate::ui::theme;
+use crate::ui::theme::RowPosition;
+use crate::ui::widgets;
+use crate::ui::widgets::Tool;
+
+pub(super) fn signatures_tab(state: &Settings) -> Element<'_, SettingsMessage> {
+    column![signature_list_section(state)]
+        .width(Length::Fill.max(SETTINGS_CONTENT_MAX_WIDTH))
+        .into()
+}
+
+fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
+    if state.managed_accounts.is_empty() {
+        return section(
+            tr(t!("settings.signatures.title")),
+            vec![coming_soon_row(tr(t!("settings.signatures.no_accounts")))],
+        );
+    }
+
+    section(
+        tr(t!("settings.signatures.title")),
+        vec![signatures_section_body(state)],
+    )
+}
+
+/// Section body that merges the signature rows and the trailing
+/// "Add Signature" button into a single block with shared corners,
+/// mirroring the Accounts tab's `accounts_section_body`.
+fn signatures_section_body<'a>(state: &'a Settings) -> RowBuilder<'a> {
+    Box::new(move |outer_position| {
+        let n_sigs = state.signatures.len();
+        let internal_n = n_sigs + 1;
+
+        let mut col = column![].width(Length::Fill);
+
+        for (i, sig) in state.signatures.iter().enumerate() {
+            if i > 0 {
+                col = col.push(
+                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
+                );
+            }
+            let internal_pos = position_for(i, internal_n);
+            let effective = compose_positions(outer_position, internal_pos);
+            col = col.push(signature_card(sig, &state.managed_accounts, effective));
+        }
+
+        if n_sigs > 0 {
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+        }
+
+        let add_internal_pos = position_for(internal_n.saturating_sub(1), internal_n);
+        let add_effective = compose_positions(outer_position, add_internal_pos);
+        col = col.push(add_signature_button(add_effective));
+
+        col.into()
+    })
+}
+
+fn add_signature_button<'a>(position: RowPosition) -> Element<'a, SettingsMessage> {
+    button(
+        container(
+            row![
+                icon::plus().size(ICON_MD).style(text::base),
+                text(t!("settings.signatures.add"))
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..crate::font::text()
+                    }),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+        )
+        .center_x(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::SignatureCreate)
+    .padding(PAD_SETTINGS_ROW)
+    .style(settings_row_style(position))
+    .width(Length::Fill)
+    .height(SETTINGS_ROW_HEIGHT)
+    .into()
+}
+
+fn signature_card<'a>(
+    sig: &'a SignatureEntry,
+    accounts: &'a [ManagedAccount],
+    position: RowPosition,
+) -> Element<'a, SettingsMessage> {
+    let mut left = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if let Some(account) = accounts.iter().find(|a| a.id == sig.account_id)
+        && let Some(ref hex) = account.account_color
+    {
+        let color = crate::ui::theme::hex_to_color(hex);
+        left = left.push(widgets::color_dot::<SettingsMessage>(color));
+    }
+
+    left = left.push(
+        text(&sig.name)
+            .size(TEXT_LG)
+            .style(text::base)
+            .width(Length::Fill),
+    );
+
+    let mut content = row![left].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if sig.is_default {
+        content = content.push(
+            container(
+                text(t!("settings.signatures.badge_new_messages"))
+                    .size(TEXT_XS)
+                    .style(text::secondary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
+    if sig.is_reply_default {
+        content = content.push(
+            container(
+                text(t!("settings.signatures.badge_replies"))
+                    .size(TEXT_XS)
+                    .style(text::secondary),
+            )
+            .padding(PAD_BADGE)
+            .style(theme::ContainerClass::KeyBadge.style()),
+        );
+    }
+
+    content = content.push(
+        container(
+            icon::chevron_right()
+                .size(ICON_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
+    );
+
+    let sig_id = sig.id.clone();
+    button(
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::SignatureEdit(sig_id))
+    .padding(0)
+    .style(settings_row_style(position))
+    .width(Length::Fill)
+    .into()
+}
+
+pub(super) fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
+    let Some(ref editor) = state.signature_editor else {
+        return column![].into();
+    };
+
+    let is_new = editor.signature_id.is_none();
+    let title = if is_new {
+        t!("settings.signatures.new_title")
+    } else {
+        t!("settings.signatures.edit_title")
+    };
+
+    // The signature editor takes the width of the page: a signature laid
+    // out in tables is often wider than the other settings.
+    let mut col = column![]
+        .spacing(SPACE_LG)
+        .width(Length::Fill.max(SETTINGS_WIDE_SHEET_MAX_WIDTH));
+
+    col = col.push(
+        column![
+            text(title)
+                .size(TEXT_HEADING)
+                .style(text::base)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..crate::font::text()
+                }),
+            text(t!("settings.signatures.editor_not_saved"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_XXS),
+    );
+
+    col = col.push(section_untitled(vec![
+        signature_account_row(
+            editor,
+            &state.managed_accounts,
+            state.open_select == Some(SelectField::SignatureAccount),
+        ),
+        input_row(
+            "sig-name",
+            &t!("settings.signatures.name"),
+            &t!("settings.signatures.name_placeholder"),
+            editor.name.text(),
+            SettingsMessage::SignatureEditorNameChanged,
+            InputField::SignatureName,
+        ),
+    ]));
+
+    col = col.push(section_with_subtitle(
+        tr(t!("settings.signatures.defaults")),
+        tr(t!("settings.signatures.defaults_description")),
+        vec![
+            toggle_row(
+                tr(t!("settings.signatures.default_new_messages")),
+                "",
+                editor.is_default,
+                SettingsMessage::SignatureEditorToggleDefault,
+            ),
+            toggle_row(
+                tr(t!("settings.signatures.default_replies")),
+                "",
+                editor.is_reply_default,
+                SettingsMessage::SignatureEditorToggleReplyDefault,
+            ),
+        ],
+    ));
+
+    col = col.push(section(
+        tr(t!("settings.signatures.body")),
+        vec![static_row(
+            container(signature_body(editor))
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+        )],
+    ));
+
+    let mut btn_row = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+
+    if !is_new {
+        let del_id = editor.signature_id.clone().unwrap_or_default();
+        let is_confirming = state.confirm_delete_signature.as_deref() == Some(del_id.as_str());
+
+        if is_confirming {
+            btn_row = btn_row.push(
+                text(t!("settings.signatures.delete_confirm"))
+                    .size(TEXT_LG)
+                    .style(text::danger),
+            );
+            btn_row = btn_row.push(
+                button(
+                    text(t!("settings.signatures.cancel"))
+                        .size(TEXT_LG)
+                        .style(text::base),
+                )
+                .on_press(SettingsMessage::SignatureDeleteCancelled)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
+            );
+            btn_row = btn_row.push(
+                button(
+                    text(t!("settings.signatures.confirm"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::SignatureDeleteConfirmed(del_id))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
+            );
+        } else {
+            btn_row = btn_row.push(
+                button(
+                    text(t!("settings.signatures.delete"))
+                        .size(TEXT_LG)
+                        .style(text::danger),
+                )
+                .on_press(SettingsMessage::SignatureDelete(del_id))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Action.style()),
+            );
+        }
+    }
+
+    btn_row = btn_row.push(Space::new().width(Length::Fill));
+
+    if let Some(error) = editor.save_error.as_deref() {
+        btn_row = btn_row.push(text(error).size(TEXT_SM).style(text::danger));
+    }
+    let save_btn = button(
+        container(text(t!("settings.signatures.save")).size(TEXT_LG)).center_x(Length::Fill),
+    )
+    .on_press(SettingsMessage::SignatureEditorSave)
+    .padding(PAD_BUTTON)
+    .style(theme::ButtonClass::Primary.style())
+    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+    btn_row = btn_row.push(save_btn);
+
+    col = col.push(btn_row);
+
+    col.into()
+}
+
+/// The rich text editor, or the rendered preview of a signature kept as
+/// HTML, with the import actions under it.
+fn signature_body(editor: &SignatureEditorState) -> Element<'_, SettingsMessage> {
+    let import_label = if editor.raw_html.is_some() {
+        t!("settings.signatures.replace_html")
+    } else {
+        t!("settings.signatures.import_html")
+    };
+    let actions = row![
+        button(text(import_label).size(TEXT_SM))
+            .on_press(SettingsMessage::SignatureEditorImportHtml)
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::Secondary.style())
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let body: Element<'_, SettingsMessage> = if editor.raw_html.is_some() {
+        container(crate::ui::mail_body::view(
+            Some(&editor.preview),
+            None,
+            SettingsMessage::SignatureEditorPreviewResized,
+            SettingsMessage::SignatureEditorPreviewLink,
+            SettingsMessage::SignatureEditorPreviewShowRemote,
+        ))
+        .padding(PAD_CONTENT)
+        .style(theme::ContainerClass::EmailBody.style())
+        .width(Length::Fill)
+        .into()
+    } else {
+        column![
+            signature_formatting_toolbar(editor),
+            Space::new().height(SPACE_XXS),
+            container(
+                rich_text_editor(&editor.body_editor)
+                    .on_action(SettingsMessage::SignatureEditorAction)
+                    .on_paste_html(SettingsMessage::SignatureEditorPasteHtml)
+                    .font(crate::font::text())
+                    // Grows with the signature so it is seen whole, without
+                    // an inner scroll; the sheet itself scrolls if needed.
+                    .height(Length::Shrink.min(SIGNATURE_EDITOR_MIN_HEIGHT))
+                    .width(Length::Fill),
+            )
+            .padding(PAD_CONTENT)
+            .style(theme::ContainerClass::EmailBody.style())
+            .width(Length::Fill),
+        ]
+        .into()
+    };
+
+    let mut content = column![body, actions].spacing(SPACE_XS);
+    if let Some(error) = editor.import_error.as_deref() {
+        content = content.push(text(error).size(TEXT_SM).style(text::danger));
+    }
+    content.into()
+}
+
+fn signature_account_row<'a>(
+    editor: &'a SignatureEditorState,
+    accounts: &'a [ManagedAccount],
+    open: bool,
+) -> RowBuilder<'a> {
+    let enabled = editor.signature_id.is_none();
+    let selected = if editor.account_id.is_empty() {
+        None
+    } else {
+        Some(editor.account_id.as_str())
+    };
+
+    let options: Vec<widgets::SelectOption<'a>> = accounts
+        .iter()
+        .map(|account| {
+            let label = account
+                .account_name
+                .as_deref()
+                .or(account.display_name.as_deref())
+                .unwrap_or(&account.email);
+            let icon = account
+                .account_color
+                .as_deref()
+                .map(|hex| widgets::SelectIcon::ColorDot(crate::ui::theme::hex_to_color(hex)));
+            widgets::SelectOption {
+                value: account.id.clone(),
+                label,
+                icon,
+            }
+        })
+        .collect();
+
+    let dropdown = widgets::select_with_icons(
+        options,
+        selected,
+        open,
+        enabled,
+        tr(t!("settings.signatures.choose_account")),
+        SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
+        SettingsMessage::SignatureEditorAccountChanged,
+    );
+
+    setting_row_with_description(
+        tr(t!("settings.signatures.account")),
+        Some(tr(t!("settings.signatures.account_description"))),
+        dropdown,
+        SettingsMessage::ToggleSelect(SelectField::SignatureAccount),
+    )
+}
+
+fn signature_formatting_toolbar<'a>(
+    editor: &'a SignatureEditorState,
+) -> Element<'a, SettingsMessage> {
+    let bar = crate::ui::widgets::format_bar(
+        &editor.format_bar,
+        crate::ui::widgets::CaretContext::of(&editor.body_editor),
+        SettingsMessage::SignatureEditorToggleFormatMenu,
+        SettingsMessage::SignatureEditorFormatQuery,
+        |action| SettingsMessage::SignatureEditorAction(RteAction::Edit(action)),
+    );
+
+    let edit = |action| SettingsMessage::SignatureEditorAction(RteAction::Edit(action));
+    let inline_tool = |glyph: fn() -> iced::widget::Text<'a>, label, style_bit| {
+        Tool::icon(glyph, label, edit(EditAction::ToggleInlineStyle(style_bit)))
+    };
+    let list_tool = |glyph: fn() -> iced::widget::Text<'a>, label, ordered| {
+        Tool::icon(
+            glyph,
+            label,
+            edit(EditAction::SetBlockType(BlockKind::ListItem { ordered })),
+        )
+    };
+
+    // Same order as the message toolbar: the last ones fold into the "more"
+    // panel when the sheet is too narrow, so the bar holds on one line.
+    let tools = vec![
+        bar.font,
+        bar.size,
+        inline_tool(icon::bold, t!("compose.format.bold"), InlineStyle::BOLD),
+        inline_tool(
+            icon::italic,
+            t!("compose.format.italic"),
+            InlineStyle::ITALIC,
+        ),
+        inline_tool(
+            icon::underline,
+            t!("compose.format.underline"),
+            InlineStyle::UNDERLINE,
+        ),
+        bar.color,
+        bar.highlight,
+        list_tool(icon::list, t!("compose.format.bulleted_list"), false),
+        list_tool(icon::list_ordered, t!("compose.format.numbered_list"), true),
+        bar.alignment,
+        Tool::icon(
+            icon::image,
+            t!("compose.format.image"),
+            SettingsMessage::SignatureEditorInsertImage,
+        ),
+        bar.block,
+        inline_tool(
+            icon::strikethrough,
+            t!("compose.format.strikethrough"),
+            InlineStyle::STRIKETHROUGH,
+        ),
+        bar.line_height,
+        bar.outdent,
+        bar.indent,
+        bar.smaller,
+        bar.larger,
+        bar.table,
+        bar.clear,
+    ];
+
+    crate::ui::widgets::toolbar(
+        tools,
+        &editor.format_bar,
+        SettingsMessage::SignatureEditorToggleFormatMenu,
+    )
+}

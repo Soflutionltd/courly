@@ -1,0 +1,36 @@
+[package]
+name = "dev-seed"
+publish = false
+description = "Ephemeral dev database seeder for Courly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+db = { path = "../db" }
+store = { path = "../stores" }
+types = { path = "../types" }
+
+rusqlite.workspace = true
+jiff.workspace = true
+rand = "0.10.1"
+flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
+toml = "1"
+serde = { workspace = true }
+log = "0.4"
+hotpath = { workspace = true, optional = true }
+# Generate small placeholder PNGs for seeded inline-image attachments.
+# Restricted to the `png` feature to keep the dep footprint small.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Hash for chat inline-image content_hash (matches `xxh3_64` formatting used
+# by the rest of the codebase, e.g. `common/src/signature_images.rs`).
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc"]

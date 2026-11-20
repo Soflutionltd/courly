@@ -1,0 +1,28 @@
+[package]
+name = "rte"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["widget"]
+widget = ["dep:iced"]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
+
+[dependencies]
+base64 = { workspace = true }
+bitflags = "2.11.1"
+html5ever = "0.40"
+markup5ever = "0.40"
+hotpath = { workspace = true, optional = true }
+unicode-segmentation = "1.12"
+
+iced = { path = "../../../sluggrs/repos/iced", default-features = false, features = [
+    "wgpu", "tokio", "advanced", "web-colors", "wayland", "image", "svg",
+], optional = true }

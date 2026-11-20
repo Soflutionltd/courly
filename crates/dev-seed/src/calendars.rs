@@ -1,0 +1,453 @@
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::{Span, Zoned};
+use rand::RngExt;
+use rusqlite::{Connection, params};
+
+use crate::accounts::Account;
+
+struct SeededCalendar {
+    id: String,
+    account_id: String,
+    provider: String,
+    remote_id: String,
+    display_name: String,
+    color: String,
+    is_primary: bool,
+    is_visible: bool,
+    sort_order: i64,
+}
+
+struct SeededEvent {
+    id: String,
+    account_id: String,
+    calendar_id: String,
+    google_event_id: String,
+    title: String,
+    description: String,
+    location: String,
+    start_time: i64,
+    end_time: i64,
+    is_all_day: bool,
+    organizer_name: String,
+    organizer_email: String,
+    rsvp_status: String,
+    availability: String,
+    visibility: String,
+}
+
+pub fn seed_calendars(
+    conn: &Connection,
+    rng: &mut impl RngExt,
+    accounts: &[Account],
+) -> Result<(), String> {
+    let today = Zoned::now().date();
+
+    for (idx, account) in accounts.iter().enumerate() {
+        let primary = SeededCalendar {
+            id: crate::next_uuid(rng),
+            account_id: account.id.clone(),
+            provider: account.provider.clone(),
+            remote_id: format!("primary-{}", account.account_name.to_lowercase()),
+            display_name: account.account_name.clone(),
+            color: account.color.clone(),
+            is_primary: true,
+            is_visible: true,
+            sort_order: 0,
+        };
+        insert_calendar(conn, &primary)?;
+        seed_primary_events(conn, rng, account, &primary, today, idx)?;
+
+        if let Some(secondary) = secondary_calendar_for_account(rng, account) {
+            insert_calendar(conn, &secondary)?;
+            seed_secondary_events(conn, rng, account, &secondary, today, idx)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn secondary_calendar_for_account(
+    rng: &mut impl RngExt,
+    account: &Account,
+) -> Option<SeededCalendar> {
+    let (name, color) = match account.account_name.as_str() {
+        "Personal" => ("Travel", "#00acc1"),
+        "Work" => ("Team", "#7e57c2"),
+        _ => return None,
+    };
+
+    Some(SeededCalendar {
+        id: crate::next_uuid(rng),
+        account_id: account.id.clone(),
+        provider: account.provider.clone(),
+        remote_id: format!(
+            "{}-{}",
+            account.account_name.to_lowercase(),
+            name.to_lowercase()
+        ),
+        display_name: name.to_string(),
+        color: color.to_string(),
+        is_primary: false,
+        is_visible: true,
+        sort_order: 1,
+    })
+}
+
+fn seed_primary_events(
+    conn: &Connection,
+    rng: &mut impl RngExt,
+    account: &Account,
+    calendar: &SeededCalendar,
+    today: Date,
+    idx: usize,
+) -> Result<(), String> {
+    let base_day = today + Span::new().days(i64::try_from(idx).unwrap_or(0));
+
+    let (title, location, start_h, start_m, end_h, end_m, description) =
+        match account.account_name.as_str() {
+            "Personal" => (
+                "Dinner with Nora",
+                "Grunerlokka",
+                18,
+                30,
+                20,
+                0,
+                "Catch up over dinner and plan the weekend.",
+            ),
+            "Work" => (
+                "Sprint Planning",
+                "HQ - Fjord Room",
+                9,
+                30,
+                10,
+                30,
+                "Review priorities for the next sprint and confirm owners.",
+            ),
+            "Office" => (
+                "Budget Review",
+                "Teams",
+                14,
+                0,
+                15,
+                0,
+                "Quarterly budget review with finance and operations.",
+            ),
+            _ => (
+                "Design Crit",
+                "Studio",
+                11,
+                0,
+                12,
+                0,
+                "Walk through the latest product work and collect feedback.",
+            ),
+        };
+
+    let event = SeededEvent {
+        id: crate::next_uuid(rng),
+        account_id: account.id.clone(),
+        calendar_id: calendar.id.clone(),
+        google_event_id: format!("devseed-{}-primary", account.account_name.to_lowercase()),
+        title: title.to_string(),
+        description: description.to_string(),
+        location: location.to_string(),
+        start_time: local_timestamp(base_day, start_h, start_m)?,
+        end_time: local_timestamp(base_day, end_h, end_m)?,
+        is_all_day: false,
+        organizer_name: account.display_name.clone(),
+        organizer_email: account.email.clone(),
+        rsvp_status: "accepted".to_string(),
+        availability: "busy".to_string(),
+        visibility: "default".to_string(),
+    };
+    insert_event(conn, &event)?;
+    insert_default_event_details(conn, &event, account, false)?;
+
+    let all_day_date = today + Span::new().days(3 + i64::try_from(idx).unwrap_or(0));
+    let all_day = SeededEvent {
+        id: crate::next_uuid(rng),
+        account_id: account.id.clone(),
+        calendar_id: calendar.id.clone(),
+        google_event_id: format!("devseed-{}-allday", account.account_name.to_lowercase()),
+        title: format!("{} Day", account.account_name),
+        description: format!("Reserved day on the {} calendar.", account.account_name),
+        location: String::new(),
+        start_time: local_timestamp(all_day_date, 0, 0)?,
+        end_time: local_timestamp(all_day_date + Span::new().days(1), 0, 0)?,
+        is_all_day: true,
+        organizer_name: account.display_name.clone(),
+        organizer_email: account.email.clone(),
+        rsvp_status: "accepted".to_string(),
+        availability: "busy".to_string(),
+        visibility: "private".to_string(),
+    };
+    insert_event(conn, &all_day)?;
+    insert_default_event_details(conn, &all_day, account, true)?;
+
+    Ok(())
+}
+
+fn seed_secondary_events(
+    conn: &Connection,
+    rng: &mut impl RngExt,
+    account: &Account,
+    calendar: &SeededCalendar,
+    today: Date,
+    idx: usize,
+) -> Result<(), String> {
+    let (title, location, offset_days, start_h, start_m, end_h, end_m, description) =
+        match calendar.display_name.as_str() {
+            "Travel" => (
+                "Flight to Copenhagen",
+                "OSL",
+                10,
+                8,
+                15,
+                9,
+                25,
+                "Morning flight for the long weekend.",
+            ),
+            _ => (
+                "Architecture Sync",
+                "Team Room",
+                4,
+                13,
+                0,
+                14,
+                0,
+                "Cross-team architecture review and decision log update.",
+            ),
+        };
+
+    let date = today + Span::new().days(offset_days + i64::try_from(idx).unwrap_or(0));
+    let event = SeededEvent {
+        id: crate::next_uuid(rng),
+        account_id: account.id.clone(),
+        calendar_id: calendar.id.clone(),
+        google_event_id: format!(
+            "devseed-{}-{}",
+            account.account_name.to_lowercase(),
+            calendar.display_name.to_lowercase()
+        ),
+        title: title.to_string(),
+        description: description.to_string(),
+        location: location.to_string(),
+        start_time: local_timestamp(date, start_h, start_m)?,
+        end_time: local_timestamp(date, end_h, end_m)?,
+        is_all_day: false,
+        organizer_name: account.display_name.clone(),
+        organizer_email: account.email.clone(),
+        rsvp_status: "tentative".to_string(),
+        availability: "busy".to_string(),
+        visibility: "default".to_string(),
+    };
+    insert_event(conn, &event)?;
+    insert_default_event_details(conn, &event, account, false)?;
+
+    Ok(())
+}
+
+/// Turn the latest inbound Microsoft 365 message into a meeting request
+/// whose synced event overlaps another busy event, so the reading pane
+/// shows the invite card with a conflict.
+pub fn seed_meeting_invite(
+    conn: &Connection,
+    rng: &mut impl RngExt,
+    accounts: &[Account],
+) -> Result<(), String> {
+    let Some(account) = accounts.iter().find(|account| account.provider == "graph") else {
+        return Ok(());
+    };
+    let calendar_id: String = conn
+        .query_row(
+            "SELECT id FROM calendars WHERE account_id = ?1 AND is_primary = 1",
+            params![account.id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("invite calendar: {e}"))?;
+    let message_id: String = conn
+        .query_row(
+            "SELECT id FROM messages WHERE account_id = ?1 AND from_address != ?2 \
+             ORDER BY date DESC LIMIT 1",
+            params![account.id, account.email],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("invite message: {e}"))?;
+    let today = Zoned::now().date();
+    let mut slot = |title: &str, from: u32, to: u32, rsvp: &str| -> Result<SeededEvent, String> {
+        Ok(SeededEvent {
+            id: crate::next_uuid(rng),
+            account_id: account.id.clone(),
+            calendar_id: calendar_id.clone(),
+            google_event_id: format!("devseed-invite-{}", title.to_lowercase().replace(' ', "-")),
+            title: title.to_string(),
+            description: "Join: https://teams.microsoft.com/l/meetup-join/devseed".to_string(),
+            location: "Microsoft Teams Meeting".to_string(),
+            start_time: local_timestamp(today, from, 0)?,
+            end_time: local_timestamp(today, to, 0)?,
+            is_all_day: false,
+            organizer_name: "Nora Berg".to_string(),
+            organizer_email: "nora.berg@example.com".to_string(),
+            rsvp_status: rsvp.to_string(),
+            availability: "busy".to_string(),
+            visibility: "default".to_string(),
+        })
+    };
+    let invite = slot("Partner Review", 15, 16, "needs-action")?;
+    let busy = slot("Supplier Call", 15, 17, "accepted")?;
+    insert_event(conn, &invite)?;
+    insert_event(conn, &busy)?;
+    conn.execute(
+        "UPDATE calendar_events SET uid = 'devseed-invite' WHERE id = ?1",
+        params![invite.id],
+    )
+    .map_err(|e| format!("invite uid: {e}"))?;
+    conn.execute(
+        "UPDATE messages SET has_meeting_invite = 1, meeting_invite_method = 'REQUEST', \
+         meeting_invite_uid = 'devseed-invite' WHERE id = ?1 AND account_id = ?2",
+        params![message_id, account.id],
+    )
+    .map_err(|e| format!("invite message flag: {e}"))?;
+    Ok(())
+}
+
+fn insert_calendar(conn: &Connection, calendar: &SeededCalendar) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO calendars (
+             id, account_id, provider, remote_id, display_name, color,
+             is_primary, is_visible, created_at, updated_at, sort_order, is_default
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, unixepoch(), unixepoch(), ?9, ?10)",
+        params![
+            calendar.id,
+            calendar.account_id,
+            calendar.provider,
+            calendar.remote_id,
+            calendar.display_name,
+            calendar.color,
+            calendar.is_primary as i64,
+            calendar.is_visible as i64,
+            calendar.sort_order,
+            calendar.is_primary as i64,
+        ],
+    )
+    .map_err(|e| format!("insert calendar: {e}"))?;
+
+    Ok(())
+}
+
+fn insert_event(conn: &Connection, event: &SeededEvent) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO calendar_events (
+             id, account_id, google_event_id, summary, description, location,
+             start_time, end_time, is_all_day, status, organizer_email,
+             calendar_id, title, timezone, recurrence_rule, organizer_name,
+             rsvp_status, created_at, updated_at, availability, visibility
+         ) VALUES (
+             ?1, ?2, ?3, ?4, ?5, ?6,
+             ?7, ?8, ?9, 'confirmed', ?10,
+             ?11, ?12, 'Europe/Oslo', NULL, ?13,
+             ?14, unixepoch(), unixepoch(), ?15, ?16
+         )",
+        params![
+            event.id,
+            event.account_id,
+            event.google_event_id,
+            event.title,
+            event.description,
+            event.location,
+            event.start_time,
+            event.end_time,
+            event.is_all_day as i64,
+            event.organizer_email,
+            event.calendar_id,
+            event.title,
+            event.organizer_name,
+            event.rsvp_status,
+            event.availability,
+            event.visibility,
+        ],
+    )
+    .map_err(|e| format!("insert calendar event: {e}"))?;
+
+    Ok(())
+}
+
+fn insert_default_event_details(
+    conn: &Connection,
+    event: &SeededEvent,
+    account: &Account,
+    all_day: bool,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+        params![
+            event.id,
+            event.account_id,
+            event.organizer_email,
+            event.organizer_name,
+            event.rsvp_status,
+        ],
+    )
+    .map_err(|e| format!("insert organizer attendee: {e}"))?;
+
+    let guest_email = guest_email_for_account(account);
+    conn.execute(
+        "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer)
+         VALUES (?1, ?2, ?3, ?4, 'accepted', 0)",
+        params![
+            event.id,
+            event.account_id,
+            guest_email,
+            guest_name_for_account(account),
+        ],
+    )
+    .map_err(|e| format!("insert guest attendee: {e}"))?;
+
+    let reminder_minutes = if all_day { 60 * 24 } else { 15 };
+    conn.execute(
+        "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method)
+         VALUES (?1, ?2, ?3, 'popup')",
+        params![event.id, event.account_id, reminder_minutes],
+    )
+    .map_err(|e| format!("insert calendar reminder: {e}"))?;
+
+    Ok(())
+}
+
+fn local_timestamp(date: Date, hour: u32, minute: u32) -> Result<i64, String> {
+    let hour_i8 =
+        i8::try_from(hour).map_err(|_| format!("invalid local hour {date} {hour}:{minute:02}"))?;
+    let minute_i8 = i8::try_from(minute)
+        .map_err(|_| format!("invalid local minute {date} {hour}:{minute:02}"))?;
+    let naive = date.at(hour_i8, minute_i8, 0, 0);
+    // jiff's compatible disambiguation subsumes the previous
+    // `single().or_else(earliest())` pair: a fold takes the earlier instant,
+    // which is what `earliest()` was reaching for. It also resolves a
+    // spring-forward gap by shifting past it rather than erroring, so a seed
+    // date that lands in one produces a usable event instead of failing the
+    // whole seed run.
+    TimeZone::system()
+        .to_zoned(naive)
+        .map(|zoned| zoned.timestamp().as_second())
+        .map_err(|_| format!("unresolvable local time {date} {hour}:{minute:02}"))
+}
+
+fn guest_email_for_account(account: &Account) -> &'static str {
+    match account.account_name.as_str() {
+        "Personal" => "nora@example.com",
+        "Work" => "team-lead@company.io",
+        "Office" => "finance@outlook.example",
+        _ => "design@example.com",
+    }
+}
+
+fn guest_name_for_account(account: &Account) -> &'static str {
+    match account.account_name.as_str() {
+        "Personal" => "Nora",
+        "Work" => "Priya Shah",
+        "Office" => "Finance Team",
+        _ => "Design Review Crew",
+    }
+}

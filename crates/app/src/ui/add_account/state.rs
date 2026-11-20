@@ -1,0 +1,1048 @@
+use std::sync::Arc;
+
+use iced::{Element, Task};
+use rust_i18n::t;
+
+use crate::component::Component;
+use crate::db::Db;
+
+use rtsk::discovery::types::{AuthMethod, DiscoveredConfig, ProtocolOption, Security};
+
+// Step enum
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddAccountStep {
+    /// Email input + Continue button.
+    EmailInput,
+    /// Discovery is running. Spinner shown.
+    Discovering,
+    /// Discovery returned multiple options. User must choose.
+    ProtocolSelection,
+    /// Discovery failed. Manual configuration form.
+    ManualConfiguration,
+    /// OAuth: waiting for browser callback.
+    OAuthWaiting,
+    /// Password auth: IMAP/SMTP credential form.
+    PasswordAuth,
+    /// Validating credentials (connecting to server).
+    Validating,
+    /// Account identity: name + color picker.
+    Identity,
+    /// Account creation in progress.
+    Creating,
+}
+
+// Security option
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityOption {
+    Tls,
+    StartTls,
+    None,
+}
+
+impl SecurityOption {
+    pub(super) fn label(self) -> String {
+        match self {
+            Self::Tls => "SSL/TLS".to_string(),
+            Self::StartTls => "STARTTLS".to_string(),
+            Self::None => t!("account_setup.security_none").into_owned(),
+        }
+    }
+
+    pub(super) fn to_db_string(self) -> &'static str {
+        match self {
+            Self::Tls => "tls",
+            Self::StartTls => "starttls",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Tolerant parser for the `security` field in the admin config.
+/// Accepts `"tls"` / `"ssl"` (both map to `Tls`), `"starttls"`, and
+/// `"none"` / `"plain"`. Case-insensitive. Returns `None` for unknown
+/// values so the caller can log a warning instead of silently picking
+/// the wrong setting.
+fn parse_security(s: &str) -> Option<SecurityOption> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "tls" | "ssl" => Some(SecurityOption::Tls),
+        "starttls" => Some(SecurityOption::StartTls),
+        "none" | "plain" => Some(SecurityOption::None),
+        _ => None,
+    }
+}
+
+/// Pre-fill helper: copy `src` into `dst` only when `dst` is empty.
+/// Used by `apply_admin_config` so existing values (e.g. discovery
+/// results) aren't overwritten by static defaults.
+fn apply_str(dst: &mut String, src: Option<&str>) {
+    if dst.is_empty()
+        && let Some(value) = src
+        && !value.is_empty()
+    {
+        *dst = value.to_string();
+    }
+}
+
+// Manual provider
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualProvider {
+    Gmail,
+    Microsoft365,
+    Jmap,
+    Imap,
+    /// Custom OIDC issuer authenticating an IMAP/SMTP account.
+    /// User supplies the issuer URL, optional client ID/secret (otherwise
+    /// dynamic registration via RFC 7591 is attempted), and IMAP+SMTP
+    /// server fields.
+    CustomOidcImap,
+    /// Custom OIDC issuer authenticating a JMAP account.
+    /// User supplies the issuer URL, optional client ID/secret, and the
+    /// JMAP session URL.
+    CustomOidcJmap,
+}
+
+impl ManualProvider {
+    pub(super) const ALL: &[ManualProvider] = &[
+        ManualProvider::Gmail,
+        ManualProvider::Microsoft365,
+        ManualProvider::Jmap,
+        ManualProvider::Imap,
+        ManualProvider::CustomOidcImap,
+        ManualProvider::CustomOidcJmap,
+    ];
+
+    pub(super) fn label(self) -> String {
+        match self {
+            Self::Gmail => "Gmail".to_string(),
+            Self::Microsoft365 => "Microsoft 365".to_string(),
+            Self::Jmap => "JMAP".to_string(),
+            Self::Imap => "IMAP".to_string(),
+            Self::CustomOidcImap => t!("account_setup.provider_custom_oidc_imap").into_owned(),
+            Self::CustomOidcJmap => t!("account_setup.provider_custom_oidc_jmap").into_owned(),
+        }
+    }
+
+    /// Built-in providers map to a static DB string; for `CustomOidc*` the
+    /// actual `provider` column carries the underlying protocol ("imap"
+    /// or "jmap"), and the user's chosen issuer URL is stored separately
+    /// in `oauth_provider` as `oidc:{issuer}`. The submit handler builds
+    /// that string at runtime; this static accessor returns the protocol
+    /// the row carries.
+    pub(super) fn to_provider_string(self) -> &'static str {
+        match self {
+            Self::Gmail => "gmail_api",
+            Self::Microsoft365 => "graph",
+            Self::Jmap => "jmap",
+            Self::Imap => "imap",
+            Self::CustomOidcImap => "imap",
+            Self::CustomOidcJmap => "jmap",
+        }
+    }
+}
+
+/// User-supplied OIDC fields for the `CustomOidc*` provider variants.
+/// All `String`, empty when unset; matches the convention used by
+/// `ManualConfig::jmap_url` etc.
+#[derive(Debug, Clone, Default)]
+pub struct CustomOidcConfig {
+    pub issuer_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    /// Space-separated extra OAuth scopes appended to the negotiated set
+    /// at auth-code request time. Populated from the IT admin config
+    /// (`[oidc].extra_scopes`); no wizard UI input for it yet.
+    pub extra_scopes: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualAuthMethod {
+    OAuth,
+    Password,
+}
+
+impl ManualAuthMethod {
+    pub(super) fn label(self) -> String {
+        match self {
+            Self::OAuth => "OAuth".to_string(),
+            Self::Password => t!("account_setup.password").into_owned(),
+        }
+    }
+}
+
+// Manual config state
+
+#[derive(Debug, Clone)]
+pub struct ManualConfig {
+    pub selected_provider: Option<ManualProvider>,
+    pub jmap_url: String,
+    pub auth_method: ManualAuthMethod,
+    pub custom_oidc: CustomOidcConfig,
+}
+
+impl Default for ManualConfig {
+    fn default() -> Self {
+        Self {
+            selected_provider: None,
+            jmap_url: String::new(),
+            auth_method: ManualAuthMethod::OAuth,
+            custom_oidc: CustomOidcConfig::default(),
+        }
+    }
+}
+
+// Auth state
+
+#[derive(Debug, Clone)]
+pub struct AuthState {
+    pub username: String,
+    pub password: String,
+    pub smtp_username: String,
+    pub smtp_password: String,
+    pub use_separate_smtp_credentials: bool,
+    pub accept_invalid_certs: bool,
+    pub imap_host: String,
+    pub imap_port: String,
+    pub imap_security: SecurityOption,
+    pub smtp_host: String,
+    pub smtp_port: String,
+    pub smtp_security: SecurityOption,
+}
+
+impl Default for AuthState {
+    fn default() -> Self {
+        Self {
+            username: String::new(),
+            password: String::new(),
+            smtp_username: String::new(),
+            smtp_password: String::new(),
+            use_separate_smtp_credentials: false,
+            accept_invalid_certs: false,
+            imap_host: String::new(),
+            imap_port: "993".to_string(),
+            imap_security: SecurityOption::Tls,
+            smtp_host: String::new(),
+            smtp_port: "587".to_string(),
+            smtp_security: SecurityOption::StartTls,
+        }
+    }
+}
+
+// Account identity
+
+#[derive(Debug, Clone)]
+pub struct AccountIdentity {
+    pub name: String,
+    pub selected_color_index: Option<usize>,
+}
+
+// OAuth success
+
+/// The Microsoft 365 organisation an administrator can approve Courly for
+/// while one of its users signs in.
+#[derive(Debug, Clone)]
+pub struct AdminConsentTarget {
+    /// A domain of the organisation, which Microsoft accepts as its tenant.
+    pub tenant: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+}
+
+/// Successful OAuth result carrying the tokens and user info.
+#[derive(Debug, Clone)]
+pub struct OAuthSuccess {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub token_expires_at: Option<i64>,
+    pub user_email: String,
+    pub user_name: String,
+    pub oauth_provider: String,
+    pub oauth_client_id: String,
+    /// Optional client secret carried when RFC 7591 dynamic registration
+    /// returned a confidential client, or when the user supplied one
+    /// manually for the `CustomOidc*` provider variants. Always `None`
+    /// for the built-in providers (Gmail / Microsoft 365).
+    pub oauth_client_secret: Option<String>,
+}
+
+// Messages
+
+#[derive(Debug, Clone)]
+pub enum AddAccountMessage {
+    // Step 1: Email
+    EmailChanged(String),
+    SubmitEmail,
+
+    // Step 2: Discovery result
+    DiscoveryComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<DiscoveredConfig, String>,
+    ),
+    SelectProtocol(usize),
+    ConfirmProtocol,
+
+    // Manual config
+    SelectManualProvider(ManualProvider),
+    ManualImapHostChanged(String),
+    ManualImapPortChanged(String),
+    ManualImapSecurityChanged(SecurityOption),
+    ManualSmtpHostChanged(String),
+    ManualSmtpPortChanged(String),
+    ManualSmtpSecurityChanged(SecurityOption),
+    ManualJmapUrlChanged(String),
+    ManualAuthMethodChanged(ManualAuthMethod),
+    CustomOidcIssuerChanged(String),
+    CustomOidcClientIdChanged(String),
+    CustomOidcClientSecretChanged(String),
+    SubmitManualConfig,
+
+    // Step 3: Authentication
+    // OAuth
+    OAuthComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<OAuthSuccess, String>,
+    ),
+    CancelOAuth,
+    RetryOAuth,
+    /// Have an administrator approve Courly for the organisation instead.
+    RequestAdminConsent,
+    AdminConsentDone(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<(), String>,
+    ),
+    OAuthValidationComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        OAuthSuccess,
+        Result<(), String>,
+    ),
+
+    // Password
+    UsernameChanged(String),
+    PasswordChanged(String),
+    SmtpUsernameChanged(String),
+    SmtpPasswordChanged(String),
+    ToggleSeparateSmtpCredentials(bool),
+    ToggleAcceptInvalidCerts(bool),
+    AuthImapHostChanged(String),
+    AuthImapPortChanged(String),
+    AuthImapSecurityChanged(SecurityOption),
+    AuthSmtpHostChanged(String),
+    AuthSmtpPortChanged(String),
+    AuthSmtpSecurityChanged(SecurityOption),
+    SubmitCredentials,
+    ValidationComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<(), String>,
+    ),
+
+    // Step 4: Identity
+    AccountNameChanged(String),
+    SelectColor(usize),
+    SubmitIdentity,
+
+    // Step 5: Creation
+    AccountCreated(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<String, String>,
+    ),
+
+    // Re-auth: token/credential update
+    ReauthTokensSaved(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<(), String>,
+    ),
+
+    // General
+    Cancel,
+    Back,
+    DismissError,
+}
+
+/// Events emitted to App.
+#[derive(Debug, Clone)]
+pub enum AddAccountEvent {
+    /// Wizard completed successfully. Carry the new account ID.
+    AccountAdded(String),
+    /// Re-authentication completed successfully. Carry the account ID.
+    ReauthComplete(String),
+    /// Wizard cancelled.
+    Cancelled,
+}
+
+// Wizard state
+
+pub struct AddAccountWizard {
+    pub step: AddAccountStep,
+    pub is_first_launch: bool,
+    pub email: String,
+    pub error: Option<String>,
+    pub generation: rtsk::generation::GenerationCounter<rtsk::generation::AddAccount>,
+    // Discovery result
+    pub discovery: Option<DiscoveredConfig>,
+    pub selected_option: Option<usize>,
+    // Manual configuration state (used when discovery fails)
+    pub manual_config: ManualConfig,
+    // Auth state
+    pub auth_state: AuthState,
+    // OAuth result (stored when OAuth completes for account creation)
+    pub oauth_success: Option<OAuthSuccess>,
+    // Provider determined from discovery/selection
+    pub resolved_provider: String,
+    pub resolved_auth_method: String,
+    // Identity
+    pub identity: AccountIdentity,
+    /// Colors already assigned to existing accounts (hex strings).
+    pub used_colors: Vec<String>,
+    /// DB handle for account creation (writable). Phase 6a:
+    /// `account.create` flows through `service_client` instead;
+    /// `db` stays for read paths and the OAuth re-auth token write
+    /// (the latter relocates in Phase 6b).
+    pub(super) db: Arc<Db>,
+    /// ServiceClient for the `account.create` IPC. Optional because
+    /// the wizard can outlive a Service respawn; if `None`, the
+    /// submit handler surfaces "Service not ready" to the user.
+    pub(super) service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    /// Re-auth mode: when set, the wizard skips email/discovery/identity
+    /// and goes straight to the auth step for this existing account.
+    pub(super) reauth_account_id: Option<String>,
+    /// The browser sign-in in flight; dropping it stops it.
+    oauth_task: Option<iced::task::Handle>,
+    pub(super) admin_consent: Option<AdminConsentTarget>,
+    /// The browser shows the administrator's approval page.
+    pub(super) admin_consent_running: bool,
+}
+
+impl AddAccountWizard {
+    pub fn new_add_account(
+        used_colors: Vec<String>,
+        db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    ) -> Self {
+        let mut wizard = Self::new(false, used_colors, db, service_client);
+        wizard.apply_admin_config(crate::admin_config());
+        wizard
+    }
+
+    /// Pre-fill wizard state from the IT-distributable admin config.
+    /// Only fills empty fields, so a wizard that already has values
+    /// (e.g. a re-auth or post-discovery state) keeps them. Re-auth
+    /// flows skip this entirely - they construct via `new_reauth` which
+    /// then overlays stored-account values.
+    fn apply_admin_config(&mut self, cfg: &crate::admin_config::AdminConfig) {
+        if let Some(oidc) = cfg.oidc.as_ref() {
+            let dst = &mut self.manual_config.custom_oidc;
+            apply_str(&mut dst.issuer_url, oidc.issuer_url.as_deref());
+            apply_str(&mut dst.client_id, oidc.client_id.as_deref());
+            apply_str(&mut dst.client_secret, oidc.client_secret.as_deref());
+            apply_str(&mut dst.extra_scopes, oidc.extra_scopes.as_deref());
+        }
+        if let Some(imap) = cfg.imap.as_ref() {
+            apply_str(&mut self.auth_state.imap_host, imap.host.as_deref());
+            if self.auth_state.imap_port.is_empty()
+                && let Some(port) = imap.port
+            {
+                self.auth_state.imap_port = port.to_string();
+            }
+            if let Some(sec) = imap.security.as_deref() {
+                if let Some(parsed) = parse_security(sec) {
+                    self.auth_state.imap_security = parsed;
+                } else {
+                    log::warn!(
+                        "admin config: unknown imap.security value '{sec}'; \
+                         leaving wizard default"
+                    );
+                }
+            }
+        }
+        if let Some(smtp) = cfg.smtp.as_ref() {
+            apply_str(&mut self.auth_state.smtp_host, smtp.host.as_deref());
+            if self.auth_state.smtp_port.is_empty()
+                && let Some(port) = smtp.port
+            {
+                self.auth_state.smtp_port = port.to_string();
+            }
+            if let Some(sec) = smtp.security.as_deref() {
+                if let Some(parsed) = parse_security(sec) {
+                    self.auth_state.smtp_security = parsed;
+                } else {
+                    log::warn!(
+                        "admin config: unknown smtp.security value '{sec}'; \
+                         leaving wizard default"
+                    );
+                }
+            }
+        }
+        if let Some(jmap) = cfg.jmap.as_ref() {
+            apply_str(&mut self.manual_config.jmap_url, jmap.url.as_deref());
+        }
+    }
+
+    /// Create a re-auth wizard for an existing account. Looks up the
+    /// account's auth method and skips straight to the appropriate
+    /// auth step (OAuth or password).
+    pub fn new_reauth(
+        account_id: String,
+        email: String,
+        db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    ) -> Result<(Self, Task<AddAccountMessage>), String> {
+        let auth_info = db.get_account_auth_info(&account_id)?;
+
+        let mut wizard = Self::new(false, Vec::new(), db, service_client);
+        wizard.email = email;
+        wizard.reauth_account_id = Some(account_id);
+        wizard.resolved_provider = auth_info.provider;
+        wizard.resolved_auth_method = auth_info.auth_method.clone();
+
+        let task = if auth_info.auth_method == "oauth2" {
+            wizard.start_reauth_oauth(
+                auth_info.oauth_provider.as_deref(),
+                auth_info.oauth_client_id.as_deref(),
+                auth_info.oauth_extra_scopes.as_deref(),
+            )
+        } else {
+            // Pre-populate server fields for password re-auth
+            if let Some(host) = auth_info.imap_host {
+                wizard.auth_state.imap_host = host;
+            }
+            if let Some(port) = auth_info.imap_port {
+                wizard.auth_state.imap_port = port.to_string();
+            }
+            if let Some(sec) = auth_info.imap_security {
+                wizard.auth_state.imap_security = match sec.as_str() {
+                    "starttls" => SecurityOption::StartTls,
+                    "none" => SecurityOption::None,
+                    _ => SecurityOption::Tls,
+                };
+            }
+            if let Some(host) = auth_info.smtp_host {
+                wizard.auth_state.smtp_host = host;
+            }
+            if let Some(port) = auth_info.smtp_port {
+                wizard.auth_state.smtp_port = port.to_string();
+            }
+            if let Some(sec) = auth_info.smtp_security {
+                wizard.auth_state.smtp_security = match sec.as_str() {
+                    "tls" => SecurityOption::Tls,
+                    "none" => SecurityOption::None,
+                    _ => SecurityOption::StartTls,
+                };
+            }
+            if let Some(username) = auth_info.imap_username {
+                wizard.auth_state.username = username;
+            }
+            wizard.step = AddAccountStep::PasswordAuth;
+            Task::none()
+        };
+
+        Ok((wizard, task))
+    }
+
+    fn new(
+        is_first_launch: bool,
+        used_colors: Vec<String>,
+        db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    ) -> Self {
+        let presets = label_colors::preset_colors::all_presets();
+        let first_unused = presets
+            .iter()
+            .enumerate()
+            .find(|(_, (_, bg, _))| !used_colors.iter().any(|uc| uc == *bg))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        Self {
+            step: AddAccountStep::EmailInput,
+            is_first_launch,
+            email: String::new(),
+            error: None,
+            generation: rtsk::generation::GenerationCounter::new(),
+            discovery: None,
+            selected_option: None,
+            manual_config: ManualConfig::default(),
+            auth_state: AuthState::default(),
+            oauth_success: None,
+            resolved_provider: "imap".to_string(),
+            resolved_auth_method: "password".to_string(),
+            identity: AccountIdentity {
+                name: String::new(),
+                selected_color_index: Some(first_unused),
+            },
+            used_colors,
+            db,
+            service_client,
+            reauth_account_id: None,
+            oauth_task: None,
+            admin_consent: None,
+            admin_consent_running: false,
+        }
+    }
+
+    /// Run a browser sign-in. Starting another one, or closing the wizard,
+    /// stops it, which frees the callback port: Microsoft only accepts the
+    /// first one.
+    pub(super) fn track_oauth(&mut self, task: Task<AddAccountMessage>) -> Task<AddAccountMessage> {
+        let (task, handle) = task.abortable();
+        self.oauth_task = Some(handle.abort_on_drop());
+        task
+    }
+
+    /// Get the selected color hex, or fallback to first preset.
+    pub(super) fn selected_color_hex(&self) -> String {
+        let presets = label_colors::preset_colors::all_presets();
+        self.identity
+            .selected_color_index
+            .and_then(|i| presets.get(i))
+            .map(|(_, bg, _)| (*bg).to_string())
+            .unwrap_or_else(|| presets[0].1.to_string())
+    }
+}
+
+// Component impl
+
+impl Component for AddAccountWizard {
+    type Message = AddAccountMessage;
+    type Event = AddAccountEvent;
+
+    fn update(
+        &mut self,
+        message: AddAccountMessage,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        match message {
+            AddAccountMessage::EmailChanged(email) => {
+                self.email = email;
+                self.error = None;
+                (Task::none(), None)
+            }
+            AddAccountMessage::SubmitEmail => self.handle_submit_email(),
+            AddAccountMessage::DiscoveryComplete(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::DiscoveryComplete(_, Ok(config)) => {
+                self.handle_discovery_result(&config)
+            }
+            AddAccountMessage::DiscoveryComplete(_, Err(e)) => {
+                // Duplicate account errors go back to email input.
+                // Discovery failures go to manual configuration.
+                if is_email_input_error(&e) {
+                    self.error = Some(e);
+                    self.step = AddAccountStep::EmailInput;
+                } else {
+                    self.error = Some(
+                        t!("account_setup.error.autodetect_failed_detail", error = e).into_owned(),
+                    );
+                    self.step = AddAccountStep::ManualConfiguration;
+                }
+                (Task::none(), None)
+            }
+            AddAccountMessage::SelectProtocol(idx) => {
+                self.selected_option = Some(idx);
+                (Task::none(), None)
+            }
+            AddAccountMessage::ConfirmProtocol => self.handle_confirm_protocol(),
+            AddAccountMessage::SubmitManualConfig => self.handle_submit_manual_config(),
+            AddAccountMessage::SubmitCredentials => self.handle_submit_credentials(),
+            AddAccountMessage::ValidationComplete(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::ValidationComplete(_, Ok(())) => {
+                // Re-auth mode: save password credentials directly via
+                // the `account.update_tokens` IPC.
+                if let Some(ref account_id) = self.reauth_account_id {
+                    let Some(client) = self.service_client.as_ref().cloned() else {
+                        self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
+                        return (Task::none(), None);
+                    };
+                    let imap_password = self.auth_state.password.clone();
+                    let smtp_password = if self.auth_state.use_separate_smtp_credentials {
+                        Some(self.auth_state.smtp_password.clone())
+                    } else {
+                        None
+                    };
+                    let params = service_api::AccountUpdateTokensParams {
+                        account_id: account_id.clone(),
+                        access_token: None,
+                        refresh_token: None,
+                        token_expires_at: None,
+                        imap_password: Some(service_api::RedactedString::new(imap_password)),
+                        smtp_password: smtp_password.map(service_api::RedactedString::new),
+                    };
+                    let generation = self.generation.next();
+                    let task = Task::perform(
+                        async move {
+                            let result = client
+                                .update_account_tokens(params)
+                                .await
+                                .map_err(|e| e.to_string());
+                            (generation, result)
+                        },
+                        |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),
+                    );
+                    return (task, None);
+                }
+
+                self.prefill_identity_name();
+                self.step = AddAccountStep::Identity;
+                self.error = None;
+                (Task::none(), None)
+            }
+            AddAccountMessage::ValidationComplete(_, Err(e)) => {
+                self.error = Some(e);
+                self.step = AddAccountStep::PasswordAuth;
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthComplete(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthComplete(_, Ok(success)) => self.handle_oauth_success(&success),
+            AddAccountMessage::OAuthComplete(_, Err(e)) => {
+                self.error = Some(e);
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthValidationComplete(g, _, _)
+                if !self.generation.is_current(g) =>
+            {
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthValidationComplete(_, success, Ok(())) => {
+                // Fresh-account OAuth verify only. Re-auth never routes through
+                // here: its tokens are verified + persisted Service-side inside
+                // `oauth.exchange_code`, and `handle_oauth_success` short-
+                // circuits re-auth straight to `ReauthTokensSaved` without an
+                // app-side verify or `account.update_tokens` round-trip.
+                self.oauth_success = Some(success);
+                self.prefill_identity_name();
+                self.step = AddAccountStep::Identity;
+                self.error = None;
+                (Task::none(), None)
+            }
+            AddAccountMessage::OAuthValidationComplete(_, _, Err(e)) => {
+                self.error = Some(e);
+                self.step = AddAccountStep::OAuthWaiting;
+                (Task::none(), None)
+            }
+            AddAccountMessage::RetryOAuth => self.handle_retry_oauth(),
+            AddAccountMessage::RequestAdminConsent => self.handle_request_admin_consent(),
+            AddAccountMessage::AdminConsentDone(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::AdminConsentDone(_, result) => {
+                self.handle_admin_consent_done(result)
+            }
+            AddAccountMessage::SubmitIdentity => self.handle_submit_identity(),
+            AddAccountMessage::AccountCreated(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::AccountCreated(_, Ok(account_id)) => (
+                Task::none(),
+                Some(AddAccountEvent::AccountAdded(account_id)),
+            ),
+            AddAccountMessage::AccountCreated(_, Err(e)) => {
+                self.error = Some(e);
+                self.step = AddAccountStep::Identity;
+                (Task::none(), None)
+            }
+            AddAccountMessage::ReauthTokensSaved(g, _) if !self.generation.is_current(g) => {
+                (Task::none(), None)
+            }
+            AddAccountMessage::ReauthTokensSaved(_, Ok(())) => {
+                let account_id = self.reauth_account_id.clone().unwrap_or_default();
+                (
+                    Task::none(),
+                    Some(AddAccountEvent::ReauthComplete(account_id)),
+                )
+            }
+            AddAccountMessage::ReauthTokensSaved(_, Err(e)) => {
+                self.error =
+                    Some(t!("account_setup.error.save_credentials_failed", error = e).into_owned());
+                (Task::none(), None)
+            }
+            AddAccountMessage::Cancel | AddAccountMessage::CancelOAuth => {
+                (Task::none(), Some(AddAccountEvent::Cancelled))
+            }
+            AddAccountMessage::Back => {
+                self.handle_back();
+                (Task::none(), None)
+            }
+            AddAccountMessage::DismissError => {
+                self.error = None;
+                (Task::none(), None)
+            }
+            _ => {
+                self.handle_field_update(message);
+                (Task::none(), None)
+            }
+        }
+    }
+
+    fn view(&self) -> Element<'_, AddAccountMessage> {
+        match self.step {
+            AddAccountStep::EmailInput => self.view_email_input(),
+            AddAccountStep::Discovering => super::discovery::view_discovering(),
+            AddAccountStep::ProtocolSelection => self.view_protocol_selection(),
+            AddAccountStep::ManualConfiguration => self.view_manual_config(),
+            AddAccountStep::OAuthWaiting => self.view_oauth_waiting(),
+            AddAccountStep::PasswordAuth => self.view_password_auth(),
+            AddAccountStep::Validating => super::password_auth::view_validating(),
+            AddAccountStep::Identity => self.view_identity(),
+            AddAccountStep::Creating => super::identity::view_creating(),
+        }
+    }
+}
+
+/// Errors from the email step (duplicate account, database failure) send
+/// the user back to the email input; every other discovery error falls
+/// through to manual configuration. The database message keeps its
+/// `%{error}` placeholder last so the prefix comparison holds in every
+/// language.
+fn is_email_input_error(error: &str) -> bool {
+    error == t!("account_setup.error.already_configured")
+        || error.starts_with(t!("account_setup.error.database", error = "").as_ref())
+}
+
+// Update helpers
+
+impl AddAccountWizard {
+    pub(super) fn proceed_to_auth(
+        &mut self,
+        option: &ProtocolOption,
+    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+        // Set the provider string for account creation
+        self.resolved_provider = super::discovery::protocol_to_db_provider(&option.protocol);
+
+        match &option.auth.method {
+            AuthMethod::OAuth2 {
+                provider_id,
+                auth_url,
+                token_url,
+                scopes,
+                use_pkce,
+            } => {
+                self.resolved_auth_method = "oauth2".to_string();
+                self.step = AddAccountStep::OAuthWaiting;
+                self.error = None;
+                let generation = self.generation.next();
+
+                let provider_id_clone = provider_id.clone();
+                let client_id_clone = super::oauth::resolve_client_id(provider_id);
+                self.admin_consent = super::oauth::admin_consent_target(
+                    &self.email,
+                    provider_id,
+                    &client_id_clone,
+                    scopes,
+                );
+                self.admin_consent_running = false;
+                let auth_url_clone = auth_url.clone();
+                let token_url_clone = token_url.clone();
+                let scopes_clone = scopes.clone();
+                let use_pkce_clone = *use_pkce;
+                let expected_email = self.email.clone();
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    self.error = Some(t!("account_setup.error.service_not_ready").into_owned());
+                    return (Task::none(), None);
+                };
+
+                let task = Task::perform(
+                    async move {
+                        let result = super::oauth::run_capture_then_exchange(
+                            &client,
+                            super::oauth::OauthCaptureConfig {
+                                provider_id: provider_id_clone.clone(),
+                                auth_url: auth_url_clone,
+                                token_url: token_url_clone,
+                                scopes: scopes_clone,
+                                user_info_url: None,
+                                use_pkce: use_pkce_clone,
+                                client_id: client_id_clone.clone(),
+                                client_secret: None,
+                                expected_email,
+                            },
+                            None,
+                        )
+                        .await
+                        .map(|ack| {
+                            let access_token = ack
+                                .access_token
+                                .map(service_api::RedactedString::into_inner)
+                                .unwrap_or_default();
+                            OAuthSuccess {
+                                access_token,
+                                refresh_token: ack
+                                    .refresh_token
+                                    .map(service_api::RedactedString::into_inner),
+                                token_expires_at: ack.token_expires_at,
+                                user_email: ack.email,
+                                user_name: ack.display_name.unwrap_or_default(),
+                                oauth_provider: provider_id_clone,
+                                oauth_client_id: client_id_clone,
+                                oauth_client_secret: None,
+                            }
+                        });
+                        (generation, result)
+                    },
+                    |(g, result)| AddAccountMessage::OAuthComplete(g, result),
+                );
+                (self.track_oauth(task), None)
+            }
+
+            AuthMethod::Password => {
+                self.resolved_auth_method = "password".to_string();
+                self.prefill_auth_from_option(option);
+                self.step = AddAccountStep::PasswordAuth;
+                self.error = None;
+                (Task::none(), None)
+            }
+
+            AuthMethod::OAuth2Unsupported { provider_domain } => {
+                self.resolved_auth_method = "password".to_string();
+                let help_url = option.help_url.clone();
+                self.prefill_auth_from_option(option);
+                self.step = AddAccountStep::PasswordAuth;
+                self.error = Some(if let Some(url) = help_url {
+                    t!("account_setup.error.app_password_required_url", url = url).into_owned()
+                } else {
+                    t!(
+                        "account_setup.error.app_password_required_domain",
+                        domain = provider_domain
+                    )
+                    .into_owned()
+                });
+                (Task::none(), None)
+            }
+        }
+    }
+
+    pub(super) fn handle_back(&mut self) {
+        // In re-auth mode, Back is equivalent to Cancel - there's no
+        // previous step to go back to.
+        if self.reauth_account_id.is_some() {
+            return;
+        }
+
+        match self.step {
+            AddAccountStep::PasswordAuth | AddAccountStep::ManualConfiguration => {
+                self.step = AddAccountStep::EmailInput;
+                self.error = None;
+            }
+            AddAccountStep::Identity => {
+                // Go back to auth step, depending on method
+                if self.oauth_success.is_some() {
+                    self.step = AddAccountStep::OAuthWaiting;
+                } else {
+                    self.step = AddAccountStep::PasswordAuth;
+                }
+                self.error = None;
+            }
+            AddAccountStep::ProtocolSelection => {
+                self.step = AddAccountStep::EmailInput;
+                self.error = None;
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_field_update(&mut self, message: AddAccountMessage) {
+        match message {
+            AddAccountMessage::UsernameChanged(v) => self.auth_state.username = v,
+            AddAccountMessage::PasswordChanged(v) => self.auth_state.password = v,
+            AddAccountMessage::SmtpUsernameChanged(v) => {
+                self.auth_state.smtp_username = v;
+            }
+            AddAccountMessage::SmtpPasswordChanged(v) => {
+                self.auth_state.smtp_password = v;
+            }
+            AddAccountMessage::ToggleSeparateSmtpCredentials(v) => {
+                self.auth_state.use_separate_smtp_credentials = v;
+            }
+            AddAccountMessage::ToggleAcceptInvalidCerts(v) => {
+                self.auth_state.accept_invalid_certs = v;
+            }
+            AddAccountMessage::AuthImapHostChanged(v) => {
+                self.auth_state.imap_host = v;
+            }
+            AddAccountMessage::AuthImapPortChanged(v) => {
+                self.auth_state.imap_port = v;
+            }
+            AddAccountMessage::AuthImapSecurityChanged(v) => {
+                self.auth_state.imap_security = v;
+            }
+            AddAccountMessage::AuthSmtpHostChanged(v) => {
+                self.auth_state.smtp_host = v;
+            }
+            AddAccountMessage::AuthSmtpPortChanged(v) => {
+                self.auth_state.smtp_port = v;
+            }
+            AddAccountMessage::AuthSmtpSecurityChanged(v) => {
+                self.auth_state.smtp_security = v;
+            }
+            AddAccountMessage::SelectManualProvider(provider) => {
+                self.manual_config.selected_provider = Some(provider);
+            }
+            AddAccountMessage::ManualImapHostChanged(v) => {
+                self.auth_state.imap_host = v;
+            }
+            AddAccountMessage::ManualImapPortChanged(v) => {
+                self.auth_state.imap_port = v;
+            }
+            AddAccountMessage::ManualImapSecurityChanged(v) => {
+                self.auth_state.imap_security = v;
+            }
+            AddAccountMessage::ManualSmtpHostChanged(v) => {
+                self.auth_state.smtp_host = v;
+            }
+            AddAccountMessage::ManualSmtpPortChanged(v) => {
+                self.auth_state.smtp_port = v;
+            }
+            AddAccountMessage::ManualSmtpSecurityChanged(v) => {
+                self.auth_state.smtp_security = v;
+            }
+            AddAccountMessage::ManualJmapUrlChanged(v) => {
+                self.manual_config.jmap_url = v;
+            }
+            AddAccountMessage::ManualAuthMethodChanged(v) => {
+                self.manual_config.auth_method = v;
+            }
+            AddAccountMessage::CustomOidcIssuerChanged(v) => {
+                self.manual_config.custom_oidc.issuer_url = v;
+            }
+            AddAccountMessage::CustomOidcClientIdChanged(v) => {
+                self.manual_config.custom_oidc.client_id = v;
+            }
+            AddAccountMessage::CustomOidcClientSecretChanged(v) => {
+                self.manual_config.custom_oidc.client_secret = v;
+            }
+            AddAccountMessage::AccountNameChanged(v) => self.identity.name = v,
+            AddAccountMessage::SelectColor(i) => {
+                self.identity.selected_color_index = Some(i);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn prefill_auth_from_option(&mut self, option: &ProtocolOption) {
+        if let rtsk::discovery::types::Protocol::Imap {
+            ref incoming,
+            ref outgoing,
+        } = option.protocol
+        {
+            self.auth_state.imap_host = incoming.hostname.clone();
+            self.auth_state.imap_port = incoming.port.to_string();
+            self.auth_state.imap_security = match incoming.security {
+                Security::Tls => SecurityOption::Tls,
+                Security::StartTls => SecurityOption::StartTls,
+                Security::None => SecurityOption::None,
+            };
+            self.auth_state.smtp_host = outgoing.hostname.clone();
+            self.auth_state.smtp_port = outgoing.port.to_string();
+            self.auth_state.smtp_security = match outgoing.security {
+                Security::Tls => SecurityOption::Tls,
+                Security::StartTls => SecurityOption::StartTls,
+                Security::None => SecurityOption::None,
+            };
+            self.auth_state.username = self.email.clone();
+        }
+    }
+}

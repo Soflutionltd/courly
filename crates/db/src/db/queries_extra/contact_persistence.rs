@@ -1,0 +1,429 @@
+use rusqlite::{OptionalExtension, params};
+
+use crate::db::WriteConn;
+use crate::db::WriteTarget;
+use crate::db::queries::{get_setting, set_setting};
+
+pub struct ContactWriteRow {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub email2: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub notes: Option<String>,
+    pub avatar_url: Option<String>,
+    pub source: String,
+    pub account_id: String,
+    pub server_id: Option<String>,
+}
+
+pub fn upsert_contact_sync(conn: &impl WriteTarget, row: &ContactWriteRow) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO contacts (id, email, display_name, email2, phone, company, notes,
+                               avatar_url, source, account_id, server_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+         ON CONFLICT(email) DO UPDATE SET \
+           display_name = CASE \
+             WHEN contacts.source = 'user' THEN contacts.display_name \
+             WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
+             ELSE COALESCE(excluded.display_name, contacts.display_name) \
+           END, \
+           email2 = CASE \
+             WHEN contacts.source = 'user' THEN contacts.email2 \
+             ELSE COALESCE(excluded.email2, contacts.email2) \
+           END, \
+           phone = CASE \
+             WHEN contacts.source = 'user' THEN contacts.phone \
+             ELSE COALESCE(excluded.phone, contacts.phone) \
+           END, \
+           company = CASE \
+             WHEN contacts.source = 'user' THEN contacts.company \
+             ELSE COALESCE(excluded.company, contacts.company) \
+           END, \
+           notes = CASE \
+             WHEN contacts.source = 'user' THEN contacts.notes \
+             ELSE COALESCE(excluded.notes, contacts.notes) \
+           END, \
+           avatar_url = CASE \
+             WHEN contacts.source = 'user' THEN contacts.avatar_url \
+             ELSE COALESCE(excluded.avatar_url, contacts.avatar_url) \
+           END, \
+           source = CASE \
+             WHEN contacts.source = 'user' THEN 'user' \
+             ELSE excluded.source \
+           END, \
+           account_id = COALESCE(excluded.account_id, contacts.account_id), \
+           server_id = COALESCE(excluded.server_id, contacts.server_id), \
+           updated_at = unixepoch()",
+        params![
+            row.id,
+            row.email,
+            row.display_name,
+            row.email2,
+            row.phone,
+            row.company,
+            row.notes,
+            row.avatar_url,
+            row.source,
+            row.account_id,
+            row.server_id,
+        ],
+    )
+    .map_err(|e| format!("upsert contact: {e}"))?;
+    Ok(())
+}
+
+/// `contacts.source` of the rows imported from the Mac's address book.
+pub const DEVICE_CONTACT_SOURCE: &str = "macos";
+
+/// One address of a contact in the Mac's address book.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceContactRow {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub company: Option<String>,
+    pub phone: Option<String>,
+    pub server_id: String,
+}
+
+/// Forgets which addresses the Mac's address book holds, ahead of an
+/// import that records them again.
+pub fn begin_device_contact_import_sync(conn: &impl WriteTarget) -> Result<(), String> {
+    conn.execute("DELETE FROM device_contact_claims", [])
+        .map_err(|e| format!("clear device contact claims: {e}"))?;
+    Ok(())
+}
+
+/// Adds a contact from the Mac's address book, or refreshes one this import
+/// added before, and records that the address book holds the address. A
+/// contact the user wrote or a provider synced keeps its data, so the
+/// address book never overrides Outlook or Google.
+pub fn upsert_device_contact_sync(
+    conn: &impl WriteTarget,
+    row: &DeviceContactRow,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO device_contact_claims (server_id, email) VALUES (?1, ?2)",
+        params![row.server_id, row.email],
+    )
+    .map_err(|e| format!("record device contact claim: {e}"))?;
+    conn.execute(
+        "INSERT INTO contacts (id, email, display_name, company, phone, source, server_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+         ON CONFLICT(email) DO UPDATE SET \
+           display_name = CASE \
+             WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
+             ELSE excluded.display_name \
+           END, \
+           company = excluded.company, \
+           phone = excluded.phone, \
+           server_id = excluded.server_id, \
+           updated_at = unixepoch() \
+         WHERE contacts.source = ?6",
+        params![
+            format!("{DEVICE_CONTACT_SOURCE}-{}", row.email),
+            row.email,
+            row.display_name,
+            row.company,
+            row.phone,
+            DEVICE_CONTACT_SOURCE,
+            row.server_id,
+        ],
+    )
+    .map_err(|e| format!("upsert device contact: {e}"))?;
+    Ok(())
+}
+
+/// Removes the imported address-book contacts whose address the Mac's
+/// address book no longer holds, unless an account still holds it.
+/// Returns how many were removed.
+pub fn prune_device_contacts_sync(conn: &impl WriteTarget) -> Result<usize, String> {
+    conn.execute(
+        "DELETE FROM contacts \
+         WHERE source = ?1 \
+           AND NOT EXISTS (SELECT 1 FROM device_contact_claims d WHERE d.email = contacts.email) \
+           AND NOT EXISTS (SELECT 1 FROM contact_claims c WHERE c.email = contacts.email)",
+        params![DEVICE_CONTACT_SOURCE],
+    )
+    .map_err(|e| format!("prune device contacts: {e}"))
+}
+
+/// A contact as stored, read before an edit changes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredContact {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub email2: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub notes: Option<String>,
+    pub source: String,
+    pub account_id: Option<String>,
+    pub server_id: Option<String>,
+}
+
+pub fn get_stored_contact_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+) -> Result<Option<StoredContact>, String> {
+    conn.query_row(
+        "SELECT email, display_name, email2, phone, company, notes, source, account_id, server_id \
+         FROM contacts WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(StoredContact {
+                email: row.get(0)?,
+                display_name: row.get(1)?,
+                email2: row.get(2)?,
+                phone: row.get(3)?,
+                company: row.get(4)?,
+                notes: row.get(5)?,
+                source: row.get(6)?,
+                account_id: row.get(7)?,
+                server_id: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("read contact: {e}"))
+}
+
+/// One account's card holding a contact's address.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AccountContactHolder {
+    pub account_id: String,
+    pub source: String,
+    pub server_id: String,
+}
+
+/// Every address book holding a contact's address: the accounts' cards and
+/// the people of the Mac's address book.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContactHolders {
+    pub accounts: Vec<AccountContactHolder>,
+    pub device_ids: Vec<String>,
+}
+
+pub fn contact_holders_sync(
+    conn: &impl WriteTarget,
+    email: &str,
+) -> Result<ContactHolders, String> {
+    let mut accounts_stmt = conn
+        .prepare(
+            "SELECT DISTINCT account_id, source, server_id FROM contact_claims \
+             WHERE email = ?1 AND corpus = 'main' ORDER BY account_id, server_id",
+        )
+        .map_err(|e| format!("list contact claims: {e}"))?;
+    let accounts = accounts_stmt
+        .query_map(params![email], |row| {
+            Ok(AccountContactHolder {
+                account_id: row.get(0)?,
+                source: row.get(1)?,
+                server_id: row.get(2)?,
+            })
+        })
+        .map_err(|e| format!("list contact claims: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("list contact claims: {e}"))?;
+    let mut device_stmt = conn
+        .prepare(
+            "SELECT DISTINCT server_id FROM device_contact_claims WHERE email = ?1 \
+             ORDER BY server_id",
+        )
+        .map_err(|e| format!("list device contact claims: {e}"))?;
+    let device_ids = device_stmt
+        .query_map(params![email], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("list device contact claims: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("list device contact claims: {e}"))?;
+    Ok(ContactHolders {
+        accounts,
+        device_ids,
+    })
+}
+
+/// Records which address book a contact Courly just created lives in.
+pub fn set_contact_origin_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+    source: &str,
+    account_id: Option<&str>,
+    server_id: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE contacts SET source = ?2, account_id = ?3, server_id = ?4 WHERE id = ?1",
+        params![id, source, account_id, server_id],
+    )
+    .map_err(|e| format!("set contact origin: {e}"))?;
+    Ok(())
+}
+
+/// Moves a card's claim on `old` to `new` once the user changed the
+/// address in that card, so the contact keeps its origin until the next
+/// pull confirms it.
+pub fn rename_contact_claim_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    server_id: &str,
+    old: &str,
+    new: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE OR IGNORE contact_claims SET email = ?4 \
+         WHERE account_id = ?1 AND server_id = ?2 AND email = ?3 AND corpus = 'main'",
+        params![account_id, server_id, old, new],
+    )
+    .map_err(|e| format!("move contact claim: {e}"))?;
+    conn.execute(
+        "DELETE FROM contact_claims \
+         WHERE account_id = ?1 AND server_id = ?2 AND email = ?3 AND corpus = 'main'",
+        params![account_id, server_id, old],
+    )
+    .map_err(|e| format!("drop moved contact claim: {e}"))?;
+    Ok(())
+}
+
+/// Forgets every address book holding `email`, once the contact is deleted
+/// from all of them.
+pub fn forget_contact_holders_sync(conn: &impl WriteTarget, email: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM contact_claims WHERE email = ?1 AND corpus = 'main'",
+        params![email],
+    )
+    .map_err(|e| format!("forget contact claims: {e}"))?;
+    conn.execute(
+        "DELETE FROM device_contact_claims WHERE email = ?1",
+        params![email],
+    )
+    .map_err(|e| format!("forget device contact claims: {e}"))?;
+    Ok(())
+}
+
+/// Drops a contact no account claims any more. When the Mac's address book
+/// still holds the address, the row is handed back to it instead.
+pub fn release_unclaimed_contact_sync(conn: &impl WriteTarget, email: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE contacts SET source = ?2, account_id = NULL, \
+           server_id = (SELECT server_id FROM device_contact_claims d WHERE d.email = ?1 LIMIT 1) \
+         WHERE email = ?1 AND source NOT IN ('user', ?2) \
+           AND EXISTS (SELECT 1 FROM device_contact_claims d WHERE d.email = ?1)",
+        params![email, DEVICE_CONTACT_SOURCE],
+    )
+    .map_err(|e| format!("hand contact back to the address book: {e}"))?;
+    conn.execute(
+        "DELETE FROM contacts WHERE email = ?1 AND source NOT IN ('user', ?2)",
+        params![email, DEVICE_CONTACT_SOURCE],
+    )
+    .map_err(|e| format!("delete orphan contact: {e}"))?;
+    Ok(())
+}
+
+pub fn delete_contact_by_server_id_and_source_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    server_id: &str,
+    source: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM contacts WHERE server_id = ?1 AND account_id = ?2 AND source = ?3",
+        params![server_id, account_id, source],
+    )
+    .map_err(|e| format!("delete contact by server id/source: {e}"))?;
+    Ok(())
+}
+
+/// Record one remote ownership claim for a materialized contact row.
+pub fn upsert_contact_claim_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    source: &str,
+    server_id: &str,
+    email: &str,
+    address_book_id: Option<&str>,
+    corpus: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO contact_claims (account_id, source, server_id, email, address_book_id, corpus) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+         ON CONFLICT(account_id, source, server_id, email) DO UPDATE SET \
+           address_book_id = excluded.address_book_id, corpus = excluded.corpus",
+        params![account_id, source, server_id, email, address_book_id, corpus],
+    )
+    .map_err(|e| format!("upsert contact claim: {e}"))?;
+    Ok(())
+}
+
+/// Retire claims absent from a completed snapshot, preserving failed ids.
+/// Returns materialized emails that no longer have any remote claim.
+pub fn reconcile_contact_claims_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    source: &str,
+    fetched_ids: &std::collections::HashSet<String>,
+    failed_ids: &std::collections::HashSet<String>,
+) -> Result<Vec<String>, String> {
+    let mut stale = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT server_id, email FROM contact_claims WHERE account_id = ?1 AND source = ?2",
+        ).map_err(|e| format!("prepare contact claim reconcile: {e}"))?;
+        let rows = stmt
+            .query_map(params![account_id, source], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| format!("query contact claims: {e}"))?;
+        for row in rows {
+            let (server_id, email) = row.map_err(|e| format!("read contact claim: {e}"))?;
+            if !fetched_ids.contains(&server_id) && !failed_ids.contains(&server_id) {
+                stale.push((server_id, email));
+            }
+        }
+    }
+    let mut orphaned = Vec::new();
+    for (server_id, email) in stale {
+        conn.execute(
+            "DELETE FROM contact_claims WHERE account_id = ?1 AND source = ?2 AND server_id = ?3 AND email = ?4",
+            params![account_id, source, server_id, email],
+        ).map_err(|e| format!("retire contact claim: {e}"))?;
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contact_claims WHERE email = ?1",
+                params![email],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("count contact claims: {e}"))?;
+        if remaining == 0 {
+            orphaned.push(email);
+        }
+    }
+    Ok(orphaned)
+}
+
+/// Read, then increment, the persisted per-`(account_id, source)` contact-pull
+/// cycle counter, returning the value BEFORE the increment.
+///
+/// Backed by the `settings` table (the same persistence the retired
+/// `increment_gmail_sync_cycle` used, § 5.3 / § 5.6), so the cadence survives
+/// a service restart - a restart no longer resets every source to cycle 0 and
+/// forces an immediate pull for Gmail (~100 min budget) / Graph / CardDAV - and
+/// there is no in-memory per-account map to leak on detach. Cycle 0 (a source's
+/// first pull after the row is created) always pulls; the divisor gate keys off
+/// the returned value.
+pub fn next_contact_pull_cycle_sync(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    source: &str,
+) -> Result<u32, String> {
+    let key = format!("contact_pull_cycle:{account_id}:{source}");
+    let current = match get_setting(conn, &key)? {
+        Some(value) => value.parse::<u32>().unwrap_or(0),
+        None => 0,
+    };
+    // Saturate rather than wrap: the divisor gate treats any large value the
+    // same modulo N, and saturating avoids a spurious "cycle 0 -> force pull"
+    // on overflow.
+    let next = current.saturating_add(1);
+    set_setting(conn, &key, &next.to_string())?;
+    Ok(current)
+}

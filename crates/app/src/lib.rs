@@ -1,0 +1,179 @@
+// ── ARCHITECTURE NOTE ───────────────────────────────────
+//
+// `lib.rs` is the crate root. Sibling modules live next to it; `main.rs` is
+// a thin shim that handles the `--service` short-circuit and defers to
+// `app::run()`. Tests in `tests/` import via `app::*` because of this lib
+// target.
+//
+//   - `app`          - `App` struct + `boot/title/theme/daemon_theme`
+//   - `message`      - `Message` enum
+//   - `subscription` - `App::subscription`
+//   - `update`       - `App::update` dispatcher
+//   - `main_view`    - `App::view` + main-window rendering
+//   - `helpers`      - navigation/thread loading helpers and free fns
+//   - `handlers/*`   - feature-scoped handler methods on `App`
+// ────────────────────────────────────────────────────────
+
+// As of hotpath 0.21, CountingAllocator is a plain generic type the consumer
+// must declare as #[global_allocator] themselves - the crate no longer wires
+// it up internally under hotpath-alloc. Without this, --alloc builds fall back
+// to the system allocator and track_alloc/track_dealloc never fire, so every
+// measured function silently reports 0 bytes. This lives in the crate root so
+// it applies to both the `app` dev binary and the `runner` (`courly`)
+// binary that links `app`.
+#[cfg(feature = "hotpath-alloc")]
+#[global_allocator]
+static ALLOC: hotpath::CountingAllocator = hotpath::CountingAllocator::new();
+
+pub(crate) mod action_resolve;
+pub(crate) mod action_wire;
+mod admin_config;
+mod app;
+mod appearance;
+mod command_dispatch;
+mod command_resolver;
+mod component;
+mod contact_photos;
+mod data_dir;
+mod db;
+mod desktop_notifications;
+mod display;
+mod draft_wal;
+mod favorites;
+mod sidebar_sections;
+mod font;
+mod handlers;
+pub mod harness;
+mod helpers;
+mod i18n;
+mod icon;
+mod main_view;
+#[cfg(target_os = "macos")]
+mod menu_bar;
+mod message;
+mod new_mail;
+pub mod notification_queue;
+mod pop_out;
+pub mod service_client;
+mod sender_logos;
+mod service_subscription;
+mod signature_html;
+mod subject;
+mod subscription;
+mod ui;
+mod unsubscribe;
+mod update;
+mod updater;
+mod window_state;
+
+pub(crate) use app::PendingChord;
+pub use app::{App, AppMode, Divider, ReadyApp};
+pub(crate) use helpers::load_accounts;
+pub use message::Message;
+pub use service_client::ServiceClient;
+pub use ui::label_paint::LabelPaint;
+
+use std::path::PathBuf;
+
+rust_i18n::i18n!("locales", fallback = "en");
+
+pub(crate) static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+
+/// IT-distributable wizard defaults, loaded once at boot from
+/// `~/.config/courly/config.toml` (or platform equivalent). When no
+/// file exists or it can't be parsed, this holds a `Default` (all
+/// sub-tables `None`, no pre-fill applies).
+pub(crate) static ADMIN_CONFIG: std::sync::OnceLock<admin_config::AdminConfig> =
+    std::sync::OnceLock::new();
+
+/// Returns the loaded admin config, or a default empty one if boot
+/// somehow hasn't set it yet (defensive; tests run without boot).
+pub(crate) fn admin_config() -> &'static admin_config::AdminConfig {
+    ADMIN_CONFIG.get_or_init(admin_config::AdminConfig::default)
+}
+
+pub type RunResult = iced::Result;
+
+#[allow(clippy::unwrap_in_result)]
+pub fn run() -> RunResult {
+    run_app_blocking()
+}
+
+#[allow(clippy::unwrap_in_result)]
+pub fn run_app_blocking() -> RunResult {
+    env_logger::init();
+    log::info!("Courly starting");
+    i18n::init();
+    #[cfg(feature = "hotpath")]
+    let _hotpath = hotpath::HotpathGuardBuilder::new("courly::main")
+        .percentiles(&[50.0, 95.0, 99.0])
+        .functions_limit(0)
+        .build();
+
+    #[cfg(feature = "dev-seed")]
+    let app_data_dir = {
+        let dev_dir = dirs::data_dir()
+            .expect("no data dir")
+            .join(data_dir::DEV_DATA_DIR_NAME);
+
+        let config = dev_seed::Config::load_or_default();
+
+        // Always regenerate - ephemeral dev database
+        if dev_dir.exists() {
+            std::fs::remove_dir_all(&dev_dir).ok();
+        }
+        std::fs::create_dir_all(&dev_dir).expect("create dev data dir");
+
+        log::info!(
+            "Dev-seed: generating ephemeral database in {}",
+            dev_dir.display()
+        );
+        dev_seed::seed_database(&config, &dev_dir).expect("dev-seed failed");
+
+        dev_dir
+    };
+
+    #[cfg(not(feature = "dev-seed"))]
+    let app_data_dir = data_dir::resolve(&dirs::data_dir().expect("no data dir"));
+
+    // The DB is no longer opened here. Phase 1.5 makes the Service the
+    // canonical owner of boot-time DB work (migrations, recovery, sweep,
+    // backfill); the UI's `ReadyApp::from_boot_ready` opens its own
+    // read-side ReadDbState after the Service handshake completes.
+
+    let detected_scale = display::detect_default_scale();
+    let _ = DEFAULT_SCALE.set(detected_scale);
+
+    let system_font_family = {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok();
+        rt.and_then(|rt| {
+            let fonts = rt.block_on(system_fonts::SystemFonts::detect());
+            fonts.ui.map(|f| f.family)
+        })
+    };
+    font::set_system_ui_font(system_font_family);
+
+    if let Err(error) = contact_photos::load(&app_data_dir) {
+        log::error!("Contact photos: {error}");
+    }
+    sender_logos::load(&app_data_dir);
+    let _ = APP_DATA_DIR.set(app_data_dir);
+    let _ = ADMIN_CONFIG.set(admin_config::load().unwrap_or_default());
+
+    let mut app = iced::daemon(App::boot, App::update, App::view)
+        .title(App::title)
+        .theme(App::daemon_theme)
+        .scale_factor(|app, _window| app.scale_factor())
+        .subscription(App::subscription)
+        .default_font(font::text());
+
+    for f in font::load() {
+        app = app.font(f);
+    }
+
+    app.run()
+}

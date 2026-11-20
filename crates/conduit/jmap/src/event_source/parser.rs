@@ -1,0 +1,850 @@
+/// Resource bound on a stream whose length the SERVER chooses. The WHATWG
+/// event-stream rules impose no size limit at all - a comment line, a field
+/// name, or an accumulated `data` buffer may be arbitrarily long and still be
+/// well-formed - so this is not a protocol limit and nothing on the wire is
+/// invalid for reaching it. It exists only to stop an unterminated line from
+/// growing a buffer without end. A payload of EXACTLY this many bytes is
+/// therefore accepted at every guard; only the byte that would take it past
+/// the bound is refused. Anything else would make the cap a limit of one less
+/// than its own name.
+///
+/// The four guards spell that same rule with two different operators, and
+/// neither is a typo. Read what each one is measuring:
+///
+/// - the three mid-line guards run BEFORE the byte is appended, so the
+///   accumulated length they see is one short of the length that byte would
+///   produce. `len >= MAX` therefore refuses exactly the byte that would make
+///   the buffer `MAX + 1`.
+/// - `commit_field`'s `data` arm runs on a whole line at once and computes the
+///   length the append WOULD produce, so it compares that hypothetical total
+///   with `> MAX`.
+///
+/// Both admit `MAX` and refuse `MAX + 1`. Aligning the operators literally
+/// would move the bound on one path by one byte, so do not "fix" either.
+///
+/// Crate-visible so oversized-block fixtures elsewhere (`stream.rs`, the
+/// sync error boundary's classification test) are derived from the bound
+/// rather than restating its current value.
+pub(crate) const MAX_EVENT_SIZE: usize = 1024 * 1024;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub(crate) enum EventType {
+    Ping,
+    /// The default type, which covers a block with no `event` field at
+    /// all. WHATWG names that case `message`; RFC 8620 s7.3 names the
+    /// state-change event `state`. Both reach this variant, so a server
+    /// that omits the field and one that spells it out are treated alike.
+    #[default]
+    State,
+    #[cfg(feature = "calendars")]
+    CalendarAlert,
+    /// An `event` name this crate has no handler for.
+    ///
+    /// WHATWG dispatches an event stream's blocks under their declared
+    /// type name, so a client that registered no listener for a name it
+    /// does not know simply never sees the block: unknown types are inert,
+    /// not errors. Mapping them onto [`EventType::State`] instead would
+    /// hand the payload we understand least to the strictest treatment in
+    /// `stream.rs`, where an undecodable state payload tears the
+    /// connection down. Nothing is learned by doing that - a type this
+    /// build cannot name carries no state this build tracks - so the
+    /// block is dropped without decoding it.
+    ///
+    /// `calendarAlert` lands here when the `calendars` feature is off, for
+    /// the same reason: with no [`crate::CalendarAlert`] type compiled in,
+    /// the payload is exactly as opaque as any other unknown name.
+    Unknown,
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct Event {
+    pub(crate) event: EventType,
+    pub(crate) id: Vec<u8>,
+    pub(crate) data: Vec<u8>,
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+enum EventParserState {
+    #[default]
+    Init,
+    Comment,
+    Field,
+    Value,
+    Discard,
+}
+
+#[derive(Default, Debug)]
+pub(crate) struct EventParser {
+    state: EventParserState,
+    field: Vec<u8>,
+    value: Vec<u8>,
+    bytes: Option<Vec<u8>>,
+    pos: usize,
+    result: Event,
+    discard_at_line_start: bool,
+    // Running length of the comment line being skipped; see the Comment arm.
+    comment_len: usize,
+    // WHATWG "interpreting an event stream": the last event ID buffer is
+    // NOT reset between events. It survives until another `id` field
+    // changes it, and every dispatched event carries the current value.
+    last_event_id: Vec<u8>,
+    // The spec dispatches nothing when the data buffer is empty, which is
+    // what makes a comment-only keepalive block (":\n\n") a no-op. An
+    // explicit flag is used rather than `result.data.is_empty()` so that a
+    // bare `data:\n\n` still dispatches an event with an empty payload.
+    data_seen: bool,
+    // WHATWG: lines end with CRLF, LF, or CR. A CR is treated as a line
+    // terminator immediately; this flag swallows the LF of a CRLF pair,
+    // including one split across two `push_bytes` frames.
+    skip_lf: bool,
+    // WHATWG "process the field": at most ONE space after the colon is
+    // stripped from a value; `data:  x` carries the value ` x`.
+    strip_value_space: bool,
+    // WHATWG: one leading U+FEFF at stream start must be ignored. Checked
+    // on the first frame only; a BOM split across frames smaller than
+    // three bytes is not reassembled (no real transport delivers one that
+    // way, and mis-holding bytes would stall the parser).
+    bom_checked: bool,
+}
+
+impl EventParser {
+    pub(crate) fn push_bytes(&mut self, mut bytes: Vec<u8>) {
+        if !self.bom_checked {
+            self.bom_checked = true;
+            if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                bytes.drain(..3);
+            }
+        }
+        if let Some(mut buffered) = self.bytes.take() {
+            let offset = self.pos.min(buffered.len());
+            let mut remaining = buffered.split_off(offset);
+            remaining.append(&mut bytes);
+            bytes = remaining;
+        }
+
+        self.bytes = (!bytes.is_empty()).then_some(bytes);
+        self.pos = 0;
+    }
+
+    pub(crate) fn needs_bytes(&self) -> bool {
+        self.bytes.is_none()
+    }
+
+    /// Applies the buffered `field`/`value` pair, per the WHATWG
+    /// "processing the field" rules. Returns `false` when the accumulated
+    /// data would exceed [`MAX_EVENT_SIZE`], in which case the caller must
+    /// enter the discard state.
+    fn commit_field(&mut self) -> bool {
+        match &self.field[..] {
+            b"id" => {
+                // A colonless `id` line carries an empty value, which the
+                // spec treats as clearing the buffer. An id containing
+                // U+0000 NULL is ignored outright (WHATWG); it is the
+                // resume token a reconnect echoes into a `Last-Event-ID`
+                // header, where a NUL is never a legal byte.
+                if !self.value.contains(&0) {
+                    self.last_event_id = std::mem::take(&mut self.value);
+                }
+            }
+            b"data" => {
+                // Per SSE spec: multiple data lines joined with \n
+                let separator_len = usize::from(self.data_seen);
+                if self.result.data.len() + separator_len + self.value.len() > MAX_EVENT_SIZE {
+                    return false;
+                }
+                if separator_len != 0 {
+                    self.result.data.push(b'\n');
+                }
+                self.result.data.extend_from_slice(&self.value);
+                self.data_seen = true;
+            }
+            b"event" => match &self.value[..] {
+                #[cfg(feature = "calendars")]
+                b"calendarAlert" => {
+                    self.result.event = EventType::CalendarAlert;
+                }
+                b"ping" => {
+                    self.result.event = EventType::Ping;
+                }
+                // An `event` line with an empty value clears the type
+                // buffer (WHATWG), which dispatches under the default type
+                // - the same thing as omitting the field.
+                b"state" | b"message" | b"" => {
+                    self.result.event = EventType::State;
+                }
+                _ => {
+                    self.result.event = EventType::Unknown;
+                }
+            },
+            _ => {
+                //ignore
+            }
+        }
+
+        self.field.clear();
+        self.value.clear();
+        true
+    }
+
+    /// Drops every partial buffer except the persistent last event ID and
+    /// enters the resynchronising discard state.
+    fn discard(&mut self, at_line_start: bool) {
+        self.state = EventParserState::Discard;
+        self.field.clear();
+        self.value.clear();
+        self.result = Event::default();
+        self.data_seen = false;
+        self.strip_value_space = false;
+        self.discard_at_line_start = at_line_start;
+    }
+
+    /// [`MAX_EVENT_SIZE`] is this crate's bound, not the protocol's, so
+    /// tripping it is marked as a local limit: unmarked, the no-evidence
+    /// fallback classified it `Transport(Network)`, and a reconnect replaying
+    /// the same oversized block from `lastEventId` would trip it again.
+    fn too_long_error() -> crate::Error {
+        crate::Error::Transport(crate::core::transport::TransportError::limit_exceeded(
+            "EventSource response is too long.",
+        ))
+    }
+}
+
+impl Iterator for EventParser {
+    type Item = crate::Result<Event>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self
+            .bytes
+            .as_ref()
+            .is_some_and(|bytes| self.pos >= bytes.len())
+        {
+            self.bytes = None;
+            self.pos = 0;
+            return None;
+        }
+        self.bytes.as_ref()?;
+
+        while let Some(byte) = self
+            .bytes
+            .as_ref()
+            .and_then(|bytes| bytes.get(self.pos))
+            .copied()
+        {
+            self.pos += 1;
+
+            // Normalise the three WHATWG line terminators (CRLF, LF, CR)
+            // to a single `\n` before the state machine sees the byte.
+            if std::mem::take(&mut self.skip_lf) && byte == b'\n' {
+                continue;
+            }
+            let byte = if byte == b'\r' {
+                self.skip_lf = true;
+                b'\n'
+            } else {
+                byte
+            };
+
+            match self.state {
+                EventParserState::Init => match byte {
+                    b':' => {
+                        self.state = EventParserState::Comment;
+                        self.comment_len = 0;
+                    }
+                    b'\n' => {
+                        // A block that carried no `data` field dispatches
+                        // nothing (comment-only keepalives land here); the
+                        // event type buffer is still reset.
+                        if self.data_seen {
+                            self.data_seen = false;
+                            let mut event = std::mem::take(&mut self.result);
+                            event.id.clone_from(&self.last_event_id);
+                            return Some(Ok(event));
+                        }
+                        self.result = Event::default();
+                    }
+                    _ => {
+                        self.state = EventParserState::Field;
+                        self.field.push(byte);
+                    }
+                },
+                EventParserState::Comment => {
+                    if byte == b'\n' {
+                        self.state = EventParserState::Init;
+                    } else {
+                        // A comment is skipped, not buffered, so the cap is
+                        // a counter: without it a pathological server could
+                        // stream one unterminated comment forever.
+                        self.comment_len += 1;
+                        if self.comment_len > MAX_EVENT_SIZE {
+                            self.discard(false);
+                            return Some(Err(Self::too_long_error()));
+                        }
+                    }
+                }
+                EventParserState::Field => match byte {
+                    b'\n' => {
+                        self.state = EventParserState::Init;
+                        // A field name with no colon is a field with an
+                        // empty value, not a line to throw away.
+                        if !self.commit_field() {
+                            self.discard(true);
+                            return Some(Err(Self::too_long_error()));
+                        }
+                    }
+                    b':' => {
+                        self.state = EventParserState::Value;
+                        self.strip_value_space = true;
+                    }
+                    _ => {
+                        if self.field.len() >= MAX_EVENT_SIZE {
+                            self.discard(false);
+                            return Some(Err(Self::too_long_error()));
+                        }
+
+                        self.field.push(byte);
+                    }
+                },
+                EventParserState::Value => {
+                    let strip_one_space = std::mem::take(&mut self.strip_value_space);
+                    match byte {
+                        b' ' if strip_one_space => (),
+                        b'\n' => {
+                            self.state = EventParserState::Init;
+                            if !self.commit_field() {
+                                self.discard(true);
+                                return Some(Err(Self::too_long_error()));
+                            }
+                        }
+                        _ => {
+                            if (self.field.len() + self.value.len()) >= MAX_EVENT_SIZE {
+                                self.discard(false);
+                                return Some(Err(Self::too_long_error()));
+                            }
+
+                            self.value.push(byte);
+                        }
+                    }
+                }
+                EventParserState::Discard => {
+                    if byte == b'\n' {
+                        if self.discard_at_line_start {
+                            self.state = EventParserState::Init;
+                            self.discard_at_line_start = false;
+                        } else {
+                            self.discard_at_line_start = true;
+                        }
+                    } else {
+                        self.discard_at_line_start = false;
+                    }
+                }
+            }
+        }
+
+        self.bytes = None;
+        self.pos = 0;
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::{Event, EventType};
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct EventString {
+        event: EventType,
+        id: String,
+        data: String,
+    }
+
+    impl From<Event> for EventString {
+        fn from(event: Event) -> Self {
+            Self {
+                event: event.event,
+                id: String::from_utf8(event.id).unwrap(),
+                data: String::from_utf8(event.data).unwrap(),
+            }
+        }
+    }
+
+    #[test]
+    fn parse() {
+        let mut parser = super::EventParser::default();
+        let mut results = Vec::new();
+
+        for frame in [
+            Vec::from("event: state\nid:  0\ndata: test\n\n"),
+            Vec::from("event: ping\nid:123\ndata: ping pa"),
+            Vec::from("yload"),
+            Vec::from("\n\n"),
+            Vec::from(":comment\n\n"),
+            Vec::from("data: YHOO\n"),
+            Vec::from("data: +2\n"),
+            Vec::from("data: 10\n\n"),
+            Vec::from(": test stream\n"),
+            Vec::from("data: first event\n"),
+            Vec::from("id: 1\n\n"),
+            Vec::from("data:second event\n"),
+            Vec::from("id\n\n"),
+            Vec::from("data:  third event\n\n"),
+            Vec::from("data:hello\n\ndata: world\n\n"),
+        ] {
+            parser.push_bytes(frame);
+
+            #[allow(clippy::while_let_on_iterator)]
+            while let Some(event) = parser.next() {
+                results.push(EventString::from(event.unwrap()));
+            }
+        }
+
+        assert_eq!(
+            results,
+            vec![
+                EventString {
+                    event: EventType::State,
+                    // `id:  0` strips exactly one space; the second is
+                    // part of the value (WHATWG "process the field").
+                    id: " 0".to_string(),
+                    data: "test".to_string()
+                },
+                EventString {
+                    event: EventType::Ping,
+                    id: "123".to_string(),
+                    data: "ping payload".to_string()
+                },
+                // `:comment\n\n` carries no data field, so it dispatches
+                // nothing at all - it is a keepalive.
+                EventString {
+                    event: EventType::State,
+                    // The last event ID buffer persists across events.
+                    id: "123".to_string(),
+                    data: "YHOO\n+2\n10".to_string()
+                },
+                EventString {
+                    event: EventType::State,
+                    id: "1".to_string(),
+                    data: "first event".to_string()
+                },
+                EventString {
+                    event: EventType::State,
+                    id: String::new(),
+                    data: "second event".to_string()
+                },
+                EventString {
+                    event: EventType::State,
+                    id: String::new(),
+                    data: " third event".to_string()
+                },
+                EventString {
+                    event: EventType::State,
+                    id: String::new(),
+                    data: "hello".to_string()
+                },
+                EventString {
+                    event: EventType::State,
+                    id: String::new(),
+                    data: "world".to_string()
+                }
+            ]
+        );
+    }
+
+    // Servers send comment-only blocks as keepalive heartbeats. Per the
+    // WHATWG event-stream rules a block whose data buffer is empty
+    // dispatches nothing; emitting an empty event here used to make the
+    // consumer in `stream.rs` fail an empty JSON parse and hang up on a
+    // live connection.
+    #[test]
+    fn a_leading_bom_at_stream_start_is_stripped() {
+        let mut parser = super::EventParser::default();
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"data: x\n\n");
+        parser.push_bytes(bytes);
+        let event = parser.next().expect("one event").expect("parses");
+        assert_eq!(event.data, b"x");
+        // Only the FIRST frame is BOM-checked; a mid-stream BOM is data.
+        parser.push_bytes(b"data: y\n\n".to_vec());
+        let event = parser.next().expect("one event").expect("parses");
+        assert_eq!(event.data, b"y");
+    }
+
+    #[test]
+    fn comment_only_blocks_dispatch_nothing() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from(
+            ": keepalive\n\n:\n\nevent: state\n\ndata: real\n\n",
+        ));
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(event.data).unwrap(), "real");
+        assert!(parser.next().is_none(), "only one event was dispatched");
+    }
+
+    // A `data` line with an empty value is still a data field, so it
+    // dispatches an event with an empty payload.
+    #[test]
+    fn an_empty_data_field_still_dispatches() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("data\n\n"));
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(event.data).unwrap(), "");
+    }
+
+    #[test]
+    fn the_last_event_id_buffer_persists_across_events() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("id: 7\ndata: a\n\ndata: b\n\n"));
+
+        let first = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(first.id).unwrap(), "7");
+        let second = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(
+            String::from_utf8(second.id).unwrap(),
+            "7",
+            "an event without an `id` field keeps the previous resume token"
+        );
+    }
+
+    #[test]
+    fn a_colonless_id_line_clears_the_buffer() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("id: 7\ndata: a\n\nid\ndata: b\n\ndata: c\n\n"));
+
+        let first = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(first.id).unwrap(), "7");
+        let second = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(second.id).unwrap(), "");
+        let third = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(
+            String::from_utf8(third.id).unwrap(),
+            "",
+            "the cleared buffer stays cleared"
+        );
+    }
+
+    // WHATWG "process the field": at most one space after the colon is
+    // stripped. `data:  x` carries ` x`, and a space later in the value
+    // is never touched.
+    #[test]
+    fn only_the_first_leading_space_is_stripped() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("data:  two spaces\n\ndata:a b\n\n"));
+
+        let first = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(first.data).unwrap(), " two spaces");
+        let second = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(second.data).unwrap(), "a b");
+    }
+
+    // WHATWG: CRLF, LF, and CR are all line terminators, and a CRLF pair
+    // split across two frames is still one terminator.
+    #[test]
+    fn cr_and_crlf_terminate_lines() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("id: 5\r\ndata: one\rdata: two\r"));
+        parser.push_bytes(Vec::from("\r\r\ndata: three\r\n\r\n"));
+
+        let first = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(first.id).unwrap(), "5");
+        assert_eq!(String::from_utf8(first.data).unwrap(), "one\ntwo");
+        let second = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(second.data).unwrap(), "three");
+        assert!(parser.next().is_none());
+    }
+
+    // WHATWG: an `id` whose value contains U+0000 NULL is ignored - it is
+    // the resume token a reconnect echoes into a `Last-Event-ID` header.
+    #[test]
+    fn an_id_containing_nul_is_ignored() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("id: 9\ndata: a\n\nid: b\0ad\ndata: b\n\n"));
+
+        let first = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(first.id).unwrap(), "9");
+        let second = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(
+            String::from_utf8(second.id).unwrap(),
+            "9",
+            "the poisoned id neither replaces nor clears the buffer"
+        );
+    }
+
+    #[test]
+    fn repeated_id_fields_replace_the_previous_value() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("id: 1\nid: 2\ndata: x\n\n"));
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(event.id).unwrap(), "2");
+        assert_eq!(String::from_utf8(event.data).unwrap(), "x");
+    }
+
+    #[test]
+    fn push_bytes_preserves_an_unconsumed_buffer() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("data: one\n\ndata: two\n\n"));
+
+        let first = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(first.data).unwrap(), "one");
+        assert!(
+            !parser.needs_bytes(),
+            "the buffer still holds the second event"
+        );
+
+        parser.push_bytes(Vec::from("data: three\n\n"));
+        let second = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(second.data).unwrap(), "two");
+        let third = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(third.data).unwrap(), "three");
+    }
+
+    // WHATWG: a line's first character is part of the field name unless it
+    // is a colon. A space-prefixed `data` line is therefore the unknown
+    // field " data" (ignored), never a data field.
+    #[test]
+    fn a_leading_space_starts_a_field_name() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from(" data: skipped\ndata: kept\n\n"));
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(event.data).unwrap(), "kept");
+        assert!(
+            parser.next().is_none(),
+            "the ignored field dispatched nothing"
+        );
+    }
+
+    // An `event` name this crate has no handler for must not be laundered
+    // into `State`, which is the one type `stream.rs` tears the connection
+    // down over. `state`, `message` (the WHATWG default name), an empty
+    // value, and an absent field all mean the same thing.
+    #[test]
+    fn unrecognised_event_names_map_to_unknown() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from(
+            "event: somethingNew\ndata: a\n\n\
+             event: state\ndata: b\n\n\
+             event: message\ndata: c\n\n\
+             event\ndata: d\n\n\
+             data: e\n\n\
+             event: ping\ndata: f\n\n",
+        ));
+
+        let types: Vec<EventType> = parser
+            .by_ref()
+            .map(|event| event.expect("no parse error").event)
+            .collect();
+        assert_eq!(
+            types,
+            vec![
+                EventType::Unknown,
+                EventType::State,
+                EventType::State,
+                EventType::State,
+                EventType::State,
+                EventType::Ping,
+            ]
+        );
+    }
+
+    // With the `calendars` feature off there is no type to decode an alert
+    // into, so `calendarAlert` is as opaque as any other unknown name - and
+    // must get the same inert treatment, not the state teardown.
+    #[cfg(not(feature = "calendars"))]
+    #[test]
+    fn calendar_alert_is_unknown_when_the_feature_is_off() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("event: calendarAlert\ndata: {}\n\n"));
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(event.event, EventType::Unknown);
+    }
+
+    #[cfg(feature = "calendars")]
+    #[test]
+    fn calendar_alert_is_recognised_when_the_feature_is_on() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(Vec::from("event: calendarAlert\ndata: {}\n\n"));
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(event.event, EventType::CalendarAlert);
+    }
+
+    #[test]
+    fn an_unbounded_comment_errors_once_and_resynchronises() {
+        let mut parser = super::EventParser::default();
+        let mut frame = Vec::from(":");
+        frame.extend_from_slice(&vec![b'z'; super::MAX_EVENT_SIZE + 4]);
+        frame.extend_from_slice(b"\n\ndata: recovered\n\n");
+        parser.push_bytes(frame);
+
+        assert!(parser.next().expect("an item").is_err());
+        let recovered = parser
+            .next()
+            .expect("a recovered event")
+            .expect("no parse error");
+        assert_eq!(String::from_utf8(recovered.data).unwrap(), "recovered");
+    }
+
+    // A comment of EXACTLY the cap does not trip it - the bound is a limit
+    // on growth, not a length that is itself illegal - and the counter
+    // resets for the next comment line.
+    #[test]
+    fn bounded_comments_pass_and_reset_the_counter() {
+        let mut parser = super::EventParser::default();
+        let long_comment = format!(":{}\n", "c".repeat(super::MAX_EVENT_SIZE));
+        let mut frame = long_comment.clone().into_bytes();
+        frame.extend_from_slice(long_comment.as_bytes());
+        frame.extend_from_slice(b"data: alive\n\n");
+        parser.push_bytes(frame);
+
+        let event = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(String::from_utf8(event.data).unwrap(), "alive");
+    }
+
+    #[test]
+    fn an_oversized_field_errors_once_and_resynchronises() {
+        let mut parser = super::EventParser::default();
+        let mut frame = vec![b'x'; super::MAX_EVENT_SIZE + 4];
+        frame.extend_from_slice(b": v\n\ndata: recovered\n\n");
+        parser.push_bytes(frame);
+
+        assert!(parser.next().expect("an item").is_err());
+        let recovered = parser
+            .next()
+            .expect("a recovered event")
+            .expect("no parse error");
+        assert_eq!(String::from_utf8(recovered.data).unwrap(), "recovered");
+    }
+
+    #[test]
+    fn multi_line_data_is_capped_and_resynchronises() {
+        let mut parser = super::EventParser::default();
+        let line = format!("data: {}\n", "y".repeat(1024));
+        let mut frame = String::new();
+        for _ in 0..=(super::MAX_EVENT_SIZE / 1024) {
+            frame.push_str(&line);
+        }
+        frame.push_str("\ndata: recovered\n\n");
+        parser.push_bytes(frame.into_bytes());
+
+        assert!(parser.next().expect("an item").is_err());
+        let recovered = parser
+            .next()
+            .expect("a recovered event")
+            .expect("no parse error");
+        assert_eq!(String::from_utf8(recovered.data).unwrap(), "recovered");
+    }
+
+    // The boundary itself, in both directions. `MAX_EVENT_SIZE` bounds
+    // buffer growth on a stream the server controls; it is not a protocol
+    // limit, so a block carrying exactly that many data bytes is well-formed
+    // and must be delivered, and only the byte past it is refused. The two
+    // halves are built from the constant so they move with it.
+    //
+    // A single `data` line cannot reach the cap on its own - the mid-line
+    // guard counts the field name too - so the payload is accumulated across
+    // two lines, which is also the path `commit_field`'s separator arithmetic
+    // runs on.
+    fn two_data_lines_totalling(total: usize) -> Vec<u8> {
+        let first = total / 2;
+        // The joining '\n' that `commit_field` inserts is one of the bytes.
+        let second = total - first - 1;
+        format!(
+            "data:{}\ndata:{}\n\ndata: recovered\n\n",
+            "y".repeat(first),
+            "z".repeat(second)
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn data_of_exactly_the_cap_is_delivered() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(two_data_lines_totalling(super::MAX_EVENT_SIZE));
+
+        let event = parser
+            .next()
+            .expect("the block at the cap dispatches")
+            .expect("a payload of exactly the cap is not an error");
+        assert_eq!(event.data.len(), super::MAX_EVENT_SIZE);
+    }
+
+    #[test]
+    fn data_one_byte_past_the_cap_is_refused() {
+        let mut parser = super::EventParser::default();
+        parser.push_bytes(two_data_lines_totalling(super::MAX_EVENT_SIZE + 1));
+
+        assert!(
+            parser.next().expect("an item").is_err(),
+            "one byte past the bound trips it"
+        );
+        let recovered = parser
+            .next()
+            .expect("a recovered event")
+            .expect("no parse error");
+        assert_eq!(String::from_utf8(recovered.data).unwrap(), "recovered");
+    }
+
+    // Every cap site reports a LOCAL limit, not a bare transport error: the
+    // cap is this crate's, so an unmarked error fell through to the
+    // no-evidence `Transport(Network)` fallback and read as a retryable
+    // network fault. One input per guard: the comment counter, the mid-line
+    // field and field-plus-value guards, and the whole-line data commit.
+    #[test]
+    fn every_cap_site_reports_a_local_limit_not_a_network_fault() {
+        let max = super::MAX_EVENT_SIZE;
+        let mut comment = Vec::from(":");
+        comment.extend_from_slice(&vec![b'z'; max + 1]);
+        let field = vec![b'x'; max + 1];
+        let mut value = Vec::from("data:");
+        value.extend_from_slice(&vec![b'v'; max]);
+        let data = two_data_lines_totalling(max + 1);
+
+        for (site, input) in [
+            ("comment", comment),
+            ("field", field),
+            ("field+value", value),
+            ("data commit", data),
+        ] {
+            let mut parser = super::EventParser::default();
+            parser.push_bytes(input);
+            let error = parser.next().expect("an item").expect_err("the cap trips");
+            let transport = match error {
+                crate::Error::Transport(transport) => transport,
+                other => panic!("{site}: expected a transport error, got {other:?}"),
+            };
+            assert_eq!(
+                transport.local,
+                Some(crate::core::transport::LocalFailure::LimitExceeded),
+                "{site}"
+            );
+        }
+    }
+
+    // `discard` documents that it drops every partial buffer EXCEPT the
+    // persistent last event ID. Nothing else in the suite pins that
+    // exception, and the difference is a resume token: if a discard cleared
+    // `last_event_id`, a reconnect after an oversized block would replay
+    // from the wrong point.
+    #[test]
+    fn a_discard_preserves_the_last_event_id() {
+        let mut parser = super::EventParser::default();
+        let mut frame = Vec::from("id: keep-me\n:");
+        frame.extend_from_slice(&vec![b'z'; super::MAX_EVENT_SIZE + 4]);
+        frame.extend_from_slice(b"\n\ndata: after\n\n");
+        parser.push_bytes(frame);
+
+        assert!(parser.next().expect("an item").is_err());
+        let after = parser.next().expect("an event").expect("no parse error");
+        assert_eq!(
+            String::from_utf8(after.id).unwrap(),
+            "keep-me",
+            "the id survived the discarded block"
+        );
+    }
+}

@@ -1,0 +1,122 @@
+[workspace]
+members = [
+    "caldav",
+    "carddav",
+    "dav-core",
+    "google",
+    "graph",
+    "imap",
+    "jmap",
+    "net",
+    "sasl",
+    "smtp",
+    "sync",
+    "types",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
+repository = "https://github.com/Soflutionltd/courly"
+authors = ["folk@folk.wtf", "Soflution Ltd"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.47", default-features = false }
+tokio-util = "0.7"
+tokio-native-tls = "0.3"
+futures = { version = "0.3", default-features = false }
+async-stream = "0.3"
+
+# Networking and TLS
+reqwest = { version = "0.13.5", default-features = false }
+native-tls = "0.2"
+socket2 = "0.6"
+httpdate = "1"
+http = "1.4.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.150"
+
+# Error handling
+thiserror = "2"
+
+# Encoding
+base64 = "0.23.0"
+encoding_rs = "0.8"
+percent-encoding = "2.3"
+
+# Parsing
+nom = "8"
+caldata = "0.17"
+
+# Time
+jiff = { version = "0.2", features = ["serde"] }
+
+# Bytes
+bytes = "1"
+
+# Concurrency primitives
+arc-swap = "1"
+dashmap = "6"
+
+# Identifiers
+uuid = { version = "1", features = ["v4"] }
+
+# Cryptography
+sha2 = "0.11.0"
+getrandom = { version = "0.4.2", features = ["std"] }
+zeroize = "1"
+
+# Diagnostics
+# Some member crates additionally ask for `features = ["std"]` and some take
+# this pin as-is. That difference is INERT, not drift: installing a
+# thread-scoped subscriber itself requires `tracing/std`, and Cargo unifies
+# features additively across the shared dependency instance, so any consumer
+# able to scope a subscriber at all has already enabled `std` for every crate in
+# the graph. Filed once as a diagnostics-loss defect and withdrawn on that
+# reasoning; reopening it needs evidence about a real build configuration.
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = "0.3"
+
+[workspace.lints.clippy]
+# Style: modern idiomatic Rust
+uninlined_format_args = "deny"
+cloned_instead_of_copied = "deny"
+redundant_closure_for_method_calls = "deny"
+semicolon_if_nothing_returned = "deny"
+manual_string_new = "deny"
+explicit_iter_loop = "deny"
+implicit_clone = "deny"
+unnecessary_sort_by = "deny"
+collapsible_match = "deny"
+if_same_then_else = "deny"
+needless_borrow = "deny"
+ptr_arg = "deny"
+redundant_locals = "deny"
+regex_creation_in_loops = "deny"
+unnecessary_unwrap = "deny"
+wrong_self_convention = "deny"
+# Safety: strict error handling
+unwrap_in_result = "deny"
+ok_expect = "deny"
+# Async safety
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+# Type safety
+large_enum_variant = "deny"
+clone_on_ref_ptr = "deny"
+float_cmp = "deny"
+cast_sign_loss = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+# Safety: no debug/placeholder code
+dbg_macro = "deny"
+todo = "deny"
+
+[profile.bench]
+debug = true

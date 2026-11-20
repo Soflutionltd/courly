@@ -1,0 +1,559 @@
+//! AES-256-GCM key file loader for Courly.
+//!
+//! Single canonical implementation shared by `common` (UI-side load before
+//! Phase 2's IPC plumbing relocates this entirely Service-side) and
+//! `service` (Service-side load during boot, gating `boot.ready`). Before
+//! this crate existed both sides carried near-identical copies that drifted
+//! in trivial ways (log capitalization, error string casing) and would have
+//! drifted further as security hardening landed in only one - the security
+//! review explicitly called this out as a regression vector for the KEK
+//! that decrypts every stored credential.
+//!
+//! Security properties:
+//!
+//! - **TOCTOU-safe permissions**: opens the key file with `O_NOFOLLOW`,
+//!   reads via the open file descriptor, and uses `fchmod` to repair the
+//!   mode (Unix). The path is resolved exactly once; a symlink swap or
+//!   permission flip between resolve and read cannot redirect us. The
+//!   pre-extraction code did `read_to_string(path)` then
+//!   `set_permissions(path, ...)` which had a window where a parallel
+//!   reader on a transiently mode-644 file saw the key bytes.
+//! - **File-owner UID validation**: rejects key files not owned by the
+//!   current process UID on Unix. A shared XDG misconfiguration or hostile
+//!   local user cannot substitute a key file at our `app_data_dir/`.
+//! - **Zeroizing buffer**: returns a [`SecretKey`] wrapper whose `Drop`
+//!   zeroes the 32-byte buffer. Callers that need the raw bytes for
+//!   AES-256-GCM should `.expose()` and copy into the cipher's key slot
+//!   without keeping the slice alive past the cipher construction.
+//! - **All-zero rejection**: the loader unconditionally refuses to return
+//!   an all-zero key. An all-zero KEK would silently downgrade
+//!   AES-256-GCM to a known key, and no legitimate caller produces one -
+//!   `dev-seed` writes a non-zero deterministic pattern, so no profile
+//!   needs to make an exception.
+
+use base64::{Engine, engine::general_purpose::STANDARD};
+use std::path::{Path, PathBuf};
+use zeroize::{Zeroize, Zeroizing};
+
+/// The key file, in the app data directory.
+pub const KEY_FILE_NAME: &str = "courly.key";
+/// The name the key file had before the app became Courly. A key found
+/// under it is renamed on load.
+const LEGACY_KEY_FILE_NAME: &str = "ratatoskr.key";
+/// Database names, current and before the rename, whose presence means
+/// the install already holds credentials encrypted with a key.
+const DB_FILE_NAMES: [&str; 2] = ["courly.db", "ratatoskr.db"];
+
+/// 32-byte AES-256-GCM key. Implements `Zeroize` on drop so the key bytes
+/// don't linger in freed memory after callers finish using them. Callers
+/// that need the raw bytes for AES-256-GCM construction should `.expose()`
+/// and copy into the cipher's key slot without keeping the slice alive
+/// past the cipher construction.
+pub struct SecretKey {
+    bytes: [u8; 32],
+}
+
+impl SecretKey {
+    /// Construct from raw bytes. Used by callers that have already
+    /// loaded a key (e.g., the dev-seed tooling or in-process tests).
+    /// Production paths use [`load_encryption_key`].
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self { bytes }
+    }
+
+    /// Borrow the raw 32-byte slice. The borrow lives only as long as
+    /// the [`SecretKey`]; once that drops, the bytes are zeroed. The
+    /// AES-256-GCM cipher constructors copy out of this borrow into
+    /// their own internal key slot, so the lifetime is short in
+    /// practice.
+    pub fn expose(&self) -> &[u8; 32] {
+        &self.bytes
+    }
+}
+
+impl Drop for SecretKey {
+    fn drop(&mut self) {
+        self.bytes.zeroize();
+    }
+}
+
+impl std::fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never expose the key bytes via Debug. Many telemetry / logging
+        // surfaces bottom out in `format!("{x:?}")`; SecretKey is the
+        // last line of defense against an accidental expose.
+        f.debug_struct("SecretKey")
+            .field("bytes", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Outcome of [`load_encryption_key`].
+#[derive(Debug)]
+pub enum LoadError {
+    /// No key file found. Production callers should treat this as fatal -
+    /// silently falling back to a zero key would land credentials
+    /// under known-public bytes.
+    NotFound,
+    /// File exists but is owned by a different UID. The file may be
+    /// genuinely intended for another user (shared XDG dir
+    /// misconfiguration) or substituted by a hostile local user; in
+    /// either case we cannot trust it.
+    WrongOwner {
+        path: PathBuf,
+        expected_uid: u32,
+        actual_uid: u32,
+    },
+    /// Filesystem I/O failed while reading the key. The wrapped error
+    /// carries the underlying cause.
+    Io {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+    /// File contents were not valid base64 (whitespace stripped before
+    /// decoding).
+    InvalidBase64(base64::DecodeError),
+    /// File decoded but yielded a buffer of the wrong length. AES-256-GCM
+    /// requires exactly 32 bytes.
+    WrongLength { expected: usize, actual: usize },
+    /// File decoded to 32 bytes of zero. An all-zero AES-256-GCM key is
+    /// indistinguishable from a known-public key; no legitimate writer
+    /// produces it. Rejected in every build profile.
+    AllZero { path: PathBuf },
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => {
+                write!(f, "no encryption key file found ({KEY_FILE_NAME})")
+            }
+            Self::WrongOwner {
+                path,
+                expected_uid,
+                actual_uid,
+            } => write!(
+                f,
+                "encryption key file {} is owned by uid {actual_uid}, expected {expected_uid}",
+                path.display(),
+            ),
+            Self::Io { path, error } => write!(
+                f,
+                "failed to read encryption key file {}: {error}",
+                path.display(),
+            ),
+            Self::InvalidBase64(error) => write!(f, "encryption key is not valid base64: {error}"),
+            Self::WrongLength { expected, actual } => write!(
+                f,
+                "encryption key length is {actual} bytes; expected {expected}",
+            ),
+            Self::AllZero { path } => write!(
+                f,
+                "encryption key at {} is all zeros; refusing an all-zero AES-256-GCM key",
+                path.display(),
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+/// Load the AES-256-GCM key from `<app_data_dir>/courly.key`, renaming a
+/// key left under the previous name first. See module docs for the
+/// security properties this enforces.
+pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> {
+    let path = app_data_dir.join(KEY_FILE_NAME);
+    adopt_legacy_key(app_data_dir, &path)?;
+    if !path.exists() {
+        return Err(LoadError::NotFound);
+    }
+
+    log::debug!("loading encryption key from {}", path.display());
+    // `contents` and `decoded` carry the raw key material; both go through
+    // `Zeroizing` so the bytes are wiped on every exit path (success, the
+    // wrong-length error, the all-zero rejection) rather than waiting for
+    // the allocator to overwrite them. Without this, a heap inspection of
+    // the Service process between key load and the next allocation would
+    // surface plaintext key bytes in the `String` and `Vec<u8>`
+    // intermediate buffers that drop normally otherwise.
+    let contents: Zeroizing<String> = Zeroizing::new(open_and_read(&path)?);
+
+    let trimmed = contents.trim();
+    let decoded: Zeroizing<Vec<u8>> =
+        Zeroizing::new(STANDARD.decode(trimmed).map_err(LoadError::InvalidBase64)?);
+    if decoded.len() != 32 {
+        return Err(LoadError::WrongLength {
+            expected: 32,
+            actual: decoded.len(),
+        });
+    }
+
+    let mut buf = [0u8; 32];
+    buf.copy_from_slice(&decoded);
+
+    if buf.iter().all(|&b| b == 0) {
+        // An all-zero AES-256-GCM key would silently downgrade encryption
+        // to a known-public key. No legitimate writer produces it -
+        // dev-seed writes a non-zero deterministic pattern - so a file
+        // that decodes to 32 zero bytes is either a bug or tampering;
+        // either way, refuse. Zero the local stack buffer before bailing
+        // (`contents` and `decoded` zeroize via their `Zeroizing` wrappers
+        // on drop).
+        buf.zeroize();
+        return Err(LoadError::AllZero { path });
+    }
+
+    Ok(SecretKey { bytes: buf })
+}
+
+/// Rename the key file from its name before the rename to Courly. The
+/// rename is atomic on the volume, so a crash leaves one name or the other,
+/// and a symlink stays a symlink, which the `O_NOFOLLOW` open then refuses.
+/// When both names exist the current one wins and the old one is left as is.
+fn adopt_legacy_key(app_data_dir: &Path, path: &Path) -> Result<(), LoadError> {
+    let legacy = app_data_dir.join(LEGACY_KEY_FILE_NAME);
+    if path.exists() || !legacy.exists() {
+        return Ok(());
+    }
+    match std::fs::rename(&legacy, path) {
+        Ok(()) => {
+            log::info!("renamed the key file {LEGACY_KEY_FILE_NAME} to {KEY_FILE_NAME}");
+            Ok(())
+        }
+        // The UI and the Service both load the key; the other one renamed it.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && path.exists() => Ok(()),
+        Err(error) => Err(LoadError::Io {
+            path: legacy,
+            error,
+        }),
+    }
+}
+
+/// Like [`load_encryption_key`], but on a first install (no key file and
+/// no database yet) generates a random key first. When a database already
+/// exists the key is never regenerated: a fresh key could not decrypt the
+/// stored credentials, so the missing-key error surfaces instead.
+pub fn load_or_create_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> {
+    match load_encryption_key(app_data_dir) {
+        Err(LoadError::NotFound) if is_first_install(app_data_dir) => {
+            create_key_file(app_data_dir)?;
+            load_encryption_key(app_data_dir)
+        }
+        other => other,
+    }
+}
+
+fn is_first_install(app_data_dir: &Path) -> bool {
+    !DB_FILE_NAMES
+        .iter()
+        .any(|name| app_data_dir.join(name).exists())
+}
+
+/// Write a random key to `courly.key` without ever exposing a partial
+/// file: the key goes to a private temp file first, then a hard link
+/// publishes it atomically and fails if another process already did.
+fn create_key_file(app_data_dir: &Path) -> Result<(), LoadError> {
+    use std::io::Write;
+
+    let path = app_data_dir.join(KEY_FILE_NAME);
+    let temp_path = app_data_dir.join(format!("{KEY_FILE_NAME}.{}.tmp", std::process::id()));
+    let io_error = |error: std::io::Error| LoadError::Io {
+        path: path.clone(),
+        error,
+    };
+
+    let mut bytes = Zeroizing::new([0u8; 32]);
+    getrandom::fill(bytes.as_mut_slice())
+        .map_err(|error| io_error(std::io::Error::other(error.to_string())))?;
+    let encoded = Zeroizing::new(STANDARD.encode(bytes.as_slice()));
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let written = options.open(&temp_path).and_then(|mut file| {
+        file.write_all(encoded.as_bytes())?;
+        file.sync_all()
+    });
+    let published = written.and_then(|()| std::fs::hard_link(&temp_path, &path));
+    let _ = std::fs::remove_file(&temp_path);
+    match published {
+        Ok(()) => {
+            log::info!("generated a new encryption key at {}", path.display());
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(io_error(error)),
+    }
+}
+
+/// Open the key file with `O_NOFOLLOW` (Unix) so a symlink at the path
+/// can't redirect us, then read its contents via the open fd. While the
+/// fd is open, fstat for owner-UID validation and fchmod to repair the
+/// mode. Path is resolved exactly once - no TOCTOU window between read
+/// and chmod, no symlink swap window between owner check and read.
+#[cfg(unix)]
+fn open_and_read(path: &Path) -> Result<String, LoadError> {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        // O_NOFOLLOW makes the open fail with ELOOP if the final path
+        // component is a symlink. The pre-extraction code resolved the
+        // path twice (read + chmod) so a swap-after-read attack was
+        // possible against a transient mode-644 key file.
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| LoadError::Io {
+            path: path.to_path_buf(),
+            error,
+        })?;
+
+    // fstat through the open fd, NOT a fresh stat on the path - the
+    // whole point of O_NOFOLLOW + fstat is that the fd is bound to the
+    // inode the open succeeded on.
+    let meta = file.metadata().map_err(|error| LoadError::Io {
+        path: path.to_path_buf(),
+        error,
+    })?;
+
+    let actual_uid = meta.uid();
+    let expected_uid = unsafe { libc::geteuid() };
+    if actual_uid != expected_uid {
+        return Err(LoadError::WrongOwner {
+            path: path.to_path_buf(),
+            expected_uid,
+            actual_uid,
+        });
+    }
+
+    // fchmod through the open fd. Skip if the mode is already 0o600 (or
+    // tighter) so we don't churn the inode mtime on every boot.
+    let current_mode = meta.mode() & 0o777;
+    if current_mode != 0o600 {
+        let fd = file.as_raw_fd();
+        let result = unsafe { libc::fchmod(fd, 0o600) };
+        if result != 0 {
+            log::warn!(
+                "failed to repair key permissions on {} (fchmod returned {}): {}",
+                path.display(),
+                result,
+                std::io::Error::last_os_error(),
+            );
+        }
+    }
+
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .map_err(|error| LoadError::Io {
+            path: path.to_path_buf(),
+            error,
+        })?;
+    Ok(contents)
+}
+
+/// Windows fallback: no `O_NOFOLLOW` equivalent in stable std, no UID
+/// model. Read via the path; permissions are not repaired (NTFS ACLs
+/// are out of scope for this loader). The key file's ACL inheritance
+/// is the user's responsibility on Windows.
+#[cfg(not(unix))]
+fn open_and_read(path: &Path) -> Result<String, LoadError> {
+    std::fs::read_to_string(path).map_err(|error| LoadError::Io {
+        path: path.to_path_buf(),
+        error,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(suffix: &str) -> std::io::Result<PathBuf> {
+        let path = std::env::current_dir()?.join("target").join(format!(
+            "crypto-key-test-{}-{}-{}",
+            std::process::id(),
+            suffix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    fn write_b64_key(path: &Path, bytes: &[u8; 32]) -> std::io::Result<()> {
+        std::fs::write(path, STANDARD.encode(bytes))
+    }
+
+    #[test]
+    fn loads_well_formed_key() {
+        let dir = temp_dir("ok").expect("temp dir");
+        let original = [7u8; 32];
+        write_b64_key(&dir.join(KEY_FILE_NAME), &original).expect("write key");
+        let key = load_encryption_key(&dir).expect("load");
+        assert_eq!(key.expose(), &original);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_key_under_the_previous_name_is_renamed_and_loaded() {
+        let dir = temp_dir("legacy").expect("temp dir");
+        let original = [42u8; 32];
+        write_b64_key(&dir.join(LEGACY_KEY_FILE_NAME), &original).expect("write legacy");
+        let key = load_encryption_key(&dir).expect("load");
+        assert_eq!(key.expose(), &original);
+        assert!(dir.join(KEY_FILE_NAME).exists());
+        assert!(!dir.join(LEGACY_KEY_FILE_NAME).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_current_key_wins_over_the_previous_name() {
+        let dir = temp_dir("prefer").expect("temp dir");
+        let primary = [1u8; 32];
+        let legacy = [2u8; 32];
+        write_b64_key(&dir.join(KEY_FILE_NAME), &primary).expect("primary");
+        write_b64_key(&dir.join(LEGACY_KEY_FILE_NAME), &legacy).expect("legacy");
+        let key = load_encryption_key(&dir).expect("load");
+        assert_eq!(key.expose(), &primary);
+        assert!(dir.join(LEGACY_KEY_FILE_NAME).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_under_the_previous_name_blocks_key_generation() {
+        let dir = temp_dir("legacy_db").expect("temp dir");
+        std::fs::write(dir.join(DB_FILE_NAMES[1]), b"").expect("write db");
+        match load_or_create_encryption_key(&dir) {
+            Err(LoadError::NotFound) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_key_file_returns_not_found() {
+        let dir = temp_dir("missing").expect("temp dir");
+        match load_encryption_key(&dir) {
+            Err(LoadError::NotFound) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_install_generates_a_private_random_key() {
+        let dir = temp_dir("first_install").expect("temp dir");
+        let created = load_or_create_encryption_key(&dir).expect("create");
+        let reloaded = load_encryption_key(&dir).expect("reload");
+        assert_eq!(created.expose(), reloaded.expose());
+        assert!(created.expose().iter().any(|&b| b != 0));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(KEY_FILE_NAME))
+                .expect("stat")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let leftovers = std::fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_key_with_existing_database_is_not_regenerated() {
+        let dir = temp_dir("lost_key").expect("temp dir");
+        std::fs::write(dir.join("courly.db"), b"").expect("write db");
+        match load_or_create_encryption_key(&dir) {
+            Err(LoadError::NotFound) => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        assert!(!dir.join(KEY_FILE_NAME).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wrong_length_key_is_rejected() {
+        let dir = temp_dir("wrong_len").expect("temp dir");
+        let bytes = [0u8; 16];
+        std::fs::write(dir.join(KEY_FILE_NAME), STANDARD.encode(bytes)).expect("write");
+        match load_encryption_key(&dir) {
+            Err(LoadError::WrongLength {
+                expected: 32,
+                actual: 16,
+            }) => {}
+            other => panic!("expected WrongLength, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn non_base64_key_is_rejected() {
+        let dir = temp_dir("garbage").expect("temp dir");
+        std::fs::write(dir.join(KEY_FILE_NAME), "this is not base64!!!@@@").expect("write");
+        match load_encryption_key(&dir) {
+            Err(LoadError::InvalidBase64(_)) => {}
+            other => panic!("expected InvalidBase64, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fchmod_repairs_overly_open_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("chmod").expect("temp dir");
+        let path = dir.join(KEY_FILE_NAME);
+        write_b64_key(&path, &[3u8; 32]).expect("write");
+        // Set a deliberately too-open mode so the loader has something
+        // to repair. The fchmod-via-fd repair runs while the file is
+        // open for read.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("set perms");
+        let _ = load_encryption_key(&dir).expect("load");
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "loader must fchmod the file to 0o600");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// All-zero keys are rejected unconditionally. An all-zero AES-256-GCM
+    /// key is indistinguishable from a known-public key; no legitimate
+    /// writer produces one (dev-seed writes a non-zero deterministic
+    /// pattern), so the loader refuses regardless of build profile.
+    #[test]
+    fn all_zero_key_is_rejected() {
+        let dir = temp_dir("zero").expect("temp dir");
+        write_b64_key(&dir.join(KEY_FILE_NAME), &[0u8; 32]).expect("write");
+        match load_encryption_key(&dir) {
+            Err(LoadError::AllZero { .. }) => {}
+            other => panic!("expected AllZero, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// SecretKey's Debug never spills the key bytes. The struct lives
+    /// long enough to be format-printed in many places (logs, error
+    /// messages); a stray `{:?}` must not exfiltrate the key.
+    #[test]
+    fn debug_does_not_leak_key_bytes() {
+        let key = SecretKey::from_bytes([0xABu8; 32]);
+        let rendered = format!("{key:?}");
+        assert!(
+            !rendered.contains("171") && !rendered.contains("0xAB") && !rendered.contains("ab"),
+            "Debug must redact key bytes; got: {rendered}"
+        );
+        assert!(rendered.contains("redacted"));
+    }
+}

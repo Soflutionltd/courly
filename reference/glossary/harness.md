@@ -1,0 +1,348 @@
+# Service test harness
+
+Lua-driven test runtime for Service IO-boundary tests. Lives in courly's `app` crate; orchestrated from outside by brokkr. Remaining harness work is in the root `TODO.md`.
+
+The architecture is mirrored on the brokkr side, in the brokkr repository's notes. Both documents stay in sync; this one is authoritative for the courly side.
+
+The target cohort is Service tests that start the Service behind an **OS-level IO boundary** - a subprocess - and then wait on boot, dispatch, drain, crash, or framing behaviour. The wall-clock-timeout and child-exit-race failure modes that motivate the harness only apply when there's a real child process to race against.
+
+The libtest cohort that originally lived in `crates/app/tests/service_subprocess.rs` is fully migrated to Lua scripts under `crates/app/tests/service-harness/`.
+
+The `spawn_harness_with_suffix` family in `crates/service/tests/dispatch_in_process.rs` is **not** a migration target. It uses in-memory `tokio::io::duplex` pipes against `service::run_service_with_io` - no subprocess, no PID, no race against the OS scheduler. Wire-level parser tests (malformed JSON, oversized frames, invalid UTF-8) and protocol-level concerns (panicking handler, in-flight semaphore + heartbeat bypass) live there and are simpler to drive as in-process libtest. The boot-failure paths (`boot_sequence_returns_key_load_failure_when_key_file_is_missing`, `boot_sequence_returns_migration_failure_when_db_is_corrupt`) follow the same pattern.
+
+## Motivation
+
+Four failure modes break Service IO-boundary testing under a plain `#[tokio::test]` shape.
+
+**Wall-clock timeouts inside the test race the implementation's own ceilings.** A 1 s `health.ping` timeout in libtest races the Service's own 5 s timeout, the spawn-side `request_or_observe_child_exit` 50 ms poll, the OS scheduler, and the disk during a hot migration. Running a flaky shape 200 times averages noise rather than eliminating it.
+
+**Failure destroys diagnostic state.** `DataDirGuard::Drop` and `TestDataDir::Drop` clean up the test's app-data directory unconditionally, including on failure. SQLite WAL state, the lockfile, the key file, the `clean_shutdown` sentinel are all gone the moment the test fails. No `/proc` snapshot, no preserved frame log, no preserved Service stderr. Re-running with `dbg!` calls is the only path forward, and the bug may not reproduce.
+
+**`kill_on_drop(false)` orphans the Service when the test itself is killed.** `PR_SET_PDEATHSIG` and Windows Job Objects handle real parent-death cleanly, but a libtest timeout or `Ctrl-C` is not real parent-death from the Service's perspective.
+
+**The cohort facing this problem is large.** Phase 8 named ~15+ similarly-shaped real-subprocess tests planned across Phases 2-7. The `spawn_harness_with_suffix` cohort in `dispatch_in_process.rs` was in the same danger zone. Phase 8's planning notes put it directly: "building T1 against today's framework would mean rebuilding it once Phase 8's work lands."
+
+The harness fixes these by making waits deterministic by construction and by preserving a self-contained artefact directory on failure.
+
+## Brokkr context
+
+Brokkr is a single-binary Rust dev tool, **external to courly** - its source lives in a separate repository and it is installed via `cargo install --path ~/Programs/brokkr`. It is not a courly crate, not a workspace member, and not a build dependency. From courly's side, brokkr is a binary on `$PATH` invoked from any project root. Brokkr reads `./brokkr.toml` to detect the active project and exposes project-gated commands tagged `[courly]`. The harness commands (`service`, `sync`) are an extension of that surface.
+
+## Brokkr / courly split
+
+Two repositories. Courly's `app` crate hosts the Lua VM and the `ServiceClient` userdata bindings (the runtime); brokkr orchestrates from outside (build, spawn, artefact dir, history). Concretely:
+
+```
+brokkr service foo.lua
+    |
+    +-- builds [courly.harness].package (defaults: binary=package, dev profile per debug=true)
+    +-- allocates .brokkr/courly/<test>/run-N/ as artefact dir
+    +-- spawns: <project_root>/<target>/<profile>/<binary> --test-harness foo.lua
+    |       env: BROKKR_HARNESS_ARTEFACT_DIR=<artefact dir>
+    |            BROKKR_TEST_BIN_DIR=<bin dir>
+    +-- waits for child exit (sync, std::process::Command-level)
+    +-- preserves artefact dir on failure / non-zero exit
+```
+
+Inside `app --test-harness`:
+
+```
++-- dellingr Lua VM
++-- ServiceClient / SpawnEvent / ClientError userdata
++-- harness.* primitives (kill, pid_is_alive, http_*, marker, summary, ...)
++-- artefact writers (frames.jsonl, events.jsonl, steps.jsonl,
+    proc-*.txt, data-dir/, service.stderr, runtime-outcome.json) into
+    BROKKR_HARNESS_ARTEFACT_DIR
+```
+
+Brokkr's responsibilities at a glance: project gating + CLI surface, self-contained build of `[courly.harness].package` (no `[[check]]` cross-reference - bare `brokkr check` is blind to orchestration blocks), subprocess spawn + capture at `std::process::Command::output()` concurrency, per-run artefact directory lifecycle, script discovery (recursive over `crates/app/tests/service-harness/**/*.lua` with frontmatter parsing), soak (`-N`) and serial suite runners, history-DB recording, and an optional sidecar `/proc` profiler. None of this machinery is part of the harness contract - see Contract surface below.
+
+## Dependency direction
+
+**Both directions are off the table for source-level deps.** Courly must not depend on brokkr; brokkr must not depend on courly. Cross-process communication is by subprocess spawn + env vars only.
+
+The Lua VM and `ServiceClient` userdata bindings live in courly's `app` crate (already where `ServiceClient` is defined); courly takes an unconditional `dellingr` dep and exposes the runtime via `app --test-harness`. Brokkr orchestrates only: project gating, self-contained orchestration build, lockfile, per-run artefact-dir lifecycle, history-DB recording, soak/suite. Brokkr ships zero courly or dellingr deps; brokkr stays sync (no tokio).
+
+The harness needs `ServiceClient`'s typed classification (boot exit codes, `ClientError` variants, `SchemaVersionChanged { was, now }`, generation-tag tracking on notifications) - hundreds of lines of stateful protocol logic. Embedding it in brokkr would force tokio in and either a heavy `app`-crate dep or a parallel JSON-RPC client implementation. Hosting the VM in courly keeps the protocol logic where the protocol is.
+
+`ServiceClient` stays in `app`. A slim `crates/service-client` carve-out is a compile-time-hygiene refactor, not a correctness requirement; revisit only if a second crate genuinely needs the client API or compile-time profiling shows pressure.
+
+## Contract surface
+
+**What brokkr passes the harness binary at spawn:**
+
+- Argv: `app --test-harness <script.lua>` (script path; brokkr resolves it relative to the project root before passing).
+- Env var `BROKKR_HARNESS_ARTEFACT_DIR` - absolute path to the per-run artefact directory (brokkr creates it before spawning).
+- Env var `BROKKR_TEST_BIN_DIR` - absolute path to the directory containing the built `courly` binary. The parent-death test helper is a hidden mode of that same binary (`courly --parent-death-helper <service_binary> <data_dir>`), not a separate sibling executable - the harness build emits only the one configured `binary`, so folding the helper in keeps the capability from silently going missing when no separate helper bin is built.
+- The harness binary's stdout/stderr are piped by brokkr; brokkr writes them to `binary-stdout.log` and `binary-stderr.log` in the artefact dir after the process exits. The runtime can `println!` for human-readable progress, but that is not a structured protocol.
+
+**What brokkr expects in return:**
+
+- Exit code zero on test pass; non-zero on failure. Brokkr preserves the artefact dir on non-zero (or signal) and deletes it on zero unless the user passed `--keep-artefacts`. There is no other out-of-band signaling - no JSON stdout protocol, no shared memory, no inotify on the artefact dir.
+- Brokkr-owned artefacts (`run.toml`, copied script, `binary-stdout.log`, `binary-stderr.log`, `spawn-error.txt` on spawn failure) are written by brokkr. Runtime-owned artefacts (`frames.jsonl`, `events.jsonl`, `steps.jsonl`, `data-dir/`, `service.stderr`, `runtime-outcome.json`, Service `/proc` snapshots) are written by the harness module. Brokkr preserves but does not parse them in v1.
+
+**What the harness module does NOT need to interact with:**
+
+- Brokkr's history DB (`.brokkr/results.db`) - brokkr records the run outcome there automatically; the runtime is unaware of it.
+- Brokkr's sidecar `/proc` profiler - reusable later if a script opts into it, but not part of the v1 contract.
+- Brokkr's worktree machinery - worktrees aren't used for harness runs.
+- Brokkr's lockfile coordination - the lock acquires before spawn and releases after wait; the runtime sees neither.
+- Brokkr's source code - the contract is process-level, not source-level.
+
+If you find yourself wanting more from brokkr than argv, env vars, stdout/stderr capture, brokkr-owned artefacts, and exit status, **stop and surface it as an explicit design change** rather than reaching across the contract. Both this document and `notes/courly-service-harness.md` in the brokkr repo would need to change in lockstep.
+
+## Determinism rule
+
+Every wait has the shape:
+
+```
+wait(condition) until (condition_satisfied
+                     | child_terminated
+                     | declared_backstop_expires)
+```
+
+The first transition wins. The harness records which one fired in the test trace. Tests assert on the transition that should have fired; failure messages name the transition that actually did. Wall-clock must never become the primary signal - child-exit observation is.
+
+Backstops are still wall-clock - the harness can't escape physical time entirely - but they are explicit, named, generous, and only fire when a determinism bug elsewhere leaves the runtime with nothing else to wait on. A safety-backstop firing names a test-design or implementation-determinism bug, not a flake. Absence assertions (`expect_quiet`) use a separate observation-window verdict where the window expiring without the predicate firing is success.
+
+## Test scripts and the Lua API
+
+Tests are Lua scripts under `crates/app/tests/service-harness/` (and `crates/app/tests/sync-harness/` for provider sync coverage). The VM is `dellingr` (pure Rust, no FFI, no system Lua dep). Adding a test means adding a `.lua` file; no brokkr rebuild, and no harness-module rebuild unless the new test exercises a Lua API surface that does not yet exist.
+
+`graph-reaction-refresh.lua` uses the test-only `test.graph_aux_pass` request
+(params: `account_id`, `cycle`, `initial_sync_completed`) to seed the
+`graph_sync_cycle` settings counter through the same write path production
+uses, then drive exactly one resident auxiliary pass synchronously, acking on
+completion. That is what makes the every-fifth-cycle reaction refresh drivable
+at all: the production loop is a 5s-then-300s wall-clock timer that sync kicks
+never invoke, so without the affordance the gate would be a sleep race.
+
+Why dellingr: pure Rust, no system Lua dep; `HostCallbacks` redirects `print()` to per-test capture and hooks errors for the failure dump; `RustFunc` exposes `ServiceClient` methods directly as userdata; variable capture, loops, and conditionals come from the language. Dellingr's per-opcode cost accounting is **not** used for runaway-script abort - `while true do end` is free by design, so wall-clock is the right mechanism. Scripts may set frontmatter `-- ceiling: 60s`; omitted scripts use a sane default.
+
+Coverage claims live in the same initial frontmatter comment block. Use one line per contract ID:
+
+```
+-- @covers: architecture.folder_vs_label_semantics_are_explicit
+```
+
+The current coverage parser accepts repeated `-- @covers: id` lines, validates the ID grammar, and reports missing or unknown claims. It is read-only for now: missing claims are not harness-loader errors until a pilot area has been backfilled and strict mode is enabled for that area.
+
+The `harness` global exposes:
+
+- spawn helpers (`spawn`, `spawn_with_events`, `data_dir`),
+- process primitives (`kill`, `pid_is_alive`, `sleep`, `now_ms`),
+- assertions (`assert`, `assert_eq`, `same_client`, `expect_quiet`),
+- filesystem helpers (`path_exists`, `dir_has_prefix`, `read_json`, `read_text`, `read_base64`, `write_text`),
+- HTTP helpers (`http`, `http_get`, `http_post_json`, `http_delete`, `http_json`, `join_url`),
+- env access (`env`, `protocol_version`),
+- benchmarking helpers (`marker`, `write_summary`, `mock_requests`, `clear_mock_requests`, `request_count`, `request_count_prefix`, `snapshot_state`, `latency`, `set_latency`),
+- large-payload helpers (`stage_attachment`, `repeat_byte`).
+
+Client tables expose `request`, `request_async`, `shutdown`, `child_pid`, `current_generation`, `drop`, `notify`, `start_sync`, `start_calendar_sync`, `execute_calendar_plan`. Event streams expose `events:next(timeout_seconds)`. Async request handles expose `request:await(timeout_seconds)`.
+
+The `request` binding is registry-backed: Rust owns a request/response registry that maps Lua method names and argument tables onto `RequestParams` variants, decodes the typed response, and returns a plain Lua table. Bad method names, malformed argument tables, and mismatched response shapes fail in Rust with a structured harness error. New `RequestParams` variants become script-visible by adding entries to the registry. The harness binding never reimplements `ServiceClient` behaviour - it forwards.
+
+`SpawnEvent` is Lua userdata with three case constructors - `ChildSpawned { client }`, `BootReady { response }`, `Terminal { error }`. `ClientError` is Lua userdata with case-discriminating accessors so scripts can pattern-match without parsing strings.
+
+Notification payloads are the exception to typed request/response decoding: they expose a `serde_json::Value`-backed Lua view for `params` so scripts can filter on `notif.method == "X"`.
+
+Capability backlog (generic `wait_for`, full `NotificationQueue` userdata, sentinel-file watch, parent-death helper bindings, generic `wait_exit`, resource-budget summaries, parsed `frames.jsonl` payloads) is in TODO.md and lands when a future test names coverage those capabilities unblock.
+
+## Stable Service entrypoints (courly-side contract)
+
+`app --service --app-data-dir <dir>` is the canonical Service subprocess entrypoint. `app --test-harness <script.lua>` is its sibling.
+
+Test-only flags are intentional and unconditionally compiled in (courly is pre-release; there is no production binary surface to guard):
+
+- fake protocol version (`--test-fake-version=N`),
+- fake schema (`--test-fake-schema=N`),
+- slow request (`TestSlow { millis }`),
+- hang-on-stdin-EOF (`--test-hang-on-stdin-eof`),
+- println/framing canary (`TestPrintln { message }`),
+- boot-delay (`--test-boot-delay-ms=N`).
+
+Provider mock endpoints are env vars consulted on every provider boot; unset in normal use, set by the harness to redirect traffic to `saehrimnir`-hosted mocks:
+
+```
+COURLY_TEST_JMAP_ENDPOINT
+COURLY_TEST_IMAP_ENDPOINT
+COURLY_TEST_SMTP_ENDPOINT
+COURLY_TEST_GRAPH_ENDPOINT
+COURLY_TEST_GMAIL_ENDPOINT
+COURLY_TEST_CALDAV_ENDPOINT
+COURLY_TEST_CARDDAV_ENDPOINT
+COURLY_TEST_PEOPLE_ENDPOINT
+COURLY_TEST_GCAL_ENDPOINT
+```
+
+JMAP endpoints are passed as base URLs and the JMAP client discovers `/.well-known/jmap`; Graph origins map to `/v1.0` and `/beta`; Gmail origins map to `/gmail/v1/users/me`; IMAP and SMTP expect host:port. This lets brokkr pass per-run mock ports without changing persisted account config.
+
+`COURLY_TEST_GRAPH_ENDPOINT` also carries Autodiscover and EWS traffic: `saehrimnir` mounts the POX `/autodiscover/autodiscover.xml` and SOAP `autodiscover.svc` / EWS routes on the same Graph listener in addition to its dedicated EWS listener, and conduit's Autodiscover / EWS base derives from the Graph api-base override when set, mirroring the existing Gmail / GCAL / People harness-redirect seams. There is no separate EWS env var; a script that needs delegate discovery or public-folder sync reaches both surfaces through the one Graph endpoint.
+
+The sync-harness request surface includes `test.start_sync` / `TestStartSync` (kicks the real Service sync runtime - initial when `accounts.initial_sync_completed = 0`, then delta), `test.query_db_state` / `TestQueryDbState` (returns account, label, thread, message, attachment, calendar, contact, contact-group, credential, and bounded small-row snapshots for assertions), and the calendar-action counterparts. Lua scripts that need the terminal sync result call `client:start_sync({ account_id = ... })`, which routes through `ServiceClient::start_sync` and consumes raw `sync.completed` frames in the waiter map (they are not delivered to `client:notifications()`).
+
+A second sync-harness request family - `test.conduit_attach` / `test.conduit_inject_batch` / `test.conduit_arm_hook` / `test.conduit_probe` (the `TestConduit*` requests) - drives the additive conduit change-stream consumer (`crates/service/src/conduit/consumer/`) directly, with NO real provider fetch: `conduit_attach` stands up the engine + consumer over a fixture account and returns a `session_id`, `conduit_inject_batch` feeds one SYNTHETIC `SyncEvent::Batch` through the real hydrate -> write -> post-persist -> search-flush -> ack pipeline, `conduit_arm_hook` arms a one-shot stall/crash for the durability gates, and `conduit_probe` reads back the durable cursor / seen-counter / searchable-doc / marker state. The `conduit-consumer-*` scripts (`lag-recovery`, `crash-before-ack`, `search-durability`, `checkpoint-resume`, `completion-cadence`, `hot-path`) under `crates/app/tests/sync-harness/` use this family. The `TestConduit*` family itself drives no production fetch (it injects synthetic batches), but the consumer it exercises is now a PRODUCTION path for JMAP, Graph, Gmail, and IMAP production sync. The production JMAP path is gated by its own `jmap-*` sync-harness scripts (which drive real provider sync against `saehrimnir`) and `jmap-production-lag-backoff.lua`; the production Graph path by `graph-initial.lua`, the `graph-steady-state-delta.lua` sync `--bench` (the `graph_steady_state_delta` gate), the `graph_consumer_membership_equals_legacy` golden + `hydrate_change_graph_category_and_importance_mapping` / `graph_drive_reconciles_move`-`purge` service tests, and the existing `graph-attachment-*` / `graph-master-category-label-sync` scripts (contacts no longer ride this change-stream consumer - the resident-aux contact pull is gated separately, `crates/app/tests/sync-harness/contacts/`, per the B8 landing commit); the production Gmail path by `gmail-initial.lua`, the `gmail-steady-state-delta.lua` sync `--bench`, `gmail-incremental-steps.lua`, `gmail-production-lag-backoff.lua`, the `gmail_consumer_membership_equals_legacy` golden + the Gmail hydrate-mapping service test, and the existing `gmail-attachment-*` / `gmail-oauth-multi-account` / `gmail-send-as-multi-account-import` scripts. For the consumer's durability contract read the conduit-migration B3a-infra landing commit, and for the per-provider production wiring read the B3a-cut-jmap, B3a-cut-graph, B3a-cut-gmail, and B3a-cut-imap landing commits.
+
+The conduit B3b push landing then inverted this lifecycle to keep-attached (the engine stays `attach`ed across kicks with one resident `account_changes_stream` consumer per slot) and lit up push across all four providers, adding new sync-harness gates: the per-transport push scripts `jmap-push-websocket.lua` / `imap-push-idle.lua` (in-process forwarder + reconciler) and `gmail-push-pubsub.lua` / `graph-push-webhook.lua` (the Service-owned out-of-process `push_ingress/` module) each deliver a mock push and assert the resident consumer persists the change at push latency rather than waiting a poll interval, and `conduit-consumer-sustained-push-bound.lua` pins the Graph move-vs-purge / IMAP threading / deferred-ack accumulator and ack-deferral bound under continuous push with no quiescence window. These required new `saehrimnir` push affordances - JMAP WebSocket `StateChange` push frames, a Gmail Pub/Sub source plus the `users.watch` / `users.stop` endpoints, and Graph `POST /subscriptions` (echo `validationToken`) + a notification POST to the registered loopback `notification_url` - and a harness-mode ingress validation bypass keyed to the mock's signing material, so no real Google/Microsoft endpoint is needed. For the keep-attached lifecycle and push wiring read the B3b landing commit.
+
+The conduit B3c control/recovery landing then wired the resident slot's pause/recovery surface, adding new sync-harness gates plus a test hook. `jmap-terminated-mid-sync-fails.lua` seeds a JMAP account that is valid at attach, then drives a mid-sync `SyncEvent::Terminated`, asserting the in-flight `start_sync` resolves `result == "failed"` (not a hang) and a follow-up kick fails fast while the slot is parked. `jmap-pause-resume.lua` drives a REAL engine `RetryBudgetExhausted` pause (saehrimnir budget exhaustion via the `jmap-changes-budget-exhaustion.lua` fixture, forcing every account reopen to fail so the three-attempt budget exhausts) so an `AccountControl::Pause` actually transits the engine's `account_control_stream` and the new `resident_control_loop` subscription - it asserts a `sync.account_paused` (`Notification::AccountPaused`) frame is observed and the account is parked, then resumes (re-auth or the new `sync.resume_account` request) and asserts a subsequent kick reaches `completed`. The `TestConduit*` family gained a `ForceTerminated { recovery }` hook (`TestConduitHook::ForceTerminated`, mirroring `ForceLag`) that injects a mapped terminal failure on the next event without provider/mock timing; it may SUPPLEMENT but never solely drive a pause gate, because a consumer hook bypasses the real `account_control_tx` broadcast and the subscription. `conduit_probe` gained `resident_redrive_total` / `resident_redrive_attempt` fields read off the live `ResidentEngine` slot, and `conduit-consumer-lag-recovery.lua` + `jmap-production-lag-backoff.lua` are extended to assert the bounded exponential backoff re-drives without hot-looping and that a clean caught-up edge resets the attempt counter. The new `sync.resume_account` request (`SyncResumeAccount`) clears a paused-account latch and resumes the attached boundary. For the control / pause / recovery wiring read the B3c landing commit.
+
+The B4a action-pipeline landing then rewired the email-action mutation dispatch off the per-provider `ProviderOps` surface and onto the resident `SyncEngine`, so the action-write gates now exercise the engine path rather than a per-batch provider client. Three new per-provider round-trip gates - `jmap-action-writeback.lua`, `graph-action-writeback.lua`, and `gmail-action-writeback.lua` - drive the real action pipeline (`ActionExecutePlan` -> resident-engine mutation passthrough) against `saehrimnir` and verify each action by SERVER ROUND-TRIP, not by matching the provider's internal wire-op string: each asserts the `action.completed` summary shows the op dispatched REMOTELY (`remote_succeeded >= 1`, `remote_failed == 0`, `local_only == 0` - so a silent local-only degrade that never reached the provider is caught), then resyncs the account and asserts the server-side state reflects the mutation. The existing IMAP write-back scripts are held green across the cut: `imap-writeback-flags.lua` still pins the flag write-back (now via the engine), and `imap-writeback-move-delete.lua` was rewired to verify move/delete by the same server round-trip - dropping its old `UID COPY` / `UID STORE` / `EXPUNGE` request-count needles, because conduit performs moves via the atomic RFC 6851 UID MOVE and a wire-op needle would be both brittle and wrong. The IMAP write-back path depends on a schema prerequisite this cut also landed: an `imap_uidvalidity` column on the `messages` table, populated at consumer hydrate time (the consumer now keeps the `uidvalidity` it previously dropped out of the decoded IMAP object id), so the action service can reconstruct a valid IMAP `ObjectId` (`imap1:<len>:<folder>:<uidvalidity>:<uid>`) for write-back; Gmail/JMAP/Graph object ids round-trip from the stored provider message id and need no schema change. For the action-dispatch rewire read the B4a landing commit.
+
+The conduit B12 shared-mailbox / public-folder landing added the namespace scripts under `crates/app/tests/sync-harness/`: `imap-shared-folder-sync.lua`, `imap-shared-folder-revoked.lua`, and `imap-shared-folder-added-after-attach.lua` drive an ACL-shared IMAP folder (`shared-imap-small.toml` / `imap-acl-lifecycle.toml`) through discovery, revocation, and a late-appearing grant; `graph-shared-mailbox-sync.lua`, `graph-delegate-discovery.lua`, `graph-shared-mailbox-action-writeback.lua`, `graph-public-folder-sync.lua`, `graph-public-folder-unpinned-zero-fetch.lua`, and `graph-public-folder-read-only.lua` drive the Graph delegate-mailbox and public-folder surfaces (`shared-graph-small.toml`, `public-folder-small.toml`) through the co-mounted Autodiscover/EWS routes described above; `jmap-shared-account-sync.lua` drives a non-personal JMAP session account (`shared-jmap-small.toml`) through hydration and a rejected foreign mutation; and `push-namespaces.toml` extends `graph-push-webhook.lua` / `imap-push-idle.lua` to prove personal push survives a shared mailbox and a public folder on the same account. All of them route through the service's `ContainerIndex` (`crates/service/src/conduit/containers.rs`), which attributes every consumer batch to a `NamespaceAttribution` from the container's scope rather than from engine membership tags. For the namespace projection, the container index, and the action-layer preflight, read the B12 landing commit. The namespaced COST contract rides two sync `--bench` gates added post-B12: `graph_shared_mailbox_steady_state` (`graph-shared-mailbox-steady-state.lua`, one mail delta per folder - personal and foreign - per kick, no per-kick delegate rediscovery) and `graph_public_folder_steady_state` (`graph-public-folder-steady-state.lua`, one EWS `FindItem` watermark poll per PINNED public folder, none for unpinned ones - the request count scales with the pin count, never the hierarchy size). The personal-account budgets are protected the other way around: the IMAP per-kick slot rebuild (the only channel a post-attach ACL grant surfaces through) is gated on conduit's `AccountCapabilities::foreign_namespaces_advertised`, so a personal-only server never pays it, and the steady-state scripts wait out the resident aux pass (5s after attach) before clearing the mock log so the measured window is the delta kick alone.
+
+The B8-groups landing added the directory-group scripts under `crates/app/tests/sync-harness/contacts/`, all three on the Lua fixture `graph-groups.lua`: `graph_groups_pull.lua` (the `graph_groups_pull` sync `--bench` gate - one explicit `test.group_pull` after the resident aux window is fenced out and cleared, asserting the three imported groups' type mapping, id shape, lowercased `member_emails`, and an exact provider-request budget), `graph_groups_reconcile.lua` (four pulls across two change-script steps: prune-stale plus member replace, then a scripted TRANSIENT expansion failure that must keep existing member rows, then a scripted enumeration permission failure that must error with zero writes, then a JMAP account proving `supported == false` is distinguishable from a clean delete-all), and `graph_groups_cadence.lua` (the only gate on the production wiring - it never issues `test.group_pull` and instead waits for `run_aux_pass`'s cycle-zero pull, then asserts the `directory_groups` cadence counter advanced independently of the contact-pull counters). The two failure windows are armed from the fixture's `on("graph", ...)` callbacks keyed on `req.call_index`; the fixture header documents the call-index arithmetic, including that saehrimnir aliases `/members`, `/transitiveMembers` and the `microsoft.graph.user` cast to ONE `list_group_members` counter, and that the cycle-zero aux pull is numbered first. `test.group_pull` / `TestGroupPull` and the `member_emails` field on `TestQueryDbState`'s contact-group rows were added for these gates; the `settings` rows on the same ack back the cadence-counter assertion.
+
+## Deterministic app-data fixtures
+
+Brokkr does not create app-data directories itself - Lua scripts do. `harness.data_dir(suffix, with_key)` creates a per-run app-data directory and, by default, a deterministic non-zero `courly.key`. The missing-key wedge passes `false`.
+
+`TestSeedAccount` (and friends) creates accounts, labels, and FK-constrained adjacent rows. This must not rely on the dev app's "wipe and seed on every launch" behavior - some tests need to shut down and respawn against the same data directory.
+
+## Trace schema
+
+Trace files are JSONL with versioned records. Each top-level record carries `schema = 1`.
+
+`frames.jsonl`:
+
+```
+{ "schema": 1, "ts_ms": 123, "direction": "in" | "out",
+  "raw_redacted": "...", "raw_len": 456, "raw_sha256": "...",
+  "parsed": { ... } | null }
+```
+
+The writer emits `raw_redacted`, never `raw`. Structural redaction is the default posture for strings above a chosen threshold (`<redacted len=N>`). `parsed` is currently always `null`; structural parsed redaction (per-`RequestParams` field allowlist) is future hardening before any credentialed script lands.
+
+`events.jsonl`:
+
+```
+{ "schema": 1, "ts_ms": 123, "event": { ... } }
+```
+
+`event` is the typed `SpawnEvent` serialization.
+
+`steps.jsonl`:
+
+```
+{ "schema": 1, "ts_ms": 123, "step": "...",
+  "kind": "spawn" | "request" | "expect_quiet" | "...",
+  "transition": "started" | "ok" | "error" | "quiet" | "event" | "..." }
+```
+
+When failure-triage tooling starts reading these files, factor the schemas into serde structs and keep readers tolerant of unknown fields for forward compatibility.
+
+## Failure model
+
+When a test fails, brokkr preserves a self-contained artefact dir at `.brokkr/courly/<test-name>/<run-N>/`. Brokkr writes the run metadata (`run.toml`, copied script, `binary-stdout.log`, `binary-stderr.log`, `spawn-error.txt`); the runtime writes Service diagnostics:
+
+- `frames.jsonl` - every JSON-RPC frame, both directions, timestamped from spawn. Single most useful artefact for drain-ordering / framing bugs.
+- `events.jsonl` - every spawn/runtime event observed (`ChildSpawned`, `BootReady`, `Terminal`).
+- `steps.jsonl` - the test's step trace.
+- `service.stderr` - Service stderr verbatim, per-run, not race-mingled with test stdout.
+- `proc-{status,wchan,syscall,stack}.txt` - Linux best-effort `/proc` snapshot at failure-declaration time. Distinguishes "blocked on futex" from "blocked on closed pipe" without re-running.
+- `data-dir/` - copy of the test's app-data dir at failure time (SQLite WAL state, lockfile, key file, `clean_shutdown` sentinel).
+- `runtime-outcome.json` - runtime-side exit reason (clean, harness-killed-on-backstop, child-exited, signal, etc.).
+
+On success, the artefact directory is deleted unless `--keep-artefacts` is passed.
+
+The data dir copy, protocol/step trace, and `/proc` snapshot for real subprocesses are the pieces of state that today's tokio-test pattern destroys or never records (`DataDirGuard::Drop` / `TestDataDir::Drop` unconditional cleanup; no structured frame/step capture). Recovering them is the largest single jump in debug ergonomics: the difference between "the test hung, re-run with verbose logging" and "the writer task exited at frame 47 while the shutdown handler was awaiting an `ack` that the dispatch loop's in-flight counter shows is still parked at 1."
+
+## Brokkr CLI surface
+
+```
+brokkr service                                          # list discovered scripts + frontmatter
+brokkr service <SCRIPT>                                 # run one, PASS/FAIL
+brokkr service <SCRIPT> -N 200                          # single-script soak
+brokkr service <DIR> -N 50                              # cohort cycles
+brokkr service --all [--filter X] [-N 50]               # run everything against one shared build
+brokkr sync                                             # list discovered sync-harness scripts
+brokkr sync <SCRIPT>                                    # run one, PASS/FAIL
+brokkr sync --all [--filter X] [--include-ignored]      # run every discovered script
+brokkr sync <SCRIPT> --bench [N]                        # measure one (N defaults to 3)
+brokkr sync <SCRIPT> --gate <name> --bench [N]          # measure against a checked-in gate
+brokkr sync --gate all --bench [N]                      # sweep every configured gate
+```
+
+Brokkr does not embed the Lua VM or `ServiceClient`; it never speaks JSON-RPC over the wire.
+
+Both harness commands collapsed a former three-command surface into one, following brokkr's
+bare-is-an-index convention (like `results`, `man`, `deps`): bare lists, a `SCRIPT` argument
+runs, `--all` sweeps. The old names are gone, not aliased.
+
+- `brokkr service` replaced `service-test` / `service-suite` / `service-list` (brokkr
+  `acd89f6`). Flags keep their meanings (`-N`, `--filter`, `--keep-going`,
+  `--include-ignored`, `--keep-artefacts`, `--debug`/`--release`) but are parse-time
+  enforced: run-shape flags require a `SCRIPT` or `--all`, and `--filter` /
+  `--include-ignored` require `--all`. Service runs were never recorded in `results.db`, and
+  artefact layout, ceiling semantics, fixture lifecycle, and the stop-on-first-failure
+  cohort default are all unchanged. Cohort output is ONE line per run -
+  `[cycle c/C][N/total] PASS <name> in Xms` as each script exits; the per-script
+  `running <name>` pre-line and the `harness build ok` echo are gone, so a hung script is
+  silent until its ceiling fires. Use `brokkr lock` from another shell for live progress
+  plus the PID. See `brokkr man service`.
+- `brokkr sync` replaced `sync-list` / `sync-smoke` / `sync-bench`. Its `--all` sweep builds
+  the harness once before the loop (formerly one no-op cargo invocation per script - about a
+  minute of a 160-script sweep) and prints the same one `name: PASS/FAIL` line per script;
+  the exit error names failures without repeating their messages. See `brokkr man sync`.
+
+- `--all [--filter X] [--include-ignored]` is the unmeasured sweep - the sync counterpart to
+  `service --all`. Discovery walks `[courly] sync_script_dir` (default
+  `crates/app/tests/sync-harness`). `--filter` substring-matches the discovered script name,
+  not its path. Scripts carrying `ignored` frontmatter are skipped unless `--include-ignored`
+  is passed. An empty discovery directory, or a `--filter` that matches nothing, is a hard
+  error. Each script gets its own run dir, so KEEP-GOING is the default here - the opposite of
+  `service --all` - because a later script's failure cannot clobber an earlier one's triage
+  artefacts. `--all` conflicts with a `SCRIPT` argument and with `--bench` (best-of-N across
+  unrelated scripts is meaningless).
+- `--bench [N]` measures one script (bare `--bench` defaults to N=3). `--force` and
+  `--commit <REF>` both require `--bench`. `--debug` / `--release` are mutually exclusive.
+- `--gate <name>|all` requires `--bench` - a gate rule compares measured numbers, so an
+  unmeasured run has nothing to evaluate against. `--gate all` sweeps every gate configured
+  under `[courly.gate.*]` in name order (stable reports); passing a `SCRIPT` alongside
+  `--gate all` is an error, since each gate already supplies its own script from config. Every
+  gate's script is existence-checked up front, before anything builds, so a typo in a late gate
+  surfaces immediately rather than after a long sweep. A breach does not stop a `--gate all`
+  sweep - all failures are collected and reported, exit non-zero. `--gate all` composes with
+  `--commit` (the worktree wraps the whole sweep, for bisecting every gate at one ref),
+  `--force`, `--keep-artefacts`, and `--debug`/`--release`.
+- `--as-baseline` requires `--gate` and is hard-refused with `--gate all` (before any build) -
+  repinning is a per-gate decision, and a cohort rebase would re-anchor every baseline-relative
+  rule at once onto whatever the tree happens to measure, with no per-gate pause to notice a
+  regression being blessed. A gate literally named `all` is refused at config load, since it
+  would be unselectable against the reserved value.
+- `results.db` auto-migrates v17 to v18 on first open under the new command, rewriting the
+  stored `command` and the `brokkr_args` substring together so historical rows still pair
+  under `--compare`; `brokkr results --command sync-bench` becomes `--command sync` (rows
+  still carry `mode = bench`). `gate.db` has no command column, so it needed no migration and
+  nothing in it references the old names.
+
+## Reading a moved number
+
+Two rules for interpreting a gate whose measurement has shifted. Both are about
+measurement rather than code, and both were learned by getting them wrong first.
+
+**A request-count regression is not proof of a code regression.** Attribute only
+after running the comparison at the parent commit. A Graph gate once read 4
+against a documented 2 and looked like the same defect as a genuine IMAP
+regression measured the same afternoon; a run at the parent commit measured 4
+there too. The extra pair was the resident auxiliary pass firing five seconds
+after attach, inside the measured window - a script that fenced its window too
+loosely, not a code change. The fix belonged in the script.
+
+**When a gate's `baseline_label` and its measurement disagree, the label is the
+evidence and the measurement is the claim.** `gate.db` holds the numbers but
+lives outside git, so the label is the only durable record of what a metric
+SHOULD read and why. Write labels that say what the number is made of (which
+requests, which window, what is amortized), because that sentence is what a
+future reader has to reason against. Repin a baseline only when you can state
+why the new number is correct - never to make a red gate green.
+
+## Out of scope
+
+- **Replacing courly's correctness assertions.** The Lua scripts drive `ServiceClient` methods and assert on returned values; they don't bypass courly's invariants.
+- **Speaking JSON-RPC from brokkr.** `ServiceClient` lives in courly; brokkr spawns the binary that embeds it and never parses the wire.
+- **Replacing `brokkr test`.** The cargo single-test runner stays. Service IO-boundary tests use the new harness; everything else uses `brokkr test`.
+- **Fixing the underlying Service bugs.** The harness exists to make bugs deterministic and diagnosable, not to hide them. The Service side owns the drain-ordering / class-aware emit / crashloop fixes.
+- **Migrating every existing tokio test.** The new harness coexists with libtest. Unit-style `#[tokio::test]` functions stay there. The migration target is the Service IO-boundary cohort.
+- **Owning the mock servers.** Sync-bench reuses the artefact / lockfile / history machinery and the harness binary, but protocol mocks live in `../saehrimnir` and orchestration lives in brokkr. Courly owns only the test-only endpoint overrides, sync-trigger requests, and sync-harness scripts.
+- **CI-only features.** First user is a local developer root-causing a flake. CI integration follows once the local story works.

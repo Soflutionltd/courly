@@ -1,0 +1,512 @@
+use super::{WriteTarget, WriterPool};
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+
+// ── Types ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingOperation {
+    pub id: String,
+    pub account_id: String,
+    pub operation_type: String,
+    pub resource_id: String,
+    pub params: String,
+    pub status: String,
+    pub retry_count: i64,
+    pub max_retries: i64,
+    pub next_retry_at: Option<i64>,
+    pub created_at: i64,
+    pub error_message: Option<String>,
+}
+
+fn row_to_pending_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<PendingOperation> {
+    Ok(PendingOperation {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        operation_type: row.get("operation_type")?,
+        resource_id: row.get("resource_id")?,
+        params: row.get("params")?,
+        status: row.get("status")?,
+        retry_count: row.get("retry_count")?,
+        max_retries: row.get("max_retries")?,
+        next_retry_at: row.get("next_retry_at")?,
+        created_at: row.get("created_at")?,
+        error_message: row.get("error_message")?,
+    })
+}
+
+// ── Backoff schedules (seconds) ──────────────────────────────
+
+/// Default backoff for most actions.
+const BACKOFF_DEFAULT: &[i64] = &[60, 300, 900, 3600];
+
+/// Aggressive backoff for folder-level actions (archive, trash, spam, move, delete).
+/// Silent divergence is the #1 user-visible bug, so retry sooner.
+const BACKOFF_FOLDER: &[i64] = &[30, 120, 300, 900, 3600];
+
+/// Light backoff for flag-level actions (star, read) - sync reconciles these.
+const BACKOFF_FLAG: &[i64] = &[60, 300, 900];
+
+/// Look up the backoff schedule for an operation type.
+fn backoff_schedule(operation_type: &str) -> &'static [i64] {
+    match operation_type {
+        "archive" | "trash" | "spam" | "moveToFolder" | "permanentDelete" => BACKOFF_FOLDER,
+        "star" | "markRead" => BACKOFF_FLAG,
+        _ => BACKOFF_DEFAULT,
+    }
+}
+
+// ── Commands ─────────────────────────────────────────────────
+
+/// Enqueue a pending operation, replacing any existing pending/executing op
+/// for the same `(account_id, resource_id, operation_type)`.
+///
+/// This is atomic (single connection hold): delete old + insert new.
+/// Handles both deduplication and directional updates (e.g., spam→unspam
+/// replaces the old params rather than being dropped as a duplicate).
+#[allow(clippy::too_many_arguments)]
+pub fn db_pending_ops_enqueue_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+    account_id: &str,
+    operation_type: &str,
+    resource_id: &str,
+    params_json: &str,
+    max_retries: i64,
+) -> Result<(), String> {
+    // Replace any existing pending/executing op for this resource+type.
+    // This prevents duplicates AND ensures directional actions (spam,
+    // star, markRead) get their params updated to the latest intent.
+    conn.execute(
+        "DELETE FROM pending_operations \
+         WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+           AND status IN ('pending', 'executing')",
+        params![account_id, resource_id, operation_type],
+    )
+    .map_err(|e| format!("replace pending op: {e}"))?;
+
+    conn.execute(
+        "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status, max_retries)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+        params![id, account_id, operation_type, resource_id, params_json, max_retries],
+    )
+    .map_err(|e| format!("enqueue pending op: {e}"))?;
+    Ok(())
+}
+
+pub async fn db_pending_ops_get(
+    db: &WriterPool,
+    account_id: Option<String>,
+    limit: Option<i64>,
+) -> Result<Vec<PendingOperation>, String> {
+    db.with_write(move |conn| {
+        let lim = limit.unwrap_or(50);
+        let now = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_secs(),
+        )
+        .map_err(|_| "current time exceeds i64 range".to_string())?;
+
+        if let Some(ref aid) = account_id {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT * FROM pending_operations
+                         WHERE account_id = ?1 AND status = 'pending'
+                           AND (next_retry_at IS NULL OR next_retry_at <= ?2)
+                         ORDER BY created_at ASC LIMIT ?3",
+                )
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(params![aid, now, lim], row_to_pending_op)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT * FROM pending_operations
+                         WHERE status = 'pending'
+                           AND (next_retry_at IS NULL OR next_retry_at <= ?1)
+                         ORDER BY created_at ASC LIMIT ?2",
+                )
+                .map_err(|e| e.to_string())?;
+            stmt.query_map(params![now, lim], row_to_pending_op)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        }
+    })
+    .await
+}
+
+pub fn db_pending_ops_update_status_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE pending_operations SET status = ?1, error_message = ?2 WHERE id = ?3",
+        params![status, error_message, id],
+    )
+    .map_err(|e| format!("update op status: {e}"))?;
+    Ok(())
+}
+
+pub fn db_pending_ops_delete_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete op: {e}"))?;
+    Ok(())
+}
+
+/// Cancel pending ops for a specific resource and operation type.
+/// Used by undo to prevent retried actions from re-executing after undo.
+/// Catches both 'pending' and 'executing' status - but cannot stop an
+/// already in-flight provider call.
+/// Synchronous writer-side form used by the Service notification handler.
+pub fn db_pending_ops_cancel_for_resource_sync(
+    conn: &impl WriteTarget,
+    account_id: &str,
+    resource_id: &str,
+    operation_type: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM pending_operations \
+         WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+           AND status IN ('pending', 'executing')",
+        params![account_id, resource_id, operation_type],
+    )
+    .map_err(|e| format!("cancel pending op: {e}"))?;
+    Ok(())
+}
+
+pub fn db_pending_ops_increment_retry_sync(
+    conn: &impl WriteTarget,
+    id: &str,
+) -> Result<(), String> {
+    let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
+        .query_row(
+            "SELECT retry_count, max_retries, operation_type FROM pending_operations WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get("retry_count")?,
+                    row.get("max_retries")?,
+                    row.get("operation_type")?,
+                ))
+            },
+        )
+        .map_err(|e| format!("get retry info: {e}"))?;
+
+    let new_count = retry_count + 1;
+    if new_count >= max_retries {
+        conn.execute(
+            "UPDATE pending_operations SET status = 'failed', retry_count = ?1 WHERE id = ?2",
+            params![new_count, id],
+        )
+        .map_err(|e| format!("mark failed: {e}"))?;
+        crate::db::queries_extra::delete_pending_thread_label_intents_for_action(conn, id)?;
+        log::warn!(
+            "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
+             {new_count}/{max_retries} - left for sync reconciliation"
+        );
+        return Ok(());
+    }
+
+    let schedule = backoff_schedule(&operation_type);
+    let retry_idx = usize::try_from(new_count - 1)
+        .map_err(|_| format!("invalid retry count for pending op {id}: {new_count}"))?;
+    let delay_sec = schedule
+        .get(retry_idx)
+        .copied()
+        .or_else(|| schedule.last().copied())
+        .unwrap_or(60);
+    let now = now_epoch()?;
+    let next_retry_at = now + delay_sec;
+
+    conn.execute(
+        "UPDATE pending_operations SET retry_count = ?1, next_retry_at = ?2, status = 'pending' WHERE id = ?3",
+        params![new_count, next_retry_at, id],
+    )
+    .map_err(|e| format!("increment retry: {e}"))?;
+    Ok(())
+}
+
+fn now_epoch() -> Result<i64, String> {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs(),
+    )
+    .map_err(|_| "current time exceeds i64 range".to_string())
+}
+
+/// Reset any operations stuck in 'executing' back to 'pending'.
+/// Called at startup to recover from crash/forced quit.
+pub fn db_pending_ops_recover_executing_sync(conn: &impl WriteTarget) -> Result<i64, String> {
+    let count = conn
+        .execute(
+            "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
+            [],
+        )
+        .map_err(|e| format!("recover executing ops: {e}"))?;
+    let count = i64::try_from(count).map_err(|_| "row count exceeds i64 range".to_string())?;
+    if count > 0 {
+        log::warn!("[pending_ops] Recovered {count} stranded executing operations");
+    }
+    Ok(count)
+}
+
+/// Synchronous DB-only boot recovery callable from the Service's
+/// `spawn_blocking` boot sequence (no `ActionContext` required).
+///
+/// Resets stranded `pending_operations.status = 'executing'` rows to
+/// 'pending' and resurfaces stale `local_drafts.sync_status = 'sending'`
+/// rows as 'failed'. This is the canonical home for the function;
+/// `service::actions::pending::recover_on_boot` is the async sister that
+/// Phase 2's relocated periodic drainer continues to call against the
+/// `ActionContext`-shaped API.
+pub fn db_pending_ops_recover_on_boot_sync(conn: &impl WriteTarget) -> Result<(), String> {
+    let pending_count = conn
+        .execute(
+            "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
+            [],
+        )
+        .map_err(|e| format!("recover executing ops: {e}"))?;
+    if pending_count > 0 {
+        log::info!("[pending_ops] Recovered {pending_count} stranded executing operations on boot");
+    }
+
+    let drafts_count = conn
+        .execute(
+            "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'sending'",
+            [],
+        )
+        .map_err(|e| format!("recover sending drafts: {e}"))?;
+    if drafts_count > 0 {
+        log::info!("[pending_ops] Recovered {drafts_count} stale 'sending' drafts on boot");
+    }
+
+    Ok(())
+}
+
+/// Queue a trash for every thread trashed locally while the server still
+/// holds its messages in the inbox and none in the trash. Those are trashes
+/// the provider refused before refused actions were undone locally;
+/// replaying them lines the server up with what the user did.
+pub fn db_pending_ops_requeue_unsent_trash_sync(conn: &impl WriteTarget) -> Result<usize, String> {
+    let queued = conn
+        .execute(
+            "INSERT INTO pending_operations
+                 (id, account_id, operation_type, resource_id, params, status, max_retries)
+             SELECT lower(hex(randomblob(16))), tf.account_id, 'trash', tf.thread_id, '{}',
+                    'pending', 10
+             FROM thread_folders tf
+             WHERE tf.folder_id = 'TRASH'
+               AND NOT EXISTS (
+                   SELECT 1 FROM thread_folders inbox
+                   WHERE inbox.account_id = tf.account_id
+                     AND inbox.thread_id = tf.thread_id
+                     AND inbox.folder_id = 'INBOX')
+               AND EXISTS (
+                   SELECT 1 FROM messages m
+                   JOIN message_folders mf
+                     ON mf.account_id = m.account_id AND mf.message_id = m.id
+                   WHERE m.account_id = tf.account_id
+                     AND m.thread_id = tf.thread_id
+                     AND mf.folder_id = 'INBOX')
+               AND NOT EXISTS (
+                   SELECT 1 FROM messages m
+                   JOIN message_folders mf
+                     ON mf.account_id = m.account_id AND mf.message_id = m.id
+                   WHERE m.account_id = tf.account_id
+                     AND m.thread_id = tf.thread_id
+                     AND mf.folder_id = 'TRASH')
+               AND NOT EXISTS (
+                   SELECT 1 FROM pending_operations queued
+                   WHERE queued.account_id = tf.account_id
+                     AND queued.resource_id = tf.thread_id
+                     AND queued.operation_type = 'trash'
+                     AND queued.status IN ('pending', 'executing'))",
+            [],
+        )
+        .map_err(|e| format!("requeue unsent trash: {e}"))?;
+    if queued > 0 {
+        log::info!("[pending_ops] Requeued {queued} trash actions the server never applied");
+    }
+    Ok(queued)
+}
+
+#[cfg(test)]
+mod boot_recovery_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn make_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "
+            CREATE TABLE pending_operations (
+                id TEXT PRIMARY KEY,
+                account_id TEXT,
+                operation_type TEXT,
+                resource_id TEXT,
+                params TEXT,
+                status TEXT,
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 5
+            );
+            CREATE TABLE local_drafts (
+                id TEXT PRIMARY KEY,
+                account_id TEXT,
+                sync_status TEXT
+            );
+            ",
+        )
+        .expect("schema setup");
+        conn
+    }
+
+    fn write(conn: &Connection) -> crate::db::WriteConn<'_> {
+        crate::db::WriteConn::from_raw(conn)
+    }
+
+    #[test]
+    fn requeues_only_trashes_the_server_never_applied() {
+        let conn = make_conn();
+        conn.execute_batch(
+            "
+            CREATE TABLE thread_folders (thread_id TEXT, account_id TEXT, folder_id TEXT);
+            CREATE TABLE messages (id TEXT, account_id TEXT, thread_id TEXT);
+            CREATE TABLE message_folders (account_id TEXT, message_id TEXT, folder_id TEXT);
+            -- refused: trashed here, still in the server inbox
+            INSERT INTO thread_folders VALUES ('refused', 'a', 'TRASH');
+            INSERT INTO messages VALUES ('m1', 'a', 'refused');
+            INSERT INTO message_folders VALUES ('a', 'm1', 'INBOX');
+            -- applied: the server already moved it
+            INSERT INTO thread_folders VALUES ('applied', 'a', 'TRASH');
+            INSERT INTO messages VALUES ('m2', 'a', 'applied');
+            INSERT INTO message_folders VALUES ('a', 'm2', 'TRASH');
+            -- kept: still in the local inbox
+            INSERT INTO thread_folders VALUES ('kept', 'a', 'INBOX');
+            INSERT INTO messages VALUES ('m3', 'a', 'kept');
+            INSERT INTO message_folders VALUES ('a', 'm3', 'INBOX');
+            ",
+        )
+        .expect("fixtures");
+
+        assert_eq!(
+            db_pending_ops_requeue_unsent_trash_sync(&write(&conn)).expect("requeue"),
+            1
+        );
+        assert_eq!(
+            db_pending_ops_requeue_unsent_trash_sync(&write(&conn)).expect("requeue again"),
+            0
+        );
+        let queued: String = conn
+            .query_row(
+                "SELECT resource_id FROM pending_operations WHERE operation_type = 'trash'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("queued trash");
+        assert_eq!(queued, "refused");
+    }
+
+    #[test]
+    fn resets_executing_pending_ops_to_pending() {
+        let conn = make_conn();
+        conn.execute(
+            "INSERT INTO pending_operations (id, status) VALUES (?1, 'executing')",
+            ["op-1"],
+        )
+        .expect("insert");
+        conn.execute(
+            "INSERT INTO pending_operations (id, status) VALUES (?1, 'pending')",
+            ["op-2"],
+        )
+        .expect("insert");
+        conn.execute(
+            "INSERT INTO pending_operations (id, status) VALUES (?1, 'failed')",
+            ["op-3"],
+        )
+        .expect("insert");
+
+        db_pending_ops_recover_on_boot_sync(&write(&conn)).expect("recovery");
+
+        let executing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations WHERE status = 'executing'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(executing, 0);
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(pending, 2);
+        let failed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations WHERE status = 'failed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(failed, 1);
+    }
+
+    #[test]
+    fn resurfaces_sending_drafts_as_failed() {
+        let conn = make_conn();
+        conn.execute(
+            "INSERT INTO local_drafts (id, sync_status) VALUES (?1, 'sending')",
+            ["draft-1"],
+        )
+        .expect("insert");
+        conn.execute(
+            "INSERT INTO local_drafts (id, sync_status) VALUES (?1, 'draft')",
+            ["draft-2"],
+        )
+        .expect("insert");
+
+        db_pending_ops_recover_on_boot_sync(&write(&conn)).expect("recovery");
+
+        let sending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_drafts WHERE sync_status = 'sending'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(sending, 0);
+        let failed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_drafts WHERE sync_status = 'failed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(failed, 1);
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_drafts WHERE sync_status = 'draft'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(untouched, 1);
+    }
+
+    #[test]
+    fn empty_db_is_a_noop() {
+        let conn = make_conn();
+        db_pending_ops_recover_on_boot_sync(&write(&conn)).expect("recovery on empty");
+    }
+}
