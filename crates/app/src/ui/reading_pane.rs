@@ -1070,6 +1070,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
             super::mail_body::view_with_link_menu(
                 pane.html_bodies.get(i),
                 msg.body_text.as_deref(),
+                &pane.search_highlight_terms,
                 move |width| ReadingPaneMessage::HtmlBodyResized(i, width),
                 move |action| ReadingPaneMessage::BodyLink(i, action),
                 move |action| ReadingPaneMessage::BodySelect(i, action),

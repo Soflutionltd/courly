@@ -28,4 +28,4 @@ pub use linked_text::*;
 pub use nav::*;
 pub use origins::*;
 pub use pickers::*;
-pub use search_highlight::query_terms;
+pub use search_highlight::{MATCH_BACKGROUND, match_ranges, query_terms};

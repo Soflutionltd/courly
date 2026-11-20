@@ -610,10 +610,12 @@ enum Links<'a, M> {
     /// A click opens the link; nothing else.
     OpenOnly(Rc<dyn Fn(String) -> M + 'a>),
     /// A click opens the link, a right-click shows its menu, and the text
-    /// around the links can be selected.
+    /// around the links can be selected. The words of `search_terms` found
+    /// in the text are marked.
     WithMenu {
         on_link: Rc<dyn Fn(LinkAction) -> M + 'a>,
         on_select: Rc<dyn Fn(SelectAction) -> M + 'a>,
+        search_terms: &'a [String],
     },
 }
 
@@ -712,10 +714,12 @@ impl<'a, M: 'a> BodyCards<'a, M> {
 }
 
 /// The HTML body of a received message, whose links also have a
-/// right-click menu and whose text can be selected and copied.
+/// right-click menu and whose text can be selected and copied. The words of
+/// `search_terms`, those of the search that found the message, are marked.
 pub fn view_with_link_menu<'a, M: Clone + 'a>(
     state: Option<&'a HtmlBodyState>,
     fallback_text: Option<&'a str>,
+    search_terms: &'a [String],
     on_width: impl Fn(f32) -> M + 'a,
     on_link: impl Fn(LinkAction) -> M + 'a,
     on_select: impl Fn(SelectAction) -> M + 'a,
@@ -728,6 +732,7 @@ pub fn view_with_link_menu<'a, M: Clone + 'a>(
         &Links::WithMenu {
             on_link: Rc::new(on_link),
             on_select: Rc::new(on_select),
+            search_terms,
         },
         on_show_remote,
     )
@@ -859,23 +864,33 @@ fn rendered_page<'a, M: Clone + 'a>(
 
     let mut page = match links {
         Links::OpenOnly(_) => anchored_overlay(layers),
-        Links::WithMenu { on_select, .. } => {
+        Links::WithMenu {
+            on_select,
+            search_terms,
+            ..
+        } => {
             let on_select = Rc::clone(on_select);
-            anchored_overlay(text_selector(
-                layers,
-                &body.text[card.lines.clone()],
-                card.lines.start,
-                selection,
-                move |action| {
-                    on_select(match action {
-                        SelectAction::ShowMenu(at) => SelectAction::ShowMenu(at + from_body),
-                        other => other,
-                    })
-                },
-            ))
+            anchored_overlay(
+                text_selector(
+                    layers,
+                    &body.text[card.lines.clone()],
+                    card.lines.start,
+                    selection,
+                    move |action| {
+                        on_select(match action {
+                            SelectAction::ShowMenu(at) => SelectAction::ShowMenu(at + from_body),
+                            other => other,
+                        })
+                    },
+                )
+                .search_terms(search_terms),
+            )
         }
     };
-    if let Links::WithMenu { on_link, on_select } = links {
+    if let Links::WithMenu {
+        on_link, on_select, ..
+    } = links
+    {
         if let Some((href, at)) = link_menu.filter(|(_, at)| shows(*at)) {
             page = page
                 .popup(link_menu_card(href, on_link.as_ref()))

@@ -718,6 +718,7 @@ fn quote_cards<'a>(
     let quoted = crate::ui::mail_body::view_with_link_menu(
         Some(&quote.preview),
         Some(quote.text.as_str()),
+        &[],
         move |width| compose(ComposeMessage::PreviewResized(which, width)),
         move |action| compose(ComposeMessage::PreviewLink(action)),
         move |action| compose(ComposeMessage::PreviewSelect(action)),

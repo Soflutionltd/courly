@@ -13,6 +13,9 @@ use mail_html::TextLine;
 
 /// Share of the accent colour laid over selected text.
 const HIGHLIGHT_ALPHA: f32 = 0.3;
+/// Share of the search yellow laid over a word the search found: the word
+/// is part of the picture under it and must stay readable.
+const MARK_ALPHA: f32 = 0.45;
 /// How much more a vertical gap counts than a horizontal one when looking
 /// for the line nearest to the pointer, so a pointer in a margin picks the
 /// line beside it rather than a closer line above.
@@ -186,6 +189,33 @@ impl Selection {
     }
 }
 
+/// Where the words of a search stand in `lines`, one rectangle per match,
+/// placed like the lines themselves.
+pub fn search_marks(lines: &[TextLine], terms: &[String]) -> Vec<Rectangle> {
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    lines
+        .iter()
+        .flat_map(|line| {
+            super::widgets::match_ranges(&line.text, terms)
+                .into_iter()
+                .filter_map(move |range| {
+                    let cells = line
+                        .cells
+                        .iter()
+                        .filter(|cell| cell.start >= range.start && cell.end <= range.end);
+                    let left = cells.clone().map(|cell| cell.x).reduce(f32::min)?;
+                    let right = cells.map(|cell| cell.x + cell.width).reduce(f32::max)?;
+                    Some(Rectangle::new(
+                        Point::new(left, line.y),
+                        Size::new(right - left, line.height),
+                    ))
+                })
+        })
+        .collect()
+}
+
 fn line_extent(line: &TextLine) -> Option<(f32, f32)> {
     let first = line.cells.first()?;
     let last = line.cells.last()?;
@@ -306,6 +336,8 @@ pub struct TextSelector<'a, Message> {
     first_line: usize,
     /// What is selected in this card, with lines counted from its first.
     selection: Option<Selection>,
+    /// The words of the search that found this mail, painted over the card.
+    marks: Vec<Rectangle>,
     on_action: Box<dyn Fn(SelectAction) -> Message + 'a>,
 }
 
@@ -323,11 +355,18 @@ pub fn text_selector<'a, Message: 'a>(
         lines,
         first_line,
         selection: selection.and_then(|selection| selection.within(first_line, lines.len())),
+        marks: Vec::new(),
         on_action: Box::new(on_action),
     }
 }
 
 impl<Message> TextSelector<'_, Message> {
+    /// Paint the words of `terms` found in the card's lines.
+    pub fn search_terms(mut self, terms: &[String]) -> Self {
+        self.marks = search_marks(self.lines, terms);
+        self
+    }
+
     fn set(&self, shell: &mut Shell<'_, Message>, selection: Option<Selection>) {
         if selection == self.selection {
             return;
@@ -531,31 +570,41 @@ impl<Message> Widget<Message, Theme, Renderer> for TextSelector<'_, Message> {
             cursor,
             viewport,
         );
-        let Some(selection) = self.selection else {
+        if self.selection.is_none() && self.marks.is_empty() {
             return;
-        };
+        }
         let bounds = layout.bounds();
-        let colour = theme
+        let selected = theme
             .palette()
             .primary
             .base
             .color
             .scale_alpha(HIGHLIGHT_ALPHA);
+        let marked = super::widgets::MATCH_BACKGROUND.scale_alpha(MARK_ALPHA);
         // A layer of its own: quads of the page's layer sit under its images.
         // It does not inherit the clip of the scrollable around the body,
         // so it is cut to what shows of the body.
         let Some(visible) = bounds.intersection(viewport) else {
             return;
         };
+        let from_page = bounds.position() - Point::ORIGIN;
         renderer.with_layer(visible, |renderer| {
-            for rectangle in selection.rectangles(self.lines) {
+            let mut fill = |rectangle: Rectangle, colour| {
                 renderer.fill_quad(
                     renderer::Quad {
-                        bounds: rectangle + (bounds.position() - Point::ORIGIN),
+                        bounds: rectangle + from_page,
                         ..renderer::Quad::default()
                     },
                     colour,
                 );
+            };
+            for mark in &self.marks {
+                fill(*mark, marked);
+            }
+            if let Some(selection) = self.selection {
+                for rectangle in selection.rectangles(self.lines) {
+                    fill(rectangle, selected);
+                }
             }
         });
     }
@@ -649,6 +698,23 @@ mod tests {
             line(0, 0.0, 20.0, "482913 today"),
             line(1, 0.0, 60.0, "Thanks"),
         ]
+    }
+
+    #[test]
+    fn a_search_word_is_marked_where_it_starts_a_word() {
+        let lines = vec![
+            line(0, 0.0, 0.0, "Message metadata"),
+            line(1, 30.0, 40.0, "Gametag Meta"),
+        ];
+        let marks = search_marks(&lines, &["meta".to_owned()]);
+        assert_eq!(
+            marks,
+            [
+                Rectangle::new(Point::new(80.0, 0.0), Size::new(40.0, 20.0)),
+                Rectangle::new(Point::new(110.0, 40.0), Size::new(40.0, 20.0)),
+            ]
+        );
+        assert!(search_marks(&lines, &[]).is_empty());
     }
 
     fn at(lines: &[TextLine], x: f32, y: f32) -> TextPos {

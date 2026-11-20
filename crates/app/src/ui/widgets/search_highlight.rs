@@ -6,7 +6,7 @@ use iced::{Color, Element, Font, Length, Theme};
 
 /// Same yellow in both themes, with dark text, so a match stands out on a
 /// light or a dark row alike.
-const MATCH_BACKGROUND: Color = Color::from_rgb8(0xFF, 0xE0, 0x4D);
+pub const MATCH_BACKGROUND: Color = Color::from_rgb8(0xFF, 0xE0, 0x4D);
 const MATCH_TEXT: Color = Color::from_rgb8(0x1F, 0x1F, 0x1F);
 
 /// Shorter words still filter the results but would light up nearly every
@@ -29,7 +29,7 @@ pub fn query_terms(query: &str) -> Vec<String> {
 
 /// Byte ranges of `content` where a term starts a word, ignoring case:
 /// the search matches the first letters of a word, so does the highlight.
-fn match_ranges(content: &str, terms: &[String]) -> Vec<Range<usize>> {
+pub fn match_ranges(content: &str, terms: &[String]) -> Vec<Range<usize>> {
     let mut ranges: Vec<Range<usize>> = Vec::new();
     let mut previous: Option<char> = None;
     for (start, current) in content.char_indices() {

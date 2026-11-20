@@ -1482,13 +1482,8 @@ impl ReadyApp {
 
         // Set search highlight terms when in search mode
         if self.thread_list.mode == ui::thread_list::ThreadListMode::Search {
-            let query = self.search_query.text().to_string();
-            let parsed = smart_folder::parse_query(&query);
-            self.reading_pane.search_highlight_terms = parsed
-                .free_text
-                .split_whitespace()
-                .map(String::from)
-                .collect();
+            self.reading_pane.search_highlight_terms =
+                ui::widgets::query_terms(self.search_query.text());
         } else {
             self.reading_pane.search_highlight_terms.clear();
         }

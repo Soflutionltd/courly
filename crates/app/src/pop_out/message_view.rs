@@ -691,6 +691,7 @@ fn message_view_body<'a>(
                 crate::ui::mail_body::view_with_link_menu(
                     Some(&state.html_body),
                     state.body_text.as_deref(),
+                    &[],
                     move |width| view_msg(MessageViewMessage::HtmlBodyResized(width)),
                     move |action| view_msg(MessageViewMessage::BodyLink(action)),
                     move |action| view_msg(MessageViewMessage::BodySelect(action)),
