@@ -68,6 +68,15 @@ impl ReadyApp {
                 self.status = format!("{} threads", threads.len());
                 let now = std::time::Instant::now();
                 self.recently_removed.retain(|removed| removed.until > now);
+                self.deleting_drafts.retain(|(account_id, draft_id)| {
+                    threads
+                        .iter()
+                        .any(|thread| thread.account_id == *account_id && thread.id == *draft_id)
+                });
+                let deleting = self
+                    .deleting_drafts
+                    .iter()
+                    .map(|(account_id, draft_id)| (account_id.as_str(), draft_id.as_str()));
                 let view = self.view_key();
                 let in_flight = self
                     .pending_action_plans
@@ -80,8 +89,10 @@ impl ReadyApp {
                     .filter(|removed| removed.view == view)
                     .map(|removed| (removed.account_id.as_str(), removed.thread_id.as_str()));
                 self.thread_list.pins_on_top = self.current_view_is_an_inbox();
-                self.thread_list
-                    .set_threads_keeping_hidden(threads, in_flight.chain(just_removed));
+                self.thread_list.set_threads_keeping_hidden(
+                    threads,
+                    in_flight.chain(just_removed).chain(deleting),
+                );
                 self.select_pending_notified_thread()
             }
             // The logos are read from memory when the rows are drawn: the
@@ -915,6 +926,9 @@ impl ReadyApp {
             Message::DraftDeleted(Ok(())) => self.reload_after_server_change(),
             Message::DraftDeleted(Err(error)) => {
                 log::error!("Deleting a draft failed: {error}");
+                // Which deletion failed is not known here: show them all
+                // again, the reload drops the ones that did go.
+                self.deleting_drafts.clear();
                 self.status = t!("main.drafts.delete_failed", error = error).into_owned();
                 self.reload_after_server_change()
             }

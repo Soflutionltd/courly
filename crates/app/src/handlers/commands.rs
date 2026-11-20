@@ -117,17 +117,36 @@ impl ReadyApp {
             return Task::none();
         }
 
-        // Collect selected thread info.
-        let selected_threads: Vec<(String, String)> = self
+        // Collect selected thread info. A draft not yet synced is no server
+        // conversation: the action pipeline cannot delete it (the row came
+        // back as a failed action), so a delete takes those out on its own.
+        let deletes = matches!(
+            intent,
+            crate::action_resolve::MailActionIntent::Trash
+                | crate::action_resolve::MailActionIntent::PermanentDelete
+        );
+        let mut local_drafts: Vec<(String, String)> = Vec::new();
+        let mut selected_threads: Vec<(String, String)> = Vec::new();
+        for thread in self
             .thread_list
             .selected_indices()
             .iter()
             .filter_map(|&i| self.thread_list.threads.get(i))
-            .map(|t| (t.account_id.clone(), t.id.clone()))
+        {
+            let key = (thread.account_id.clone(), thread.id.clone());
+            if deletes && thread.is_local_draft {
+                local_drafts.push(key);
+            } else {
+                selected_threads.push(key);
+            }
+        }
+        let mut tasks: Vec<Task<Message>> = local_drafts
+            .into_iter()
+            .map(|(account_id, draft_id)| self.delete_local_draft(account_id, draft_id))
             .collect();
 
         if selected_threads.is_empty() {
-            return Task::none();
+            return Task::batch(tasks);
         }
 
         // Deleting from the trash cannot be undone: ask first.
@@ -136,10 +155,24 @@ impl ReadyApp {
             crate::action_resolve::MailActionIntent::PermanentDelete
         ) {
             self.pending_permanent_delete = Some(selected_threads);
-            return Task::none();
+            return Task::batch(tasks);
         }
 
-        self.run_email_action(intent, &selected_threads)
+        tasks.push(self.run_email_action(intent, &selected_threads));
+        Task::batch(tasks)
+    }
+
+    /// Delete a draft not yet synced. Its row goes at the click; the store
+    /// and the server copy follow in the background.
+    pub(crate) fn delete_local_draft(
+        &mut self,
+        account_id: String,
+        draft_id: String,
+    ) -> Task<Message> {
+        let key = (account_id, draft_id);
+        let _ = self.thread_list.hide_threads(std::slice::from_ref(&key));
+        self.deleting_drafts.push(key.clone());
+        self.delete_draft(key.0, key.1)
     }
 
     pub(crate) fn confirm_permanent_delete(&mut self) -> Task<Message> {

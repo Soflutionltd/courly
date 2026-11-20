@@ -250,7 +250,9 @@ impl ReadyApp {
                 {
                     return match action {
                         ThreadRowAction::Trash => {
-                            self.delete_draft(draft.account_id.clone(), draft.id.clone())
+                            let (account_id, draft_id) =
+                                (draft.account_id.clone(), draft.id.clone());
+                            self.delete_local_draft(account_id, draft_id)
                         }
                         ThreadRowAction::Pin | ThreadRowAction::Flag => Task::none(),
                     };

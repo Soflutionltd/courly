@@ -264,6 +264,12 @@ pub struct ReadyApp {
     /// [`RecentlyRemoved`].
     pub(crate) recently_removed: Vec<RecentlyRemoved>,
 
+    /// Local drafts whose deletion is under way, as `(account_id, draft_id)`.
+    /// Their row leaves the list at the click; a reload that still finds
+    /// them in the store, because another deletion finished first, keeps
+    /// them out. An entry goes once a reload no longer finds its draft.
+    pub(crate) deleting_drafts: Vec<(String, String)>,
+
     /// In-flight compose-send dispatches keyed by `send_id` (the
     /// UI-generated UUIDv7 the wire request carries; doubles as the
     /// `plan_id` the eventual `ActionCompleted` notification echoes
@@ -556,6 +562,7 @@ impl ReadyApp {
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),
             recently_removed: Vec::new(),
+            deleting_drafts: Vec::new(),
             in_flight_sends: std::collections::HashMap::new(),
             delayed_sends: Vec::new(),
             action_throttle: std::collections::HashMap::new(),
