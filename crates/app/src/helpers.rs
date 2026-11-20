@@ -181,10 +181,17 @@ impl ReadyApp {
 
     pub(crate) fn load_navigation_and_threads(&mut self) -> Task<Message> {
         let token = self.nav_generation.next();
-        Task::batch([
-            self.fire_navigation_load(token),
-            self.load_threads_for_current_view(token),
-        ])
+        self.threads_then_navigation(token)
+    }
+
+    /// Load the thread list, then the sidebar counts. Both read through the
+    /// one reader connection, so they run one after the other whatever the
+    /// order asked: the counts of every folder take about ten times longer
+    /// than the list (240 ms against 25 ms on a 25,000 message store), and
+    /// the list is what the user is waiting for.
+    fn threads_then_navigation(&mut self, token: GenerationToken<Nav>) -> Task<Message> {
+        self.load_threads_for_current_view(token)
+            .chain(self.fire_navigation_load(token))
     }
 
     /// Refresh after the background sync wrote server-side changes. Search
@@ -192,16 +199,15 @@ impl ReadyApp {
     /// sidebar counts reload under them.
     pub(crate) fn reload_after_server_change(&mut self) -> Task<Message> {
         let token = self.nav_generation.next();
-        let nav_task = self.fire_navigation_load(token);
         if self.active_chat.is_some()
             || matches!(
                 self.thread_list.mode,
                 crate::ui::thread_list::ThreadListMode::Search
             )
         {
-            return nav_task;
+            return self.fire_navigation_load(token);
         }
-        Task::batch([nav_task, self.load_threads_for_current_view(token)])
+        self.threads_then_navigation(token)
     }
 }
 
