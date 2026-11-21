@@ -458,7 +458,12 @@ fn enrich_with_attribution(
         log::warn!("enrich_with_attribution: enrich_match_kinds failed: {e}");
     }
     for r in results.iter_mut() {
-        if matches!(r.match_kind, MatchKind::Attachment { .. }) {
+        if let MatchKind::Attachment { snippet, .. } = &mut r.match_kind {
+            // The engine cuts its fragment out of the raw text, line breaks
+            // included, and a row has one line for it.
+            let line = crate::search_match::excerpt(snippet, &words)
+                .unwrap_or_else(|| snippet.split_whitespace().collect::<Vec<_>>().join(" "));
+            *snippet = line;
             continue;
         }
         let only_match = inputs
