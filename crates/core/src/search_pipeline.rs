@@ -457,11 +457,48 @@ fn enrich_with_attribution(
     if let Err(e) = search_state.enrich_match_kinds(free_text, results, &inputs) {
         log::warn!("enrich_with_attribution: enrich_match_kinds failed: {e}");
     }
+    for r in results.iter_mut() {
+        if matches!(r.match_kind, MatchKind::Attachment { .. }) {
+            continue;
+        }
+        let only_match = inputs
+            .get(&r.message_id)
+            .and_then(|input| attachment_only_match(input, &words));
+        if let Some(attachment) = only_match {
+            r.match_kind = attachment;
+        }
+    }
     log::info!(
         "Search timing attribution: attachment text {fragments_ms} ms for {attachment_bytes} bytes, bodies {bodies_ms} ms for {body_bytes} bytes, scoring {} ms",
         scoring_started.elapsed().as_millis()
     );
     excerpts
+}
+
+/// The attachment a message was found through, when the searched word
+/// starts a word of its text and of nothing else in the message.
+///
+/// The engine attributes a hit by whole words, while the search matches the
+/// start of a word: "meta" finds a mail through "Metal" in a PDF, and that
+/// hit stayed attributed to a body that does not hold the word, so the row
+/// showed no reason for it.
+fn attachment_only_match(input: &AttributionInputs, words: &[String]) -> Option<MatchKind> {
+    use crate::search_match::{excerpt, holds_match};
+    let elsewhere = [&input.subject, &input.from_name, &input.body_text]
+        .into_iter()
+        .any(|text| holds_match(text, words));
+    if elsewhere {
+        return None;
+    }
+    input.attachments.iter().find_map(|attachment| {
+        let snippet = excerpt(&attachment.extracted_text, words)?;
+        Some(MatchKind::Attachment {
+            attachment_id: attachment.attachment_id.clone(),
+            filename: attachment.filename.clone(),
+            mime: attachment.mime.clone(),
+            snippet,
+        })
+    })
 }
 
 /// The line of body text around the searched word, per conversation
@@ -994,6 +1031,38 @@ mod tests {
             results[2].snippet.as_deref(),
             Some("Your Metal plan renews")
         );
+    }
+
+    fn message_with_attachment(body_text: &str, attachment_text: &str) -> AttributionInputs {
+        AttributionInputs {
+            subject: "Changes to our terms".to_owned(),
+            from_name: "Bank".to_owned(),
+            body_text: body_text.to_owned(),
+            attachments: vec![AttachmentAttributionInput {
+                attachment_id: "att1".to_owned(),
+                filename: "terms.pdf".to_owned(),
+                mime: "application/pdf".to_owned(),
+                extracted_text: attachment_text.to_owned(),
+            }],
+        }
+    }
+
+    #[test]
+    fn a_word_starting_a_word_of_the_attachment_alone_is_an_attachment_match() {
+        let words = vec!["meta".to_owned()];
+        let input = message_with_attachment("We are updating our terms", "Plans: Plus, Metal.");
+        match attachment_only_match(&input, &words) {
+            Some(MatchKind::Attachment {
+                filename, snippet, ..
+            }) => {
+                assert_eq!(filename, "terms.pdf");
+                assert_eq!(snippet, "Plans: Plus, Metal.");
+            }
+            other => panic!("expected the attachment, got {other:?}"),
+        }
+        // The body holds the word too: the attachment is not the only match.
+        let both = message_with_attachment("Your Metal plan", "Plans: Plus, Metal.");
+        assert!(attachment_only_match(&both, &words).is_none());
     }
 
     // -- parse_date_string --

@@ -63,6 +63,26 @@ fn sender_or_unknown<'a>(name: Option<&'a str>, address: Option<&'a str>) -> Cow
     name.or(address)
         .map_or_else(|| t!("main.unknown_sender"), Cow::Borrowed)
 }
+/// Characters of an attachment name shown in front of the line a search
+/// found in it: a longer name left no room for the line on the row.
+const MATCH_FILENAME_CHARS: usize = 24;
+/// Characters kept from the end of a shortened name, extension included.
+const MATCH_FILENAME_TAIL_CHARS: usize = 8;
+
+/// `name` with its middle cut out when it is too long for a row.
+fn short_filename(name: &str) -> Cow<'_, str> {
+    let length = name.chars().count();
+    if length <= MATCH_FILENAME_CHARS {
+        return Cow::Borrowed(name);
+    }
+    let head = MATCH_FILENAME_CHARS - MATCH_FILENAME_TAIL_CHARS - 1;
+    let start: String = name.chars().take(head).collect();
+    let end: String = name
+        .chars()
+        .skip(length - MATCH_FILENAME_TAIL_CHARS)
+        .collect();
+    Cow::Owned(format!("{start}\u{2026}{end}"))
+}
 use super::highlighted::highlighted_text_body;
 use super::search_highlight::highlighted_line;
 
@@ -305,11 +325,14 @@ pub fn thread_card<'a, M: Clone + 'a>(
         if let Some((filename, attachment_snippet)) = attachment_match {
             container(
                 row![
-                    text(t!("main.search.attachment_match", filename = filename))
-                        .size(TEXT_SM)
-                        .style(text::secondary)
-                        .font(font::text_italic())
-                        .wrapping(text::Wrapping::None),
+                    text(t!(
+                        "main.search.attachment_match",
+                        filename = short_filename(filename)
+                    ))
+                    .size(TEXT_SM)
+                    .style(text::secondary)
+                    .font(font::text_italic())
+                    .wrapping(text::Wrapping::None),
                     highlighted_line(
                         Cow::Borrowed(attachment_snippet),
                         highlight_terms,
@@ -1115,7 +1138,16 @@ fn format_message_date(
 
 #[cfg(test)]
 mod tests {
-    use super::{QuotedSender, local_dt, quoted_sender, quotes_shown, short_date};
+    use super::{QuotedSender, local_dt, quoted_sender, quotes_shown, short_date, short_filename};
+
+    #[test]
+    fn a_long_attachment_name_keeps_its_start_and_its_extension() {
+        assert_eq!(short_filename("terms.pdf"), "terms.pdf");
+        assert_eq!(
+            short_filename("Compte_20250131_00258_0025800020.pdf"),
+            "Compte_20250131\u{2026}0020.pdf"
+        );
+    }
 
     fn quote_card(message: Option<usize>) -> Option<QuotedSender> {
         Some(QuotedSender {
