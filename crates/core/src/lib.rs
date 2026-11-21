@@ -28,6 +28,7 @@ pub mod scope;
 // `SendAttachment` / `SendRequest`; those types are now reached through
 // `service::actions::{SendAttachment, SendRequest}` (or `service::send`).
 pub use search;
+pub mod search_match;
 pub mod search_pipeline;
 pub use seen as seen_addresses;
 pub use smart_folder;

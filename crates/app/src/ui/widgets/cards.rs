@@ -310,12 +310,13 @@ pub fn thread_card<'a, M: Clone + 'a>(
                         .style(text::secondary)
                         .font(font::text_italic())
                         .wrapping(text::Wrapping::None),
-                    text(attachment_snippet.to_string())
-                        .size(TEXT_SM)
-                        .style(text::secondary)
-                        .wrapping(text::Wrapping::None)
-                        .ellipsis(text::Ellipsis::End)
-                        .width(Length::Fill),
+                    highlighted_line(
+                        Cow::Borrowed(attachment_snippet),
+                        highlight_terms,
+                        TEXT_SM,
+                        font::text(),
+                        text::secondary,
+                    ),
                 ]
                 .align_y(Alignment::Center),
             )

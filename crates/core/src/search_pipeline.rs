@@ -191,7 +191,7 @@ fn search_tantivy_only(
     let mut results = search_state.search_with_filters(&params)?;
     let index_ms = index_started.elapsed().as_millis();
     let attribution_started = Instant::now();
-    enrich_with_attribution(
+    let excerpts = enrich_with_attribution(
         &mut results,
         &parsed.free_text,
         search_state,
@@ -220,6 +220,7 @@ fn search_tantivy_only(
                 .map(|thread| enrich_from_sql(r, thread))
         })
         .collect();
+    preview_matches(&mut grouped, &excerpts, &parsed.free_text);
     grouped.sort_by(newest_first);
     Ok(grouped)
 }
@@ -280,7 +281,7 @@ fn search_combined(
     // grouping so the highest-scoring message's attribution survives
     // thread-grouping intact.
     let attribution_started = Instant::now();
-    enrich_with_attribution(
+    let excerpts = enrich_with_attribution(
         &mut tantivy_results,
         &parsed.free_text,
         search_state,
@@ -321,6 +322,8 @@ fn search_combined(
         })
         .collect();
 
+    preview_matches(&mut enriched, &excerpts, &parsed.free_text);
+
     // Step 6: Newest conversation first.
     enriched.sort_by(newest_first);
     Ok(enriched)
@@ -353,15 +356,21 @@ fn newest_first(a: &UnifiedSearchResult, b: &UnifiedSearchResult) -> std::cmp::O
 /// On any DB error we log a warning and leave the results' default
 /// `MatchKind::Body` in place; this is a UI-affordance feature and
 /// must never break a search.
+///
+/// Returns, per conversation, the line of body text around the searched
+/// word in its most recent message that holds it: the bodies are read here
+/// anyway, and `preview_matches` shows that line where a row would
+/// otherwise show no trace of the word.
 fn enrich_with_attribution(
     results: &mut [TantivyResult],
     free_text: &str,
     search_state: &SearchReadState,
     conn: &ReadConn<'_>,
     body_read: Option<&store::body_store::BodyStoreReadState>,
-) {
+) -> MatchExcerpts {
+    let mut excerpts = MatchExcerpts::new();
     if free_text.trim().is_empty() || results.is_empty() {
-        return;
+        return excerpts;
     }
     let pairs: Vec<(String, String)> = results
         .iter()
@@ -373,7 +382,7 @@ fn enrich_with_attribution(
             Ok(map) => map,
             Err(e) => {
                 log::warn!("enrich_with_attribution: attachment fetch failed: {e}");
-                return;
+                return excerpts;
             }
         };
     let fragments_ms = fragments_started.elapsed().as_millis();
@@ -404,6 +413,21 @@ fn enrich_with_attribution(
     let bodies_ms = bodies_started.elapsed().as_millis();
     let body_bytes: usize = body_by_mid.values().map(String::len).sum();
     let scoring_started = Instant::now();
+    // Results come newest first, so the first excerpt of a conversation is
+    // the one of its most recent matching message.
+    let words = crate::search_match::free_text_words(free_text);
+    for r in results.iter() {
+        let key = (r.account_id.clone(), r.thread_id.clone());
+        if excerpts.contains_key(&key) {
+            continue;
+        }
+        let line = body_by_mid
+            .get(&r.message_id)
+            .and_then(|text| crate::search_match::excerpt(text, &words));
+        if let Some(line) = line {
+            excerpts.insert(key, line);
+        }
+    }
     let mut inputs: HashMap<String, AttributionInputs> = HashMap::with_capacity(results.len());
     for r in results.iter() {
         let key = (r.account_id.clone(), r.message_id.clone());
@@ -437,6 +461,39 @@ fn enrich_with_attribution(
         "Search timing attribution: attachment text {fragments_ms} ms for {attachment_bytes} bytes, bodies {bodies_ms} ms for {body_bytes} bytes, scoring {} ms",
         scoring_started.elapsed().as_millis()
     );
+    excerpts
+}
+
+/// The line of body text around the searched word, per conversation
+/// `(account_id, thread_id)`.
+type MatchExcerpts = HashMap<(String, String), String>;
+
+/// Preview a result with the line of its body that holds the searched word,
+/// when nothing the row shows does: its sender, its subject and the usual
+/// preview all come from the latest message of the conversation, and the
+/// word may sit further down or in an earlier message. A row that already
+/// shows the word keeps its preview.
+fn preview_matches(results: &mut [UnifiedSearchResult], excerpts: &MatchExcerpts, free_text: &str) {
+    let words = crate::search_match::free_text_words(free_text);
+    for result in results {
+        let shown = [
+            &result.from_name,
+            &result.from_address,
+            &result.subject,
+            &result.snippet,
+        ];
+        if shown
+            .into_iter()
+            .flatten()
+            .any(|text| crate::search_match::holds_match(text, &words))
+        {
+            continue;
+        }
+        let key = (result.account_id.clone(), result.thread_id.clone());
+        if let Some(line) = excerpts.get(&key) {
+            result.snippet = Some(line.clone());
+        }
+    }
 }
 
 /// Determine the account scope from parsed query operators.
@@ -892,6 +949,51 @@ mod tests {
         // Ranking metadata stays from Tantivy.
         assert_eq!(enriched.rank, 3.5);
         assert!(matches!(enriched.match_kind, Some(MatchKind::Body)));
+    }
+
+    // -- match preview --
+
+    fn result_shown_as(thread_id: &str, from_name: &str, snippet: &str) -> UnifiedSearchResult {
+        UnifiedSearchResult {
+            thread_id: thread_id.to_owned(),
+            account_id: "acc1".to_owned(),
+            subject: Some("Setup complete".to_owned()),
+            snippet: Some(snippet.to_owned()),
+            from_name: Some(from_name.to_owned()),
+            from_address: Some("notices@test.com".to_owned()),
+            date: Some(1_700_000_000),
+            is_read: true,
+            is_starred: false,
+            has_attachments: false,
+            message_count: Some(1),
+            rank: 1.0,
+            match_kind: Some(MatchKind::Body),
+            also_matched: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_row_showing_no_trace_of_the_word_previews_the_line_that_holds_it() {
+        let mut results = [
+            result_shown_as("deep", "Cloud notices", "Health event"),
+            result_shown_as("sender", "Meta for Business", "A new setting"),
+            result_shown_as("opening", "Bank", "Your Metal plan renews"),
+        ];
+        let line = "\u{2026}Message metadata Affected account".to_owned();
+        let excerpts: MatchExcerpts = ["deep", "sender", "opening"]
+            .into_iter()
+            .map(|thread_id| (("acc1".to_owned(), thread_id.to_owned()), line.clone()))
+            .collect();
+
+        preview_matches(&mut results, &excerpts, "meta");
+
+        assert_eq!(results[0].snippet.as_deref(), Some(line.as_str()));
+        // The word is already on the row: in the sender, in the preview.
+        assert_eq!(results[1].snippet.as_deref(), Some("A new setting"));
+        assert_eq!(
+            results[2].snippet.as_deref(),
+            Some("Your Metal plan renews")
+        );
     }
 
     // -- parse_date_string --
