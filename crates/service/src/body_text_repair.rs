@@ -1,9 +1,11 @@
 //! One-time rewrite of the stored body texts that hold markup.
 //!
-//! Some senders write HTML in the plain text part of their mails. Until
-//! `common::rfc822::text_free_of_markup` those parts were stored as the text
-//! of the message, so search found the mail through its tags and style rules
-//! and the list previewed CSS. New mail is clean on arrival; this pass brings
+//! Some senders write HTML in the plain text part of their mails, and the
+//! text derived for a mail without a plain text part kept the rules of its
+//! style elements. Until `common::rfc822::text_free_of_markup` those were
+//! stored as the text of the message, so search found the mail through its
+//! tags and style rules and the list previewed CSS. New mail is clean on
+//! arrival; this pass brings
 //! the mail stored before to the same state: the text in the body store, the
 //! preview of the message and of its conversation, and the search document.
 //!
@@ -22,8 +24,9 @@ use tokio_util::sync::CancellationToken;
 /// Messages read from the body store at a time: their HTML is decompressed
 /// too, so this bounds the memory of the pass.
 const CHUNK_SIZE: usize = 200;
-/// `user_version` of a body store whose texts were rewritten.
-const REPAIRED_VERSION: i64 = 1;
+/// `user_version` of a body store whose texts were rewritten. Version 1 left
+/// the rules of style elements that carry an attribute in the text.
+const REPAIRED_VERSION: i64 = 2;
 
 /// A text to rewrite: the message, and the text read from its HTML part.
 type Fix = (String, String);

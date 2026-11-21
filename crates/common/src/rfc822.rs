@@ -109,9 +109,11 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
         Some(html.to_string())
     });
     // Some senders write markup in their plain text part, a whole HTML page
-    // at times. That part is what search indexes and the list previews, so
-    // its tags and style rules matched searches ("meta", "table") the mail
-    // says nothing about. The text is then taken from the HTML part.
+    // at times, and the text mail-parser derives for a mail that has no
+    // plain text part keeps some style rules. That text is what search
+    // indexes and the list previews, so tags and style rules matched
+    // searches ("meta", "table") the mail says nothing about. The text is
+    // then read from the HTML part.
     let body_text = match (body_text, body_html.as_deref()) {
         (Some(text), Some(html)) => Some(text_free_of_markup(&text, html).unwrap_or(text)),
         (text, _) => text,
@@ -167,12 +169,66 @@ pub fn parse_rfc822(parser: &MessageParser, raw: &[u8]) -> Result<Rfc822Parsed, 
     })
 }
 
-/// The text of a message whose plain text part is written with HTML tags,
-/// taken from its HTML part instead. `None` when `text` holds no markup and
-/// stands as it is.
+/// The text of a message read from its HTML part, when the text it has is
+/// not what the mail says: a plain text part written with HTML tags, or the
+/// text mail-parser derives from the HTML, which keeps the rules of a style
+/// element that carries an attribute. `None` when `text` stands as it is.
 #[must_use]
 pub fn text_free_of_markup(text: &str, html: &str) -> Option<String> {
-    holds_markup(text).then(|| mail_parser::decoders::html::html_to_text(html))
+    let derived = || text == mail_parser::decoders::html::html_to_text(html);
+    (holds_markup(text) || derived())
+        .then(|| text_of_html(html))
+        .filter(|clean| clean != text)
+}
+
+/// The readable text of an HTML body.
+///
+/// mail-parser's converter knows a `style`, `script`, `template` or `head`
+/// element by its bare name only: `<style type="text/css">` is not one to
+/// it, and its rules come out as text. Those elements are cut out first.
+fn text_of_html(html: &str) -> String {
+    const HIDDEN: [&str; 5] = ["style", "script", "template", "head", "title"];
+    let mut shown = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(at) = rest.find('<') {
+        let (before, tag) = rest.split_at(at);
+        shown.push_str(before);
+        let hidden = HIDDEN.iter().find(|name| opens_element(&tag[1..], name));
+        let Some(name) = hidden else {
+            shown.push('<');
+            rest = &tag[1..];
+            continue;
+        };
+        shown.push(' ');
+        rest = after_closing_tag(&tag[1..], name);
+    }
+    shown.push_str(rest);
+    mail_parser::decoders::html::html_to_text(&shown)
+}
+
+/// Whether `after_bracket`, the text that follows a `<`, opens a `name`
+/// element.
+fn opens_element(after_bracket: &str, name: &str) -> bool {
+    after_bracket
+        .get(..name.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(name))
+        && after_bracket[name.len()..]
+            .chars()
+            .next()
+            .is_some_and(|after| after == '>' || after == '/' || after.is_whitespace())
+}
+
+/// What follows the closing tag of the `name` element opened in `inside`;
+/// nothing when the element is never closed.
+fn after_closing_tag<'a>(inside: &'a str, name: &str) -> &'a str {
+    let mut rest = inside;
+    while let Some(at) = rest.find("</") {
+        rest = &rest[at + 2..];
+        if opens_element(rest, name) {
+            return rest.find('>').map_or("", |end| &rest[end + 1..]);
+        }
+    }
+    ""
 }
 
 /// Whether `text`, given as plain text, is written with HTML tags.
@@ -351,6 +407,25 @@ Content-Type: text/html; charset=utf-8\r\n\
         }
         assert!(text.contains("Your receipt & total: 12"), "{text:?}");
         assert!(text.contains("Thanks"), "{text:?}");
+    }
+
+    /// mail-parser's own converter lets the rules of a style element through
+    /// as soon as the element carries an attribute.
+    #[test]
+    fn the_rules_of_a_style_element_with_an_attribute_are_not_text() {
+        let raw: &[u8] = b"Subject: receipt\r\n\
+Content-Type: text/html; charset=utf-8\r\n\
+\r\n\
+<html><head profile=\"x\"><title>Receipt</title></head>\r\n\
+<body><STYLE type=\"text/css\">.meta_box td { color:#007eff; }</STYLE>\r\n\
+<script type=\"text/javascript\">var tracker = 1;</script>\r\n\
+<p>Your total: 12 EUR</p><style media=\"all\">p { margin:0 }</body></html>";
+        let parsed = parse_rfc822(&MessageParser::default(), raw).unwrap();
+        let text = parsed.body_text.unwrap();
+        for markup in ["meta", "color", "tracker", "Receipt", "margin", "{"] {
+            assert!(!text.contains(markup), "{markup:?} left in {text:?}");
+        }
+        assert!(text.contains("Your total: 12 EUR"), "{text:?}");
     }
 
     /// What Apple, Meta and AWS notices send: a plain text alternative that
