@@ -1,5 +1,7 @@
 pub mod attachment;
-pub mod aux;
+// Not `aux`: Windows reserves that name, and a checkout there refuses any
+// path that holds it.
+pub mod auxiliary;
 pub mod checkpoint_store;
 pub mod consumer;
 pub mod contacts;

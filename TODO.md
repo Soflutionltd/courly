@@ -366,7 +366,7 @@ and mirroring any needed upstream fixtures into
   preset → color_bg/fg null).
 - [ ] **Graph category shared-mailbox path hardening** - Combine
   master categories with a multi-account fixture. The category-definitions
-  read (`SyncEngine::category_definitions_list`, `service/src/conduit/aux/
+  read (`SyncEngine::category_definitions_list`, `service/src/conduit/auxiliary/
   graph.rs`) is per-account-scoped through conduit-graph's own account
   routing as of conduit-migration B15 (the legacy `graph_label_sync()` /
   `GraphClient::api_path_prefix()` hardcoded-`/me` path this item was

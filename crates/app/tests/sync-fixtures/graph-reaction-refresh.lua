@@ -1,7 +1,7 @@
 -- The Graph reaction refresh only considers messages that already carry an
 -- `exchange_native` reaction row OR arrived within the last 14 days (the
 -- legacy seeded-or-recent LIMIT 60 candidate query, ported verbatim into
--- `service::conduit::aux::graph`). A `received_at` of "now minus more than a
+-- `service::conduit::auxiliary::graph`). A `received_at` of "now minus more than a
 -- fortnight" silently drops the message out of the candidate set and the gate
 -- stops exercising the refresh while still reporting green on its other
 -- assertions - which is exactly what a fixed 2026-01-15 date did.

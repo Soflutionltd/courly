@@ -1485,7 +1485,7 @@ async fn category_refresh_loop(
             () = slot.cancel.cancelled() => return,
             () = tokio::time::sleep(CATEGORY_REFRESH_INTERVAL) => {}
         }
-        match super::aux::graph::import_master_categories(
+        match super::auxiliary::graph::import_master_categories(
             &inner.engine.engine(),
             &account,
             &inner.write_db,
@@ -1678,7 +1678,7 @@ async fn run_aux_pass(
         // persisted. ShareNotification polling had no user-visible effect.
         ConduitProviderKind::Jmap => Ok(()),
         ConduitProviderKind::Graph => {
-            super::aux::graph::run_graph_auxiliary_sync(
+            super::auxiliary::graph::run_graph_auxiliary_sync(
                 &inner.engine.engine(),
                 account_id,
                 &inner.read_db,
