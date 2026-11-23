@@ -724,6 +724,11 @@ impl SearchReadState {
         if let Some(ref text) = params.free_text
             && !text.is_empty()
         {
+            // What the user reads in the list or the mail matches from the
+            // first letters of a word. The text inside an attachment matches
+            // by whole words only: over the pages of a PDF, "meta" would
+            // otherwise find "Metal" or "metapay" in mails that show the
+            // word nowhere.
             let mut qp = word_prefix_parser(
                 searcher.index(),
                 vec![
@@ -732,9 +737,9 @@ impl SearchReadState {
                     self.fields.to_addresses,
                     self.fields.body_text,
                     self.fields.snippet,
-                    self.fields.attachment_text,
                     self.fields.attachment_filename,
                 ],
+                &[self.fields.attachment_text],
             );
             // Every typed word must match somewhere; where it matches sets
             // the rank.
@@ -1210,9 +1215,20 @@ fn name_prefix_query(
     Ok(Some(Box::new(PhrasePrefixQuery::new(terms))))
 }
 
-fn word_prefix_parser(index: &tantivy::Index, fields: Vec<Field>) -> QueryParser {
-    let mut parser = QueryParser::for_index(index, fields.clone());
-    for field in fields {
+/// A parser over `prefix_fields`, where a typed word matches the start of
+/// a word, and `whole_word_fields`, where it matches a whole word only.
+fn word_prefix_parser(
+    index: &tantivy::Index,
+    prefix_fields: Vec<Field>,
+    whole_word_fields: &[Field],
+) -> QueryParser {
+    let fields = prefix_fields
+        .iter()
+        .chain(whole_word_fields)
+        .copied()
+        .collect();
+    let mut parser = QueryParser::for_index(index, fields);
+    for field in prefix_fields {
         parser.set_field_fuzzy(field, true, 0, false);
     }
     parser
@@ -1692,6 +1708,33 @@ mod tests {
             .expect("ok");
         assert!(matches!(results[0].match_kind, MatchKind::Body));
         assert!(results[0].also_matched.is_empty());
+    }
+
+    #[test]
+    fn the_text_of_an_attachment_matches_by_whole_words_only() {
+        let read = build_attribution_test_index(
+            "ordinary email body unrelated",
+            "general inquiry",
+            "alice",
+            "your Metal plan renews soon",
+            "nothing of note",
+        );
+        let search = |text: &str| {
+            read.search_with_filters(&SearchParams {
+                free_text: Some(text.into()),
+                ..date_boundary_params(None, None)
+            })
+            .expect("search")
+            .len()
+        };
+
+        // The start of a word of the attachment is not a match...
+        assert_eq!(search("meta"), 0);
+        // ...the whole word is...
+        assert_eq!(search("metal"), 1);
+        // ...and what the mail itself shows still matches from its start.
+        assert_eq!(search("ordin"), 1);
+        assert_eq!(search("gener"), 1);
     }
 
     #[test]
