@@ -42,6 +42,10 @@ pub struct UnifiedSearchResult {
     /// Phase 7-8: secondary matches above the 50%-of-top-score
     /// threshold, score-descending. Empty for SQL paths.
     pub also_matched: Vec<MatchKind>,
+    /// The message of the conversation the engine found the words in, so
+    /// the conversation can open on it. `None` for SQL paths, which match
+    /// a conversation as a whole.
+    pub match_message_id: Option<String>,
 }
 
 /// Search result quality is a property of the result set, not each row.
@@ -158,6 +162,7 @@ fn search_sql_fallback(
                 rank: 0.0,
                 match_kind: None,
                 also_matched: Vec::new(),
+                match_message_id: None,
             })
             .collect())
     }
@@ -594,6 +599,7 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
         rank: 0.0,
         match_kind: None,
         also_matched: Vec::new(),
+        match_message_id: None,
     }
 }
 
@@ -678,6 +684,7 @@ fn tantivy_result_to_unified(r: &TantivyResult) -> UnifiedSearchResult {
         rank: r.rank,
         match_kind: Some(r.match_kind.clone()),
         also_matched: r.also_matched.clone(),
+        match_message_id: Some(r.message_id.clone()),
     }
 }
 
@@ -846,6 +853,7 @@ mod tests {
             rank,
             match_kind: None,
             also_matched: Vec::new(),
+            match_message_id: None,
         };
         let mut results = [
             result("old-strong", Some(100), 9.0),
@@ -973,6 +981,7 @@ mod tests {
             rank: 3.5,
             match_kind: Some(MatchKind::Body),
             also_matched: Vec::new(),
+            match_message_id: None,
         };
 
         let enriched = enrich_from_sql(result, &thread);
@@ -1011,6 +1020,7 @@ mod tests {
             rank: 1.0,
             match_kind: Some(MatchKind::Body),
             also_matched: Vec::new(),
+            match_message_id: None,
         }
     }
 

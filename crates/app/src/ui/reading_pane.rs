@@ -134,6 +134,26 @@ pub enum ReadingPaneEvent {
 
 // ── State ──────────────────────────────────────────────
 
+/// Id of the scrollable that holds the messages of the open conversation.
+const MESSAGE_LIST_ID: &str = "reading-pane-messages";
+
+/// How long the view keeps following the matched message after a
+/// conversation opens. The mails above it are drawn one after the other
+/// and each one moves it; past this delay the scroll position is the
+/// reader's own.
+const MATCH_FOLLOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Id of the card of the message at `index` in the list.
+fn message_card_id(index: usize) -> iced::advanced::widget::Id {
+    iced::advanced::widget::Id::from(format!("reading-pane-message-{index}"))
+}
+
+/// The message of the open conversation the view scrolls to.
+struct MatchTarget {
+    index: usize,
+    until: std::time::Instant,
+}
+
 pub struct ReadingPane {
     pub thread_messages: Vec<ThreadMessage>,
     pub thread_attachments: Vec<ThreadAttachment>,
@@ -145,6 +165,9 @@ pub struct ReadingPane {
     current_thread: Option<ThreadRef>,
     /// Search terms to highlight in message bodies. Empty when not in search mode.
     pub search_highlight_terms: Vec<String>,
+    /// The message a search result was found through, shown at the top of
+    /// the view when the conversation opens.
+    match_target: Option<MatchTarget>,
     /// Attachment whose Preview / Open / Download menu is unfolded.
     attachment_menu: Option<String>,
     /// HTML render state, one per message.
@@ -420,6 +443,7 @@ impl ReadingPane {
             date_display: DateDisplay::RelativeOffset,
             current_thread: None,
             search_highlight_terms: Vec::new(),
+            match_target: None,
             attachment_menu: None,
             html_bodies: Vec::new(),
             inline_image_bytes: HashMap::new(),
@@ -451,6 +475,7 @@ impl ReadingPane {
         self.thread_attachments.clear();
         self.thread_labels.clear();
         self.focused_message = None;
+        self.match_target = None;
         self.attachment_menu = None;
         self.html_bodies.clear();
         self.inline_image_bytes.clear();
@@ -526,6 +551,40 @@ impl ReadingPane {
         self.attachment_menu = None;
         self.thread_labels = detail.labels;
         self.inline_image_bytes = super::mail_body::inline_image_bytes(&detail.inline_images);
+    }
+
+    /// Open the loaded conversation on the message a search result was
+    /// found through, keeping the order of the messages: the view scrolls
+    /// down to it. Nothing moves when it is the message already on top, or
+    /// when it is not in the conversation.
+    pub fn open_on_match(&mut self, message_id: &str) -> Task<ReadingPaneMessage> {
+        self.match_target = self
+            .thread_messages
+            .iter()
+            .position(|message| message.id == message_id)
+            .filter(|index| *index > 0)
+            .map(|index| MatchTarget {
+                index,
+                until: std::time::Instant::now() + MATCH_FOLLOW,
+            });
+        self.scroll_to_match()
+    }
+
+    /// Bring the matched message to the top of the view, while the view
+    /// still follows it.
+    fn scroll_to_match(&mut self) -> Task<ReadingPaneMessage> {
+        let Some(target) = &self.match_target else {
+            return Task::none();
+        };
+        if std::time::Instant::now() > target.until {
+            self.match_target = None;
+            return Task::none();
+        }
+        iced::advanced::widget::operate(super::scroll_to_child::scroll_to_child::<()>(
+            iced::advanced::widget::Id::from(MESSAGE_LIST_ID),
+            message_card_id(target.index),
+        ))
+        .discard()
     }
 
     /// Invites still waiting for their calendar lookup, as
@@ -836,7 +895,18 @@ impl Component for ReadingPane {
                     .get_mut(index)
                     .is_some_and(|state| state.finish(inputs, body));
                 self.find_code_in_rendered_text(index);
-                (self.start_html_render(index, again), None)
+                let render = self.start_html_render(index, again);
+                // A mail drawn above the matched message, or the message
+                // itself, changes where it sits: follow it.
+                let follows = self
+                    .match_target
+                    .as_ref()
+                    .is_some_and(|target| index <= target.index);
+                if follows {
+                    (Task::batch([render, self.scroll_to_match()]), None)
+                } else {
+                    (render, None)
+                }
             }
             ReadingPaneMessage::ToggleOriginalTone(index) => {
                 let start = self
@@ -1126,7 +1196,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 ReadingPaneMessage::CopyCode(msg.id.clone()),
             )
         });
-        msg_col = msg_col.push(widgets::expanded_message_card(
+        let card = widgets::expanded_message_card(
             msg,
             i,
             pane.date_display,
@@ -1151,12 +1221,15 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
             ReadingPaneMessage::EditContact,
             ReadingPaneMessage::CreateEventFromEmail,
             ReadingPaneMessage::ShowRecipients,
-        ));
+        );
+        // The card carries an id so the view can scroll to this message.
+        msg_col = msg_col.push(container(card).id(message_card_id(i)));
     }
 
     msg_col = msg_col.push(Space::new().height(SPACE_MD));
 
     scrollable(msg_col)
+        .id(MESSAGE_LIST_ID)
         .spacing(SCROLLBAR_SPACING)
         .height(Length::Fill)
         .into()

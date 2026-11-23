@@ -75,6 +75,7 @@ fn held_send_row(
         also_matched: Vec::new(),
         folder_name: None,
         message_id: None,
+        match_message_id: None,
     })
 }
 

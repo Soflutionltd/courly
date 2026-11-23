@@ -95,6 +95,9 @@ pub struct Thread {
     /// mail one message per row. Opening the row shows that message, not
     /// the whole conversation with its latest message on top.
     pub message_id: Option<String>,
+    /// The message a search result was found through. Opening the row
+    /// scrolls the conversation to it; the other messages stay in place.
+    pub match_message_id: Option<String>,
 }
 
 /// Start of the row id of a sent message the app still holds: during its
@@ -134,6 +137,7 @@ impl Thread {
             also_matched: Vec::new(),
             folder_name: None,
             message_id: None,
+            match_message_id: None,
         }
     }
 
@@ -165,6 +169,7 @@ impl Thread {
             also_matched: Vec::new(),
             folder_name: None,
             message_id: None,
+            match_message_id: None,
         }
     }
 
@@ -193,6 +198,7 @@ impl Thread {
             also_matched: r.also_matched,
             folder_name: None,
             message_id: None,
+            match_message_id: r.match_message_id,
         }
     }
 }

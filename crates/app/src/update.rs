@@ -951,20 +951,30 @@ impl ReadyApp {
             Message::ThreadDetailLoaded(_, Ok(mut detail)) => {
                 // A row of a person's mail stands for one message: show that
                 // one, not the conversation with someone else's reply on top.
-                let only = self
+                let row = self
                     .thread_list
                     .selected_thread
                     .and_then(|index| self.thread_list.threads.get(index))
-                    .filter(|row| row.id == detail.thread_id && row.account_id == detail.account_id)
-                    .and_then(|row| row.message_id.as_deref());
+                    .filter(|row| {
+                        row.id == detail.thread_id && row.account_id == detail.account_id
+                    });
+                let only = row.and_then(|row| row.message_id.as_deref());
+                // A search result opens on the message it was found
+                // through, wherever it sits in the conversation.
+                let matched = row.and_then(|row| row.match_message_id.clone());
                 if let Some(only) = only
                     && detail.messages.iter().any(|message| message.id == only)
                 {
                     detail.messages.retain(|message| message.id == only);
                 }
                 self.reading_pane.load_thread_detail(detail);
+                let scroll = matched.map_or_else(Task::none, |message_id| {
+                    self.reading_pane
+                        .open_on_match(&message_id)
+                        .map(Message::ReadingPane)
+                });
                 let invites = self.load_meeting_invites();
-                Task::batch([invites, self.run_pending_row_action()])
+                Task::batch([scroll, invites, self.run_pending_row_action()])
             }
             Message::MeetingInviteResponded {
                 message_id,
