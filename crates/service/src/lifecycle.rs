@@ -53,6 +53,9 @@ impl ServiceLifecycle {
         }
     }
 
+    /// Start the shutdown drain. Its one caller is the SIGTERM handler,
+    /// which exists on Unix only.
+    #[cfg(unix)]
     pub(crate) fn request_shutdown(&self) {
         self.requested.store(true, Ordering::SeqCst);
         self.notify.notify_waiters();

@@ -22,7 +22,9 @@ impl ContactFields {
     }
 
     /// Given and family name for address books that store them apart: the
-    /// first word is the given name, the rest the family name.
+    /// first word is the given name, the rest the family name. Only the
+    /// Mac's address book stores them apart.
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn split_name(&self) -> (String, String) {
         let name = self.display_name.as_deref().unwrap_or("").trim();
         match name.split_once(char::is_whitespace) {

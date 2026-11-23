@@ -536,6 +536,13 @@ fn lua_kill(state: &mut State) -> dellingr::Result<u8> {
             )));
         }
     }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, signal);
+        Err(lua_error_message(
+            "harness.kill is only implemented on unix",
+        ))
+    }
     #[cfg(unix)]
     {
         let signal_pid = i32::try_from(pid)
@@ -544,20 +551,13 @@ fn lua_kill(state: &mut State) -> dellingr::Result<u8> {
         if result != 0 {
             return Err(lua_io(std::io::Error::last_os_error()));
         }
+        ctx.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .record_step("kill", "process", "sent");
+        state.set_top(0)?;
+        state.push_boolean(true)?;
+        Ok(1)
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (pid, signal);
-        return Err(lua_error_message(
-            "harness.kill is only implemented on unix",
-        ));
-    }
-    ctx.lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .record_step("kill", "process", "sent");
-    state.set_top(0)?;
-    state.push_boolean(true)?;
-    Ok(1)
 }
 
 fn lua_pid_is_alive(state: &mut State) -> dellingr::Result<u8> {
@@ -4585,11 +4585,21 @@ fn signal_number(state: &mut State) -> dellingr::Result<i32> {
         return Ok(state.to_number(2)? as i32);
     }
     match state.to_string(2)?.as_str() {
-        "SIGKILL" | "KILL" => Ok(libc::SIGKILL),
-        "SIGTERM" | "TERM" => Ok(libc::SIGTERM),
+        "SIGKILL" | "KILL" => Ok(SIGKILL),
+        "SIGTERM" | "TERM" => Ok(SIGTERM),
         other => Err(lua_error_message(format!("unknown signal {other:?}"))),
     }
 }
+
+#[cfg(unix)]
+use libc::{SIGKILL, SIGTERM};
+
+/// Their POSIX numbers, so a script naming a signal still parses where
+/// `harness.kill` then refuses to send it.
+#[cfg(not(unix))]
+const SIGKILL: i32 = 9;
+#[cfg(not(unix))]
+const SIGTERM: i32 = 15;
 
 fn duration_from_seconds(seconds: f64) -> Duration {
     Duration::from_millis((seconds * 1000.0).max(0.0) as u64)
