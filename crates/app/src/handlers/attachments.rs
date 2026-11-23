@@ -89,6 +89,9 @@ pub struct SaveAttachmentParams {
 #[derive(Debug, Clone)]
 pub struct SaveAllAttachmentsParams {
     pub thread_id: String,
+    /// Subject of the mail: the name proposed for the folder the
+    /// attachments are saved into.
+    pub subject: Option<String>,
     pub items: Vec<AttachmentRef>,
 }
 
@@ -162,8 +165,9 @@ impl ReadyApp {
         )
     }
 
-    /// Pick a folder, fetch every attachment in `items`, write each
-    /// with `(N)` collision suffix on name conflicts.
+    /// Ask where to save a folder named after the mail, create it, fetch
+    /// every attachment in `items` and write each into it, with a `(N)`
+    /// suffix on name conflicts.
     pub(crate) fn handle_save_all_attachments(
         &mut self,
         params: SaveAllAttachmentsParams,
@@ -185,8 +189,15 @@ impl ReadyApp {
         // params.items is non-empty (guarded above).
         let folder_key = (params.items[0].account_id.clone(), params.thread_id.clone());
         let initial_dir = self.attachment_last_folders.get(&folder_key).cloned();
+        let folder_name = save_all_folder_name(params.subject.as_deref());
         Task::perform(
-            save_all_attachments_worker(client, app_data_dir, params.items, initial_dir),
+            save_all_attachments_worker(
+                client,
+                app_data_dir,
+                params.items,
+                folder_name,
+                initial_dir,
+            ),
             move |chosen| match chosen {
                 Some(folder) => Message::AttachmentSaveFolderRemembered(folder_key.clone(), folder),
                 None => Message::Noop,
@@ -285,23 +296,43 @@ async fn save_attachment_worker(
     chosen.parent().map(Path::to_path_buf)
 }
 
-/// Returns `Some(folder)` if the user picked a folder. `None` on
-/// cancel.
+/// The name proposed for the folder a mail's attachments are saved into:
+/// its subject, or a generic name when it has none.
+fn save_all_folder_name(subject: Option<&str>) -> String {
+    match subject.map(str::trim).filter(|subject| !subject.is_empty()) {
+        Some(subject) => sanitize_attachment_filename(subject),
+        None => t!("main.attachments.save_all_folder_name").into_owned(),
+    }
+}
+
+/// Returns `Some(parent)` of the folder the attachments were saved into,
+/// to open the next save there. `None` on cancel or when the folder could
+/// not be created.
+///
+/// The dialog is the save dialog a single attachment gets, with the name
+/// of a folder in its name field: a folder picker validates with "Open",
+/// which reads as opening a file, not as saving several.
 async fn save_all_attachments_worker(
     client: Arc<ServiceClient>,
     app_data_dir: PathBuf,
     items: Vec<AttachmentRef>,
+    folder_name: String,
     initial_dir: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    let mut dialog =
-        rfd::AsyncFileDialog::new().set_title(t!("main.attachments.save_all_dialog_title"));
+    let mut dialog = rfd::AsyncFileDialog::new()
+        .set_title(t!("main.attachments.save_all_dialog_title"))
+        .set_file_name(&folder_name);
     if let Some(dir) = initial_dir.as_ref().filter(|p| p.exists()) {
         dialog = dialog.set_directory(dir);
     } else if let Some(dl) = dirs::download_dir() {
         dialog = dialog.set_directory(dl);
     }
-    let handle = dialog.pick_folder().await?;
+    let handle = dialog.save_file().await?;
     let folder = handle.path().to_path_buf();
+    if let Err(e) = tokio::fs::create_dir_all(&folder).await {
+        log::warn!("save_all mkdir ({}): {e}", folder.display());
+        return None;
+    }
 
     let total = items.len();
     let mut ok_count = 0usize;
@@ -345,7 +376,7 @@ async fn save_all_attachments_worker(
         ok_count += 1;
     }
     log::info!("save_all attachments: total={total} ok={ok_count} fail={fail_count}");
-    Some(folder)
+    folder.parent().map(Path::to_path_buf)
 }
 
 /// Strip path separators, control chars, and Windows-reserved chars
@@ -617,6 +648,21 @@ fn open_file_with_os_default(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_folder_of_a_save_all_is_named_after_the_mail() {
+        assert_eq!(
+            save_all_folder_name(Some(" Statements 2025/2026 ")),
+            sanitize_attachment_filename("Statements 2025/2026")
+        );
+        assert!(!save_all_folder_name(Some("a/b")).contains('/'));
+    }
+
+    #[test]
+    fn a_mail_without_a_subject_still_names_its_folder() {
+        assert!(!save_all_folder_name(None).is_empty());
+        assert_eq!(save_all_folder_name(Some("  ")), save_all_folder_name(None));
+    }
 
     #[test]
     fn sanitizer_preserves_extensions_and_strips_separators() {

@@ -686,6 +686,7 @@ fn build_save_all_params(state: &MessageViewState) -> SaveAllAttachmentsParams {
         .collect();
     SaveAllAttachmentsParams {
         thread_id: state.thread_id.clone(),
+        subject: state.subject.clone(),
         items,
     }
 }

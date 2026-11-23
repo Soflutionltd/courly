@@ -258,6 +258,7 @@ impl ReadingPane {
             ReadingPaneEvent::SaveAllAttachments(
                 crate::handlers::attachments::SaveAllAttachmentsParams {
                     thread_id: thread.id.clone(),
+                    subject: thread.subject.clone(),
                     items,
                 },
             )
