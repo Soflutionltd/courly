@@ -69,11 +69,22 @@ fn prefix_len(haystack: &str, term: &str) -> Option<usize> {
 /// an ellipsis when the text began earlier; line breaks and runs of spaces
 /// read as one space.
 pub fn excerpt(text: &str, terms: &[String]) -> Option<String> {
+    excerpt_with_lead(text, terms, EXCERPT_LEAD_CHARS)
+}
+
+/// One line of `text` opening on the first word a term starts, `None` when
+/// no term does. For a line that shares its row with a label, where a lead
+/// would push the matched word out of sight.
+pub fn excerpt_at_match(text: &str, terms: &[String]) -> Option<String> {
+    excerpt_with_lead(text, terms, 0)
+}
+
+fn excerpt_with_lead(text: &str, terms: &[String], lead_chars: usize) -> Option<String> {
     let found = match_ranges(text, terms).into_iter().next()?;
     let lead_start = text[..found.start]
         .char_indices()
         .rev()
-        .take(EXCERPT_LEAD_CHARS)
+        .take(lead_chars)
         .last()
         .map_or(found.start, |(at, _)| at);
     // Open on a whole word unless the lead reaches the start of the text.
@@ -163,6 +174,12 @@ complete.\r\n\r\nMessage   metadata\r\nAffected account";
     fn an_excerpt_of_a_match_near_the_start_opens_the_text() {
         let line = excerpt("Your Metal plan renews soon", &terms(&["meta"])).expect("a match");
         assert_eq!(line, "Your Metal plan renews soon");
+    }
+
+    #[test]
+    fn an_excerpt_at_the_match_opens_on_the_matched_word() {
+        let line = excerpt_at_match("Terms for our\nMetal   plan", &terms(&["meta"]));
+        assert_eq!(line.as_deref(), Some("\u{2026}Metal plan"));
     }
 
     #[test]

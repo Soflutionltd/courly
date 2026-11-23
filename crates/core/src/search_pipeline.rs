@@ -461,7 +461,7 @@ fn enrich_with_attribution(
         if let MatchKind::Attachment { snippet, .. } = &mut r.match_kind {
             // The engine cuts its fragment out of the raw text, line breaks
             // included, and a row has one line for it.
-            let line = crate::search_match::excerpt(snippet, &words)
+            let line = crate::search_match::excerpt_at_match(snippet, &words)
                 .unwrap_or_else(|| snippet.split_whitespace().collect::<Vec<_>>().join(" "));
             *snippet = line;
             continue;
@@ -488,7 +488,7 @@ fn enrich_with_attribution(
 /// hit stayed attributed to a body that does not hold the word, so the row
 /// showed no reason for it.
 fn attachment_only_match(input: &AttributionInputs, words: &[String]) -> Option<MatchKind> {
-    use crate::search_match::{excerpt, holds_match};
+    use crate::search_match::{excerpt_at_match, holds_match};
     let elsewhere = [&input.subject, &input.from_name, &input.body_text]
         .into_iter()
         .any(|text| holds_match(text, words));
@@ -496,7 +496,7 @@ fn attachment_only_match(input: &AttributionInputs, words: &[String]) -> Option<
         return None;
     }
     input.attachments.iter().find_map(|attachment| {
-        let snippet = excerpt(&attachment.extracted_text, words)?;
+        let snippet = excerpt_at_match(&attachment.extracted_text, words)?;
         Some(MatchKind::Attachment {
             attachment_id: attachment.attachment_id.clone(),
             filename: attachment.filename.clone(),
@@ -1061,7 +1061,9 @@ mod tests {
                 filename, snippet, ..
             }) => {
                 assert_eq!(filename, "terms.pdf");
-                assert_eq!(snippet, "Plans: Plus, Metal.");
+                // The fragment follows a label on its row: it opens on the
+                // matched word so the word stays in sight.
+                assert_eq!(snippet, "\u{2026}Metal.");
             }
             other => panic!("expected the attachment, got {other:?}"),
         }
