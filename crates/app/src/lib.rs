@@ -40,6 +40,7 @@ mod desktop_notifications;
 mod display;
 mod draft_wal;
 mod favorites;
+mod hidden_addresses;
 mod sidebar_sections;
 mod font;
 mod handlers;

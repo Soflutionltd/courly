@@ -407,11 +407,15 @@ fn build_contact_entry(
 
 // ── Compose autocomplete ───────────────────────────────
 
+/// People suggested under a recipient field.
+const AUTOCOMPLETE_RESULTS: usize = 10;
+
 /// Dispatch an autocomplete search for the active compose field.
 pub fn dispatch_autocomplete_search(
     db: &Arc<Db>,
     window_id: iced::window::Id,
     state: &mut ComposeState,
+    hidden: &crate::hidden_addresses::HiddenAddresses,
 ) -> Task<Message> {
     let query = state.autocomplete.query.clone();
     log::debug!("Autocomplete search: {query:?}");
@@ -423,9 +427,19 @@ pub fn dispatch_autocomplete_search(
 
     let generation = state.autocomplete.search_generation.next();
     let db = Arc::clone(db);
+    let hidden = hidden.clone();
 
     Task::perform(
-        async move { db.search_autocomplete(query, 10).await },
+        async move {
+            // Ask for as many more as are hidden, so hiding addresses
+            // never shortens the list.
+            let wanted = AUTOCOMPLETE_RESULTS + hidden.addresses().len();
+            let limit = i64::try_from(wanted).unwrap_or(i64::MAX);
+            let mut results = db.search_autocomplete(query, limit).await?;
+            results.retain(|contact| contact.is_group || !hidden.hides(&contact.email));
+            results.truncate(AUTOCOMPLETE_RESULTS);
+            Ok(results)
+        },
         move |results| {
             Message::PopOut(
                 window_id,

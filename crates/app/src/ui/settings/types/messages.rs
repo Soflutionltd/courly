@@ -174,6 +174,8 @@ pub enum SettingsMessage {
     /// reloaded list and the reason.
     ContactWriteIncomplete(Result<Vec<crate::db::ContactEntry>, String>, String),
     DismissContactIssue,
+    /// Suggest again an address the reader took out of the suggestions.
+    RestoreHiddenAddress(String),
     // Contact Import
     ImportContactsOpen,
     ImportFileSelected(String, Vec<u8>),
@@ -279,6 +281,8 @@ pub enum SettingsEvent {
     /// The reading zoom changed; re-render open HTML bodies.
     EmailZoomChanged(f32),
     OpenAddAccountWizard,
+    /// Request the App to suggest this address again while typing.
+    RestoreHiddenAddress(String),
     /// The user asked for an update check from Settings > About.
     CheckForUpdates,
     OpenGithub,

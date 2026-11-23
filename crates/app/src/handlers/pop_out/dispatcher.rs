@@ -449,7 +449,12 @@ impl ReadyApp {
                         Task::none()
                     };
                 let autocomplete_task = if trigger_autocomplete {
-                    crate::handlers::contacts::dispatch_autocomplete_search(&db, window_id, state)
+                    crate::handlers::contacts::dispatch_autocomplete_search(
+                        &db,
+                        window_id,
+                        state,
+                        &self.hidden_addresses,
+                    )
                 } else {
                     Task::none()
                 };

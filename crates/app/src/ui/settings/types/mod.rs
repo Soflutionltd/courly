@@ -420,6 +420,8 @@ pub struct Settings {
     pub contact_editor: Option<ContactEditorState>,
     /// Why the last contact write did not reach every address book.
     pub contact_issue: Option<String>,
+    /// Addresses no longer suggested while typing, as the App holds them.
+    pub hidden_addresses: Vec<String>,
     /// Pending contact delete ID awaiting confirmation.
     pub confirm_delete_contact: Option<String>,
     // Groups management
@@ -770,6 +772,7 @@ impl Default for Settings {
             contacts: Vec::new(),
             contact_editor: None,
             contact_issue: None,
+            hidden_addresses: Vec::new(),
             confirm_delete_contact: None,
             group_filter: String::new(),
             groups: Vec::new(),
@@ -905,6 +908,7 @@ mod tests {
             email_body_background: None,
             date_display: None,
             favorite_contacts: None,
+            hidden_addresses: None,
             sidebar_hidden: None,
         }
     }

@@ -869,6 +869,7 @@ impl ReadyApp {
                 .set_reading_zoom(zoom)
                 .map(Message::ReadingPane),
             SettingsEvent::OpenAddAccountWizard => self.handle_open_add_account_wizard(),
+            SettingsEvent::RestoreHiddenAddress(address) => self.restore_address(&address),
             SettingsEvent::CheckForUpdates => {
                 self.handle_updater(crate::updater::UpdaterMessage::CheckRequestedByUser)
             }
@@ -1673,6 +1674,9 @@ impl ReadyApp {
         self.search_scope.choice =
             crate::ui::search_scope::SearchScopeChoice::parse(ui_snap.search_scope.as_deref());
         self.favorites = crate::favorites::Favorites::parse(ui_snap.favorite_contacts.as_deref());
+        self.hidden_addresses =
+            crate::hidden_addresses::HiddenAddresses::parse(ui_snap.hidden_addresses.as_deref());
+        self.settings.hidden_addresses = self.hidden_addresses.addresses().to_vec();
         self.sidebar.hidden_sections =
             crate::sidebar_sections::HiddenSections::parse(ui_snap.sidebar_hidden.as_deref());
         self.sync_sidebar_favorites();

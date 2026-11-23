@@ -153,6 +153,8 @@ pub struct UiBootstrapSnapshot {
     pub email_body_background: Option<String>,
     pub date_display: Option<String>,
     pub favorite_contacts: Option<String>,
+    /// Addresses no longer suggested while typing, as JSON.
+    pub hidden_addresses: Option<String>,
     /// Sections taken out of the folder column, as comma-separated keys.
     pub sidebar_hidden: Option<String>,
 }
@@ -365,6 +367,7 @@ pub fn get_ui_bootstrap_snapshot(
         email_body_background: get("email_body_background"),
         date_display: get("date_display"),
         favorite_contacts: get("favorite_contacts"),
+        hidden_addresses: get("hidden_addresses"),
         sidebar_hidden: get("sidebar_hidden"),
     })
 }

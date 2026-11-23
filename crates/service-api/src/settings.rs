@@ -92,6 +92,9 @@ pub enum SettingValue {
     NotificationVipSenders(String),
     /// People starred as favourites, listed in the folder column, as JSON.
     FavoriteContacts(String),
+    /// Addresses the reader no longer wants suggested while typing, as
+    /// JSON.
+    HiddenAddresses(String),
     /// Sections of the folder column the reader took out of it, as
     /// comma-separated keys ("smart,starred").
     SidebarHidden(String),
@@ -133,6 +136,7 @@ impl SettingValue {
             Self::NotifyCategories(_) => "notify_categories",
             Self::NotificationVipSenders(_) => "notification_vip_senders",
             Self::FavoriteContacts(_) => "favorite_contacts",
+            Self::HiddenAddresses(_) => "hidden_addresses",
             Self::SidebarHidden(_) => "sidebar_hidden",
             Self::SenderLogos(_) => "sender_logos",
         }
@@ -180,6 +184,7 @@ impl SettingValue {
             | Self::NotifyCategories(s)
             | Self::NotificationVipSenders(s)
             | Self::FavoriteContacts(s)
+            | Self::HiddenAddresses(s)
             | Self::SidebarHidden(s) => s.clone(),
         }
     }

@@ -765,7 +765,11 @@ impl ReadyApp {
     pub(crate) fn handle_search_suggest(&mut self, message: SearchSuggestMessage) -> Task<Message> {
         match message {
             SearchSuggestMessage::Refresh => self.refresh_search_suggestions(),
-            SearchSuggestMessage::Loaded { query, contacts } => {
+            SearchSuggestMessage::Loaded {
+                query,
+                mut contacts,
+            } => {
+                contacts.retain(|contact| !self.hidden_addresses.hides(&contact.insert_value));
                 let current = self.search_query.text().to_string();
                 if !self.thread_list.typeahead.visible {
                     self.search_suggest.load(query, &current, contacts);
@@ -788,6 +792,20 @@ impl ReadyApp {
                 }
             }
             SearchSuggestMessage::PickContact(index) => self.pick_suggested_contact(index),
+            SearchSuggestMessage::AskHide(index) => {
+                self.search_suggest.ask_hide(Some(index));
+                Task::none()
+            }
+            SearchSuggestMessage::CancelHide => {
+                self.search_suggest.ask_hide(None);
+                Task::none()
+            }
+            SearchSuggestMessage::ConfirmHide(index) => {
+                match self.search_suggest.remove_contact(index) {
+                    Some(address) => self.hide_address(&address),
+                    None => Task::none(),
+                }
+            }
             SearchSuggestMessage::ShowAll => self.handle_search_execute(),
             SearchSuggestMessage::Close => {
                 self.close_search_menus();
@@ -932,6 +950,47 @@ impl ReadyApp {
     /// Hand the favourites to the folder column.
     pub(crate) fn sync_sidebar_favorites(&mut self) {
         self.sidebar.favorites = self.favorites.contacts().to_vec();
+    }
+
+    /// Stop suggesting an address while typing, and say where to undo it.
+    pub(crate) fn hide_address(&mut self, address: &str) -> Task<Message> {
+        if !self.hidden_addresses.hide(address) {
+            return Task::none();
+        }
+        self.settings.hidden_addresses = self.hidden_addresses.addresses().to_vec();
+        self.status_bar
+            .show_confirmation(t!("main.search.suggest.hidden", address = address).into_owned());
+        self.persist_hidden_addresses()
+    }
+
+    /// Suggest an address again.
+    pub(crate) fn restore_address(&mut self, address: &str) -> Task<Message> {
+        if !self.hidden_addresses.restore(address) {
+            return Task::none();
+        }
+        self.settings.hidden_addresses = self.hidden_addresses.addresses().to_vec();
+        self.persist_hidden_addresses()
+    }
+
+    fn persist_hidden_addresses(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("settings.set: no ServiceClient yet; hidden addresses not persisted");
+            return Task::none();
+        };
+        let json = self.hidden_addresses.to_json();
+        Task::perform(
+            async move {
+                client
+                    .set_settings(vec![service_api::SettingValue::HiddenAddresses(json)])
+                    .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::warn!("settings.set hidden_addresses failed: {e}");
+                }
+                Message::Noop
+            },
+        )
     }
 
     fn persist_favorites(&self) -> Task<Message> {

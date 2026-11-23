@@ -69,7 +69,46 @@ pub(super) fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     col = col.push(section(tr(t!("settings.people.groups")), group_items));
 
+    // Shown only once an address was hidden: an empty section would teach
+    // nothing, the action lives on a suggestion's right click.
+    if !state.hidden_addresses.is_empty() {
+        let mut hidden_items: Vec<RowBuilder<'_>> = vec![static_row(
+            text(t!("settings.people.hidden_addresses_description"))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )];
+        hidden_items.extend(
+            state
+                .hidden_addresses
+                .iter()
+                .map(|address| static_row(hidden_address_row(address))),
+        );
+        col = col.push(section(
+            tr(t!("settings.people.hidden_addresses")),
+            hidden_items,
+        ));
+    }
+
     col.into()
+}
+
+/// One address taken out of the suggestions, with the way back.
+fn hidden_address_row(address: &str) -> Element<'_, SettingsMessage> {
+    row![
+        text(address)
+            .size(TEXT_MD)
+            .style(text::base)
+            .wrapping(text::Wrapping::None)
+            .ellipsis(text::Ellipsis::End)
+            .width(Length::Fill),
+        button(text(t!("settings.people.hidden_addresses_restore")).size(TEXT_SM))
+            .on_press(SettingsMessage::RestoreHiddenAddress(address.to_owned()))
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::Ghost.style()),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 /// Why the last contact write left an address book behind.

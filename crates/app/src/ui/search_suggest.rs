@@ -3,7 +3,7 @@
 //! the messages live. Search operators (`from:`, `in:`…) list their values
 //! instead.
 
-use iced::widget::{Space, button, column, container, row, text};
+use iced::widget::{Space, button, column, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length};
 use rust_i18n::t;
 
@@ -28,6 +28,12 @@ pub enum SearchSuggestMessage {
     /// Enter in the search field: the highlighted row, or every result.
     Activate,
     PickContact(usize),
+    /// A right click on a person: ask before taking them out of the
+    /// suggestions.
+    AskHide(usize),
+    /// The answer to that question: stop suggesting the address.
+    ConfirmHide(usize),
+    CancelHide,
     ShowAll,
     Close,
     /// The cross on the sender pill.
@@ -54,6 +60,8 @@ pub struct SearchSuggest {
     /// Highlighted row; none until an arrow key moves into the menu, so
     /// Enter alone searches for what was typed.
     selected: Option<usize>,
+    /// The person whose row asks whether to stop suggesting them.
+    asking_hide: Option<usize>,
 }
 
 impl SearchSuggest {
@@ -72,12 +80,29 @@ impl SearchSuggest {
             .collect();
         self.query = query;
         self.selected = None;
+        self.asking_hide = None;
         self.open = !self.contacts.is_empty();
     }
 
     pub fn close(&mut self) {
         self.open = false;
         self.selected = None;
+        self.asking_hide = None;
+    }
+
+    /// Turn the row of this person into the question, or back when `None`.
+    pub fn ask_hide(&mut self, index: Option<usize>) {
+        self.asking_hide = index.filter(|index| *index < self.contacts.len());
+    }
+
+    /// Take the person out of the menu and return their address.
+    pub fn remove_contact(&mut self, index: usize) -> Option<String> {
+        self.asking_hide = None;
+        self.selected = None;
+        if index >= self.contacts.len() {
+            return None;
+        }
+        Some(self.contacts.remove(index).insert_value)
     }
 
     pub fn rows(&self) -> Vec<SuggestRow> {
@@ -123,11 +148,11 @@ pub fn view<'a>(
     if !suggest.contacts.is_empty() {
         list = list.push(section_title(t!("main.search.suggest.people")));
         for (i, contact) in suggest.contacts.iter().enumerate() {
-            list = list.push(contact_row(
-                contact,
-                i,
-                selected == Some(SuggestRow::Contact(i)),
-            ));
+            list = list.push(if suggest.asking_hide == Some(i) {
+                hide_question_row(contact, i)
+            } else {
+                contact_row(contact, i, selected == Some(SuggestRow::Contact(i)))
+            });
         }
     }
     list = list.push(widgets::divider());
@@ -195,7 +220,53 @@ fn contact_row(contact: &TypeaheadItem, index: usize, selected: bool) -> Element
     if let Some(marks) = widgets::contact_origin_marks(contact.origins, ICON_MD) {
         line = line.push(Space::new().width(Length::Fill)).push(marks);
     }
-    suggestion_button(line, SearchSuggestMessage::PickContact(index), selected)
+    // A right click asks whether to stop suggesting the person. It takes
+    // two deliberate gestures, so a hurried click never loses an address.
+    mouse_area(suggestion_button(
+        line,
+        SearchSuggestMessage::PickContact(index),
+        selected,
+    ))
+    .on_right_press(Message::SearchSuggest(SearchSuggestMessage::AskHide(index)))
+    .into()
+}
+
+/// The row of a person, turned into the question a right click asks.
+fn hide_question_row(contact: &TypeaheadItem, index: usize) -> Element<'_, Message> {
+    let answer = |label: String, message: SearchSuggestMessage, class: theme::ButtonClass| {
+        button(text(label).size(TEXT_SM))
+            .on_press(Message::SearchSuggest(message))
+            .padding(PAD_ICON_BTN)
+            .style(class.style())
+    };
+    container(
+        row![
+            text(t!(
+                "main.search.suggest.hide_question",
+                address = contact.insert_value.as_str()
+            ))
+            .size(TEXT_MD)
+            .style(text::base)
+            .wrapping(text::Wrapping::None)
+            .ellipsis(text::Ellipsis::End)
+            .width(Length::Fill),
+            answer(
+                t!("main.search.suggest.hide_cancel").into_owned(),
+                SearchSuggestMessage::CancelHide,
+                theme::ButtonClass::Ghost,
+            ),
+            answer(
+                t!("main.search.suggest.hide_confirm").into_owned(),
+                SearchSuggestMessage::ConfirmHide(index),
+                theme::ButtonClass::Primary,
+            ),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .padding(ROW_MENU_ITEM_PADDING)
+    .width(Length::Fill)
+    .into()
 }
 
 fn show_all_row(query: &str, selected: bool) -> Element<'_, Message> {

@@ -196,6 +196,8 @@ pub struct ReadyApp {
     pub(crate) search_sender_name: Option<(String, String)>,
     /// People starred as favourites, listed in the folder column.
     pub(crate) favorites: crate::favorites::Favorites,
+    /// Addresses the reader took out of the suggestions.
+    pub(crate) hidden_addresses: crate::hidden_addresses::HiddenAddresses,
     /// People (with the account searched, `None` for all) whose older mail
     /// was already asked of the server this session.
     pub(crate) server_searched: std::collections::HashSet<(Option<String>, String)>,
@@ -542,6 +544,7 @@ impl ReadyApp {
             search_sender: None,
             search_sender_name: None,
             favorites: crate::favorites::Favorites::default(),
+            hidden_addresses: crate::hidden_addresses::HiddenAddresses::default(),
             server_searched: std::collections::HashSet::new(),
             server_search: None,
             search_debounce_deadline: None,

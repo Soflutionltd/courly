@@ -73,6 +73,13 @@ impl Component for Settings {
             SettingsMessage::CheckForUpdates => {
                 return (Task::none(), Some(SettingsEvent::CheckForUpdates));
             }
+            SettingsMessage::RestoreHiddenAddress(address) => {
+                self.hidden_addresses.retain(|hidden| *hidden != address);
+                return (
+                    Task::none(),
+                    Some(SettingsEvent::RestoreHiddenAddress(address)),
+                );
+            }
             SettingsMessage::OpenGithub => {
                 return (Task::none(), Some(SettingsEvent::OpenGithub));
             }
