@@ -1,0 +1,84 @@
+name: Build
+
+# Control build of Courly on every platform it is meant to run on. It
+# publishes nothing and reads no secret: it only tells whether the tree
+# still compiles and links there. Releases are made by scripts/.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TOOLCHAIN: "1.99.0"
+  # Courly builds against sibling checkouts of two public repositories, at
+  # the path its manifests name: ../sluggrs and ../sluggrs/repos/iced. They
+  # are pinned to the commits the released builds use.
+  SLUGGRS_REF: b51be5c7044c801182cafd702b831a9f3edf708c
+  ICED_REF: 9b74a21dadb0359f32ee3f9e6143b960530476a3
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One platform failing must not hide what the others say.
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple silicon
+            runner: macos-latest
+            target: aarch64-apple-darwin
+          - name: macOS Intel
+            runner: macos-latest
+            target: x86_64-apple-darwin
+          - name: Windows x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: Linux x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - name: Allow long paths
+        if: runner.os == 'Windows'
+        run: git config --system core.longpaths true
+
+      - name: Check out Courly
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: courly
+
+      - name: Check out sluggrs
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Soflutionltd/sluggrs
+          ref: ${{ env.SLUGGRS_REF }}
+          path: sluggrs
+
+      - name: Check out iced
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Soflutionltd/iced
+          ref: ${{ env.ICED_REF }}
+          path: sluggrs/repos/iced
+
+      - name: Install the Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential pkg-config libwayland-dev libxkbcommon-dev \
+            libfontconfig1-dev libssl-dev libdbus-1-dev libgtk-3-dev
+
+      - name: Install Rust ${{ env.TOOLCHAIN }}
+        shell: bash
+        run: rustup toolchain install "$TOOLCHAIN" --profile minimal --target "${{ matrix.target }}"
+
+      - name: Build
+        shell: bash
+        working-directory: courly
+        run: cargo "+$TOOLCHAIN" build --locked -p runner --target "${{ matrix.target }}"
