@@ -97,7 +97,17 @@ pub struct Thread {
     pub message_id: Option<String>,
 }
 
+/// Start of the row id of a sent message the app still holds: during its
+/// undo delay, then while the Service sends it. Such a row is no
+/// conversation of the database, so nothing may look it up there.
+pub const HELD_SEND_ROW_PREFIX: &str = "held-send:";
+
 impl Thread {
+    /// Whether this row stands for a sent message that has not left yet.
+    pub fn is_held_send(&self) -> bool {
+        self.id.starts_with(HELD_SEND_ROW_PREFIX)
+    }
+
     pub fn from_db_thread(t: rtsk::db::types::DbThread) -> Self {
         Self {
             id: t.id,

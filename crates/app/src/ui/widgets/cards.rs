@@ -197,9 +197,14 @@ pub fn thread_card<'a, M: Clone + 'a>(
 
     let mut indicators = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     if thread.is_local_draft {
+        let badge = if thread.is_held_send() {
+            t!("main.thread_list.sending_badge")
+        } else {
+            t!("main.thread_list.draft_badge")
+        };
         indicators = indicators.push(
             container(
-                text(t!("main.thread_list.draft_badge"))
+                text(badge)
                     .size(TEXT_XS)
                     .style(theme::TextClass::Accent.style()),
             )
@@ -279,7 +284,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
     // sent conversations. Every row of Drafts shows the same single action,
     // so a draft already on the server does not grow two more buttons than
     // its neighbours.
-    let actions = if thread.is_local_draft || in_drafts {
+    let actions = if thread.is_held_send() {
+        // Not a stored message yet: opening the row takes it back, and
+        // nothing else can act on it.
+        row![]
+    } else if thread.is_local_draft || in_drafts {
         row![trash]
     } else {
         row![

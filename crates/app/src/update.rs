@@ -63,7 +63,10 @@ impl ReadyApp {
                 Task::none()
             }
             Message::ThreadsLoaded(g, _) if !self.nav_generation.is_current(g) => Task::none(),
-            Message::ThreadsLoaded(_, Ok(threads)) => {
+            Message::ThreadsLoaded(_, Ok(mut threads)) => {
+                if self.current_view_is_outbox() {
+                    threads.splice(0..0, self.held_send_rows());
+                }
                 log::info!("Loaded {} threads", threads.len());
                 self.status = format!("{} threads", threads.len());
                 let now = std::time::Instant::now();

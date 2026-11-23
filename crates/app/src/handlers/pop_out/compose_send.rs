@@ -28,7 +28,132 @@ pub(crate) struct DelayedSend {
     compose: Box<ComposeState>,
 }
 
+/// The outbox row of a sent message the app still holds, when its account
+/// is `only_account` or any account is wanted.
+fn held_send_row(
+    send_id: service_api::PlanId,
+    compose: &ComposeState,
+    only_account: Option<&str>,
+) -> Option<crate::db::Thread> {
+    let account = compose.from_account.as_ref()?;
+    if only_account.is_some_and(|only| only != account.id) {
+        return None;
+    }
+    let recipients: Vec<&str> = compose
+        .to
+        .tokens
+        .iter()
+        .chain(&compose.cc.tokens)
+        .chain(&compose.bcc.tokens)
+        .map(|token| token.email.as_str())
+        .collect();
+    let (_, body_text) = compose.outgoing_body();
+    Some(crate::db::Thread {
+        id: format!("{}{send_id}", crate::db::HELD_SEND_ROW_PREFIX),
+        account_id: account.id.clone(),
+        subject: Some(compose.full_subject()).filter(|subject| !subject.is_empty()),
+        snippet: Some(body_text.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|snippet| !snippet.is_empty()),
+        last_message_at: Some(jiff::Timestamp::now().as_millisecond()),
+        message_count: 1,
+        is_read: true,
+        is_starred: false,
+        is_replied: false,
+        is_forwarded: false,
+        is_pinned: false,
+        is_muted: false,
+        is_flag_complete: false,
+        has_attachments: !compose.attachments.is_empty(),
+        label_paints: Vec::new(),
+        from_name: account.display_name.clone(),
+        from_address: Some(account.email.clone()),
+        to_addresses: Some(recipients.join(", ")).filter(|to| !to.is_empty()),
+        // Like a draft not yet on the server: no menu, no drag, no detail
+        // to load.
+        is_local_draft: true,
+        match_kind: None,
+        also_matched: Vec::new(),
+        folder_name: None,
+        message_id: None,
+    })
+}
+
 impl ReadyApp {
+    /// Whether the list shows an outbox: the row that gathers the outbox
+    /// of every account, or the outbox folder of one account.
+    pub(crate) fn current_view_is_outbox(&self) -> bool {
+        let Some(nav_id) = self.sidebar.selection.navigation_folder_id() else {
+            return false;
+        };
+        if nav_id == types::outbox::OUTBOX_VIEW_ID {
+            return true;
+        }
+        self.sidebar.nav_state.as_ref().is_some_and(|nav| {
+            nav.folders
+                .iter()
+                .any(|folder| folder.id == nav_id && types::outbox::is_outbox_name(&folder.name))
+        })
+    }
+
+    /// Sent messages that have not left yet, as outbox rows of the accounts
+    /// in view: those in their undo delay, then those the Service is
+    /// sending. Neither is in the database, where the outbox only holds
+    /// what the server keeps in its own.
+    pub(crate) fn held_send_rows(&self) -> Vec<crate::db::Thread> {
+        let only_account = match &self.sidebar.selected_scope {
+            rtsk::scope::ViewScope::AllAccounts => None,
+            rtsk::scope::ViewScope::Account(account_id) => Some(account_id.as_str()),
+            _ => return Vec::new(),
+        };
+        let waiting = self
+            .delayed_sends
+            .iter()
+            .map(|delayed| (delayed.send_id, delayed.compose.as_ref()));
+        let leaving = self
+            .in_flight_sends
+            .iter()
+            .filter_map(|(send_id, origin)| match origin {
+                SendOrigin::Detached(compose) => Some((*send_id, compose.as_ref())),
+                SendOrigin::Window(_) | SendOrigin::Unsubscribe(_) => None,
+            });
+        let mut rows: Vec<crate::db::Thread> = waiting
+            .chain(leaving)
+            .filter_map(|(send_id, compose)| held_send_row(send_id, compose, only_account))
+            .collect();
+        // Send ids are time-ordered: the latest send first, as in the list.
+        rows.sort_by(|a, b| b.id.cmp(&a.id));
+        rows
+    }
+
+    /// Reload the outbox when it is on screen: a message entered or left it.
+    fn refresh_outbox(&mut self) -> Task<Message> {
+        if self.current_view_is_outbox() {
+            self.reload_after_server_change()
+        } else {
+            Task::none()
+        }
+    }
+
+    /// A row of the outbox was opened. `None` when it is no held send. A
+    /// message still in its undo delay is taken back and reopened, as
+    /// Outlook does; one the Service is already sending cannot be.
+    pub(crate) fn reopen_held_send(&mut self, row_id: &str) -> Option<Task<Message>> {
+        let send_id = row_id.strip_prefix(crate::db::HELD_SEND_ROW_PREFIX)?;
+        let Some(index) = self
+            .delayed_sends
+            .iter()
+            .position(|delayed| delayed.send_id.to_string() == send_id)
+        else {
+            return Some(Task::none());
+        };
+        let delayed = self.delayed_sends.remove(index);
+        if self.delayed_sends.is_empty() {
+            self.status_bar.clear_pending_send();
+        }
+        let reopen = self.restore_compose(delayed.compose, None);
+        Some(Task::batch([reopen, self.refresh_outbox()]))
+    }
+
     /// Build a MIME message from the compose state, save it to the draft row
     /// as base64url in the `attachments` column, mark the draft `'queued'`,
     /// Validate compose state, build a SendRequest, and dispatch to the
@@ -149,6 +274,7 @@ impl ReadyApp {
             .show_pending_send(t!("compose.waiting_to_send").into_owned());
         Task::batch([
             close,
+            self.refresh_outbox(),
             Task::perform(
                 async move {
                     tokio::time::sleep(delay).await;
@@ -183,7 +309,8 @@ impl ReadyApp {
         if self.delayed_sends.is_empty() {
             self.status_bar.clear_pending_send();
         }
-        self.restore_compose(delayed.compose, None)
+        let reopen = self.restore_compose(delayed.compose, None);
+        Task::batch([reopen, self.refresh_outbox()])
     }
 
     /// Messages still in their undo delay when the app quits: they were
@@ -266,10 +393,11 @@ impl ReadyApp {
         let Some(origin) = self.in_flight_sends.remove(&send_id) else {
             return Task::none();
         };
-        self.fail_send(
+        let failed = self.fail_send(
             origin,
             t!("compose.send_failed", error = error).into_owned(),
-        )
+        );
+        Task::batch([failed, self.refresh_outbox()])
     }
 
     /// Route the Service's verdict on a send to where it came from.
@@ -280,20 +408,24 @@ impl ReadyApp {
     ) -> Task<Message> {
         match origin {
             SendOrigin::Window(window_id) => self.handle_send_completed(window_id, outcome),
-            SendOrigin::Detached(compose) => match outcome {
-                service_api::actions::ActionOutcome::Success
-                | service_api::actions::ActionOutcome::NoOp => {
-                    self.status_bar
-                        .show_confirmation(t!("compose.message_sent").into_owned());
-                    self.delete_sent_draft(&compose)
-                }
-                service_api::actions::ActionOutcome::Failed { error }
-                | service_api::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
-                    let status =
-                        t!("compose.send_failed", error = error.user_message()).into_owned();
-                    self.restore_compose(compose, Some(status))
-                }
-            },
+            SendOrigin::Detached(compose) => {
+                let settled = match outcome {
+                    service_api::actions::ActionOutcome::Success
+                    | service_api::actions::ActionOutcome::NoOp => {
+                        self.status_bar
+                            .show_confirmation(t!("compose.message_sent").into_owned());
+                        self.delete_sent_draft(&compose)
+                    }
+                    service_api::actions::ActionOutcome::Failed { error }
+                    | service_api::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
+                        let status =
+                            t!("compose.send_failed", error = error.user_message()).into_owned();
+                        self.restore_compose(compose, Some(status))
+                    }
+                };
+                // The message left the outbox, sent or back in its compose.
+                Task::batch([settled, self.refresh_outbox()])
+            }
             SendOrigin::Unsubscribe(message_id) => {
                 let status = match outcome {
                     service_api::actions::ActionOutcome::Success

@@ -1458,6 +1458,14 @@ impl ReadyApp {
             log::debug!("Thread selected: {}", t.id);
         }
 
+        // A sent message still held reopens in its compose, taken back.
+        if let Some(row_id) = selected_id.as_deref()
+            && let Some(task) = self.reopen_held_send(row_id)
+        {
+            return task;
+        }
+        let thread = self.thread_list.threads.get(idx);
+
         // Local drafts reopen in the compose instead of the message view.
         if let Some(t) = thread
             && t.is_local_draft

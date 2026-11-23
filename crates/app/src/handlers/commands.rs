@@ -133,6 +133,10 @@ impl ReadyApp {
             .iter()
             .filter_map(|&i| self.thread_list.threads.get(i))
         {
+            // A sent message still held is in no store an action could reach.
+            if thread.is_held_send() {
+                continue;
+            }
             let key = (thread.account_id.clone(), thread.id.clone());
             if deletes && thread.is_local_draft {
                 local_drafts.push(key);
