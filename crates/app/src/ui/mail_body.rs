@@ -523,6 +523,26 @@ impl HtmlBodyState {
                 .is_some_and(|w| (w - inputs.width).abs() >= 1.0)
     }
 
+    /// Whether nothing of this body is on screen yet.
+    pub fn awaits_first_render(&self) -> bool {
+        self.rendered.is_none()
+    }
+
+    /// Show a render made without its remote content while the full one,
+    /// started with this ticket, is still running. Returns true when it is
+    /// now on screen: a preview that lands after the full render, or for
+    /// content since replaced, is dropped.
+    pub fn preview(&mut self, ticket: u64, body: Option<Arc<RenderedBody>>) -> bool {
+        if self.in_flight != Some(ticket) || self.rendered.is_some() {
+            return false;
+        }
+        let Some(body) = body else {
+            return false;
+        };
+        self.rendered = Some(body);
+        true
+    }
+
     /// Mark a render as started and return its inputs.
     pub fn start(&mut self) -> Option<RenderInputs> {
         let width = self.desired_width?;
@@ -1221,6 +1241,27 @@ mod tests {
         assert!(state.allow_remote());
         assert!(!state.allow_remote());
         assert!(state.start().expect("started").allow_remote);
+    }
+
+    #[test]
+    fn a_preview_shows_until_the_full_render_and_never_replaces_it() {
+        let mut state = HtmlBodyState::default();
+        state.set_width(600.0);
+        assert!(state.awaits_first_render());
+        let inputs = state.start().expect("started");
+
+        let shown = |state: &HtmlBodyState| state.rendered.as_ref().map(|body| body.width);
+
+        assert!(!state.preview(inputs.ticket + 1, body(600.0)), "other mail");
+        assert!(state.preview(inputs.ticket, body(600.0)));
+        assert!(!state.awaits_first_render());
+        assert!(!state.preview(inputs.ticket, body(601.0)), "already shown");
+
+        // The full render lands: it replaces the preview and ends the pass.
+        assert!(!state.finish(inputs, body(602.0)));
+        assert_eq!(shown(&state), Some(602.0));
+        assert!(!state.preview(inputs.ticket, body(603.0)), "came too late");
+        assert_eq!(shown(&state), Some(602.0));
     }
 
     #[test]

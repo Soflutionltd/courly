@@ -71,6 +71,13 @@ pub enum ReadingPaneMessage {
         inputs: super::mail_body::RenderInputs,
         body: Option<std::sync::Arc<super::mail_body::RenderedBody>>,
     },
+    /// The same render without its remote content finished: what a mail
+    /// shows while its images are still on their way.
+    HtmlBodyPreviewed {
+        index: usize,
+        ticket: u64,
+        body: Option<std::sync::Arc<super::mail_body::RenderedBody>>,
+    },
     /// Load remote images for the message at this index.
     ShowRemoteImages(usize),
     /// Switch a dark-recoloured HTML body to the email as sent, and back.
@@ -334,22 +341,43 @@ impl ReadingPane {
         else {
             return Task::none();
         };
-        let Some(inputs) = self
-            .html_bodies
-            .get_mut(index)
-            .and_then(super::mail_body::HtmlBodyState::start)
-        else {
+        let Some(state) = self.html_bodies.get_mut(index) else {
+            return Task::none();
+        };
+        let nothing_shown = state.awaits_first_render();
+        let Some(inputs) = state.start() else {
             return Task::none();
         };
         let inline_images = self.inline_image_bytes.clone();
-        Task::perform(
+        // A render waits for every remote image, up to ten seconds when a
+        // host is slow, and the mail stayed blank meanwhile. With nothing
+        // on screen yet, the same mail is also rendered without its remote
+        // content, which is immediate, and shown until the full one lands.
+        let preview = if inputs.allow_remote && nothing_shown {
+            let local = super::mail_body::RenderInputs {
+                allow_remote: false,
+                ..inputs
+            };
+            Task::perform(
+                super::mail_body::render(html.clone(), local, inline_images.clone()),
+                move |body| ReadingPaneMessage::HtmlBodyPreviewed {
+                    index,
+                    ticket: inputs.ticket,
+                    body,
+                },
+            )
+        } else {
+            Task::none()
+        };
+        let full = Task::perform(
             super::mail_body::render(html, inputs, inline_images),
             move |body| ReadingPaneMessage::HtmlBodyRendered {
                 index,
                 inputs,
                 body,
             },
-        )
+        );
+        Task::batch([preview, full])
     }
 
     /// Look for a one-time code in what the HTML body shows, for emails
@@ -907,6 +935,32 @@ impl Component for ReadingPane {
                 } else {
                     (render, None)
                 }
+            }
+            ReadingPaneMessage::HtmlBodyPreviewed {
+                index,
+                ticket,
+                body,
+            } => {
+                let shown = self
+                    .html_bodies
+                    .get_mut(index)
+                    .is_some_and(|state| state.preview(ticket, body));
+                if !shown {
+                    return (Task::none(), None);
+                }
+                self.find_code_in_rendered_text(index);
+                // The text of a mail above the matched message has taken
+                // its place: the view follows, as after a full render.
+                let follows = self
+                    .match_target
+                    .as_ref()
+                    .is_some_and(|target| index <= target.index);
+                let task = if follows {
+                    self.scroll_to_match()
+                } else {
+                    Task::none()
+                };
+                (task, None)
             }
             ReadingPaneMessage::ToggleOriginalTone(index) => {
                 let start = self
