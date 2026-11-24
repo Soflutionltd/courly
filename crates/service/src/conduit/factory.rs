@@ -215,6 +215,7 @@ pub(crate) fn factory_from_decrypted(
                 GraphClient::with_api_base(graph_base, access_token)
             } else {
                 let source = decrypted.token_source(provider, token_mode)?;
+                super::license_probe::spawn(decrypted.row.id.clone(), Arc::clone(&source));
                 GraphClient::with_source(graph_base, source)
             };
             let mut factory = GraphAccountFactory::new(client);
