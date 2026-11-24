@@ -11,13 +11,13 @@ pub mod engine_sync;
 pub mod error_map;
 pub mod factory;
 pub mod gmail_signatures;
-mod license_probe;
 pub mod push_ingress;
 pub mod reconcile;
 pub mod resident;
 pub mod server_filters;
 pub mod server_search;
 pub mod settings;
+mod subscription_watch;
 pub mod token_source;
 
 pub use checkpoint_store::SqliteCheckpointStore;

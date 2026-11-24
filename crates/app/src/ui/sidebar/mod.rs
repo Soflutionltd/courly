@@ -263,6 +263,9 @@ pub struct Sidebar {
     pub tree: Option<NavigationTree>,
     /// Folded tree sections, by scope key.
     pub collapsed_sections: HashSet<String>,
+    /// Accounts whose mailbox the provider may delete because its
+    /// subscription lapsed. Their title carries a warning mark.
+    pub lapsed_accounts: HashSet<String>,
     pub section_drag: Option<SectionDrag>,
     pub selected_scope: ViewScope,
     pub selection: SidebarSelection,
@@ -377,6 +380,7 @@ impl Sidebar {
             nav_state: None,
             tree: None,
             collapsed_sections: HashSet::new(),
+            lapsed_accounts: HashSet::new(),
             section_drag: None,
             selected_scope: ViewScope::AllAccounts,
             selection: SidebarSelection::Inbox,

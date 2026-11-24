@@ -901,6 +901,9 @@ impl BootingApp {
                     | service_api::Notification::SyncProgress(_)
                     | service_api::Notification::SyncCompleted(_)
                     | service_api::Notification::AccountPaused(_)
+                    // The watch reports a lapse again at every check, so
+                    // one dropped here is seen again once ready.
+                    | service_api::Notification::SubscriptionState(_)
                     | service_api::Notification::MailboxChanged(_)
                     | service_api::Notification::IndexCommitted(_)
                     | service_api::Notification::PushEvent(_)

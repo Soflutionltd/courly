@@ -170,6 +170,7 @@ impl ResidentEngine {
         notification_tx: NotificationSender,
         service_generation: u32,
     ) -> Self {
+        super::subscription_watch::set_notifier(notification_tx.clone(), service_generation);
         Self {
             inner: Arc::new(ResidentEngineInner {
                 engine,

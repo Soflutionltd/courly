@@ -8,7 +8,10 @@ use crate::extract::{
     PrefetchCompleted, PrefetchProgress,
 };
 use crate::push::PushEvent;
-use crate::sync::{AccountPausedNotification, IndexCommitted, MailboxChanged, SyncCompleted};
+use crate::sync::{
+    AccountPausedNotification, IndexCommitted, MailboxChanged, SubscriptionStateNotification,
+    SyncCompleted,
+};
 use serde::{Deserialize, Serialize};
 
 /// Marker + accessor trait for notification payloads that carry a
@@ -147,6 +150,11 @@ pub enum Notification {
     /// remain parked until the UI or a re-auth flow clears it.
     #[serde(rename = "sync.account_paused")]
     AccountPaused(AccountPausedNotification),
+    /// The subscription behind an account's mailbox lapsed, or is back in
+    /// order. `MustDeliver`: it sets and clears a standing warning, and a
+    /// dropped one would leave the wrong state on screen for an hour.
+    #[serde(rename = "account.subscription_state")]
+    SubscriptionState(SubscriptionStateNotification),
     /// Per-account mail view-reload signal from the resident conduit
     /// engine, emitted after a batch wrote server-side changes.
     /// `Coalesce { key: MailboxChanged(account_id) }`: the UI only needs
@@ -256,6 +264,7 @@ impl Notification {
             },
             Self::SyncCompleted(_) => NotificationClass::MustDeliver,
             Self::AccountPaused(_) => NotificationClass::MustDeliver,
+            Self::SubscriptionState(_) => NotificationClass::MustDeliver,
             Self::MailboxChanged(changed) => NotificationClass::Coalesce {
                 key: CoalesceKey::MailboxChanged(changed.account_id.clone()),
             },
@@ -302,6 +311,7 @@ impl Notification {
             Self::SyncProgress(_) => "sync.progress",
             Self::SyncCompleted(_) => "sync.completed",
             Self::AccountPaused(_) => "sync.account_paused",
+            Self::SubscriptionState(_) => "account.subscription_state",
             Self::MailboxChanged(_) => "sync.mailbox_changed",
             Self::IndexCommitted(_) => "index.committed",
             Self::PushEvent(_) => "push.event",
@@ -357,6 +367,7 @@ impl Notification {
             Self::SyncProgress(progress) => Some(progress.generation()),
             Self::SyncCompleted(completed) => Some(completed.generation()),
             Self::AccountPaused(paused) => Some(paused.generation()),
+            Self::SubscriptionState(state) => Some(state.generation()),
             Self::MailboxChanged(changed) => Some(changed.generation()),
             Self::IndexCommitted(committed) => Some(committed.generation()),
             Self::PushEvent(event) => Some(event.generation()),
@@ -394,6 +405,7 @@ impl Notification {
             Self::SyncProgress(progress) => progress.set_generation(generation),
             Self::SyncCompleted(completed) => completed.set_generation(generation),
             Self::AccountPaused(paused) => paused.set_generation(generation),
+            Self::SubscriptionState(state) => state.set_generation(generation),
             Self::MailboxChanged(changed) => changed.set_generation(generation),
             Self::IndexCommitted(committed) => committed.set_generation(generation),
             Self::PushEvent(event) => event.set_generation(generation),
@@ -478,6 +490,27 @@ mod tests {
                 assert_eq!(paused.service_generation, 7);
             }
             other => panic!("expected AccountPaused notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subscription_state_round_trips_and_is_never_dropped() {
+        let line = r#"{"jsonrpc":"2.0","method":"account.subscription_state","params":{"account_id":"acc-1","at_risk":true,"state":"Warning","service_generation":7}}"#;
+        let mut notification = match parse_service_message(line).expect("parse") {
+            ParsedServiceMessage::Notification(notification) => notification,
+            other => panic!("expected a notification, got {other:?}"),
+        };
+        assert_eq!(notification.method_name(), "account.subscription_state");
+        assert_eq!(notification.class(), NotificationClass::MustDeliver);
+        notification.set_service_generation(42);
+        assert_eq!(notification.service_generation(), Some(42));
+        match notification {
+            Notification::SubscriptionState(state) => {
+                assert_eq!(state.account_id, "acc-1");
+                assert!(state.at_risk);
+                assert_eq!(state.state, "Warning");
+            }
+            other => panic!("expected SubscriptionState, got {other:?}"),
         }
     }
 

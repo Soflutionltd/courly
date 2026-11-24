@@ -278,6 +278,10 @@ pub enum StatusBarEvent {
 
 pub struct StatusBar {
     warnings: BTreeMap<String, AccountWarning>,
+    /// Mailboxes whose subscription lapsed, account id to address. Kept
+    /// apart from `warnings` so signing an account in again does not hide
+    /// that its mailbox is still at risk.
+    lapsed: BTreeMap<String, String>,
     sync_progress: HashMap<String, SyncAccountProgress>,
     confirmation: Option<Confirmation>,
     warning_cycle_index: usize,
@@ -302,6 +306,7 @@ impl StatusBar {
     pub fn new() -> Self {
         Self {
             warnings: BTreeMap::new(),
+            lapsed: BTreeMap::new(),
             sync_progress: HashMap::new(),
             confirmation: None,
             warning_cycle_index: 0,
@@ -436,6 +441,16 @@ impl StatusBar {
         self.warnings.remove(account_id);
     }
 
+    /// Record that the subscription behind a mailbox lapsed, or that it is
+    /// back in order.
+    pub fn set_subscription_lapsed(&mut self, account_id: &str, email: String, lapsed: bool) {
+        if lapsed {
+            self.lapsed.insert(account_id.to_owned(), email);
+        } else {
+            self.lapsed.remove(account_id);
+        }
+    }
+
     /// Show a transient confirmation message (~3s).
     pub fn show_confirmation(&mut self, text: String) {
         self.confirmation = Some(Confirmation {
@@ -466,6 +481,11 @@ impl StatusBar {
         }
 
         // 1. Warnings win over normal activity.
+        // A lapsed subscription can cost a whole mailbox: it comes before
+        // any other warning.
+        if !self.lapsed.is_empty() {
+            return self.resolve_lapsed();
+        }
         if !self.warnings.is_empty() {
             return self.resolve_warning();
         }
@@ -504,6 +524,25 @@ impl StatusBar {
         }
 
         ResolvedContent::Idle
+    }
+
+    /// The standing warning for mailboxes whose subscription lapsed. It
+    /// names every mailbox concerned at once instead of cycling through
+    /// them.
+    fn resolve_lapsed(&self) -> ResolvedContent {
+        let emails: Vec<&str> = self.lapsed.values().map(String::as_str).collect();
+        let text = match emails.as_slice() {
+            [email] => t!("main.status.subscription_lapsed_one", email = *email),
+            _ => t!(
+                "main.status.subscription_lapsed_many",
+                emails = emails.join(", ")
+            ),
+        };
+        ResolvedContent::Warning {
+            text: text.into_owned(),
+            clickable: false,
+            account_id: self.lapsed.keys().next().cloned().unwrap_or_default(),
+        }
     }
 
     fn resolve_warning(&self) -> ResolvedContent {
@@ -686,7 +725,9 @@ impl Component for StatusBar {
                 (iced::Task::none(), None)
             }
             StatusBarMessage::WarningClicked => {
-                if self.warnings.is_empty() {
+                // The lapse warning is the one on screen, and it has no
+                // action: a click must not reach the warning it hides.
+                if !self.lapsed.is_empty() || self.warnings.is_empty() {
                     return (iced::Task::none(), None);
                 }
                 let warnings: Vec<&AccountWarning> = self.warnings.values().collect();

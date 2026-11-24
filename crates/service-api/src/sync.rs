@@ -231,6 +231,29 @@ impl WithGeneration for AccountPausedNotification {
     }
 }
 
+/// Emitted when the subscription behind an account's mailbox lapses, and
+/// again when it is back in order. Sync keeps working through a lapse, so
+/// this is the only sign that the provider may delete the mailbox.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscriptionStateNotification {
+    pub account_id: String,
+    /// Whether the provider may delete the mailbox unless the subscription
+    /// is put back in order.
+    pub at_risk: bool,
+    /// The state as the provider names it, for the log and for support.
+    pub state: String,
+    pub service_generation: u32,
+}
+
+impl WithGeneration for SubscriptionStateNotification {
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
+}
+
 /// Mail view-reload signal: the resident sync engine wrote server-side
 /// changes (new, changed or deleted messages) for this account. `Coalesce`
 /// keyed per account; the UI debounces before reloading the list, so a

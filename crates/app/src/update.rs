@@ -371,6 +371,26 @@ impl ReadyApp {
                         });
                         Task::none()
                     }
+                    service_api::Notification::SubscriptionState(state) => {
+                        log::warn!(
+                            "subscription of {}: at_risk={} state={}",
+                            state.account_id,
+                            state.at_risk,
+                            state.state
+                        );
+                        let email = self.email_for_account(&state.account_id);
+                        self.status_bar.set_subscription_lapsed(
+                            &state.account_id,
+                            email,
+                            state.at_risk,
+                        );
+                        if state.at_risk {
+                            self.sidebar.lapsed_accounts.insert(state.account_id);
+                        } else {
+                            self.sidebar.lapsed_accounts.remove(&state.account_id);
+                        }
+                        Task::none()
+                    }
                     service_api::Notification::MailboxChanged(changed) => {
                         self.pending_mailbox_reload = Some(std::time::Instant::now());
                         self.look_for_new_mail(Some(&changed.account_id))

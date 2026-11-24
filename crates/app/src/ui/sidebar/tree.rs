@@ -1,4 +1,4 @@
-use iced::widget::{Space, button, column, container, mouse_area, row, text};
+use iced::widget::{Space, button, column, container, mouse_area, row, text, tooltip};
 use iced::{Alignment, Element, Length, mouse};
 use rust_i18n::t;
 
@@ -98,6 +98,28 @@ fn account_label(account: &Account) -> &str {
         .unwrap_or(&account.email)
 }
 
+/// The mark on the title of an account whose subscription lapsed, with the
+/// reason on hover. It offers no action: the subscription is settled with
+/// the provider, and removing an account at risk is how mail gets lost.
+fn lapsed_mark<'a>() -> Element<'a, SidebarMessage> {
+    tooltip(
+        icon::alert_triangle().size(ICON_MD).style(text::danger),
+        container(
+            text(t!("main.sidebar.subscription_lapsed"))
+                .size(TEXT_XS)
+                .style(theme::TextClass::OnPrimary.style()),
+        )
+        .padding(PAD_BADGE)
+        .width(SUBSCRIPTION_TIP_WIDTH)
+        .style(theme::ContainerClass::Floating.style()),
+        tooltip::Position::Bottom,
+    )
+    .into()
+}
+
+/// Width the lapse reason wraps at: it is a sentence, not a label.
+const SUBSCRIPTION_TIP_WIDTH: f32 = 260.0;
+
 fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a, SidebarMessage> {
     let scope = ViewScope::Account(account.id.clone());
     let expanded = !sidebar.collapsed_sections.contains(&account.id);
@@ -115,6 +137,15 @@ fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a
             .align_y(Alignment::Center),
         );
     }
+
+    let title: Element<'a, SidebarMessage> = if sidebar.lapsed_accounts.contains(&account.id) {
+        row![container(title).width(Length::Fill), lapsed_mark()]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center)
+            .into()
+    } else {
+        title.into()
+    };
 
     let mut header: Element<'a, SidebarMessage> = mouse_area(
         container(title)
