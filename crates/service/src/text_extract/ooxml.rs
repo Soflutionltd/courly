@@ -96,8 +96,10 @@ pub(crate) fn extract_xlsx(bytes: &[u8]) -> ExtractionOutcome {
     // every xl/worksheets/sheet*.xml and extract <t> content.
     let sheet_names: Vec<String> = archive
         .file_names()
+        // A name that cannot be read is not one of the sheets.
+        .filter_map(Result::ok)
         .filter(|n| n.starts_with("xl/worksheets/sheet") && n.ends_with(".xml"))
-        .map(str::to_string)
+        .map(std::borrow::Cow::into_owned)
         .collect();
 
     for name in sheet_names {
@@ -138,8 +140,10 @@ pub(crate) fn extract_pptx(bytes: &[u8]) -> ExtractionOutcome {
 
     let slide_names: Vec<String> = archive
         .file_names()
+        // A name that cannot be read is not one of the slides.
+        .filter_map(Result::ok)
         .filter(|n| n.starts_with("ppt/slides/slide") && n.ends_with(".xml"))
-        .map(str::to_string)
+        .map(std::borrow::Cow::into_owned)
         .collect();
 
     if slide_names.is_empty() {

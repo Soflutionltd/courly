@@ -360,7 +360,9 @@ fn estimate_archive_reader<R: Read + Seek>(
         let Ok(entry) = archive.by_index_raw(i) else {
             continue;
         };
-        let name = entry.name().to_string();
+        let Ok(name) = entry.name().map(std::borrow::Cow::into_owned) else {
+            continue;
+        };
         let size = entry.size(); // uncompressed size
 
         // Match the compressor's limits: if any entry or the total exceeds
