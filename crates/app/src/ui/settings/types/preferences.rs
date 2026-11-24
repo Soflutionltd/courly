@@ -153,6 +153,7 @@ pub struct PreferencesState {
     pub email_zoom: String,
     pub thread_date_groups: bool,
     pub sender_logos: bool,
+    pub domain_expiry_alerts: bool,
     pub compose_always_show_cc: bool,
     pub compose_request_read_receipt: bool,
     /// One of `MARK_AS_READ_OPTIONS`.

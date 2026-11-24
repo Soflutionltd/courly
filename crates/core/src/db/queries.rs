@@ -144,6 +144,8 @@ pub struct UiBootstrapSnapshot {
     pub thread_date_groups: bool,
     /// Show the brand logo of known senders.
     pub sender_logos: bool,
+    /// Warn when the domain name of an account is about to expire.
+    pub domain_expiry_alerts: bool,
     pub compose_always_show_cc: bool,
     pub compose_request_read_receipt: bool,
     pub sidebar_layout: Option<String>,
@@ -358,6 +360,7 @@ pub fn get_ui_bootstrap_snapshot(
         email_zoom: get("email_zoom"),
         thread_date_groups: get_bool("thread_date_groups", true),
         sender_logos: get_bool("sender_logos", true),
+        domain_expiry_alerts: get_bool("domain_expiry_alerts", true),
         compose_always_show_cc: get_bool("compose_always_show_cc", false),
         compose_request_read_receipt: get_bool("compose_request_read_receipt", false),
         sidebar_layout: get("sidebar_layout"),

@@ -29,6 +29,7 @@ pub enum SettingsMessage {
     EmailZoomChanged(String),
     ToggleThreadDateGroups(bool),
     ToggleSenderLogos(bool),
+    ToggleDomainExpiryAlerts(bool),
     ToggleComposeAlwaysShowCc(bool),
     ToggleComposeRequestReadReceipt(bool),
     /// Show or hide a part of the folder column.

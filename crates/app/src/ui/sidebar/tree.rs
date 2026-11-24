@@ -107,6 +107,12 @@ fn issue_mark<'a>(issue: crate::ui::status_bar::AccountIssue) -> Element<'a, Sid
         AccountIssue::SubscriptionLapsed => t!("main.sidebar.subscription_lapsed"),
         AccountIssue::NeedsReauth => t!("main.sidebar.account_needs_reauth"),
         AccountIssue::Paused => t!("main.sidebar.account_paused"),
+        AccountIssue::DomainExpiring { days_left } if days_left < 0 => {
+            t!("main.sidebar.domain_expired")
+        }
+        AccountIssue::DomainExpiring { days_left } => {
+            t!("main.sidebar.domain_expiring", days = days_left)
+        }
     };
     tooltip(
         icon::alert_triangle().size(ICON_MD).style(text::danger),

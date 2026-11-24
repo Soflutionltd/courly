@@ -32,6 +32,13 @@ pub(super) fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         vec![accounts_section_body(state)],
     ));
 
+    col = col.push(section_untitled(vec![toggle_row(
+        tr(t!("settings.accounts.domain_expiry_alerts")),
+        t!("settings.accounts.domain_expiry_alerts_description"),
+        state.domain_expiry_alerts,
+        SettingsMessage::ToggleDomainExpiryAlerts,
+    )]));
+
     col.into()
 }
 

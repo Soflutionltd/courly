@@ -198,6 +198,10 @@ pub struct ReadyApp {
     pub(crate) favorites: crate::favorites::Favorites,
     /// Addresses the reader took out of the suggestions.
     pub(crate) hidden_addresses: crate::hidden_addresses::HiddenAddresses,
+    /// Domains of the accounts that expire soon, with the days left.
+    pub(crate) expiring_domains: std::collections::BTreeMap<String, i64>,
+    /// When the registries were last asked about those domains.
+    pub(crate) domains_checked_at: Option<std::time::Instant>,
     /// People (with the account searched, `None` for all) whose older mail
     /// was already asked of the server this session.
     pub(crate) server_searched: std::collections::HashSet<(Option<String>, String)>,
@@ -545,6 +549,8 @@ impl ReadyApp {
             search_sender_name: None,
             favorites: crate::favorites::Favorites::default(),
             hidden_addresses: crate::hidden_addresses::HiddenAddresses::default(),
+            expiring_domains: std::collections::BTreeMap::new(),
+            domains_checked_at: None,
             server_searched: std::collections::HashSet::new(),
             server_search: None,
             search_debounce_deadline: None,

@@ -356,6 +356,8 @@ pub struct Settings {
     pub thread_date_groups: bool,
     /// Show the brand logo of known senders.
     pub sender_logos: bool,
+    /// Warn when the domain name of an account is about to expire.
+    pub domain_expiry_alerts: bool,
     pub mail_check_interval: String,
     // Composing
     pub compose_always_show_cc: bool,
@@ -509,6 +511,7 @@ impl Settings {
         self.thread_date_groups = ui.thread_date_groups;
         self.sender_logos = ui.sender_logos;
         crate::sender_logos::set_enabled(self.sender_logos);
+        self.domain_expiry_alerts = ui.domain_expiry_alerts;
         self.compose_always_show_cc = ui.compose_always_show_cc;
         self.compose_request_read_receipt = ui.compose_request_read_receipt;
         self.sidebar_hidden =
@@ -623,6 +626,7 @@ impl Settings {
             email_zoom: self.email_zoom.clone(),
             thread_date_groups: self.thread_date_groups,
             sender_logos: self.sender_logos,
+            domain_expiry_alerts: self.domain_expiry_alerts,
             compose_always_show_cc: self.compose_always_show_cc,
             compose_request_read_receipt: self.compose_request_read_receipt,
             mark_as_read: self.mark_as_read.clone(),
@@ -656,6 +660,7 @@ impl Settings {
         self.thread_date_groups = prefs.thread_date_groups;
         self.sender_logos = prefs.sender_logos;
         crate::sender_logos::set_enabled(prefs.sender_logos);
+        self.domain_expiry_alerts = prefs.domain_expiry_alerts;
         self.compose_always_show_cc = prefs.compose_always_show_cc;
         self.compose_request_read_receipt = prefs.compose_request_read_receipt;
         self.mark_as_read = prefs.mark_as_read.clone();
@@ -690,6 +695,7 @@ impl Default for Settings {
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
             sender_logos: true,
+            domain_expiry_alerts: true,
             compose_always_show_cc: false,
             compose_request_read_receipt: false,
             mark_as_read: "After 2 Seconds".into(),
@@ -725,6 +731,7 @@ impl Default for Settings {
             email_zoom: DEFAULT_EMAIL_ZOOM.into(),
             thread_date_groups: true,
             sender_logos: true,
+            domain_expiry_alerts: true,
             mail_check_interval: DEFAULT_MAIL_CHECK_INTERVAL.into(),
             compose_always_show_cc: false,
             compose_request_read_receipt: false,
@@ -899,6 +906,7 @@ mod tests {
             email_zoom: None,
             thread_date_groups: true,
             sender_logos: true,
+            domain_expiry_alerts: true,
             compose_always_show_cc: false,
             compose_request_read_receipt: false,
             sidebar_layout: None,

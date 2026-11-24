@@ -675,6 +675,12 @@ impl Settings {
                     prefs.sender_logos = v;
                 }
             }
+            SettingsMessage::ToggleDomainExpiryAlerts(v) => {
+                self.domain_expiry_alerts = v;
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.domain_expiry_alerts = v;
+                }
+            }
             SettingsMessage::ToggleComposeAlwaysShowCc(v) => {
                 self.compose_always_show_cc = v;
                 if let Some(ref mut prefs) = self.editing_preferences {

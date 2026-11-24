@@ -618,6 +618,7 @@ impl ReadyApp {
             SettingValue::EmailZoom(prefs.email_zoom.clone()),
             SettingValue::ThreadDateGroups(prefs.thread_date_groups),
             SettingValue::SenderLogos(prefs.sender_logos),
+            SettingValue::DomainExpiryAlerts(prefs.domain_expiry_alerts),
             SettingValue::ComposeAlwaysShowCc(prefs.compose_always_show_cc),
             SettingValue::ComposeRequestReadReceipt(prefs.compose_request_read_receipt),
             SettingValue::MailCheckInterval(prefs.mail_check_interval.clone()),
@@ -824,7 +825,19 @@ impl ReadyApp {
     /// status bar, which holds the state of each account. Called after
     /// anything sets or clears a warning there.
     pub(crate) fn refresh_account_marks(&mut self) {
-        self.sidebar.account_issues = self.status_bar.account_issues();
+        let mut issues = self.status_bar.account_issues();
+        // A domain about to expire marks its accounts too, unless they
+        // already carry a more pressing mark.
+        for account in &self.sidebar.accounts {
+            let days_left = crate::domain_expiry::owned_domain(&account.email)
+                .and_then(|domain| self.expiring_domains.get(&domain).copied());
+            if let Some(days_left) = days_left {
+                issues
+                    .entry(account.id.clone())
+                    .or_insert(ui::status_bar::AccountIssue::DomainExpiring { days_left });
+            }
+        }
+        self.sidebar.account_issues = issues;
     }
 
     /// Look up the email address for an account ID from the sidebar's
@@ -1737,6 +1750,10 @@ impl ReadyApp {
         // accounts (the engine owns the per-account push bridges). The
         // `sync.start_account` IPC piggybacks push setup for newly
         // added accounts (Phase 4 task 6).
+        // The accounts may have changed: their domains are asked about
+        // again rather than at the next daily check.
+        self.domains_checked_at = None;
+        let domains_task = self.check_domains_when_due();
         Task::batch([
             self.load_navigation_and_threads(),
             sig_task,
@@ -1744,7 +1761,63 @@ impl ReadyApp {
             label_groups_task,
             sync_task,
             auto_reply_task,
+            domains_task,
         ])
+    }
+
+    /// Ask the registries when the domain of each account expires, once a
+    /// day. Called where the app is regularly woken, so a session left
+    /// open for days keeps checking.
+    pub(crate) fn check_domains_when_due(&mut self) -> Task<Message> {
+        if !self.settings.domain_expiry_alerts {
+            if !self.expiring_domains.is_empty() {
+                self.expiring_domains.clear();
+                self.apply_expiring_domains();
+            }
+            return Task::none();
+        }
+        let due = self
+            .domains_checked_at
+            .is_none_or(|at| at.elapsed() >= crate::domain_expiry::CHECK_EVERY);
+        if !due {
+            return Task::none();
+        }
+        let mut domains: Vec<String> = self
+            .sidebar
+            .accounts
+            .iter()
+            .filter_map(|account| crate::domain_expiry::owned_domain(&account.email))
+            .collect();
+        domains.sort_unstable();
+        domains.dedup();
+        if domains.is_empty() {
+            return Task::none();
+        }
+        self.domains_checked_at = Some(std::time::Instant::now());
+        Task::perform(
+            crate::domain_expiry::check(domains),
+            Message::DomainExpiryChecked,
+        )
+    }
+
+    /// Keep the domains that expire soon, and show them.
+    pub(crate) fn handle_domain_expiry_checked(
+        &mut self,
+        found: Vec<crate::domain_expiry::DomainExpiry>,
+    ) -> Task<Message> {
+        self.expiring_domains = found
+            .into_iter()
+            .filter(|expiry| expiry.days_left <= crate::domain_expiry::WARN_DAYS)
+            .map(|expiry| (expiry.domain, expiry.days_left))
+            .collect();
+        self.apply_expiring_domains();
+        Task::none()
+    }
+
+    fn apply_expiring_domains(&mut self) {
+        self.status_bar
+            .set_expiring_domains(self.expiring_domains.clone());
+        self.refresh_account_marks();
     }
 
     pub(crate) fn update_thread_list_context_from_sidebar(&mut self) {

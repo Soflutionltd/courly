@@ -1,5 +1,7 @@
 _version: 1
 settings.accounts.title: "Accounts"
+settings.accounts.domain_expiry_alerts: "Domain name expiry alert"
+settings.accounts.domain_expiry_alerts_description: "Warns 30 days before the domain name of your addresses expires: unless renewed, they stop working. Once a day, the domain name is looked up in its public registry. Does not apply to Gmail, Outlook or other mailbox provider addresses."
 settings.accounts.add: "Add Account"
 settings.accounts.never_synced: "Never synced"
 settings.accounts.first_sync_running: "First sync in progress…"

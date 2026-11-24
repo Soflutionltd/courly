@@ -1,5 +1,7 @@
 _version: 1
 settings.accounts.title: "Comptes"
+settings.accounts.domain_expiry_alerts: "Alerte d'expiration du nom de domaine"
+settings.accounts.domain_expiry_alerts_description: "Prévient 30 jours avant l'expiration du nom de domaine de vos adresses : sans renouvellement, elles cessent de fonctionner. Une fois par jour, le nom de domaine est demandé à son registre public. Ne concerne pas les adresses Gmail, Outlook ou d'un autre fournisseur de boîtes."
 settings.accounts.add: "Ajouter un compte"
 settings.accounts.never_synced: "Jamais synchronisé"
 settings.accounts.first_sync_running: "Première synchronisation en cours…"

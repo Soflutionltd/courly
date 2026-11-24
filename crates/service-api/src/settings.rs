@@ -100,6 +100,9 @@ pub enum SettingValue {
     SidebarHidden(String),
     /// Show the brand logo of known senders. Off, no logo is fetched.
     SenderLogos(bool),
+    /// Warn when the domain name of an account is about to expire. Off,
+    /// no registry is asked.
+    DomainExpiryAlerts(bool),
 }
 
 impl SettingValue {
@@ -139,6 +142,7 @@ impl SettingValue {
             Self::HiddenAddresses(_) => "hidden_addresses",
             Self::SidebarHidden(_) => "sidebar_hidden",
             Self::SenderLogos(_) => "sender_logos",
+            Self::DomainExpiryAlerts(_) => "domain_expiry_alerts",
         }
     }
 
@@ -158,7 +162,8 @@ impl SettingValue {
             | Self::ComposeRequestReadReceipt(v)
             | Self::NotificationsEnabled(v)
             | Self::SmartNotifications(v)
-            | Self::SenderLogos(v) => {
+            | Self::SenderLogos(v)
+            | Self::DomainExpiryAlerts(v) => {
                 if *v {
                     "true".to_string()
                 } else {

@@ -101,6 +101,7 @@ impl ReadyApp {
             // The logos are read from memory when the rows are drawn: the
             // message only asks for that redraw.
             Message::SenderLogosWarmed => Task::none(),
+            Message::DomainExpiryChecked(found) => self.handle_domain_expiry_checked(found),
             Message::ThreadsLoaded(_, Err(e)) => {
                 log::error!("ThreadsLoaded error: {e}");
                 self.status = format!("Threads error: {e}");
@@ -765,7 +766,8 @@ impl ReadyApp {
                 let _ = self.nav_generation.next();
                 let nav_task = self.reload_after_server_change();
                 let auto_reply_task = self.check_auto_reply_status();
-                Task::batch([nav_task, auto_reply_task])
+                let domains_task = self.check_domains_when_due();
+                Task::batch([nav_task, auto_reply_task, domains_task])
             }
             Message::SetReadingPanePosition(_pos) => Task::none(),
             Message::Palette(msg) => self.handle_palette(msg),

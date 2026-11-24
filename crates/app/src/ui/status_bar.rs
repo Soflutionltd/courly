@@ -52,6 +52,22 @@ pub enum WarningKind {
     Paused,
 }
 
+/// A domain and when it expires, as one item of a list: "monapp.com in 12
+/// days", "monapp.com today", "monapp.com has expired".
+pub fn domain_expiry_label(domain: &str, days_left: i64) -> String {
+    match days_left {
+        i64::MIN..=-1 => t!("main.status.domain_expired", domain = domain),
+        0 => t!("main.status.domain_expires_today", domain = domain),
+        1 => t!("main.status.domain_expires_tomorrow", domain = domain),
+        _ => t!(
+            "main.status.domain_expires_in_days",
+            domain = domain,
+            days = days_left
+        ),
+    }
+    .into_owned()
+}
+
 /// Why an account carries a warning mark in the folder column. Only
 /// standing states of the account do: a sync that failed once, as on a
 /// network cut, does not.
@@ -63,6 +79,9 @@ pub enum AccountIssue {
     NeedsReauth,
     /// The sync engine parked the account.
     Paused,
+    /// The domain name of the address expires within the warning period,
+    /// or has: its addresses stop working once it has.
+    DomainExpiring { days_left: i64 },
 }
 
 #[derive(Debug, Clone)]
@@ -299,6 +318,8 @@ pub struct StatusBar {
     /// apart from `warnings` so signing an account in again does not hide
     /// that its mailbox is still at risk.
     lapsed: BTreeMap<String, String>,
+    /// Domains of the accounts that expire soon, with the days left.
+    expiring_domains: BTreeMap<String, i64>,
     sync_progress: HashMap<String, SyncAccountProgress>,
     confirmation: Option<Confirmation>,
     warning_cycle_index: usize,
@@ -324,6 +345,7 @@ impl StatusBar {
         Self {
             warnings: BTreeMap::new(),
             lapsed: BTreeMap::new(),
+            expiring_domains: BTreeMap::new(),
             sync_progress: HashMap::new(),
             confirmation: None,
             warning_cycle_index: 0,
@@ -477,6 +499,11 @@ impl StatusBar {
         standing.chain(lapsed).collect()
     }
 
+    /// Replace the domains that expire soon, with the days left for each.
+    pub fn set_expiring_domains(&mut self, domains: BTreeMap<String, i64>) {
+        self.expiring_domains = domains;
+    }
+
     /// Record that the subscription behind a mailbox lapsed, or that it is
     /// back in order.
     pub fn set_subscription_lapsed(&mut self, account_id: &str, email: String, lapsed: bool) {
@@ -524,6 +551,11 @@ impl StatusBar {
         }
         if !self.warnings.is_empty() {
             return self.resolve_warning();
+        }
+        // Weeks of notice at most: it yields to an account that is in
+        // trouble now, and comes before the passing activity below.
+        if !self.expiring_domains.is_empty() {
+            return self.resolve_expiring_domains();
         }
 
         // 2. Rebuild progress is long-running system work.
@@ -578,6 +610,26 @@ impl StatusBar {
             text: text.into_owned(),
             clickable: false,
             account_id: self.lapsed.keys().next().cloned().unwrap_or_default(),
+        }
+    }
+
+    /// The standing warning for domain names about to expire: every one
+    /// of them, the soonest first.
+    fn resolve_expiring_domains(&self) -> ResolvedContent {
+        let mut domains: Vec<(&String, i64)> = self
+            .expiring_domains
+            .iter()
+            .map(|(domain, days_left)| (domain, *days_left))
+            .collect();
+        domains.sort_by_key(|(_, days_left)| *days_left);
+        let listed: Vec<String> = domains
+            .iter()
+            .map(|(domain, days_left)| domain_expiry_label(domain, *days_left))
+            .collect();
+        ResolvedContent::Warning {
+            text: t!("main.status.domains_expiring", domains = listed.join(", ")).into_owned(),
+            clickable: false,
+            account_id: String::new(),
         }
     }
 
@@ -773,6 +825,8 @@ impl Component for StatusBar {
             StatusBarMessage::WarningClicked => {
                 // The lapse warning is the one on screen, and it has no
                 // action: a click must not reach the warning it hides.
+                // Neither has the one about domains, shown without any
+                // account warning.
                 if !self.lapsed.is_empty() || self.warnings.is_empty() {
                     return (iced::Task::none(), None);
                 }

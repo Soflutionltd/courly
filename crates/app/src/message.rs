@@ -157,6 +157,8 @@ pub enum Message {
     ThreadsLoaded(GenerationToken<Nav>, Result<Vec<Thread>, String>),
     /// The brand logos of the loaded list's senders are in memory.
     SenderLogosWarmed,
+    /// The registries answered about the domains of the accounts.
+    DomainExpiryChecked(Vec<crate::domain_expiry::DomainExpiry>),
 
     // Existing UI
     Compose,

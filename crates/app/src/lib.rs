@@ -37,6 +37,7 @@ mod contact_photos;
 mod data_dir;
 mod db;
 mod desktop_notifications;
+mod domain_expiry;
 mod display;
 mod draft_wal;
 mod favorites;
