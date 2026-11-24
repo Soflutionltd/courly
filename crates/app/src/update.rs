@@ -359,9 +359,7 @@ impl ReadyApp {
                                 ui::status_bar::WarningKind::TokenExpiry
                             }
                             service_api::SyncPauseReason::NeedsAttention => {
-                                ui::status_bar::WarningKind::ConnectionFailure {
-                                    message: t!("main.status.account_paused").into_owned(),
-                                }
+                                ui::status_bar::WarningKind::Paused
                             }
                         };
                         self.status_bar.set_warning(ui::status_bar::AccountWarning {
@@ -369,6 +367,7 @@ impl ReadyApp {
                             email,
                             kind,
                         });
+                        self.refresh_account_marks();
                         Task::none()
                     }
                     service_api::Notification::SubscriptionState(state) => {
@@ -384,11 +383,7 @@ impl ReadyApp {
                             email,
                             state.at_risk,
                         );
-                        if state.at_risk {
-                            self.sidebar.lapsed_accounts.insert(state.account_id);
-                        } else {
-                            self.sidebar.lapsed_accounts.remove(&state.account_id);
-                        }
+                        self.refresh_account_marks();
                         Task::none()
                     }
                     service_api::Notification::MailboxChanged(changed) => {
@@ -762,6 +757,7 @@ impl ReadyApp {
                         self.status_bar.clear_warning(&account_id);
                     }
                 }
+                self.refresh_account_marks();
                 // Reload navigation + threads (or chat timeline) to reflect sync changes
                 if let Some(email) = self.active_chat.clone() {
                     return self.enter_chat_view(&email);

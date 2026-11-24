@@ -46,6 +46,23 @@ pub enum WarningKind {
     TokenExpiry,
     /// Persistent connection failure. Not clickable (no recovery action).
     ConnectionFailure { message: String },
+    /// The sync engine parked the account until someone steps in. Unlike a
+    /// failed sync, which a network cut causes too, this is a standing
+    /// state of the account.
+    Paused,
+}
+
+/// Why an account carries a warning mark in the folder column. Only
+/// standing states of the account do: a sync that failed once, as on a
+/// network cut, does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountIssue {
+    /// The subscription behind the mailbox lapsed.
+    SubscriptionLapsed,
+    /// The server refuses the saved sign-in.
+    NeedsReauth,
+    /// The sync engine parked the account.
+    Paused,
 }
 
 #[derive(Debug, Clone)]
@@ -441,6 +458,25 @@ impl StatusBar {
         self.warnings.remove(account_id);
     }
 
+    /// The accounts in a standing state that needs the user, for their mark
+    /// in the folder column. A lapsed subscription comes first: it is the
+    /// one that can cost the mailbox.
+    pub fn account_issues(&self) -> std::collections::HashMap<String, AccountIssue> {
+        let standing = self.warnings.values().filter_map(|warning| {
+            let issue = match warning.kind {
+                WarningKind::TokenExpiry => AccountIssue::NeedsReauth,
+                WarningKind::Paused => AccountIssue::Paused,
+                WarningKind::ConnectionFailure { .. } => return None,
+            };
+            Some((warning.account_id.clone(), issue))
+        });
+        let lapsed = self
+            .lapsed
+            .keys()
+            .map(|account_id| (account_id.clone(), AccountIssue::SubscriptionLapsed));
+        standing.chain(lapsed).collect()
+    }
+
     /// Record that the subscription behind a mailbox lapsed, or that it is
     /// back in order.
     pub fn set_subscription_lapsed(&mut self, account_id: &str, email: String, lapsed: bool) {
@@ -561,6 +597,11 @@ impl StatusBar {
                     email = warning.email,
                     error = message
                 ),
+                WarningKind::Paused => t!(
+                    "main.status.connection_failed",
+                    email = warning.email,
+                    error = t!("main.status.account_paused")
+                ),
             }
         } else {
             let detail = match &warning.kind {
@@ -569,6 +610,11 @@ impl StatusBar {
                     "main.status.account_error",
                     email = warning.email,
                     error = message
+                ),
+                WarningKind::Paused => t!(
+                    "main.status.account_error",
+                    email = warning.email,
+                    error = t!("main.status.account_paused")
                 ),
             };
             t!(
@@ -740,7 +786,9 @@ impl Component for StatusBar {
                         };
                         (iced::Task::none(), Some(event))
                     }
-                    WarningKind::ConnectionFailure { .. } => (iced::Task::none(), None),
+                    WarningKind::ConnectionFailure { .. } | WarningKind::Paused => {
+                        (iced::Task::none(), None)
+                    }
                 }
             }
             StatusBarMessage::UndoSendClicked => {

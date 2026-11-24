@@ -31,6 +31,7 @@ impl ReadyApp {
             AddAccountEvent::ReauthComplete(account_id) => {
                 self.add_account_wizard = None;
                 self.status_bar.clear_warning(&account_id);
+                self.refresh_account_marks();
                 let email = self.email_for_account(&account_id);
                 self.status_bar.show_confirmation(
                     t!("settings.accounts.reauth_success", email = email).into_owned(),

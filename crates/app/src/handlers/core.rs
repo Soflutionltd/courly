@@ -817,6 +817,14 @@ impl ReadyApp {
                 });
             }
         }
+        self.refresh_account_marks();
+    }
+
+    /// Bring the warning marks of the folder column in line with the
+    /// status bar, which holds the state of each account. Called after
+    /// anything sets or clears a warning there.
+    pub(crate) fn refresh_account_marks(&mut self) {
+        self.sidebar.account_issues = self.status_bar.account_issues();
     }
 
     /// Look up the email address for an account ID from the sidebar's

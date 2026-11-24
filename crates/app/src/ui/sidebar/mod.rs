@@ -263,9 +263,9 @@ pub struct Sidebar {
     pub tree: Option<NavigationTree>,
     /// Folded tree sections, by scope key.
     pub collapsed_sections: HashSet<String>,
-    /// Accounts whose mailbox the provider may delete because its
-    /// subscription lapsed. Their title carries a warning mark.
-    pub lapsed_accounts: HashSet<String>,
+    /// Accounts in a standing state that needs the user, whatever their
+    /// provider. Their title carries a warning mark that says why.
+    pub account_issues: std::collections::HashMap<String, crate::ui::status_bar::AccountIssue>,
     pub section_drag: Option<SectionDrag>,
     pub selected_scope: ViewScope,
     pub selection: SidebarSelection,
@@ -380,7 +380,7 @@ impl Sidebar {
             nav_state: None,
             tree: None,
             collapsed_sections: HashSet::new(),
-            lapsed_accounts: HashSet::new(),
+            account_issues: std::collections::HashMap::new(),
             section_drag: None,
             selected_scope: ViewScope::AllAccounts,
             selection: SidebarSelection::Inbox,

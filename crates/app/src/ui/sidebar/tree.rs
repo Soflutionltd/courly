@@ -98,14 +98,20 @@ fn account_label(account: &Account) -> &str {
         .unwrap_or(&account.email)
 }
 
-/// The mark on the title of an account whose subscription lapsed, with the
-/// reason on hover. It offers no action: the subscription is settled with
-/// the provider, and removing an account at risk is how mail gets lost.
-fn lapsed_mark<'a>() -> Element<'a, SidebarMessage> {
+/// The mark on the title of an account in a standing state that needs the
+/// user, with the reason on hover. It offers no action of its own, and
+/// never to remove the account: that is how mail gets lost.
+fn issue_mark<'a>(issue: crate::ui::status_bar::AccountIssue) -> Element<'a, SidebarMessage> {
+    use crate::ui::status_bar::AccountIssue;
+    let reason = match issue {
+        AccountIssue::SubscriptionLapsed => t!("main.sidebar.subscription_lapsed"),
+        AccountIssue::NeedsReauth => t!("main.sidebar.account_needs_reauth"),
+        AccountIssue::Paused => t!("main.sidebar.account_paused"),
+    };
     tooltip(
         icon::alert_triangle().size(ICON_MD).style(text::danger),
         container(
-            text(t!("main.sidebar.subscription_lapsed"))
+            text(reason)
                 .size(TEXT_XS)
                 .style(theme::TextClass::OnPrimary.style()),
         )
@@ -117,7 +123,7 @@ fn lapsed_mark<'a>() -> Element<'a, SidebarMessage> {
     .into()
 }
 
-/// Width the lapse reason wraps at: it is a sentence, not a label.
+/// Width the reason of a mark wraps at: it is a sentence, not a label.
 const SUBSCRIPTION_TIP_WIDTH: f32 = 260.0;
 
 fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a, SidebarMessage> {
@@ -138,13 +144,12 @@ fn account_section<'a>(sidebar: &'a Sidebar, account: &'a Account) -> Element<'a
         );
     }
 
-    let title: Element<'a, SidebarMessage> = if sidebar.lapsed_accounts.contains(&account.id) {
-        row![container(title).width(Length::Fill), lapsed_mark()]
+    let title: Element<'a, SidebarMessage> = match sidebar.account_issues.get(&account.id) {
+        Some(issue) => row![container(title).width(Length::Fill), issue_mark(*issue)]
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center)
-            .into()
-    } else {
-        title.into()
+            .into(),
+        None => title.into(),
     };
 
     let mut header: Element<'a, SidebarMessage> = mouse_area(
