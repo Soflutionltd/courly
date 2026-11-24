@@ -589,6 +589,8 @@ impl Settings {
     }
 
     /// Density picked outside the panel (menu bar), written like `set_theme`.
+    /// Only macOS has that menu bar.
+    #[cfg(any(target_os = "macos", test))]
     pub fn set_density(&mut self, density: Density) {
         let value = density.setting();
         value.clone_into(&mut self.committed_preferences.density);

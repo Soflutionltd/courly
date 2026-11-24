@@ -100,7 +100,9 @@ futures-util = "0.3"
 tokio = { version = "1.52.3" }
 
 # Database
-rusqlite = { version = "0.40" }
+# Windows ships no SQLite to link against: there, and only there, SQLite is
+# built into the binary. macOS and Linux keep using the system library.
+rusqlite = { version = "0.40", features = ["bundled-windows"] }
 
 # Time
 #

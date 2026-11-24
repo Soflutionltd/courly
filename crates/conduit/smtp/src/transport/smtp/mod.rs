@@ -351,6 +351,8 @@ impl SmtpInfo {
         self.authentication_configured = true;
     }
 
+    /// Only asked before connecting over a Unix-domain socket.
+    #[cfg(unix)]
     fn uses_tls(&self) -> bool {
         !matches!(self.tls, Tls::None)
     }
