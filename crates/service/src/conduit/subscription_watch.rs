@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use conduit_net::TokenSource;
 use service_api::{Notification, SubscriptionStateNotification};
+use tokio_util::sync::CancellationToken;
 
 use crate::boot_progress::NotificationSender;
 
@@ -52,14 +53,39 @@ fn notifier() -> &'static Mutex<Option<(NotificationSender, u32)>> {
     NOTIFIER.get_or_init(Mutex::default)
 }
 
+/// Fired when the Service shuts down: every watch stops.
+fn stopped() -> &'static CancellationToken {
+    static STOPPED: OnceLock<CancellationToken> = OnceLock::new();
+    STOPPED.get_or_init(CancellationToken::new)
+}
+
 /// Where the watch reports what it finds. Set once by the resident engine.
 pub(crate) fn set_notifier(sender: NotificationSender, service_generation: u32) {
     *notifier().lock().unwrap_or_else(PoisonError::into_inner) = Some((sender, service_generation));
 }
 
+/// Stop every watch and let go of what they hold. The notifier is a sender
+/// of the outbound queue and each token source holds the database writer:
+/// kept here, in statics that outlive everything, they left the queue open
+/// and the Service waiting on it forever after the app had quit.
+pub(crate) fn shutdown() {
+    stopped().cancel();
+    notifier()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    sources()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+}
+
 /// Watch the account. Called each time its client is built: the first call
 /// starts the watch, later ones hand it the token source now in use.
 pub(crate) fn watch(account_id: String, source: Arc<dyn TokenSource>) {
+    if stopped().is_cancelled() {
+        return;
+    }
     let already_watched = sources()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -73,12 +99,22 @@ pub(crate) fn watch(account_id: String, source: Arc<dyn TokenSource>) {
         return;
     };
     runtime.spawn(async move {
-        tokio::time::sleep(START_DELAY).await;
+        let mut wait = START_DELAY;
         let mut reported_at_risk = false;
         let mut suspected = false;
         let mut token_refused = false;
         loop {
-            let wait = match check(&account_id).await {
+            // The wait ends at once when the Service shuts down, and so
+            // does a check in flight: nothing of the watch outlives it.
+            tokio::select! {
+                () = stopped().cancelled() => return,
+                () = tokio::time::sleep(wait) => {}
+            }
+            let checked = tokio::select! {
+                () = stopped().cancelled() => return,
+                checked = check(&account_id) => checked,
+            };
+            wait = match checked {
                 Check::TokenRefused if !token_refused => {
                     token_refused = true;
                     TOKEN_RETRY_DELAY
@@ -102,7 +138,6 @@ pub(crate) fn watch(account_id: String, source: Arc<dyn TokenSource>) {
                     }
                 }
             };
-            tokio::time::sleep(wait).await;
         }
     });
 }

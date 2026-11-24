@@ -35,6 +35,9 @@ where
     //    token between long-running account iterations, so it must be
     //    visible before the notification drain waits on them.
     state.boot_state.shutdown_token().cancel();
+    // The subscription watch holds a sender of the outbound queue and the
+    // database writer outside any state dropped below: it lets go here.
+    crate::conduit::subscription_watch::shutdown();
 
     // 3. Drain in-flight notifications before writing any sentinel.
     //    The boot task cannot be safely aborted until after the

@@ -17,7 +17,7 @@ pub mod resident;
 pub mod server_filters;
 pub mod server_search;
 pub mod settings;
-mod subscription_watch;
+pub(crate) mod subscription_watch;
 pub mod token_source;
 
 pub use checkpoint_store::SqliteCheckpointStore;
