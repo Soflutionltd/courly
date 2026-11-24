@@ -1587,7 +1587,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
     fn state(&self) -> widget::tree::State {
         widget::tree::State::new(WidgetState {
             cache: ParagraphCache::new(),
-            focus: None,
+            // An editor drawn anew (a message put back after a relaunch, or
+            // moved to its own window) keeps the keyboard its state had.
+            focus: (self.on_action.is_some() && self.state.is_focused()).then(FocusState::now),
             last_click: None,
             dragging: false,
             scroll_offset: 0.0,
