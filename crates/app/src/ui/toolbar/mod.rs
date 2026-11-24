@@ -208,6 +208,29 @@ pub enum DropTarget {
 /// Movement below this many pixels is a click, not a drag.
 const DRAG_THRESHOLD: f32 = 4.0;
 
+/// How long the gap for a dragged button takes to open or to close: long
+/// enough to see the neighbours slide, short enough to keep up with the
+/// pointer.
+const GAP_SLIDE: std::time::Duration = std::time::Duration::from_millis(140);
+
+/// A gap on its way open or shut: where it is, when it set off and how far
+/// open it was then, so one caught mid-way carries on from where it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GapSlide {
+    slot: DropTarget,
+    since: std::time::Instant,
+    from: f32,
+}
+
+impl GapSlide {
+    /// How far this slide has run, 0 to 1, eased out.
+    fn run(&self, now: std::time::Instant) -> f32 {
+        let elapsed = now.saturating_duration_since(self.since).as_secs_f32();
+        let linear = (elapsed / GAP_SLIDE.as_secs_f32()).clamp(0.0, 1.0);
+        1.0 - (1.0 - linear).powi(3)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolbarDrag {
     pub source: DragSource,
@@ -215,6 +238,56 @@ pub struct ToolbarDrag {
     pub cursor: Option<Point>,
     origin: Option<Point>,
     pub moved: bool,
+    /// The gap opening at `target`. `None` when it is fully open, as on
+    /// the slot a bar button is lifted from.
+    opening: Option<GapSlide>,
+    /// The gap closing where the pointer just left.
+    closing: Option<GapSlide>,
+}
+
+impl ToolbarDrag {
+    /// How far open the gap at `slot` is, 0 to 1.
+    pub fn gap(&self, slot: DropTarget, now: std::time::Instant) -> f32 {
+        if self.target == Some(slot) {
+            return self
+                .opening
+                .filter(|slide| slide.slot == slot)
+                .map_or(1.0, |slide| {
+                    slide.from + (1.0 - slide.from) * slide.run(now)
+                });
+        }
+        self.closing
+            .filter(|slide| slide.slot == slot)
+            .map_or(0.0, |slide| slide.from * (1.0 - slide.run(now)))
+    }
+
+    /// Whether a gap is still sliding, so the bar must keep redrawing.
+    pub fn is_sliding(&self, now: std::time::Instant) -> bool {
+        [self.opening, self.closing]
+            .into_iter()
+            .flatten()
+            .any(|slide| slide.run(now) < 1.0)
+    }
+
+    /// Move the landing place: the gap there starts to open, the one left
+    /// behind starts to close.
+    fn retarget(&mut self, target: Option<DropTarget>) {
+        if self.target == target {
+            return;
+        }
+        let now = std::time::Instant::now();
+        self.closing = self.target.map(|slot| GapSlide {
+            slot,
+            since: now,
+            from: self.gap(slot, now),
+        });
+        self.opening = target.map(|slot| GapSlide {
+            slot,
+            since: now,
+            from: self.gap(slot, now),
+        });
+        self.target = target;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -259,6 +332,8 @@ pub enum ToolbarMessage {
     DragLeave(DropTarget),
     CursorMoved(Point),
     DragEnd,
+    /// A frame went by while a gap is sliding.
+    Frame,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,12 +428,14 @@ impl Toolbar {
                     cursor: None,
                     origin: self.pointer,
                     moved: false,
+                    opening: None,
+                    closing: None,
                 });
                 None
             }
             ToolbarMessage::DragOver(target) => {
                 if let Some(drag) = self.drag.as_mut() {
-                    drag.target = Some(target);
+                    drag.retarget(Some(target));
                 }
                 None
             }
@@ -366,10 +443,13 @@ impl Toolbar {
                 if let Some(drag) = self.drag.as_mut()
                     && drag.target == Some(target)
                 {
-                    drag.target = None;
+                    drag.retarget(None);
                 }
                 None
             }
+            // Nothing to change: the message is the redraw a sliding gap
+            // needs on each frame.
+            ToolbarMessage::Frame => None,
             ToolbarMessage::CursorMoved(point) => {
                 self.pointer = Some(point);
                 if let Some(drag) = self.drag.as_mut() {
@@ -413,6 +493,14 @@ impl Toolbar {
     fn changed(&mut self) -> Option<ToolbarEvent> {
         self.menu = None;
         Some(ToolbarEvent::LayoutChanged(self.layout.to_json()))
+    }
+
+    /// Whether the gap of a drag is sliding, so the bar needs a redraw on
+    /// each frame.
+    pub fn is_sliding(&self) -> bool {
+        self.drag
+            .as_ref()
+            .is_some_and(|drag| drag.moved && drag.is_sliding(std::time::Instant::now()))
     }
 
     /// Escape closes the innermost thing open. Returns whether it did.
@@ -466,6 +554,34 @@ mod tests {
             toolbar.update(ToolbarMessage::DragLeave(DropTarget::Before(index)));
         }
         toolbar.update(ToolbarMessage::DragEnd)
+    }
+
+    #[test]
+    fn the_gap_slides_open_where_the_button_lands_and_shut_where_it_left() {
+        let mut toolbar = bar(&[Archive, Delete, Flag, Junk, Move]);
+        toolbar.update(ToolbarMessage::DragStart(DragSource::Bar(1)));
+        let lifted = std::time::Instant::now();
+        let drag = toolbar.drag.as_ref().expect("dragging");
+        // The slot a button is lifted from is its gap, fully open at once.
+        assert!((drag.gap(DropTarget::Before(1), lifted) - 1.0).abs() < f32::EPSILON);
+        assert!(!drag.is_sliding(lifted));
+
+        toolbar.update(ToolbarMessage::DragLeave(DropTarget::Before(1)));
+        toolbar.update(ToolbarMessage::DragOver(DropTarget::Before(3)));
+        let drag = toolbar.drag.as_ref().expect("dragging");
+        let moved = drag.opening.expect("a gap opening").since;
+        assert!(drag.gap(DropTarget::Before(3), moved) < 0.01);
+        assert!(drag.is_sliding(moved));
+
+        let midway = moved + GAP_SLIDE / 2;
+        let opening = drag.gap(DropTarget::Before(3), midway);
+        assert!(opening > 0.5 && opening < 1.0, "eased out: {opening}");
+
+        let settled = moved + GAP_SLIDE;
+        assert!((drag.gap(DropTarget::Before(3), settled) - 1.0).abs() < f32::EPSILON);
+        assert!(drag.gap(DropTarget::Before(1), settled) < f32::EPSILON);
+        assert!(drag.gap(DropTarget::Before(0), settled) < f32::EPSILON);
+        assert!(!drag.is_sliding(settled));
     }
 
     #[test]

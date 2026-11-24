@@ -251,6 +251,13 @@ impl ReadyApp {
             );
         }
 
+        if self.toolbar.is_sliding() {
+            subs.push(
+                iced::window::frames()
+                    .map(|_| Message::Toolbar(crate::ui::toolbar::ToolbarMessage::Frame)),
+            );
+        }
+
         iced::Subscription::batch(subs)
     }
 }

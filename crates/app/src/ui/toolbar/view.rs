@@ -309,7 +309,19 @@ fn editable_bar<'a>(
     size: Size,
 ) -> Element<'a, Message> {
     let drag = state.drag.as_ref().filter(|drag| drag.moved);
-    let target = drag.and_then(|drag| drag.target);
+    let now = std::time::Instant::now();
+    // The gap is as wide as the button it makes room for, so the bar keeps
+    // its length while a button travels along it.
+    let gap_width = drag.map_or(0.0, |drag| {
+        let width = match drag.source {
+            DragSource::Bar(from) => buttons
+                .iter()
+                .find(|resolved| resolved.index == from)
+                .map(|resolved| button_width(&resolved.label, labels)),
+            DragSource::Catalog(_) => None,
+        };
+        width.unwrap_or(TOOLBAR_DROP_GAP) + SPACE_XXS
+    });
 
     let mut bar = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     let mut total = 0.0;
@@ -317,29 +329,23 @@ fn editable_bar<'a>(
         let index = resolved.index;
         total += button_width(&resolved.label, labels) + SPACE_XXS;
         let dragged = drag.is_some_and(|drag| drag.source == DragSource::Bar(index));
-        let mut face = container(button_face(resolved.item, &resolved.label, labels, true))
-            .padding(PAD_ICON_BTN);
-        if dragged {
-            face = face.style(theme::ContainerClass::DraggingRow.style());
-        }
-        // Where the dragged button would land, a gap opens and this button
-        // and the ones after it move right. The gap is part of the same
-        // drop slot: the pointer, now over the gap, has not left the slot,
-        // so the gap does not close under it.
-        let lands_here = target == Some(DropTarget::Before(index)) && !dragged;
-        let slot: Element<'a, Message> = if lands_here {
-            row![
-                container(Space::new())
-                    .width(TOOLBAR_DROP_GAP)
-                    .height(TOOLBAR_SLOT_HEIGHT)
-                    .style(theme::ContainerClass::DropTarget.style()),
-                face,
-            ]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center)
-            .into()
+        // Where the dragged button would land, a gap slides open and this
+        // button and the ones after it slide right; the gap left behind
+        // slides shut. The gap is part of the same drop slot: the pointer,
+        // now over the gap, has not left the slot, so the gap does not
+        // close under it.
+        let open = drag.map_or(0.0, |drag| drag.gap(DropTarget::Before(index), now));
+        let gap = Space::new()
+            .width(gap_width * open)
+            .height(TOOLBAR_SLOT_HEIGHT);
+        // The button being dragged is the one under the pointer: its place
+        // in the bar is only the gap it left.
+        let slot: Element<'a, Message> = if dragged {
+            gap.into()
         } else {
-            face.into()
+            let face = container(button_face(resolved.item, &resolved.label, labels, true))
+                .padding(PAD_ICON_BTN);
+            row![gap, face].align_y(Alignment::Center).into()
         };
         bar = bar.push(
             drop_slot(slot, DropTarget::Before(index)).on_press(toolbar_message(
@@ -349,16 +355,15 @@ fn editable_bar<'a>(
     }
 
     let overflows = total + TOOLBAR_END_SLOT_WIDTH > size.width;
-    let mut end = container(Space::new())
+    // The end of the bar is free space already: a button dropped there
+    // needs no gap, and no frame to say so.
+    let end = container(Space::new())
         .width(if overflows {
             Length::Fixed(TOOLBAR_END_SLOT_WIDTH)
         } else {
             Length::Fill
         })
         .height(TOOLBAR_SLOT_HEIGHT);
-    if target == Some(DropTarget::End) {
-        end = end.style(theme::ContainerClass::DropTarget.style());
-    }
     bar = bar.push(drop_slot(end, DropTarget::End));
 
     if overflows {
