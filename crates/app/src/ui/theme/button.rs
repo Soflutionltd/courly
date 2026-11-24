@@ -50,6 +50,9 @@ pub enum ButtonClass {
     /// libadwaita-aligned and so the two can diverge later without a
     /// global rename.
     Suggested,
+    /// The pill in the title bar that waits for an update to be installed,
+    /// louder the longer it has waited.
+    UpdatePill { urgency: crate::updater::Urgency },
 }
 
 /// Colour a thread row icon takes when hovered or active.
@@ -94,7 +97,60 @@ impl ButtonClass {
             Self::ExperimentSemantic { variant } => style_exp_semantic_btn(theme, status, variant),
             Self::Destructive => style_destructive_button(theme, status),
             Self::Suggested => style_primary_button(theme, status),
+            Self::UpdatePill { urgency } => style_update_pill_button(theme, status, urgency),
         }
+    }
+}
+
+/// On the title bar: a light veil over the brand color while the update is
+/// recent, then the warning and the danger colors.
+fn style_update_pill_button(
+    theme: &Theme,
+    status: button::Status,
+    urgency: crate::updater::Urgency,
+) -> button::Style {
+    use crate::updater::Urgency;
+    let p = theme.palette();
+    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let (background, text_color) = match urgency {
+        Urgency::Fresh if p.is_dark => {
+            let rest = p.background.strong.color;
+            let bg = if hovered {
+                p.background.stronger.color
+            } else {
+                rest
+            };
+            (bg, p.background.strong.text)
+        }
+        Urgency::Fresh => {
+            let alpha = if hovered { 0.30 } else { 0.20 };
+            (
+                Color {
+                    a: alpha,
+                    ..Color::WHITE
+                },
+                Color::WHITE,
+            )
+        }
+        Urgency::Pending | Urgency::Overdue => {
+            let pair = if urgency == Urgency::Pending {
+                p.warning.base
+            } else {
+                p.danger.base
+            };
+            let bg = if hovered {
+                mix(pair.color, Color::BLACK, 0.12)
+            } else {
+                pair.color
+            };
+            (bg, pair.text)
+        }
+    };
+    button::Style {
+        background: Some(background.into()),
+        text_color,
+        border: border::rounded(RADIUS_LG),
+        ..Default::default()
     }
 }
 

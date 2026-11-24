@@ -124,6 +124,15 @@ impl ReadyApp {
             );
         }
 
+        // An update downloaded in the background waits for nobody to be
+        // using the computer.
+        if matches!(self.updater.phase, updater::Phase::Ready { .. }) {
+            subs.push(
+                iced::time::every(updater::IDLE_CHECK_INTERVAL)
+                    .map(|_| Message::Updater(UpdaterMessage::IdleTick)),
+            );
+        }
+
         if self.composer_is_open() && self.has_dirty_compose_drafts() {
             subs.push(
                 iced::time::every(handlers::pop_out::DRAFT_AUTO_SAVE_INTERVAL)

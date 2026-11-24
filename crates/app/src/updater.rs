@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -37,6 +37,82 @@ pub const CHECK_INTERVAL: Duration = Duration::from_secs(180);
 pub const FOCUS_CHECK_THROTTLE: Duration = Duration::from_secs(60);
 pub const RETRY_DELAY: Duration = Duration::from_secs(15);
 pub const AUTO_RETRIES: u32 = 2;
+/// With automatic updates on, how long nobody must have touched the
+/// computer before Courly restarts itself into the new version.
+pub const UNATTENDED_IDLE: Duration = Duration::from_secs(30 * 60);
+/// How often that is checked while an update waits to be installed.
+pub const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+/// Days after its release an update not installed turns the pill orange,
+/// then red.
+const PENDING_AFTER_DAYS: i64 = 3;
+const OVERDUE_AFTER_DAYS: i64 = 7;
+
+/// How loudly the title bar asks for an update to be installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Urgency {
+    Fresh,
+    Pending,
+    Overdue,
+}
+
+/// The urgency of an update released at `published`, seen at `now`. A
+/// release with no date stays quiet rather than guess.
+pub fn urgency(published: Option<jiff::Timestamp>, now: jiff::Timestamp) -> Urgency {
+    let Some(published) = published else {
+        return Urgency::Fresh;
+    };
+    let days = now.duration_since(published).as_secs() / 86_400;
+    if days >= OVERDUE_AFTER_DAYS {
+        Urgency::Overdue
+    } else if days >= PENDING_AFTER_DAYS {
+        Urgency::Pending
+    } else {
+        Urgency::Fresh
+    }
+}
+
+/// How long no key, click or pointer move has reached the computer, any
+/// app included. `None` where the system does not say.
+#[cfg(target_os = "macos")]
+pub fn time_since_input() -> Option<Duration> {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(state_id: i32, event_type: u32) -> f64;
+    }
+    /// `kCGEventSourceStateCombinedSessionState`: every source of the session.
+    const COMBINED_SESSION_STATE: i32 = 0;
+    /// `kCGAnyInputEventType`.
+    const ANY_INPUT_EVENT: u32 = u32::MAX;
+    // SAFETY: a CoreGraphics function taking two integers and returning a
+    // number, with no pointer and no ownership involved.
+    let seconds =
+        unsafe { CGEventSourceSecondsSinceLastEventType(COMBINED_SESSION_STATE, ANY_INPUT_EVENT) };
+    Duration::try_from_secs_f64(seconds).ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn time_since_input() -> Option<Duration> {
+    None
+}
+
+/// The archive of an update, downloaded and its signature checked, kept in
+/// memory until it is installed.
+#[derive(Clone)]
+pub struct Archive(Arc<Vec<u8>>);
+
+impl std::fmt::Debug for Archive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Archive({} bytes)", self.0.len())
+    }
+}
+
+impl PartialEq for Archive {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Archive {}
 
 static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -51,6 +127,8 @@ static HTTP: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
 pub struct UpdateInfo {
     pub version: String,
     pub notes: String,
+    /// When the release was published, from its manifest.
+    pub published: Option<jiff::Timestamp>,
     url: String,
     signature: String,
 }
@@ -60,6 +138,8 @@ struct Manifest {
     version: String,
     #[serde(default)]
     notes: String,
+    #[serde(default)]
+    pub_date: Option<String>,
     platforms: HashMap<String, PlatformEntry>,
 }
 
@@ -71,7 +151,12 @@ struct PlatformEntry {
 
 #[derive(Debug, Clone)]
 pub enum InstallEvent {
-    Progress { downloaded: u64, total: Option<u64> },
+    Progress {
+        downloaded: u64,
+        total: Option<u64>,
+    },
+    /// Downloaded and checked, to be installed later.
+    Downloaded(Archive),
     Installing,
     Done(Result<(), String>),
 }
@@ -95,6 +180,13 @@ pub enum Phase {
     /// The new bundle is on disk but the automatic relaunch could not be
     /// scheduled; the user quits and reopens.
     Installed(UpdateInfo),
+    /// Downloaded and checked in the background, waiting for a moment
+    /// nobody is using the computer, a click on the pill, or the app to
+    /// quit. The installed app is left alone until then.
+    Ready {
+        info: UpdateInfo,
+        archive: Archive,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +204,12 @@ pub enum UpdaterMessage {
     Event(InstallEvent),
     Retry,
     Quit,
+    /// The pill of a postponed update: show its card again.
+    Reopen,
+    /// The pill of an update downloaded in the background: install it now.
+    RestartNow,
+    /// Time to see whether nobody is using the computer.
+    IdleTick,
 }
 
 #[derive(Debug, Default)]
@@ -119,6 +217,10 @@ pub struct UpdaterState {
     pub phase: Phase,
     /// Version the user postponed with "Later"; offered again next launch.
     pub dismissed_version: Option<String>,
+    /// The update put off with "Later", kept on the title bar as a pill.
+    pub postponed: Option<UpdateInfo>,
+    /// The update downloads in the background: no card shows it.
+    pub silent: bool,
     pub attempts: u32,
     pub checking: bool,
     /// The running check was asked for by the user; its outcome is shown.
@@ -201,28 +303,59 @@ pub async fn check() -> Result<Option<UpdateInfo>, String> {
     Ok(Some(UpdateInfo {
         version: manifest.version,
         notes: manifest.notes,
+        published: manifest
+            .pub_date
+            .as_deref()
+            .and_then(|date| date.parse().ok()),
         url: entry.url.clone(),
         signature: entry.signature.clone(),
     }))
 }
 
-/// Download, verify and swap the bundle, reporting progress on `events`.
-/// The caller relaunches with [`relaunch_after_exit`] once `Done(Ok)`
-/// arrives.
+/// Download and verify the update, reporting progress on `events`. With
+/// `apply_now` the bundle is then swapped and `Done` reports it, and the
+/// caller relaunches with [`relaunch_after_exit`]. Without, the checked
+/// archive comes back as `Downloaded` and the installed app is untouched.
 pub async fn install(
     info: UpdateInfo,
+    apply_now: bool,
     mut events: iced::futures::channel::mpsc::Sender<InstallEvent>,
 ) {
-    let result = install_inner(&info, &mut events).await;
-    let _ = events.try_send(InstallEvent::Done(result));
+    let archive = match download(&info, &mut events).await {
+        Ok(archive) => archive,
+        Err(error) => {
+            let _ = events.try_send(InstallEvent::Done(Err(error)));
+            return;
+        }
+    };
+    if !apply_now {
+        let _ = events.try_send(InstallEvent::Downloaded(archive));
+        return;
+    }
+    let _ = events.try_send(InstallEvent::Installing);
+    let _ = events.try_send(InstallEvent::Done(apply(archive).await));
 }
 
-async fn install_inner(
-    info: &UpdateInfo,
-    events: &mut iced::futures::channel::mpsc::Sender<InstallEvent>,
-) -> Result<(), String> {
+/// Swap the installed bundle for the one in `archive`.
+pub async fn apply(archive: Archive) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || apply_blocking(&archive))
+        .await
+        .map_err(|error| t!("updater.error.install", error = error).into_owned())?
+}
+
+/// Swap the installed bundle for the one in `archive`, on this thread: for
+/// the app's last moments, when it quits.
+pub fn apply_blocking(archive: &Archive) -> Result<(), String> {
     let bundle =
         installed_bundle().ok_or_else(|| t!("updater.error.not_installed").into_owned())?;
+    replace_bundle(&bundle, &archive.0)
+}
+
+async fn download(
+    info: &UpdateInfo,
+    events: &mut iced::futures::channel::mpsc::Sender<InstallEvent>,
+) -> Result<Archive, String> {
+    installed_bundle().ok_or_else(|| t!("updater.error.not_installed").into_owned())?;
     let mut response = client()?
         .get(&info.url)
         .send()
@@ -252,10 +385,7 @@ async fn install_inner(
     }
 
     verify_signature(&archive, &info.signature, &info.version)?;
-    let _ = events.try_send(InstallEvent::Installing);
-    tokio::task::spawn_blocking(move || replace_bundle(&bundle, &archive))
-        .await
-        .map_err(|error| t!("updater.error.install", error = error).into_owned())?
+    Ok(Archive(Arc::new(archive)))
 }
 
 fn decode_base64_text(value: &str) -> Result<String, String> {
@@ -393,6 +523,35 @@ mod tests {
         assert!(is_newer("1.0.0", "0.99.99"));
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0", "0.2.0"));
+    }
+
+    #[test]
+    fn the_pill_grows_louder_as_the_release_ages() {
+        let published: jiff::Timestamp = "2026-11-01T12:00:00Z".parse().expect("date");
+        let after = |days: i64| published + jiff::SignedDuration::from_hours(days * 24 + 1);
+        assert_eq!(urgency(Some(published), after(0)), Urgency::Fresh);
+        assert_eq!(urgency(Some(published), after(2)), Urgency::Fresh);
+        assert_eq!(urgency(Some(published), after(3)), Urgency::Pending);
+        assert_eq!(urgency(Some(published), after(6)), Urgency::Pending);
+        assert_eq!(urgency(Some(published), after(7)), Urgency::Overdue);
+        assert_eq!(urgency(None, after(30)), Urgency::Fresh);
+    }
+
+    #[test]
+    fn the_manifest_date_is_read() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"version":"0.2.9","notes":"","pub_date":"2026-11-24T17:18:59Z",
+                "platforms":{}}"#,
+        )
+        .expect("manifest");
+        let published: Option<jiff::Timestamp> = manifest
+            .pub_date
+            .as_deref()
+            .and_then(|date| date.parse().ok());
+        assert_eq!(
+            published,
+            Some("2026-11-24T17:18:59Z".parse().expect("date"))
+        );
     }
 
     #[test]

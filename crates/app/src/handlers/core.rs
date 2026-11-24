@@ -1483,6 +1483,7 @@ impl ReadyApp {
         }
         self.main_close = crate::app::MainClose::Closing;
         self.note_view_offsets(place);
+        self.install_ready_update_on_quit();
         let id = self.main_window_id;
         {
             log::info!("Main window closing, saving state");

@@ -5,8 +5,8 @@ use iced::{Alignment, Element, Length};
 use rust_i18n::t;
 
 use crate::ui::layout::{
-    PAD_BUTTON, PAD_CARD, SPACE_SM, SPACE_XS, TEXT_LG, TEXT_SM, UPDATE_BANNER_BOTTOM_OFFSET,
-    UPDATE_BANNER_WIDTH, UPDATE_PROGRESS_HEIGHT,
+    ICON_SM, PAD_BUTTON, PAD_CARD, PAD_CHIP, SPACE_SM, SPACE_XS, SPACE_XXS, TEXT_LG, TEXT_SM,
+    UPDATE_BANNER_BOTTOM_OFFSET, UPDATE_BANNER_WIDTH, UPDATE_PROGRESS_HEIGHT,
 };
 use crate::ui::theme;
 use crate::updater::{AUTO_RETRIES, Phase, UpdaterMessage, UpdaterState};
@@ -14,8 +14,12 @@ use crate::updater::{AUTO_RETRIES, Phase, UpdaterMessage, UpdaterState};
 /// The card positioned bottom-center over the window, or `None` when
 /// there is nothing to show.
 pub fn view(state: &UpdaterState) -> Option<Element<'_, UpdaterMessage>> {
+    // A download in the background shows no card: only the pill, once it
+    // is ready.
+    let silent = state.silent && matches!(state.phase, Phase::Downloading { .. });
     let content: Element<'_, UpdaterMessage> = match &state.phase {
-        Phase::Idle => return None,
+        Phase::Idle | Phase::Ready { .. } => return None,
+        _ if silent => return None,
         Phase::Available(info) => {
             let mut body = column![title(
                 t!("updater.available", version = info.version).into_owned()
@@ -115,6 +119,34 @@ pub fn view(state: &UpdaterState) -> Option<Element<'_, UpdaterMessage>> {
                 ..iced::Padding::ZERO
             })
             .into(),
+    )
+}
+
+/// The pill on the title bar for an update not installed yet: one put off
+/// with "Later" reopens its card, one downloaded in the background installs
+/// and relaunches. Louder the longer the release has waited.
+pub fn pill(state: &UpdaterState) -> Option<Element<'_, UpdaterMessage>> {
+    let (info, label, message) = match (&state.phase, &state.postponed) {
+        (Phase::Ready { info, .. }, _) => {
+            (info, t!("updater.pill_restart"), UpdaterMessage::RestartNow)
+        }
+        (Phase::Idle, Some(info)) => (info, t!("updater.pill_update"), UpdaterMessage::Reopen),
+        _ => return None,
+    };
+    let urgency = crate::updater::urgency(info.published, jiff::Timestamp::now());
+    Some(
+        button(
+            row![
+                crate::icon::download().size(ICON_SM),
+                text(label.into_owned()).size(TEXT_SM)
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
+        )
+        .padding(PAD_CHIP)
+        .style(theme::ButtonClass::UpdatePill { urgency }.style())
+        .on_press(message)
+        .into(),
     )
 }
 

@@ -260,7 +260,10 @@ impl ReadyApp {
             .height(Length::Fill);
 
         container(column![
-            ui::chrome::title_bar(search),
+            ui::chrome::title_bar(
+                search,
+                ui::update_banner::pill(&self.updater).map(|pill| pill.map(Message::Updater)),
+            ),
             workspace,
             self.status_bar_view()
         ])

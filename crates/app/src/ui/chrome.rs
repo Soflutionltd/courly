@@ -25,7 +25,11 @@ fn drag_area<'a>(width: Length) -> Element<'a, Message> {
         .into()
 }
 
-pub fn title_bar<'a>(search: Element<'a, Message>) -> Element<'a, Message> {
+/// `trailing` sits at the right end of the bar: the update pill.
+pub fn title_bar<'a>(
+    search: Element<'a, Message>,
+    trailing: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
     let left_inset = if cfg!(target_os = "macos") {
         TRAFFIC_LIGHTS_INSET
     } else {
@@ -35,12 +39,31 @@ pub fn title_bar<'a>(search: Element<'a, Message>) -> Element<'a, Message> {
         .width(Length::FillPortion(2).max(TITLE_SEARCH_MAX_WIDTH))
         .align_y(Alignment::Center);
 
+    // The pill takes the right end of the space after the search, so the
+    // search stays centered and the rest of that space still moves the
+    // window.
+    let right: Element<'a, Message> = match trailing {
+        Some(trailing) => container(
+            row![
+                drag_area(Length::Fill),
+                trailing,
+                drag_area(Length::Fixed(PANE_GAP)),
+            ]
+            .height(Length::Fill)
+            .align_y(Alignment::Center),
+        )
+        .width(Length::FillPortion(1))
+        .height(Length::Fill)
+        .into(),
+        None => drag_area(Length::FillPortion(1)),
+    };
+
     container(
         row![
             drag_area(Length::Fixed(left_inset)),
             drag_area(Length::FillPortion(1)),
             search_slot,
-            drag_area(Length::FillPortion(1)),
+            right,
         ]
         .height(Length::Fill)
         .align_y(Alignment::Center),
