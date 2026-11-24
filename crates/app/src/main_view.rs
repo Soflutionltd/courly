@@ -39,10 +39,15 @@ impl ReadyApp {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn view_main_window(&self) -> Element<'_, Message> {
         let window = self.view_main_window_content();
-        match ui::update_banner::view(&self.updater) {
-            Some(banner) => stack![window, banner.map(Message::Updater)].into(),
-            None => window,
+        // The window is always the first layer of the same stack, card or
+        // not: a root that changed kind would rebuild every widget's state,
+        // sending the lists back to their top and taking the keyboard from
+        // the message being written each time the card came or went.
+        let mut layers = stack![window];
+        if let Some(banner) = ui::update_banner::view(&self.updater) {
+            layers = layers.push(banner.map(Message::Updater));
         }
+        layers.into()
     }
 
     fn view_main_window_content(&self) -> Element<'_, Message> {
@@ -55,14 +60,18 @@ impl ReadyApp {
 
         let layout = self.view_main_layout();
 
+        // The layout keeps the same wrapper and the same first layer below,
+        // whatever is open over it: a tree that changed shape would rebuild
+        // every widget's state, sending the lists back to their top and
+        // taking the keyboard from the message being written.
+        let area = mouse_area(layout);
         let main_layout: Element<'_, Message> = if self.dragging.is_some() {
-            mouse_area(layout)
-                .on_move(Message::DividerDragMove)
+            area.on_move(Message::DividerDragMove)
                 .on_release(Message::DividerDragEnd)
                 .interaction(iced::mouse::Interaction::ResizingHorizontally)
                 .into()
         } else {
-            layout
+            area.into()
         };
 
         if let Some(threads) = self.pending_permanent_delete.as_ref() {
@@ -142,7 +151,7 @@ impl ReadyApp {
                 .align_y(iced::Alignment::End);
             stack![main_layout, indicator_positioned].into()
         } else {
-            main_layout
+            stack![main_layout].into()
         }
     }
 
