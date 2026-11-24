@@ -39,6 +39,7 @@ impl ReadyApp {
                 PopOutWindow::Compose(state) => {
                     compose_windows.push(ComposeSessionEntry {
                         draft_id: state.draft_id.clone(),
+                        detail: crate::handlers::resume::compose_detail(state, data_dir),
                         width: state.width,
                         height: state.height,
                         x: state.x,
@@ -56,11 +57,28 @@ impl ReadyApp {
             }
         }
 
+        let main_view = self.main_view_entry(data_dir);
+        // The attached files of the messages still open are kept; those of
+        // messages sent or closed since go.
+        let kept_files = compose_windows
+            .iter()
+            .map(|compose| &compose.detail)
+            .chain(
+                main_view
+                    .inline_compose
+                    .iter()
+                    .map(|compose| &compose.detail),
+            )
+            .flat_map(|detail| detail.attachments.iter().map(|file| file.file.clone()))
+            .collect();
+        crate::pop_out::session::prune_attachments(data_dir, &kept_files);
+
         let session = SessionState {
             main_window: self.window.clone(),
             message_views,
             compose_windows,
             calendar_window,
+            main_view: Some(main_view),
         };
 
         let path = data_dir.join("session.json");
@@ -117,6 +135,7 @@ impl ReadyApp {
             let height = entry.height;
             let x = entry.x;
             let y = entry.y;
+            let detail = entry.detail.clone();
 
             // Open the window now (so the user sees it appear at boot) and
             // hydrate the compose state from the persisted draft async. The
@@ -135,6 +154,7 @@ impl ReadyApp {
                     height,
                     x,
                     y,
+                    detail: detail.clone(),
                     result,
                 },
             );
@@ -176,10 +196,8 @@ impl ReadyApp {
     pub(crate) fn handle_restored_compose_loaded(
         &mut self,
         window_id: iced::window::Id,
-        width: f32,
-        height: f32,
-        x: Option<f32>,
-        y: Option<f32>,
+        (width, height, x, y): (f32, f32, Option<f32>, Option<f32>),
+        detail: &crate::pop_out::session::ComposeDetail,
         result: Result<Option<rtsk::db::types::DbLocalDraft>, String>,
     ) -> Task<Message> {
         let draft = match result {
@@ -196,6 +214,7 @@ impl ReadyApp {
 
         let mut state =
             crate::pop_out::compose::ComposeState::from_local_draft(&self.sidebar.accounts, &draft);
+        crate::handlers::resume::apply_compose_detail(&mut state, detail);
         state.width = width;
         state.height = height;
         state.x = x;

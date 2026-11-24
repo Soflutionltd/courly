@@ -63,6 +63,16 @@ pub struct RebuildProgressState {
     pub total: u64,
 }
 
+/// How far the closing of the main window has gone.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum MainClose {
+    #[default]
+    NotAsked,
+    /// The scroll positions are being read from the view.
+    Measuring,
+    Closing,
+}
+
 pub struct ReadyApp {
     pub(crate) db: Arc<Db>,
     pub(crate) sidebar: Sidebar,
@@ -96,6 +106,20 @@ pub struct ReadyApp {
     /// The compose window last brought to the front, where a template
     /// from the side panel goes.
     pub(crate) last_compose_window: Option<iced::window::Id>,
+    /// The place recorded at the last close, until the accounts are known.
+    pub(crate) resume_view: Option<pop_out::session::MainViewEntry>,
+    /// What is left of that place to put back once its list has loaded.
+    pub(crate) resume_point: Option<crate::handlers::resume::ResumePoint>,
+    /// The scroll position to give back to the conversation of that place.
+    pub(crate) reading_resume: Option<crate::handlers::resume::ReadingResume>,
+    /// How far the list and the open conversation are scrolled, as last
+    /// read from the view.
+    pub(crate) view_offsets: (f32, f32),
+    /// The message at the top of the open conversation and how far down
+    /// into it the view is, as last read from the view.
+    pub(crate) reading_anchor: Option<(usize, f32)>,
+    /// The main window is closing: its scroll positions have been asked for.
+    pub(crate) main_close: MainClose,
     #[cfg(target_os = "macos")]
     pub(crate) menu_bar: Option<crate::menu_bar::MenuBar>,
     pub(crate) pop_out_generation: GenerationCounter<PopOut>,
@@ -508,6 +532,12 @@ impl ReadyApp {
             last_new_message_from: None,
             focused_window: main_window_id,
             last_compose_window: None,
+            resume_view: session.main_view.clone(),
+            resume_point: None,
+            reading_resume: None,
+            view_offsets: (0.0, 0.0),
+            reading_anchor: None,
+            main_close: MainClose::default(),
             #[cfg(target_os = "macos")]
             menu_bar: None,
             pop_out_generation: GenerationCounter::new(),

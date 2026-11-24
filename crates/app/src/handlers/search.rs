@@ -563,6 +563,9 @@ impl ReadyApp {
                     self.clear_thread_selection();
                 }
                 self.show_server_search_status();
+                // The search a relaunch brought back: its results are the
+                // list the reader was in.
+                let resume = self.resume_after_list_loaded(true);
 
                 match &result.resolved.intent {
                     SearchIntent::PinnedActivation { id } | SearchIntent::PinnedRefresh { id } => {
@@ -750,10 +753,10 @@ impl ReadyApp {
                     self.apply_search_pinned_state(&result.resolved.completion.pinned_state, None);
                     let post =
                         self.apply_search_post_success(result.resolved.completion.post_success);
-                    return post;
+                    return Task::batch([post, resume]);
                 }
 
-                persistence_task
+                Task::batch([persistence_task, resume])
             }
             Err(e) => {
                 self.status = format!("Search error: {e}");
@@ -871,7 +874,7 @@ impl ReadyApp {
         self.search_without_saving(false)
     }
 
-    fn search_without_saving(&mut self, keep_selection: bool) -> Task<Message> {
+    pub(crate) fn search_without_saving(&mut self, keep_selection: bool) -> Task<Message> {
         let query = self.effective_search_query();
         if query.is_empty() {
             return Task::none();

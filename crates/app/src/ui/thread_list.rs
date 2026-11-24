@@ -1097,10 +1097,15 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
         list = list.push(row_el);
     }
     scrollable(list)
+        .id(THREAD_LIST_SCROLL_ID)
         .spacing(SCROLLBAR_SPACING)
         .height(Length::Fill)
         .into()
 }
+
+/// Id of the scrollable that holds the rows, to read and restore how far
+/// down the list is.
+pub(crate) const THREAD_LIST_SCROLL_ID: &str = "thread-list-rows";
 
 /// "Today", "Yesterday", ... with a chevron; a click folds the group.
 fn date_group_header<'a>(group: DateGroup, folded: bool) -> Element<'a, ThreadListMessage> {

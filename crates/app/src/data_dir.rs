@@ -56,6 +56,41 @@ pub(crate) fn resolve(base: &Path) -> PathBuf {
     }
 }
 
+/// What a relaunch reads to come back to the same place: the session, the
+/// drafts not yet in the database, and the files attached to them.
+#[cfg(feature = "dev-seed")]
+const SESSION_FILES: [&str; 4] = [
+    "session.json",
+    "window.json",
+    service_api::WAL_FILENAME,
+    "compose-attachments",
+];
+
+/// Move the session files of the dev data directory `dir` aside, before it
+/// is wiped. Returns where they went.
+#[cfg(feature = "dev-seed")]
+pub(crate) fn take_session_files(dir: &std::path::Path) -> std::path::PathBuf {
+    let aside = dir.with_extension("dev-session");
+    std::fs::remove_dir_all(&aside).ok();
+    if let Err(error) = std::fs::create_dir_all(&aside) {
+        log::warn!("Dev-seed: cannot keep the session: {error}");
+        return aside;
+    }
+    for name in SESSION_FILES {
+        std::fs::rename(dir.join(name), aside.join(name)).ok();
+    }
+    aside
+}
+
+/// Move the session files set `aside` back into the fresh `dir`.
+#[cfg(feature = "dev-seed")]
+pub(crate) fn put_session_files(dir: &std::path::Path, aside: std::path::PathBuf) {
+    for name in SESSION_FILES {
+        std::fs::rename(aside.join(name), dir.join(name)).ok();
+    }
+    std::fs::remove_dir_all(aside).ok();
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DATA_DIR_NAME, LEGACY_DATA_DIR_NAME, resolve};

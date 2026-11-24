@@ -21,6 +21,7 @@ pub mod palette;
 pub mod pane_card;
 pub mod reading_pane;
 pub mod recipients;
+pub mod scroll_probe;
 pub mod scroll_to_child;
 pub mod search_person;
 pub mod search_scope;

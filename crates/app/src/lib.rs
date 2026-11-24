@@ -121,11 +121,21 @@ pub fn run_app_blocking() -> RunResult {
 
         let config = dev_seed::Config::load_or_default();
 
+        // With COURLY_DEV_KEEP_SESSION set, what a relaunch reads to come
+        // back to the same place survives the wipe, so that can be tried
+        // on the seeded data: the seed is deterministic, the ids match.
+        let kept_session = std::env::var_os("COURLY_DEV_KEEP_SESSION")
+            .is_some()
+            .then(|| data_dir::take_session_files(&dev_dir));
+
         // Always regenerate - ephemeral dev database
         if dev_dir.exists() {
             std::fs::remove_dir_all(&dev_dir).ok();
         }
         std::fs::create_dir_all(&dev_dir).expect("create dev data dir");
+        if let Some(kept) = kept_session {
+            data_dir::put_session_files(&dev_dir, kept);
+        }
 
         log::info!(
             "Dev-seed: generating ephemeral database in {}",

@@ -2,7 +2,7 @@
 ///
 /// This is a UI-scoping concept, not a database type. Personal accounts,
 /// shared mailboxes, and public folders route through different query paths.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ViewScope {
     /// All personal accounts.
     AllAccounts,

@@ -10,12 +10,13 @@ use iced::advanced::widget::operation::{Animation, Outcome};
 use iced::advanced::widget::{Id, Operation};
 
 /// Scroll the scrollable `list` so that the container `child`, somewhere in
-/// its content, is at the top of the view. Does nothing when either is not
-/// in the tree.
-pub fn scroll_to_child<T: 'static>(list: Id, child: Id) -> impl Operation<T> {
+/// its content, is at the top of the view, `below` pixels down into it.
+/// Does nothing when either is not in the tree.
+pub fn scroll_to_child<T: 'static>(list: Id, child: Id, below: f32) -> impl Operation<T> {
     ScrollToChild {
         list,
         child,
+        below,
         content_top: None,
         child_top: None,
     }
@@ -24,6 +25,7 @@ pub fn scroll_to_child<T: 'static>(list: Id, child: Id) -> impl Operation<T> {
 struct ScrollToChild {
     list: Id,
     child: Id,
+    below: f32,
     content_top: Option<f32>,
     child_top: Option<f32>,
 }
@@ -50,7 +52,7 @@ impl<T: 'static> Operation<T> for ScrollToChild {
                 self.list.clone(),
                 AbsoluteOffset {
                     x: None,
-                    y: Some((child_top - content_top).max(0.0)),
+                    y: Some((child_top - content_top + self.below).max(0.0)),
                 },
                 Animation::Instant,
             ))),

@@ -22,6 +22,9 @@ use std::sync::Arc;
 
 /// How long after a move or resize the window geometry is written.
 const WINDOW_SAVE_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+/// How long the main window waits for its scroll positions before closing
+/// without them.
+const MAIN_CLOSE_MEASURE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl ReadyApp {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -156,9 +159,10 @@ impl ReadyApp {
                 if self.current_modifiers.shift() {
                     return self.handle_thread_list(ThreadListMessage::RangeSelectThread(idx));
                 }
-                // Plain click: clear multi-select, single-select.
+                // Plain click: clear multi-select, single-select. The place
+                // is recorded shortly after, for the next launch.
                 self.thread_list.clear_multi_select();
-                self.handle_select_thread(idx)
+                Task::batch([self.handle_select_thread(idx), self.schedule_window_save()])
             }
             ThreadListEvent::SelectedRowClicked(idx) => {
                 // Clicking the conversation being answered goes back to
@@ -1411,7 +1415,87 @@ impl ReadyApp {
 
     pub(crate) fn handle_window_close(&mut self, id: iced::window::Id) -> Task<Message> {
         if id == self.main_window_id {
+            // Where the lists are scrolled is only known to the view: it is
+            // read first, so the next launch comes back to the same place.
+            // The delay covers a view that never answers.
+            if self.main_close == crate::app::MainClose::NotAsked {
+                self.main_close = crate::app::MainClose::Measuring;
+                return Task::batch([
+                    self.measure_view_offsets().map(Message::MainCloseMeasured),
+                    Task::perform(tokio::time::sleep(MAIN_CLOSE_MEASURE_DELAY), |()| {
+                        Message::MainCloseMeasured(ui::scroll_probe::ViewPlace::default())
+                    }),
+                ]);
+            }
+            return Task::none();
+        }
+
+        if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&id) {
+            if state.has_user_content() && !state.discard_confirm_open {
+                // Show discard confirmation instead of closing silently
+                state.discard_confirm_open = true;
+                return Task::none();
+            }
+            // Either no content or user already confirmed - save and close
+            if !self.save_compose_draft_sync(id) {
+                log::warn!("Compose draft save failed, aborting window close");
+                return Task::none();
+            }
+        }
+        // Calendar pop-out closing - calendar becomes available in main window again.
+        // (No state change needed - mode toggle just works.)
+        self.pop_out_windows.remove(&id);
+        iced::window::close(id)
+    }
+
+    /// Ask the view how far the list and the open conversation are scrolled.
+    pub(crate) fn measure_view_offsets(&self) -> Task<ui::scroll_probe::ViewPlace> {
+        let cards = (0..self.reading_pane.thread_messages.len())
+            .map(ui::reading_pane::message_card_id)
+            .collect();
+        iced::advanced::widget::operate(ui::scroll_probe::view_place(
+            iced::advanced::widget::Id::from(ui::thread_list::THREAD_LIST_SCROLL_ID),
+            iced::advanced::widget::Id::from(ui::reading_pane::MESSAGE_LIST_ID),
+            cards,
+        ))
+    }
+
+    /// Keep the scroll positions the view reported. One that is not on
+    /// screen (settings or calendar over the mail) keeps its last value.
+    pub(crate) fn note_view_offsets(&mut self, place: &ui::scroll_probe::ViewPlace) {
+        if let Some(list) = place.list_offset {
+            self.view_offsets.0 = list;
+        }
+        if let Some(reading) = place.reading_offset {
+            self.view_offsets.1 = reading;
+            self.reading_anchor = place.reading_anchor();
+        }
+    }
+
+    /// The scroll positions came back, or the view did not answer: close
+    /// the main window, and the app with it.
+    pub(crate) fn finish_main_close(
+        &mut self,
+        place: &ui::scroll_probe::ViewPlace,
+    ) -> Task<Message> {
+        if self.main_close != crate::app::MainClose::Measuring {
+            return Task::none();
+        }
+        self.main_close = crate::app::MainClose::Closing;
+        self.note_view_offsets(place);
+        let id = self.main_window_id;
+        {
             log::info!("Main window closing, saving state");
+            // A message being written is found again at the next launch
+            // from its draft: one with content, or a reply, gets one even
+            // when nothing changed since it was opened.
+            for window in self.pop_out_windows.values_mut() {
+                if let PopOutWindow::Compose(compose) = window
+                    && (compose.has_user_content() || compose.reply_thread_id.is_some())
+                {
+                    compose.draft_dirty = true;
+                }
+            }
             self.persist_window_state();
             // Save dirty compose drafts synchronously before destroying windows
             let compose_ids: Vec<_> = self
@@ -1449,30 +1533,16 @@ impl ReadyApp {
             } else {
                 tasks.push(iced::exit());
             }
-            return Task::batch(tasks);
+            Task::batch(tasks)
         }
-
-        if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&id) {
-            if state.has_user_content() && !state.discard_confirm_open {
-                // Show discard confirmation instead of closing silently
-                state.discard_confirm_open = true;
-                return Task::none();
-            }
-            // Either no content or user already confirmed - save and close
-            if !self.save_compose_draft_sync(id) {
-                log::warn!("Compose draft save failed, aborting window close");
-                return Task::none();
-            }
-        }
-        // Calendar pop-out closing - calendar becomes available in main window again.
-        // (No state change needed - mode toggle just works.)
-        self.pop_out_windows.remove(&id);
-        iced::window::close(id)
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
         self.pending_row_action = None;
+        // Another conversation starts at its top.
+        self.view_offsets.1 = 0.0;
+        self.reading_anchor = None;
         let selected_id = self.thread_list.threads.get(idx).map(|t| t.id.clone());
         self.leave_inline_compose(selected_id.as_deref());
         let thread = self.thread_list.threads.get(idx);
@@ -1727,6 +1797,9 @@ impl ReadyApp {
         {
             self.sidebar.selected_scope = ViewScope::Account(first.id.clone());
             self.sidebar.selection = types::SidebarSelection::Inbox;
+        }
+        if first_load {
+            self.resume_main_view();
         }
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task =

@@ -94,24 +94,38 @@ pub enum ReadingPaneMessage {
 #[derive(Debug, Clone)]
 pub enum ReadingPaneEvent {
     /// User clicked the pop-out button on a message; open it in a new window.
-    OpenMessagePopOut { message_index: usize },
+    OpenMessagePopOut {
+        message_index: usize,
+    },
     /// User clicked Reply on a specific message.
-    ReplyToMessage { message_index: usize },
+    ReplyToMessage {
+        message_index: usize,
+    },
     /// User clicked Reply All on a specific message.
-    ReplyAllToMessage { message_index: usize },
+    ReplyAllToMessage {
+        message_index: usize,
+    },
     /// User clicked Forward on a specific message.
-    ForwardMessage { message_index: usize },
+    ForwardMessage {
+        message_index: usize,
+    },
     /// User clicked a sender/recipient to edit their contact info.
-    EditContact { email: String },
+    EditContact {
+        email: String,
+    },
     /// Start a new message to this address, from a link's menu.
-    ComposeTo { address: String },
+    ComposeTo {
+        address: String,
+    },
     /// List everyone a message was sent to and copied to.
     ShowRecipients {
         to: Option<String>,
         cc: Option<String>,
     },
     /// User clicked the calendar button on a message to create a calendar event.
-    CreateEventFromEmail { message_index: usize },
+    CreateEventFromEmail {
+        message_index: usize,
+    },
     /// Answer a synced meeting invite. Unsynced invites deliberately have
     /// no standalone iMIP mail-reply path.
     RespondToMeetingInvite {
@@ -142,7 +156,7 @@ pub enum ReadingPaneEvent {
 // ── State ──────────────────────────────────────────────
 
 /// Id of the scrollable that holds the messages of the open conversation.
-const MESSAGE_LIST_ID: &str = "reading-pane-messages";
+pub(crate) const MESSAGE_LIST_ID: &str = "reading-pane-messages";
 
 /// How long the view keeps following the matched message after a
 /// conversation opens. The mails above it are drawn one after the other
@@ -151,15 +165,39 @@ const MESSAGE_LIST_ID: &str = "reading-pane-messages";
 const MATCH_FOLLOW: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Id of the card of the message at `index` in the list.
-fn message_card_id(index: usize) -> iced::advanced::widget::Id {
+pub(crate) fn message_card_id(index: usize) -> iced::advanced::widget::Id {
     iced::advanced::widget::Id::from(format!("reading-pane-message-{index}"))
 }
 
-/// The message of the open conversation the view scrolls to.
+/// Where the view of the open conversation scrolls to, and until when it
+/// keeps going back there as the mails are drawn.
 struct MatchTarget {
-    index: usize,
+    aim: Aim,
     until: std::time::Instant,
 }
+
+enum Aim {
+    /// The message at this index brought to the top, so many pixels down
+    /// into it.
+    Card(usize, f32),
+    /// This offset from the top: where the reader was before a relaunch,
+    /// when no message held the place.
+    Offset(f32),
+}
+
+impl MatchTarget {
+    /// Whether drawing the mail at `index` can move what the view aims at.
+    fn moved_by(&self, index: usize) -> bool {
+        match self.aim {
+            Aim::Card(card, _) => index <= card,
+            Aim::Offset(_) => true,
+        }
+    }
+}
+
+/// How long the view keeps going back to where the reader was before a
+/// relaunch. The mails are drawn later at startup, while the stores open.
+const RESUME_FOLLOW: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub struct ReadingPane {
     pub thread_messages: Vec<ThreadMessage>,
@@ -592,9 +630,33 @@ impl ReadingPane {
             .position(|message| message.id == message_id)
             .filter(|index| *index > 0)
             .map(|index| MatchTarget {
-                index,
+                aim: Aim::Card(index, 0.0),
                 until: std::time::Instant::now() + MATCH_FOLLOW,
             });
+        self.scroll_to_match()
+    }
+
+    /// Scroll the loaded conversation back to where the reader had left it
+    /// before the app was relaunched: `anchor` is the message that was at
+    /// the top and how far down into it, `offset` the bare position used
+    /// when no message held the place.
+    pub fn resume_at(
+        &mut self,
+        offset: f32,
+        anchor: Option<(usize, f32)>,
+    ) -> Task<ReadingPaneMessage> {
+        let aim = match anchor {
+            Some((index, below)) if index < self.thread_messages.len() => Aim::Card(index, below),
+            _ if offset > 0.0 => Aim::Offset(offset),
+            _ => {
+                self.match_target = None;
+                return Task::none();
+            }
+        };
+        self.match_target = Some(MatchTarget {
+            aim,
+            until: std::time::Instant::now() + RESUME_FOLLOW,
+        });
         self.scroll_to_match()
     }
 
@@ -608,11 +670,21 @@ impl ReadingPane {
             self.match_target = None;
             return Task::none();
         }
-        iced::advanced::widget::operate(super::scroll_to_child::scroll_to_child::<()>(
-            iced::advanced::widget::Id::from(MESSAGE_LIST_ID),
-            message_card_id(target.index),
-        ))
-        .discard()
+        let list = iced::advanced::widget::Id::from(MESSAGE_LIST_ID);
+        match target.aim {
+            Aim::Card(index, below) => iced::advanced::widget::operate(
+                super::scroll_to_child::scroll_to_child::<()>(list, message_card_id(index), below),
+            )
+            .discard(),
+            Aim::Offset(offset) => iced::widget::operation::scroll_to(
+                list,
+                iced::widget::operation::AbsoluteOffset {
+                    x: None,
+                    y: Some(offset),
+                },
+                iced::widget::operation::Animation::Instant,
+            ),
+        }
     }
 
     /// Invites still waiting for their calendar lookup, as
@@ -929,7 +1001,7 @@ impl Component for ReadingPane {
                 let follows = self
                     .match_target
                     .as_ref()
-                    .is_some_and(|target| index <= target.index);
+                    .is_some_and(|target| target.moved_by(index));
                 if follows {
                     (Task::batch([render, self.scroll_to_match()]), None)
                 } else {
@@ -954,7 +1026,7 @@ impl Component for ReadingPane {
                 let follows = self
                     .match_target
                     .as_ref()
-                    .is_some_and(|target| index <= target.index);
+                    .is_some_and(|target| target.moved_by(index));
                 let task = if follows {
                     self.scroll_to_match()
                 } else {

@@ -44,6 +44,12 @@ impl ReadyApp {
             Message::NavigationLoaded(g, _) if !self.nav_generation.is_current(g) => Task::none(),
             Message::NavigationLoaded(_, Ok(nav_state)) => {
                 self.sidebar.nav_state = Some(nav_state);
+                // The list is named after its folder, read from the
+                // navigation: a folder opened before it loaded (the one a
+                // relaunch comes back to) gets its name now.
+                if self.thread_list.mode == crate::ui::thread_list::ThreadListMode::Scope {
+                    self.update_thread_list_context_from_sidebar();
+                }
                 Task::none()
             }
             Message::NavigationTreeLoaded(g, _) if !self.nav_generation.is_current(g) => {
@@ -96,7 +102,13 @@ impl ReadyApp {
                     threads,
                     in_flight.chain(just_removed).chain(deleting),
                 );
-                self.select_pending_notified_thread()
+                // The place the reader is in is recorded shortly after each
+                // list, so quitting without closing the window keeps it.
+                Task::batch([
+                    self.select_pending_notified_thread(),
+                    self.resume_after_list_loaded(false),
+                    self.schedule_window_save(),
+                ])
             }
             // The logos are read from memory when the rows are drawn: the
             // message only asks for that redraw.
@@ -208,8 +220,16 @@ impl ReadyApp {
             }
             Message::WindowStateSettled => {
                 self.window_save_pending = false;
+                self.measure_view_offsets().map(Message::ViewMeasured)
+            }
+            Message::ViewMeasured(place) => {
+                self.note_view_offsets(&place);
                 self.persist_window_state();
                 Task::none()
+            }
+            Message::MainCloseMeasured(place) => self.finish_main_close(&place),
+            Message::InlineComposeResumed { detail, result } => {
+                self.handle_inline_compose_resumed(&detail, result)
             }
             Message::WindowCloseRequested(id) => self.handle_window_close(id),
 
@@ -959,8 +979,14 @@ impl ReadyApp {
                 height,
                 x,
                 y,
+                detail,
                 result,
-            } => self.handle_restored_compose_loaded(window_id, width, height, x, y, result),
+            } => self.handle_restored_compose_loaded(
+                window_id,
+                (width, height, x, y),
+                &detail,
+                result,
+            ),
 
             // Thread detail via core (replaces separate messages/attachments loads)
             Message::ThreadDetailLoaded(g, _) if !self.thread_generation.is_current(g) => {
@@ -985,12 +1011,21 @@ impl ReadyApp {
                 {
                     detail.messages.retain(|message| message.id == only);
                 }
+                let resumed = self.reading_offset_to_resume(&detail.account_id, &detail.thread_id);
                 self.reading_pane.load_thread_detail(detail);
-                let scroll = matched.map_or_else(Task::none, |message_id| {
-                    self.reading_pane
+                // After a relaunch the conversation goes back to where it
+                // was scrolled, rather than to the message a search found.
+                let scroll = match (resumed, matched) {
+                    (Some((offset, anchor)), _) => self
+                        .reading_pane
+                        .resume_at(offset, anchor)
+                        .map(Message::ReadingPane),
+                    (None, Some(message_id)) => self
+                        .reading_pane
                         .open_on_match(&message_id)
-                        .map(Message::ReadingPane)
-                });
+                        .map(Message::ReadingPane),
+                    (None, None) => Task::none(),
+                };
                 let invites = self.load_meeting_invites();
                 Task::batch([scroll, invites, self.run_pending_row_action()])
             }

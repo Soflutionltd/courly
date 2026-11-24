@@ -90,7 +90,8 @@
 // Pop-out windows: dropped (the pop-out dispatch path needs ReadyApp
 // state). The session restorer fires its own pop-out tasks after Ready.
 //   PopOut | OpenMessageView | ComposeDraftTick | LocalDraftLoaded
-//   RestoredComposeLoaded
+//   RestoredComposeLoaded | InlineComposeResumed | MainCloseMeasured
+//   ViewMeasured
 //
 // Calendar: dropped (calendar state is loaded after Ready):
 //   Calendar | ToggleAppMode | SetAppMode | SetCalendarView
@@ -418,8 +419,20 @@ pub enum Message {
         height: f32,
         x: Option<f32>,
         y: Option<f32>,
+        detail: crate::pop_out::session::ComposeDetail,
         result: Result<Option<rtsk::db::types::DbLocalDraft>, String>,
     },
+    /// The draft of the message that was being written in the main window
+    /// when the app last closed, read back to put it there again.
+    InlineComposeResumed {
+        detail: crate::pop_out::session::ComposeDetail,
+        result: Result<Option<rtsk::db::types::DbLocalDraft>, String>,
+    },
+    /// How far the list and the open conversation were scrolled, read as
+    /// the main window closes.
+    MainCloseMeasured(crate::ui::scroll_probe::ViewPlace),
+    /// The same positions, read to record the place while the app runs.
+    ViewMeasured(crate::ui::scroll_probe::ViewPlace),
 
     // Thread detail via core
     ThreadDetailLoaded(
