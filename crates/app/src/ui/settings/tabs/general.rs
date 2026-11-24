@@ -103,7 +103,6 @@ pub(super) fn layout_tab(state: &Settings) -> iced::Element<'_, SettingsMessage>
         ),
     ));
 
-
     col = col.push(section(
         tr(t!("settings.general.message_list")),
         vec![
@@ -225,27 +224,24 @@ pub(super) fn reading_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
         ],
     ));
 
-
     col.into()
 }
 
 pub(super) fn sending_section(state: &Settings) -> iced::Element<'_, SettingsMessage> {
     section(
         tr(t!("settings.general.sending")),
-        vec![
-            setting_row(
-                tr(t!("settings.general.undo_send_delay")),
-                translated_select(
-                    UNDO_SEND_DELAYS,
-                    &state.undo_delay,
-                    option_label,
-                    state.open_select == Some(SelectField::UndoDelay),
-                    SettingsMessage::ToggleSelect(SelectField::UndoDelay),
-                    SettingsMessage::UndoDelayChanged,
-                ),
+        vec![setting_row(
+            tr(t!("settings.general.undo_send_delay")),
+            translated_select(
+                UNDO_SEND_DELAYS,
+                &state.undo_delay,
+                option_label,
+                state.open_select == Some(SelectField::UndoDelay),
                 SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+                SettingsMessage::UndoDelayChanged,
             ),
-        ],
+            SettingsMessage::ToggleSelect(SelectField::UndoDelay),
+        )],
     )
 }
 

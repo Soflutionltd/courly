@@ -9,11 +9,11 @@ use serde_json::Value;
 use service_api::{ServiceError, VerifyAccountAck, VerifyAccountParams, VerifyFailureReason};
 use types::MailProviderKind;
 
+use crate::boot::BootSharedState;
 use crate::conduit::error_map::account_error_to_action_error;
 use crate::conduit::factory::{
     ConduitBuildError, DecryptedAccountCredentials, TokenMode, factory_from_decrypted,
 };
-use crate::boot::BootSharedState;
 
 pub(crate) fn build_error_message(error: &ConduitBuildError) -> &'static str {
     match error {

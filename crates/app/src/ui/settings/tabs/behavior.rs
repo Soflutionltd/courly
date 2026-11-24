@@ -60,18 +60,17 @@ pub(super) fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage
     ));
 
     if state.smart_notifications {
-        let chips: Vec<Element<'_, SettingsMessage>> =
-            NOTIFY_CATEGORIES
-                .iter()
-                .map(|cat| {
-                    let active = state.notify_categories.contains(&(*cat).to_string());
-                    button(text(category_label(cat)).size(TEXT_SM))
-                        .on_press(SettingsMessage::ToggleNotifyCategory((*cat).to_string()))
-                        .padding(PAD_ICON_BTN)
-                        .style(theme::ButtonClass::Chip { active }.style())
-                        .into()
-                })
-                .collect();
+        let chips: Vec<Element<'_, SettingsMessage>> = NOTIFY_CATEGORIES
+            .iter()
+            .map(|cat| {
+                let active = state.notify_categories.contains(&(*cat).to_string());
+                button(text(category_label(cat)).size(TEXT_SM))
+                    .on_press(SettingsMessage::ToggleNotifyCategory((*cat).to_string()))
+                    .padding(PAD_ICON_BTN)
+                    .style(theme::ButtonClass::Chip { active }.style())
+                    .into()
+            })
+            .collect();
         let chips_row = iced::widget::row(chips)
             .spacing(SPACE_XS)
             .align_y(Alignment::Center);
