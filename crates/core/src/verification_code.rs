@@ -241,6 +241,10 @@ fn candidates(text: &str, words: &[Word<'_>]) -> Vec<Candidate> {
 /// The one-time code of a verification email, without separators, or `None`
 /// when the text is not clearly such an email.
 pub fn find(text: &str) -> Option<String> {
+    // What follows the copyright sign is the legal footer: the company
+    // number, the licence or authorisation code of the sender. A code
+    // named there is never one to type.
+    let text = text.split_once('©').map_or(text, |(body, _)| body);
     let words = words(text);
     let lowered: Vec<String> = words.iter().map(|word| word.text.to_lowercase()).collect();
     if !lowered.iter().any(|word| is_context_word(word)) {
@@ -385,6 +389,19 @@ mod tests {
             find("Confirm your code at https://example.com/verify/482913"),
             None
         );
+    }
+
+    #[test]
+    fn ignores_a_code_of_the_legal_footer() {
+        let text = "Bonjour,\n\nPour votre sécurité, retrouvez vos informations dans \
+                    l'application.\n\n© 2026 MonApp\nMonApp Bank est une institution de crédit, \
+                    enregistrée sous le numéro d'entreprise 304580906 et le code d'autorisation \
+                    LB002119.";
+        assert_eq!(find(text), None);
+        // A code named before the footer is still read.
+        let text = "Votre code de vérification est 482913.\n\n© 2026 MonApp, code \
+                    d'autorisation LB002119.";
+        assert_eq!(find(text).as_deref(), Some("482913"));
     }
 
     #[test]
