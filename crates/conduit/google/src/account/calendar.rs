@@ -158,10 +158,17 @@ pub(crate) fn create(
         let calendar_id = event.calendar_id.0.clone();
         let encoded = conduit_net::url::encode_path_component(&calendar_id);
         let url = format!("{}/calendars/{encoded}/events", client.calendar_base());
-        let created: GoogleEvent = client
-            .post(&url, &google_event_from_create(&event))
-            .await
-            .map_err(|error| collection_error(error, AccountOperation::EventCreate))?;
+        let payload = google_event_from_create(&event);
+        let created: GoogleEvent = match client.post(&url, &payload).await {
+            Ok(created) => created,
+            // The id is the caller's key: 409 means an earlier attempt of
+            // this same creation went through and its answer was lost.
+            Err(error) if is_conflict(&error) && payload.id.is_some() => {
+                let id = payload.id.unwrap_or_default();
+                return Ok(EventId(join_event_id(&calendar_id, &id)));
+            }
+            Err(error) => return Err(collection_error(error, AccountOperation::EventCreate)),
+        };
         let id = created.id.ok_or_else(|| {
             local_error_with_field(
                 AccountOperation::EventCreate,
@@ -695,8 +702,40 @@ fn event_from_google(
     })
 }
 
+/// Whether Google answered 409 Conflict, whether the transport reported it
+/// or the response parser did.
+fn is_conflict(error: &crate::Error) -> bool {
+    match error {
+        crate::Error::Net(conduit_net::Error::Status { code, .. }) => {
+            *code == reqwest::StatusCode::CONFLICT
+        }
+        crate::Error::Response(response) => response.status == 409,
+        _ => false,
+    }
+}
+
+/// The Google event id for a caller's `client_key`. Google takes ids of 5 to
+/// 1024 characters from base32hex (`a` to `v` and digits): a lowercase UUID
+/// without its dashes is 32 of them.
+fn google_event_id_for_key(client_key: &str) -> Option<String> {
+    let id: String = client_key
+        .chars()
+        .filter(|c| *c != '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let valid = (5..=1024).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'v').contains(&b));
+    valid.then_some(id)
+}
+
 fn google_event_from_create(event: &EventCreate) -> GoogleEventPatch {
     GoogleEventPatch {
+        id: event
+            .client_key
+            .as_deref()
+            .and_then(google_event_id_for_key),
         summary: event.title.clone().map(Some),
         description: event.description.clone().map(Some),
         location: event.location.clone().map(Some),
@@ -720,6 +759,7 @@ fn google_event_from_create(event: &EventCreate) -> GoogleEventPatch {
 
 fn google_event_from_patch(patch: &EventPatch) -> GoogleEventPatch {
     GoogleEventPatch {
+        id: None,
         summary: patch.title.clone(),
         description: patch.description.clone(),
         location: patch.location.clone(),
@@ -1388,6 +1428,10 @@ struct GoogleEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct GoogleEventPatch {
+    /// Create only: an event id chosen by the caller, so that a retried
+    /// insert is refused with 409 instead of making a second event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1447,10 +1491,10 @@ struct GoogleAttendee {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use conduit_net::test_support::{Canned, ScriptedDispatch};
     use conduit_net::{NetConfig, RetryPolicy, StaticTokenSource};
     use conduit_types::{ReconcileReason, RecoveryClass};
-    use bytes::Bytes;
     use reqwest::StatusCode;
 
     use super::*;
@@ -2407,10 +2451,84 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         });
 
         assert_eq!(patch.transparency.as_deref(), Some("transparent"));
         assert_eq!(patch.status.as_deref(), Some("tentative"));
+    }
+
+    fn keyed_create(client_key: Option<&str>) -> EventCreate {
+        EventCreate {
+            calendar_id: CalendarId("primary".to_string()),
+            title: Some("Planning".to_string()),
+            description: None,
+            location: None,
+            start: EventTime {
+                value: "2026-06-02T12:00:00Z".to_string(),
+                timezone: None,
+            },
+            end: EventTime {
+                value: "2026-06-02T13:00:00Z".to_string(),
+                timezone: None,
+            },
+            is_all_day: false,
+            status: EventStatus::Confirmed,
+            availability: EventAvailability::Busy,
+            visibility: EventVisibility::Default,
+            organizer: None,
+            attendees: Vec::new(),
+            recurrence: EventRecurrence::default(),
+            client_key: client_key.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn the_client_key_becomes_a_google_event_id() {
+        let patch =
+            google_event_from_create(&keyed_create(Some("0B9F3C1E-6A2D-4F1B-9C3E-2D7A5B8E1F40")));
+        assert_eq!(
+            patch.id.as_deref(),
+            Some("0b9f3c1e6a2d4f1b9c3e2d7a5b8e1f40")
+        );
+        // A key Google would refuse is not sent: the insert goes through
+        // with an id Google picks, as it did without a key.
+        assert_eq!(
+            google_event_from_create(&keyed_create(Some("no!"))).id,
+            None
+        );
+        assert_eq!(google_event_from_create(&keyed_create(None)).id, None);
+    }
+
+    /// A retried insert whose first attempt went through answers 409 for
+    /// the same id: that is the event already made, not a failure.
+    #[tokio::test]
+    async fn a_conflict_on_the_keyed_id_is_the_event_already_made() {
+        let (client, _script) = scripted_client(vec![canned_json(
+            StatusCode::CONFLICT,
+            json!({"error": {"code": 409, "message": "The requested identifier already exists.",
+                "errors": [{"reason": "duplicate"}]}}),
+        )]);
+        let id = create(
+            client,
+            keyed_create(Some("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40")),
+        )
+        .await
+        .expect("the event made by the earlier attempt");
+        assert_eq!(
+            id,
+            EventId(join_event_id("primary", "0b9f3c1e6a2d4f1b9c3e2d7a5b8e1f40"))
+        );
+    }
+
+    /// Without a key, a 409 is a real refusal and stays one.
+    #[tokio::test]
+    async fn a_conflict_without_a_key_stays_an_error() {
+        let (client, _script) = scripted_client(vec![canned_json(
+            StatusCode::CONFLICT,
+            json!({"error": {"code": 409, "message": "conflict"}}),
+        )]);
+        assert!(create(client, keyed_create(None)).await.is_err());
     }
 
     /// A created event with no id names the field Google left out, `id`,
@@ -2440,6 +2558,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
         )
         .await
@@ -2491,6 +2610,7 @@ mod tests {
             }),
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         })
         .expect_err("organizer should be unsupported");
 
@@ -2649,6 +2769,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         }
     }
 

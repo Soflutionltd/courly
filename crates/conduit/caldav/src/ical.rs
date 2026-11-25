@@ -1,9 +1,9 @@
+use caldata::{ContentLineParser, LineReader};
 use conduit_types::{
     AttendeeRole, CalendarEvent, CalendarId, CalendarProvenance, EventAttendee, EventAvailability,
     EventCreate, EventId, EventOrganizer, EventPatch, EventRecurrence, EventReminder, EventStatus,
     EventTime, EventVisibility, ProtocolKind, ReminderRelativeTo, ReminderTrigger, RsvpStatus,
 };
-use caldata::{ContentLineParser, LineReader};
 use jiff::tz::{AmbiguousOffset, Offset, TimeZone};
 use jiff::{SignedDuration, Timestamp, civil};
 use uuid::Uuid;
@@ -513,6 +513,7 @@ pub(crate) fn patch_event(current: &CalendarEvent, patch: &EventPatch) -> EventC
             .recurrence
             .clone()
             .unwrap_or_else(|| current.recurrence.clone()),
+        client_key: None,
     }
 }
 
@@ -2068,6 +2069,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2232,6 +2234,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2267,6 +2270,7 @@ mod tests {
                 }),
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2297,6 +2301,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2328,6 +2333,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2371,6 +2377,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2404,6 +2411,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -2461,6 +2469,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -3099,6 +3108,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -3525,6 +3535,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: EventRecurrence::default(),
+                client_key: None,
             },
             "uid-1",
         );
@@ -3554,6 +3565,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         }
     }
 

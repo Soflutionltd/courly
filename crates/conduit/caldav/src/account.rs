@@ -8,8 +8,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use conduit_types::*;
 use bytes::Bytes;
+use conduit_types::*;
 use futures::{StreamExt, stream};
 use jiff::tz::Offset;
 use jiff::{Timestamp, civil};
@@ -1054,19 +1054,46 @@ impl Account for CalDavAccount {
                 Some(event.calendar_id.clone()),
                 AccountOperation::EventCreate,
             )?;
-            let uid = new_uid();
+            // The caller's key, when it gives one, is the UID and so the
+            // resource name: a retry addresses the very resource the first
+            // attempt wrote, and `If-None-Match` refuses to write it twice.
+            let keyed = event.client_key.is_some();
+            let uid = event.client_key.clone().unwrap_or_else(new_uid);
             let path = format!("{uid}.ics");
             let url = append_path(&calendar_url, &path);
             let body = create_to_ical(&event, &uid)
                 .map_err(|error| write_error(AccountOperation::EventCreate, error))?;
-            client
+            let written = client
                 .put_event(
                     &url,
                     body,
                     PutCondition::IfNoneMatch,
                     AccountOperation::EventCreate,
                 )
-                .await
+                .await;
+            // A refused keyed create may be the event an earlier attempt
+            // already wrote: read the resource back, and a resource holding
+            // this UID is that event, not a conflict.
+            let written = match written {
+                Err(error)
+                    if keyed
+                        && matches!(
+                            error.kind(),
+                            conduit_types::AccountErrorKind::ConcurrencyConflict
+                        ) =>
+                {
+                    let found = client
+                        .get_event(&url, AccountOperation::EventCreate)
+                        .await
+                        .is_ok_and(|existing| ical_has_uid(&existing.data, &uid));
+                    if found {
+                        return Ok(EventId(url));
+                    }
+                    Err(error)
+                }
+                other => other,
+            };
+            written
                 // The URL and the UID are minted LOCALLY, so nothing else in the
                 // failure names them. A dropped create-PUT derives
                 // `Reconcile(CheckTarget)`, and a consumer told to check a
@@ -2211,9 +2238,132 @@ fn contains(value: &str, needle: &str) -> bool {
     value.to_lowercase().contains(needle)
 }
 
+/// Whether the iCalendar text carries a `UID` property equal to `uid`. The
+/// property name is case-insensitive and may carry parameters
+/// (`UID;X-PARAM=1:value`); a UID line is far below the 75-octet fold, so
+/// a line holds it whole.
+fn ical_has_uid(data: &str, uid: &str) -> bool {
+    data.lines().any(|line| {
+        let Some((name, value)) = line.trim_end_matches('\r').split_once(':') else {
+            return false;
+        };
+        let name = name.split(';').next().unwrap_or_default();
+        name.eq_ignore_ascii_case("UID") && value.trim() == uid
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn keyed_event_create(calendar_url: &str, client_key: &str) -> EventCreate {
+        EventCreate {
+            calendar_id: CalendarId(calendar_url.to_string()),
+            title: Some("Planning".to_string()),
+            description: None,
+            location: None,
+            start: EventTime {
+                value: "2026-06-02T12:00:00Z".to_string(),
+                timezone: None,
+            },
+            end: EventTime {
+                value: "2026-06-02T13:00:00Z".to_string(),
+                timezone: None,
+            },
+            is_all_day: false,
+            status: EventStatus::Confirmed,
+            availability: EventAvailability::Busy,
+            visibility: EventVisibility::Default,
+            organizer: None,
+            attendees: Vec::new(),
+            recurrence: EventRecurrence::default(),
+            client_key: Some(client_key.to_string()),
+        }
+    }
+
+    fn dav_status(status: StatusCode, body: &str) -> DavResponse {
+        DavResponse {
+            status,
+            headers: HeaderMap::new(),
+            body: body.to_string(),
+            url: String::new(),
+        }
+    }
+
+    /// A retried keyed create meets the resource its first attempt wrote:
+    /// `If-None-Match` answers 412, the read-back finds the same UID, and
+    /// the create reports that event rather than a conflict or a second copy.
+    #[tokio::test]
+    async fn a_keyed_create_already_written_is_that_event() {
+        let key = "0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40";
+        let calendar = "https://dav.example.test/cal/";
+        let existing = format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:{key}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        let script = dav_script([
+            dav_status(StatusCode::PRECONDITION_FAILED, ""),
+            dav_status(StatusCode::OK, &existing),
+        ]);
+        let client = Arc::new(CalDavClient::with_account_net(
+            "https://dav.example.test",
+            scripted_dav_net(&script),
+        ));
+        let account = CalDavAccount::for_tests(client, calendar);
+
+        let id = account
+            .event_create(keyed_event_create(calendar, key))
+            .await
+            .expect("the event the first attempt wrote");
+
+        assert_eq!(id, EventId(format!("{calendar}{key}.ics")));
+        let requests = transcripts(&script);
+        assert_eq!(requests.len(), 2, "one PUT, one read-back, no second PUT");
+        assert!(requests[0].url.ends_with(&format!("{key}.ics")));
+    }
+
+    /// A 412 on a resource holding ANOTHER event is a real conflict.
+    #[tokio::test]
+    async fn a_keyed_create_on_someone_elses_resource_stays_a_conflict() {
+        let key = "0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40";
+        let calendar = "https://dav.example.test/cal/";
+        let script = dav_script([
+            dav_status(StatusCode::PRECONDITION_FAILED, ""),
+            dav_status(
+                StatusCode::OK,
+                "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:other\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+            ),
+        ]);
+        let client = Arc::new(CalDavClient::with_account_net(
+            "https://dav.example.test",
+            scripted_dav_net(&script),
+        ));
+        let account = CalDavAccount::for_tests(client, calendar);
+
+        let error = account
+            .event_create(keyed_event_create(calendar, key))
+            .await
+            .expect_err("someone else's resource is a conflict");
+        assert!(matches!(
+            error.kind(),
+            conduit_types::AccountErrorKind::ConcurrencyConflict
+        ));
+    }
+
+    #[test]
+    fn an_ical_uid_is_found_whatever_its_form() {
+        let uid = "0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40";
+        let plain = format!("BEGIN:VEVENT\r\nUID:{uid}\r\nEND:VEVENT\r\n");
+        let lowercase = format!("BEGIN:VEVENT\nuid:{uid}\nEND:VEVENT\n");
+        let with_param = format!("BEGIN:VEVENT\r\nUID;X-ORIGIN=1:{uid}\r\nEND:VEVENT\r\n");
+        assert!(ical_has_uid(&plain, uid));
+        assert!(ical_has_uid(&lowercase, uid));
+        assert!(ical_has_uid(&with_param, uid));
+        let other = "BEGIN:VEVENT\r\nUID:someone-else\r\nEND:VEVENT\r\n";
+        assert!(!ical_has_uid(other, uid));
+        // A description mentioning the uid is not the property.
+        let mention = format!("BEGIN:VEVENT\r\nDESCRIPTION:see {uid}\r\nEND:VEVENT\r\n");
+        assert!(!ical_has_uid(&mention, uid));
+    }
     use conduit_dav_core::DavResponse;
     use conduit_dav_core::test_support::{
         dav_script, dav_script_empty, scripted_dav_net, transcripts,

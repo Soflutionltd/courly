@@ -271,6 +271,13 @@ pub struct EventCreate {
     pub organizer: Option<EventOrganizer>,
     pub attendees: Vec<EventAttendee>,
     pub recurrence: EventRecurrence,
+    /// A key the caller keeps for this one creation and sends again on every
+    /// retry, so that a retry after a lost answer finds the event the first
+    /// attempt made instead of creating a second one. Each provider carries
+    /// it its own way (Graph `transactionId`, Google event id, CalDAV and
+    /// JMAP `uid`). It must be a lowercase UUID; `None` creates as before,
+    /// with no protection against a duplicate.
+    pub client_key: Option<String>,
 }
 
 /// Partial event update payload.

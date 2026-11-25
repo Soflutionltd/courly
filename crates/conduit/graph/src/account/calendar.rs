@@ -707,6 +707,7 @@ fn graph_event_from_create(event: &EventCreate) -> Result<GraphEventPatch, Accou
         sensitivity: Some(sensitivity(event.visibility).to_string()),
         attendees: non_empty(event.attendees.iter().map(graph_attendee)),
         recurrence: recurrence.map(Some),
+        transaction_id: event.client_key.clone(),
     })
 }
 
@@ -907,6 +908,7 @@ fn graph_event_from_patch(
             .as_ref()
             .map(|attendees| attendees.iter().map(graph_attendee).collect()),
         recurrence,
+        transaction_id: None,
     })
 }
 
@@ -2312,6 +2314,10 @@ struct GraphEventPatch {
     /// `Some(None)` serializes as `null`, which clears the recurrence.
     #[serde(skip_serializing_if = "Option::is_none")]
     recurrence: Option<Option<GraphRecurrence>>,
+    /// Create only: Graph's guard against a retried POST making a second
+    /// event, the caller's `client_key`. It cannot be changed afterwards.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transaction_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2630,6 +2636,7 @@ mod tests {
                 status: RsvpStatus::Accepted,
             }],
             recurrence: EventRecurrence::default(),
+            client_key: None,
         })
         .expect("create payload");
 
@@ -2676,6 +2683,7 @@ mod tests {
             }),
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         })
         .expect_err("organizer should be unsupported");
 
@@ -3000,6 +3008,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         })
         .expect("create payload");
 
@@ -3088,6 +3097,7 @@ mod tests {
                 rrule: Some("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=2;COUNT=3".to_string()),
                 ..EventRecurrence::default()
             },
+            client_key: None,
         })
         .expect("create payload");
         let recurrence = patch
@@ -3129,6 +3139,7 @@ mod tests {
                 rrule: Some(rrule.to_string()),
                 ..EventRecurrence::default()
             },
+            client_key: None,
         }
     }
 
@@ -3745,6 +3756,43 @@ mod tests {
     }
 
     #[test]
+    fn graph_event_create_sends_the_client_key_as_transaction_id() {
+        let create = |client_key: Option<&str>| {
+            let patch = graph_event_from_create(&EventCreate {
+                calendar_id: CalendarId("calendar".to_string()),
+                title: Some("Planning".to_string()),
+                description: None,
+                location: None,
+                start: EventTime {
+                    value: "2026-06-02T12:00:00".to_string(),
+                    timezone: Some("UTC".to_string()),
+                },
+                end: EventTime {
+                    value: "2026-06-02T13:00:00".to_string(),
+                    timezone: Some("UTC".to_string()),
+                },
+                is_all_day: false,
+                status: EventStatus::Confirmed,
+                availability: EventAvailability::Busy,
+                visibility: EventVisibility::Default,
+                organizer: None,
+                attendees: Vec::new(),
+                recurrence: EventRecurrence::default(),
+                client_key: client_key.map(str::to_string),
+            })
+            .expect("create payload");
+            serde_json::to_value(patch).expect("json")
+        };
+
+        let keyed = create(Some("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40"));
+        assert_eq!(
+            keyed["transactionId"],
+            json!("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40")
+        );
+        assert!(create(None).get("transactionId").is_none());
+    }
+
+    #[test]
     fn graph_event_create_writes_relative_yearly_recurrence() {
         let patch = graph_event_from_create(&EventCreate {
             calendar_id: CalendarId("calendar".to_string()),
@@ -3771,6 +3819,7 @@ mod tests {
                 ),
                 ..EventRecurrence::default()
             },
+            client_key: None,
         })
         .expect("create payload");
         let recurrence = patch

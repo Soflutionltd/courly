@@ -1138,6 +1138,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: conduit_types::EventRecurrence::default(),
+                client_key: None,
             })
             .await
             .expect_err("a dropped create must fail");
@@ -1314,6 +1315,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: conduit_types::EventRecurrence::default(),
+                client_key: None,
             };
             mutate(&mut event);
             event

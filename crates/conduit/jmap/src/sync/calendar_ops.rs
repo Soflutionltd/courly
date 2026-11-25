@@ -164,11 +164,30 @@ pub(crate) fn create<T: HttpTransport>(
             AccountOperation::EventCreate,
         )?;
         validate_shared_attendees(&event.attendees, AccountOperation::EventCreate)?;
+        // A keyed create looks for the event an earlier attempt of it may
+        // already have made: JMAP has no conditional create, but the key is
+        // the event's `uid`, which a query can find.
+        if let Some(key) = event.client_key.as_deref() {
+            let query = crate::calendar_event::CalendarEventQuery::new()
+                .filter(QueryFilter::and(vec![
+                    QueryFilter::from(EventFilter::in_calendar(event.calendar_id.0.clone())),
+                    QueryFilter::from(EventFilter::uid(key)),
+                ]))
+                .limit(1);
+            let found = calendars
+                .call(query)
+                .await
+                .map_err(to_acct_err(AccountOperation::EventCreate))?;
+            if let Some(id) = found.ids().first() {
+                return Ok(EventId(id.clone().into_string()));
+            }
+        }
+        let mut payload = jmap_create_from_event(&event, AccountOperation::EventCreate)?;
+        if let Some(key) = event.client_key.as_deref() {
+            payload.uid(key);
+        }
         let mut set = CalendarEventSet::new();
-        let create_id = set.create_item(jmap_create_from_event(
-            &event,
-            AccountOperation::EventCreate,
-        )?);
+        let create_id = set.create_item(payload);
         let mut response = calendars
             .call(set)
             .await
@@ -2991,6 +3010,7 @@ mod tests {
                 exdate: Vec::new(),
                 recurrence_id: None,
             },
+            client_key: None,
         });
 
         assert_eq!(create.properties.get("@type"), Some(&json!("Event")));
@@ -3049,6 +3069,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         }
     }
 
@@ -3680,6 +3701,7 @@ mod tests {
                 organizer: None,
                 attendees: Vec::new(),
                 recurrence: bad_recurrence,
+                client_key: None,
             },
             AccountOperation::EventCreate,
         )
@@ -4007,6 +4029,7 @@ mod tests {
             }),
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         });
 
         let participants = create
@@ -4104,6 +4127,182 @@ mod tests {
         assert!(error.contains("multiple attendee participants"));
     }
 
+    /// A JMAP server for a keyed create: `CalendarEvent/query` finds the
+    /// event `existing` names (or nothing), `CalendarEvent/set` creates
+    /// `new-event`. Every call is recorded.
+    #[derive(Clone)]
+    struct KeyedCreateTransport {
+        existing: Option<&'static str>,
+        calls: std::sync::Arc<std::sync::Mutex<Vec<(String, Value)>>>,
+    }
+
+    impl KeyedCreateTransport {
+        fn new(existing: Option<&'static str>) -> Self {
+            Self {
+                existing,
+                calls: std::sync::Arc::default(),
+            }
+        }
+
+        fn calls(&self) -> Vec<(String, Value)> {
+            self.calls.lock().expect("calls").clone()
+        }
+
+        fn account(&self) -> CalendarAccount<Self> {
+            let client = crate::client::Client::with_transport(
+                self.clone(),
+                calendar_session(),
+                "https://example.test/.well-known/jmap",
+            )
+            .expect("client builds");
+            JmapProtoAccount::new(client, "primary")
+        }
+    }
+
+    impl crate::core::transport::HttpTransport for KeyedCreateTransport {
+        async fn api_request(
+            &self,
+            _url: &str,
+            body: Vec<u8>,
+        ) -> Result<bytes::Bytes, crate::core::transport::TransportError> {
+            let request: Value = serde_json::from_slice(&body).expect("request json");
+            let call = request["methodCalls"][0].clone();
+            let name = call[0].as_str().expect("method name").to_string();
+            let call_id = call[2].as_str().expect("call id").to_string();
+            self.calls
+                .lock()
+                .expect("calls")
+                .push((name.clone(), call[1].clone()));
+            let arguments = match name.as_str() {
+                "CalendarEvent/query" => json!({
+                    "accountId": "primary",
+                    "queryState": "q1",
+                    "canCalculateChanges": false,
+                    "position": 0,
+                    "ids": self.existing.into_iter().collect::<Vec<_>>()
+                }),
+                "CalendarEvent/set" => {
+                    let create_id = call[1]["create"]
+                        .as_object()
+                        .and_then(|create| create.keys().next().cloned())
+                        .expect("one create");
+                    json!({
+                        "accountId": "primary",
+                        "newState": "s2",
+                        "created": {create_id: {"id": "new-event"}}
+                    })
+                }
+                other => panic!("unexpected method {other}"),
+            };
+            let response = json!({
+                "sessionState": "session-1",
+                "methodResponses": [[name, arguments, call_id]]
+            });
+            Ok(bytes::Bytes::from(response.to_string()))
+        }
+
+        async fn upload(
+            &self,
+            _url: &str,
+            _body: Vec<u8>,
+            _content_type: Option<&str>,
+        ) -> Result<bytes::Bytes, crate::core::transport::TransportError> {
+            Err(crate::core::transport::TransportError::new("no upload"))
+        }
+
+        async fn download(
+            &self,
+            _url: &str,
+        ) -> Result<bytes::Bytes, crate::core::transport::TransportError> {
+            Err(crate::core::transport::TransportError::new("no download"))
+        }
+
+        async fn get_session(
+            &self,
+            _url: &str,
+        ) -> Result<bytes::Bytes, crate::core::transport::TransportError> {
+            Err(crate::core::transport::TransportError::new("no session"))
+        }
+    }
+
+    fn keyed_create(client_key: Option<&str>) -> EventCreate {
+        EventCreate {
+            calendar_id: CalendarId("cal".to_string()),
+            title: Some("Planning".to_string()),
+            description: None,
+            location: None,
+            start: time("2026-06-02T12:00:00Z"),
+            end: time("2026-06-02T13:00:00Z"),
+            is_all_day: false,
+            status: EventStatus::Confirmed,
+            availability: EventAvailability::Busy,
+            visibility: EventVisibility::Default,
+            organizer: None,
+            attendees: Vec::new(),
+            recurrence: EventRecurrence::default(),
+            client_key: client_key.map(str::to_string),
+        }
+    }
+
+    /// The event an earlier attempt of this creation made is found by its
+    /// uid and returned; nothing is created a second time.
+    #[tokio::test]
+    async fn a_keyed_create_already_made_is_found_not_repeated() {
+        let transport = KeyedCreateTransport::new(Some("made-earlier"));
+        let id = create(
+            Some(transport.account()),
+            keyed_create(Some("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40")),
+        )
+        .await
+        .expect("the event made earlier");
+
+        assert_eq!(id, EventId("made-earlier".to_string()));
+        let methods: Vec<String> = transport.calls().into_iter().map(|(m, _)| m).collect();
+        assert_eq!(methods, vec!["CalendarEvent/query".to_string()]);
+    }
+
+    /// A first attempt creates the event with the key as its uid, so a
+    /// later retry can find it.
+    #[tokio::test]
+    async fn a_keyed_create_writes_the_key_as_uid() {
+        let transport = KeyedCreateTransport::new(None);
+        let id = create(
+            Some(transport.account()),
+            keyed_create(Some("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40")),
+        )
+        .await
+        .expect("created");
+
+        assert_eq!(id, EventId("new-event".to_string()));
+        let calls = transport.calls();
+        let (_, query) = &calls[0];
+        assert!(
+            query
+                .to_string()
+                .contains("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40"),
+            "the query filters on the key: {query}"
+        );
+        let (method, set) = &calls[1];
+        assert_eq!(method, "CalendarEvent/set");
+        let created = set["create"].as_object().expect("create map");
+        let payload = created.values().next().expect("one event");
+        assert_eq!(
+            payload["uid"],
+            json!("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40")
+        );
+    }
+
+    /// Without a key nothing is looked up first, as before.
+    #[tokio::test]
+    async fn an_unkeyed_create_goes_straight_to_set() {
+        let transport = KeyedCreateTransport::new(Some("unrelated"));
+        create(Some(transport.account()), keyed_create(None))
+            .await
+            .expect("created");
+        let methods: Vec<String> = transport.calls().into_iter().map(|(m, _)| m).collect();
+        assert_eq!(methods, vec!["CalendarEvent/set".to_string()]);
+    }
+
     #[test]
     fn create_payload_does_not_synthesize_uid() {
         let create = create_payload(&EventCreate {
@@ -4120,6 +4319,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         });
 
         assert!(!create.properties.contains_key("uid"));
@@ -4163,6 +4363,7 @@ mod tests {
             organizer: None,
             attendees: Vec::new(),
             recurrence: EventRecurrence::default(),
+            client_key: None,
         });
 
         assert_eq!(create.properties.get("privacy"), Some(&json!("secret")));
@@ -4189,6 +4390,7 @@ mod tests {
                 exdate: vec!["2026-06-04T12:00:00".to_string()],
                 recurrence_id: None,
             },
+            client_key: None,
         });
 
         let rules = create.properties["recurrenceRules"]

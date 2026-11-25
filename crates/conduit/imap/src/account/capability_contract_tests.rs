@@ -142,6 +142,7 @@ fn event_create() -> EventCreate {
         organizer: None,
         attendees: Vec::new(),
         recurrence: EventRecurrence::default(),
+        client_key: None,
     }
 }
 
