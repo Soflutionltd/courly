@@ -1,0 +1,22 @@
+PODS:
+  - Flutter (1.0.0)
+  - mobile_bridge (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - mobile_bridge (from `.symlinks/plugins/mobile_bridge/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  mobile_bridge:
+    :path: ".symlinks/plugins/mobile_bridge/ios"
+
+SPEC CHECKSUMS:
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  mobile_bridge: 43b9e89cfcf3740cd8a78832636a30651993dcc8
+
+PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
+
+COCOAPODS: 1.17.0

@@ -33,6 +33,7 @@ members = [
 "crates/action-types",
 "crates/coverage",
 "crates/mail-html",
+"crates/mobile-bridge",
 ]
 
 exclude = [
