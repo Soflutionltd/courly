@@ -19,7 +19,13 @@ const MANIFEST_URL: &str =
 /// Public half of `~/.tauri/courly_updater.key` (base64 of the minisign
 /// public key file, as written by `tauri signer generate`).
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4REQxQUQ2MzUxNTk1RjAKUldUd2xSVTExaHJkQ0t1Z1pUQUJmNlpiWVk5WmdsK0NoNTlmN2o4ck4vQkZ3UXIvMDRNbTB0ZGMK";
+/// The `latest.json` key for this build. Releases ship one universal app,
+/// listed under both Mac keys; an Intel Mac runs the x86_64 half of it and
+/// reads its own entry.
+#[cfg(target_arch = "aarch64")]
 const PLATFORM: &str = "darwin-aarch64";
+#[cfg(not(target_arch = "aarch64"))]
+const PLATFORM: &str = "darwin-x86_64";
 /// The archive must come from this repository's own releases. The
 /// signature already guards integrity; this keeps a tampered manifest from
 /// sending every client to a third-party host.
@@ -270,7 +276,7 @@ fn client() -> Result<&'static reqwest::Client, String> {
 /// which otherwise serves the previous `latest.json` for minutes after a
 /// release.
 pub async fn check() -> Result<Option<UpdateInfo>, String> {
-    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) || installed_bundle().is_none() {
+    if !cfg!(target_os = "macos") || installed_bundle().is_none() {
         return Ok(None);
     }
     let stamp = jiff::Timestamp::now().as_millisecond();

@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Build, sign, notarize and publish Courly for macOS (Apple silicon).
+# Build, sign, notarize and publish Courly for macOS, as one universal app
+# that runs on Apple silicon and Intel Macs.
 #
-# Installed copies update themselves from the GitHub release this script
-# creates (crates/app/src/updater.rs reads latest.json from it).
+# The release carries two downloads of the same notarized app: Courly.dmg,
+# the installer window people download, and Courly.app.tar.gz, which
+# installed copies fetch to update themselves (crates/app/src/updater.rs
+# reads latest.json from the release).
 #
 # Usage: scripts/release-macos.sh ["one-line release notes"]
 #
 # Bump `version` in the workspace Cargo.toml and push that commit first:
 # the script refuses to publish a dirty tree or an existing tag.
 #
-# Needs: gh (write access to the repo), cargo-about, the Developer ID
-# certificate in the login keychain, the App Store Connect API key used for
-# notarization, and the updater signing key (backup in 1Password, vault
-# Soflution).
+# Needs: gh (write access to the repo), cargo-about, create-dmg and
+# rsvg-convert (brew install create-dmg librsvg), both Rust targets
+# (rustup target add x86_64-apple-darwin), the Developer ID certificate in
+# the login keychain, the App Store Connect API key used for notarization,
+# and the updater signing key (backup in 1Password, vault Soflution).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -37,6 +41,13 @@ die() {
 [[ -f "$UPDATER_KEY" ]] || die "updater key not found at $UPDATER_KEY"
 [[ -f "$NOTARY_KEY" ]] || die "notarization key not found at $NOTARY_KEY"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated"
+command -v create-dmg >/dev/null || die "create-dmg is missing: brew install create-dmg"
+command -v rsvg-convert >/dev/null || die "rsvg-convert is missing: brew install librsvg"
+TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
+for target in "${TARGETS[@]}"; do
+  rustup "$TOOLCHAIN" target list --installed | grep -qx "$target" ||
+    die "Rust target $target is missing: rustup target add $target --toolchain ${TOOLCHAIN#+}"
+done
 git diff --quiet HEAD || die "uncommitted changes; commit and push first"
 
 VERSION="$(cargo "$TOOLCHAIN" metadata --no-deps --format-version 1 |
@@ -53,13 +64,20 @@ fi
 OUT="target/release-macos"
 APP="${OUT}/${APP_NAME}.app"
 ARCHIVE="${OUT}/${APP_NAME}.app.tar.gz"
+DMG="${OUT}/${APP_NAME}.dmg"
 MANIFEST="${OUT}/latest.json"
 rm -rf "$OUT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-echo "==> Building ${APP_NAME} ${VERSION}"
-cargo "$TOOLCHAIN" build --release --locked -p runner
-cp target/release/courly "$APP/Contents/MacOS/courly"
+echo "==> Building ${APP_NAME} ${VERSION} for Apple silicon and Intel"
+SLICES=()
+for target in "${TARGETS[@]}"; do
+  cargo "$TOOLCHAIN" build --release --locked -p runner --target "$target"
+  SLICES+=("target/${target}/release/courly")
+done
+lipo -create "${SLICES[@]}" -output "$APP/Contents/MacOS/courly"
+lipo "$APP/Contents/MacOS/courly" -verify_arch arm64 x86_64 ||
+  die "the universal binary lacks an architecture"
 
 echo "==> Bundling"
 ICONSET="${OUT}/AppIcon.iconset"
@@ -134,6 +152,21 @@ xcrun stapler staple "$APP"
 spctl --assess --type execute --verbose=2 "$APP" 2>&1 | grep -q "Notarized Developer ID" ||
   die "Gatekeeper does not accept the notarized app"
 
+echo "==> Building the installer disk image"
+scripts/make-dmg.sh "$APP" "$DMG"
+codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+codesign --verify --verbose=2 "$DMG"
+xcrun notarytool submit "$DMG" \
+  --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" \
+  --wait --timeout 30m >"${OUT}/notarize-dmg.log"
+grep -q "status: Accepted" "${OUT}/notarize-dmg.log" || {
+  cat "${OUT}/notarize-dmg.log" >&2
+  die "notarization of the disk image was not accepted"
+}
+xcrun stapler staple "$DMG"
+spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 |
+  grep -q "Notarized Developer ID" || die "Gatekeeper does not accept the disk image"
+
 echo "==> Packaging the update"
 COPYFILE_DISABLE=1 tar -czf "$ARCHIVE" -C "$OUT" "${APP_NAME}.app"
 npx --yes @tauri-apps/cli@2.12.4 signer sign \
@@ -149,14 +182,18 @@ manifest = {
     "version": version,
     "notes": notes,
     "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "platforms": {"darwin-aarch64": {"signature": signature, "url": url}},
+    # One universal archive serves both architectures.
+    "platforms": {
+        "darwin-aarch64": {"signature": signature, "url": url},
+        "darwin-x86_64": {"signature": signature, "url": url},
+    },
 }
 with open(path, "w") as handle:
     json.dump(manifest, handle, indent=2)
 PY
 
 echo "==> Publishing ${TAG}"
-gh release create "$TAG" "$ARCHIVE" "${ARCHIVE}.sig" "$MANIFEST" \
+gh release create "$TAG" "$DMG" "$ARCHIVE" "${ARCHIVE}.sig" "$MANIFEST" \
   --repo "$REPO" --target "$COMMIT" --title "${APP_NAME} ${VERSION}" --notes "$NOTES" --latest
 
 echo "==> Checking the published manifest"
