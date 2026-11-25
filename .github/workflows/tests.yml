@@ -1,0 +1,85 @@
+name: Tests
+
+# Every change to main, and every pull request, runs clippy and the unit
+# tests of Courly and of its protocol engine, so a release is built from a
+# tree whose checks are on record. It publishes nothing and reads no secret.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run moot.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  TOOLCHAIN: "1.99.0"
+  # The same sibling checkouts, at the same commits, as the Build workflow:
+  # Courly's manifests name ../sluggrs and ../sluggrs/repos/iced.
+  SLUGGRS_REF: b51be5c7044c801182cafd702b831a9f3edf708c
+  ICED_REF: 9b74a21dadb0359f32ee3f9e6143b960530476a3
+
+jobs:
+  tests:
+    name: Clippy and unit tests
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out Courly
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: courly
+
+      - name: Check out sluggrs
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Soflutionltd/sluggrs
+          ref: ${{ env.SLUGGRS_REF }}
+          path: sluggrs
+
+      - name: Check out iced
+        # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Soflutionltd/iced
+          ref: ${{ env.ICED_REF }}
+          path: sluggrs/repos/iced
+
+      - name: Install Rust ${{ env.TOOLCHAIN }}
+        run: rustup toolchain install "$TOOLCHAIN" --profile minimal --component clippy
+
+      - name: Cache the build
+        # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            courly/target
+            courly/crates/conduit/target
+          key: tests-${{ runner.os }}-${{ env.TOOLCHAIN }}-${{ hashFiles('courly/Cargo.lock', 'courly/crates/conduit/Cargo.lock') }}
+          restore-keys: tests-${{ runner.os }}-${{ env.TOOLCHAIN }}-
+
+      - name: Clippy, Courly
+        working-directory: courly
+        run: cargo "+$TOOLCHAIN" clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Unit tests, Courly
+        working-directory: courly
+        run: cargo "+$TOOLCHAIN" test --locked --workspace --lib
+
+      - name: Clippy, protocol engine
+        working-directory: courly
+        run: cargo "+$TOOLCHAIN" clippy --locked --manifest-path crates/conduit/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+
+      - name: Tests, protocol engine
+        working-directory: courly
+        run: cargo "+$TOOLCHAIN" test --locked --manifest-path crates/conduit/Cargo.toml --workspace --all-features
