@@ -435,12 +435,74 @@ impl ReadyApp {
         &mut self,
         result: Result<String, String>,
     ) -> Task<Message> {
-        let text = match result {
-            Ok(address) => t!("main.row_menu.sender_blocked", address = address),
-            Err(error) => t!("main.row_menu.block_failed", error = error),
+        let (text, reload) = match result {
+            Ok(address) => (
+                t!("main.row_menu.sender_blocked", address = address),
+                self.load_blocked_senders(),
+            ),
+            Err(error) => (
+                t!("main.row_menu.block_failed", error = error),
+                Task::none(),
+            ),
         };
         self.status_bar.show_confirmation(text.into_owned());
-        Task::none()
+        reload
+    }
+
+    /// Remove an address from an account's blocked list from Settings.
+    pub(crate) fn unblock_sender(&mut self, account_id: String, address: String) -> Task<Message> {
+        let Some(client) = self.service_client.clone() else {
+            self.status_bar.show_confirmation(
+                t!(
+                    "main.row_menu.unblock_failed",
+                    error = t!("main.side_panel.templates.service_unavailable")
+                )
+                .into_owned(),
+            );
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                client
+                    .unblock_sender(account_id, address.clone())
+                    .await
+                    .map(|_| address)
+                    .map_err(|e| e.to_string())
+            },
+            Message::SenderUnblocked,
+        )
+    }
+
+    pub(crate) fn handle_sender_unblocked(
+        &mut self,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        let text = match result {
+            Ok(address) => t!("main.row_menu.sender_unblocked", address = address),
+            Err(error) => t!("main.row_menu.unblock_failed", error = error),
+        };
+        self.status_bar.show_confirmation(text.into_owned());
+        self.load_blocked_senders()
+    }
+
+    /// Read every account's blocked senders for the Settings list.
+    pub(crate) fn load_blocked_senders(&self) -> Task<Message> {
+        let db = std::sync::Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                let rows = rtsk::db::queries_extra::db_get_all_blocked_senders(&db.read_db_state())
+                    .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|row| crate::ui::settings::BlockedSender {
+                        account_id: row.account_id,
+                        account_email: row.account_email,
+                        address: row.sender_address,
+                    })
+                    .collect())
+            },
+            Message::BlockedSendersLoaded,
+        )
     }
 
     fn menu_sender(&self) -> Option<String> {

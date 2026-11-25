@@ -930,6 +930,10 @@ impl ReadyApp {
                 handlers::signatures::handle_delete_signature(self.service_client.clone(), id)
                     .map(Message::SignatureOp)
             }
+            SettingsEvent::UnblockSender {
+                account_id,
+                address,
+            } => self.unblock_sender(account_id, address),
             SettingsEvent::ReorderSignatures(ordered_ids) => {
                 handlers::signatures::handle_reorder_signatures(
                     self.service_client.clone(),
@@ -1836,6 +1840,7 @@ impl ReadyApp {
             sync_task,
             auto_reply_task,
             domains_task,
+            self.load_blocked_senders(),
         ])
     }
 

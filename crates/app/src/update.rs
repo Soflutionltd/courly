@@ -240,6 +240,14 @@ impl ReadyApp {
             Message::Compose => self.open_new_message(),
             Message::Noop => Task::none(),
             Message::SenderBlocked(result) => self.handle_sender_blocked(result),
+            Message::SenderUnblocked(result) => self.handle_sender_unblocked(result),
+            Message::BlockedSendersLoaded(result) => {
+                match result {
+                    Ok(senders) => self.settings.blocked_senders = senders,
+                    Err(error) => log::warn!("blocked senders not loaded: {error}"),
+                }
+                Task::none()
+            }
             Message::AttachmentSaveFolderRemembered(key, folder) => {
                 self.attachment_last_folders.remember(key, folder);
                 Task::none()

@@ -1,5 +1,5 @@
 use super::super::ReadDbState;
-use super::super::types::{DbLocalDraft, DbSignature, DbTemplate};
+use super::super::types::{DbBlockedSenderEntry, DbLocalDraft, DbSignature, DbTemplate};
 use crate::db::{query_as, query_one};
 use rusqlite::params;
 
@@ -42,6 +42,23 @@ pub async fn db_get_all_templates(db: &ReadDbState) -> Result<Vec<DbTemplate>, S
         query_as::<DbTemplate>(
             conn,
             "SELECT id, name, subject, body_html FROM templates ORDER BY name COLLATE NOCASE",
+            &[],
+        )
+    })
+    .await
+}
+
+/// Every blocked sender of every account, by account then address.
+pub async fn db_get_all_blocked_senders(
+    db: &ReadDbState,
+) -> Result<Vec<DbBlockedSenderEntry>, String> {
+    db.with_read(move |conn| {
+        query_as::<DbBlockedSenderEntry>(
+            conn,
+            "SELECT b.account_id, a.email AS account_email, b.sender_address
+             FROM blocked_senders b
+             JOIN accounts a ON a.id = b.account_id
+             ORDER BY a.email, b.sender_address",
             &[],
         )
     })

@@ -392,6 +392,12 @@ impl_from_row!(DbTemplate {
     body_html,
 });
 
+impl_from_row!(DbBlockedSenderEntry {
+    account_id,
+    account_email,
+    sender_address,
+});
+
 impl_from_row!(DbSignature {
     id,
     account_id,
