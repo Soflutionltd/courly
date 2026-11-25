@@ -1,0 +1,63 @@
+// Composite of a finished blurred shadow.
+//
+// A separate module from the blur itself, not merely a separate entry point:
+// both need a uniform, a texture and a sampler at group 0, and two different
+// globals cannot share one binding index within a module.
+
+struct ShadowParams {
+    color: vec4<f32>,
+    // Destination rect in physical pixels: origin then size.
+    rect: vec4<f32>,
+    // Where the destination sits inside the blurred texture, as UV origin and
+    // UV size. The texture covers the SOURCE rect, which is larger than the
+    // destination - pulled back by the offset and padded by the kernel
+    // support on every side - so mapping UV 0..1 across the destination quad
+    // would squeeze the whole padded source into it and scale the shadow.
+    uv_rect: vec4<f32>,
+    screen_size: vec2<f32>,
+    // Bit 1 matches the main shader's Params.flags: Web colour mode.
+    flags: u32,
+    // NDC depth for this composite, taken from the glyphs whose mask it is.
+    // Analytic decorations use each instance's own depth, so a shadow fixed
+    // at zero would be occluded differently from the hard shadow beside it.
+    // One quad can only carry one depth, so masks are partitioned by depth
+    // on the CPU and each partition composites at its own.
+    depth: f32,
+}
+
+@group(0) @binding(0) var<uniform> shadow: ShadowParams;
+@group(0) @binding(1) var shadow_texture: texture_2d<f32>;
+@group(0) @binding(2) var shadow_sampler: sampler;
+
+struct ShadowVertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_shadow(@builtin(vertex_index) vid: u32) -> ShadowVertexOutput {
+    var output: ShadowVertexOutput;
+    let corner = vec2<f32>(f32(vid & 1u), f32((vid >> 1u) & 1u));
+    // Sample the sub-rectangle of the source texture that corresponds to the
+    // destination, not the whole texture.
+    output.uv = shadow.uv_rect.xy + corner * shadow.uv_rect.zw;
+    let screen_pos = shadow.rect.xy + corner * shadow.rect.zw;
+    output.position = vec4<f32>(
+        screen_pos.x / shadow.screen_size.x * 2.0 - 1.0,
+        -(screen_pos.y / shadow.screen_size.y * 2.0 - 1.0),
+        shadow.depth,
+        1.0,
+    );
+    return output;
+}
+
+@fragment
+fn fs_shadow(input: ShadowVertexOutput) -> @location(0) vec4<f32> {
+    let coverage = textureSampleLevel(shadow_texture, shadow_sampler, input.uv, 0.0).r;
+    // Colour conversion happens HERE, on the tint, matching the fill and
+    // border shaders. The blurred coverage stays linear.
+    let web = (shadow.flags & 2u) != 0u;
+    let rgb = select(shadow.color.rgb, pow(shadow.color.rgb, vec3<f32>(2.2)), web);
+    let alpha = shadow.color.a * coverage;
+    return vec4<f32>(rgb * alpha, alpha);
+}

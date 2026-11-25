@@ -21,7 +21,7 @@ thiserror.workspace = true
 #iced = { git = "https://github.com/squidowl/iced", rev = "b201e4f", default-features = false, features = [
 #    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11", "image", "svg",
 #] }
-iced = { path = "../../../sluggrs/repos/iced", default-features = false, features = [
+iced = { path = "../../vendor/iced", default-features = false, features = [
     "wgpu", "tokio", "advanced", "canvas", "web-colors", "wayland", "image", "svg",
 ] }
 dirs = "7"

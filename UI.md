@@ -2,7 +2,7 @@
 
 iced UI for the Courly email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
-**iced fork:** `https://github.com/Soflutionltd/iced`, branch `sluggrs`. Local checkout at `../sluggrs/repos/iced`. When you need to check what API is available in our iced version, read files in that directory - do not assume upstream iced APIs exist.
+**iced:** the version Courly builds against lives in this repository at `vendor/iced`, with the `sluggrs` text renderer it uses at `vendor/sluggrs`. When you need to check what API is available in our iced version, read files in that directory - do not assume upstream iced APIs exist.
 
 ## App module structure (`crates/app/src/`)
 

@@ -9,9 +9,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-iced_core = { path = "../../../sluggrs/repos/iced/core" }
-iced_widget = { path = "../../../sluggrs/repos/iced/widget", features = ["wgpu"] }
-iced_runtime = { path = "../../../sluggrs/repos/iced/runtime" }
+iced_core = { path = "../../vendor/iced/core" }
+iced_widget = { path = "../../vendor/iced/widget", features = ["wgpu"] }
+iced_runtime = { path = "../../vendor/iced/runtime" }
 hotpath = { workspace = true, optional = true }
 
 [lints]

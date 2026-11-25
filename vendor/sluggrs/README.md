@@ -1,0 +1,61 @@
+# sluggrs
+
+GPU vector text rendering using the [Slug algorithm](https://terathon.com/blog/decade-slug.html). Evaluates quadratic bezier curves per-pixel in fragment shaders - resolution-independent, no texture atlas needed.
+
+Drop-in replacement for [cryoglyph](https://github.com/iced-rs/cryoglyph) in the [iced](https://github.com/iced-rs/iced) GUI framework's wgpu text rendering pipeline.
+
+<div align="center">
+<img src="docs/public/sluggrs.png" alt="sluggrs screenshot" />
+<p><em>sluggrs rendering multilingual text in <a href="https://github.com/folknor/ratatoskr">ratatoskr</a> via this <a href="https://github.com/folknor/iced/tree/sluggrs">iced fork</a></em></p>
+</div>
+
+Built with LLMs. See [LLM.md](LLM.md).
+
+## How it works
+
+Traditional text renderers (cryoglyph, glyphon) rasterize glyphs to bitmaps on the CPU, pack them into a GPU texture atlas, and draw textured quads. This works but has downsides: atlas memory pressure, re-rasterization on scale changes, and pixel-locked rendering.
+
+sluggrs takes a different approach: glyph outlines (quadratic bezier curves) are uploaded to the GPU as control point data. The fragment shader evaluates these curves per-pixel to determine coverage, producing resolution-independent rendering with zero atlas overhead for vector glyphs.
+
+Key advantages:
+- **Resolution independent** - one cached outline serves all sizes
+- **No atlas pressure** - vector data is ~100x smaller than bitmaps
+- **Clean at any scale** - no rasterization artifacts at fractional DPI
+- **Same API** - matches cryoglyph's interface for iced integration
+
+## Status
+
+Work in progress. The core rendering pipeline is functional and tested in production via [ratatoskr](https://github.com/folknor/ratatoskr):
+- Outline extraction from any font (TrueType + CFF/OpenType) via [skrifa](https://github.com/googlefonts/fontations)
+- Cubic-to-quadratic subdivision for CFF fonts
+- Band acceleration structure for efficient per-pixel curve lookup
+- WGSL fragment shader with full Slug curve evaluation
+- Non-vector glyphs (color emoji, bitmap fonts) detected and classified - the [iced fork](https://github.com/folknor/iced/tree/sluggrs) routes these to cryoglyph's raster pipeline for two-pass rendering
+- Pressure-based trim/eviction matching cryoglyph's frame-boundary semantics
+- Retained prepared-text cache - skips glyph loop and GPU upload for unchanged text
+- cryoglyph-compatible API (Cache, TextAtlas, TextRenderer, Viewport)
+- Wired into iced's `text.rs` via [forked iced](https://github.com/folknor/iced/tree/sluggrs)
+
+## Performance
+
+Measured on an RTX 3080 at 1920x1080 with an email-client workload (5 text areas, ~8000 glyph instances, ~160 distinct glyphs, mixed 10-20px sizes, SansSerif + Monospace).
+
+**Steady-state (static text):** prepare takes ~5µs per frame - the retained cache detects unchanged text and skips both the glyph loop and GPU upload entirely. GPU fragment shader render: ~100µs.
+
+**Scrolling:** ~36µs per frame. Cached instances are position-adjusted and re-culled without rebuilding from font data.
+
+**Cold start (new text):** ~2ms for 160 distinct glyphs (~13µs per glyph for outline extraction, band building, and GPU upload). Subsequent frames with the same text hit the retained cache.
+
+**Memory:** ~4.8KB per distinct glyph in GPU storage buffer. Resolution-independent - the same cached glyph data serves all sizes without re-upload.
+
+## Acknowledgements
+
+- [Eric Lengyel](https://terathon.com/) for the Slug algorithm, the [JCGT paper](http://jcgt.org/published/0006/02/02/), and dedicating the [patent](https://terathon.com/blog/decade-slug.html) to the public domain
+- [Slug reference shaders](https://github.com/EricLengyel/Slug) (MIT license) - the WGSL shaders in this crate are translated from the HLSL reference
+- [iced](https://github.com/iced-rs/iced) and [cryoglyph](https://github.com/iced-rs/cryoglyph) / [glyphon](https://github.com/grovesNL/glyphon) for the text rendering API design that sluggrs targets
+- [cosmic-text](https://github.com/pop-os/cosmic-text) for shaping, layout, and font system integration
+- [skrifa](https://github.com/googlefonts/fontations) (part of Google Fonts' fontations) for glyph outline extraction
+
+## License
+
+MIT OR Apache-2.0 OR Zlib

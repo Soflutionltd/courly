@@ -39,6 +39,8 @@ exclude = [
 "crates/conduit",
 "docs/research/slug-glyph-proto",
 "vendor/blitz-dom",
+"vendor/iced",
+"vendor/sluggrs",
 ]
 
 [workspace.package]

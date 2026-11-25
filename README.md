@@ -206,14 +206,10 @@ Courly is signed and notarized by Apple. It checks for new versions on its own a
 
 ## Build from source
 
-Courly builds against its sibling repositories, which must sit next to it:
+Everything Courly needs is in this repository, its text and interface engine included:
 
 ```sh
-mkdir courly-workspace && cd courly-workspace
 git clone https://github.com/Soflutionltd/courly.git
-git clone --branch courly https://github.com/Soflutionltd/sluggrs.git
-git clone --branch sluggrs https://github.com/Soflutionltd/iced.git sluggrs/repos/iced
-
 cd courly
 cargo +1.99.0 run -p runner --features dev-seed   # demo data, no account needed
 cargo +1.99.0 build --release -p runner           # optimised build
