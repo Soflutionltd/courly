@@ -860,6 +860,33 @@ mod tests {
         0.299 * f32::from(red) + 0.587 * f32::from(green) + 0.114 * f32::from(blue)
     }
 
+    /// Pixels darker than plain text's antialiasing threshold in the CSS
+    /// square from the origin to (`size`, `size`).
+    fn inked_pixels(mail: &RenderedMail, size: usize) -> usize {
+        let height = mail.height.to_usize().expect("height");
+        (0..size.min(height))
+            .flat_map(|y| (0..size).map(move |x| (x, y)))
+            .filter(|&(x, y)| luma(pixel(mail, x, y)) < 200.0)
+            .count()
+    }
+
+    /// Apple Color Emoji keeps each emoji as a PNG bitmap. The painter used
+    /// to skip PNG glyphs, so emoji laid out (the line took their height)
+    /// but painted nothing, in text and inside bordered survey buttons
+    /// alike.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_emoji_is_painted() {
+        let mail = render_html(
+            r#"<body style="margin:0"><p style="font-size:40px;margin:0">😍</p></body>"#,
+        );
+        assert!(
+            inked_pixels(&mail, 60) > 100,
+            "the emoji painted {} pixels",
+            inked_pixels(&mail, 60)
+        );
+    }
+
     /// Darkest pixel of row `y` between CSS `x_from` and `x_to`.
     fn darkest_in_row(mail: &RenderedMail, y: usize, x_from: usize, x_to: usize) -> f32 {
         (x_from..x_to)

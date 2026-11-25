@@ -24,3 +24,8 @@ log = "0.4"
 num-traits = "0.2"
 parley = { version = "0.12", default-features = false, features = ["std"] }
 peniko = "0.6"
+# Not called directly: turns on PNG glyphs in the CPU painter that
+# anyrender_vello_cpu pulls in without them. Apple Color Emoji stores each
+# emoji as a PNG in an sbix table, so without this every emoji paints
+# nothing.
+vello_cpu = { version = "0.3", default-features = false, features = ["png"] }
