@@ -364,6 +364,16 @@ impl_from_row!(DbAllowlistEntry {
     created_at,
 });
 
+// ── Blocked senders ─────────────────────────────────────────
+
+impl_from_row!(DbBlockedSender {
+    id,
+    account_id,
+    sender_address,
+    provider_rule_id,
+    created_at,
+});
+
 // ── Phishing Allowlist ──────────────────────────────────────
 
 impl_from_row!(DbPhishingAllowlistEntry {
