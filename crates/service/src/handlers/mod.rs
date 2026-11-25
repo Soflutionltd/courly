@@ -198,6 +198,9 @@ pub(crate) async fn dispatch(
         RequestParams::AttachmentFetch { params } => {
             attachment::handle_fetch(&boot_state, params).await
         }
+        RequestParams::MessageSource { params } => {
+            attachment::handle_message_source(&boot_state, params).await
+        }
         RequestParams::AttachmentCacheSize { params: _ } => {
             attachment::handle_cache_size(&boot_state).await
         }

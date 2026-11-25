@@ -1759,6 +1759,23 @@ impl ServiceClient {
         Ok(ack)
     }
 
+    /// Fetch a message's original source from its provider into the
+    /// temporary folder, for an `.eml` export. The bytes never cross the
+    /// IPC: the ack names the file under the app data directory.
+    pub async fn message_source(
+        &self,
+        account_id: String,
+        message_id: String,
+    ) -> Result<service_api::MessageSourceAck, ClientError> {
+        self.request(RequestParams::MessageSource {
+            params: service_api::MessageSourceParams {
+                account_id,
+                message_id,
+            },
+        })
+        .await
+    }
+
     /// Attachments roadmap Phase 6: snapshot the on-disk byte
     /// breakdown for the settings-UI cache-size readout. Returns
     /// `(live_bytes, tombstoned_bytes)`. The values are a snapshot of

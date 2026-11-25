@@ -119,7 +119,7 @@ All screenshots show the built-in demo data: no real mailbox.
 - Local-first storage in SQLite, with compressed message stores
 - Credentials encrypted with AES-256-GCM
 - HTML sanitizing, remote image blocking, tracking pixel and tracking link removal
-- BIMI brand logos verified before they are shown
+- Brand logos (BIMI) shown only for known senders whose mail passes DMARC; the logo itself is published by the domain and not certified by a third party
 
 **Everyday comfort**
 - Light, dark or automatic theme

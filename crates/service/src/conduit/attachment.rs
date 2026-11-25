@@ -23,6 +23,16 @@ pub(crate) enum AttachmentByteError {
     NotByteStream,
     #[error("IMAP MIME part extraction failed: {0}")]
     ImapPart(String),
+    #[error("message has no provider id: {0}")]
+    MessageId(String),
+}
+
+/// What a stored message needs to be found again at its provider.
+pub(crate) struct StoredMessageRef {
+    pub(crate) message_id: String,
+    pub(crate) imap_folder: Option<String>,
+    pub(crate) imap_uid: Option<i64>,
+    pub(crate) imap_uidvalidity: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -93,6 +103,33 @@ impl AttachmentByteSource {
         let raw = action_account
             .engine
             .open_raw_rfc822(&account, imap_object_id(row)?)
+            .map_err(AttachmentByteError::Engine)?;
+        drain(raw).await
+    }
+
+    /// The original source of a stored message, as its provider holds it
+    /// (RFC 822 octets, attachments included), for an `.eml` export.
+    pub(crate) async fn fetch_message_rfc822(
+        &self,
+        account_id: &str,
+        message: StoredMessageRef,
+    ) -> Result<Vec<u8>, AttachmentByteError> {
+        let action_account = self
+            .resident
+            .action_account(account_id)
+            .await
+            .map_err(AttachmentByteError::Attach)?;
+        let object_id = crate::actions::dispatch_target::message_object_id(
+            action_account.provider,
+            message.message_id,
+            message.imap_folder,
+            message.imap_uid,
+            message.imap_uidvalidity,
+        )
+        .map_err(|error| AttachmentByteError::MessageId(error.to_string()))?;
+        let raw = action_account
+            .engine
+            .open_raw_rfc822(&AccountId(account_id.to_string()), object_id)
             .map_err(AttachmentByteError::Engine)?;
         drain(raw).await
     }

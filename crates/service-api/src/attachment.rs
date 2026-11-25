@@ -39,6 +39,23 @@ pub struct AttachmentFetchAck {
     pub relative_path: String,
 }
 
+/// `message.source` request body: the message whose original source the
+/// UI saves as an `.eml` file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageSourceParams {
+    pub account_id: String,
+    pub message_id: String,
+}
+
+/// `message.source` ack: the message exactly as the provider holds it
+/// (RFC 822 octets), written to `<app_data>/<relative_path>` in the same
+/// temporary folder as fetched attachments. The bytes never cross the IPC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageSourceAck {
+    pub size_bytes: u64,
+    pub relative_path: String,
+}
+
 /// Attachments roadmap Phase 6: `attachment.cache_size` request body.
 /// Global readout - no parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

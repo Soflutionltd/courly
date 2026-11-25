@@ -233,18 +233,6 @@ impl Db {
         })
         .await
     }
-
-    /// Load raw email source for a message (used by pop-out Source view).
-    pub async fn load_raw_source(
-        &self,
-        account_id: String,
-        message_id: String,
-    ) -> Result<String, String> {
-        self.with_read(move |conn| {
-            message_queries::get_message_raw_source(conn, &account_id, &message_id)
-        })
-        .await
-    }
 }
 
 /// Initialize the body store for loading message bodies.

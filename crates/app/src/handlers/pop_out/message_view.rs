@@ -153,6 +153,12 @@ pub(super) fn handle_message_view_update(
             );
             Task::none()
         }
+        MessageViewMessage::SaveAsFinished(result) => {
+            state.error_banner = result
+                .err()
+                .map(|error| t!("compose.save_message_failed", error = error).into_owned());
+            Task::none()
+        }
         MessageViewMessage::Reply
         | MessageViewMessage::ReplyAll
         | MessageViewMessage::Forward

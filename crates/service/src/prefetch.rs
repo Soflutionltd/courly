@@ -978,7 +978,7 @@ fn classify_byte_error(error: &crate::conduit::attachment::AttachmentByteError) 
         E::Engine(conduit_sync::Error::Account(account_error)) => recovery_skip(account_error),
         E::Engine(_) => SkipReason::InternalError,
         E::Attach(_) => SkipReason::ProviderTransient,
-        E::MissingBlobId | E::ImapPart(_) => SkipReason::InternalError,
+        E::MissingBlobId | E::ImapPart(_) | E::MessageId(_) => SkipReason::InternalError,
         E::NotByteStream => SkipReason::ProviderPermanent,
     }
 }

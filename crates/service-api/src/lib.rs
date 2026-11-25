@@ -45,7 +45,7 @@ pub use action::{
 pub use attachment::{
     AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentClearCacheAck,
     AttachmentClearCacheParams, AttachmentFetchAck, AttachmentFetchParams, EvictionCompleted,
-    GcCompleted,
+    GcCompleted, MessageSourceAck, MessageSourceParams,
 };
 pub use boot::{
     BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,

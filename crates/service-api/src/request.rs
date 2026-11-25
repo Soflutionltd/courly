@@ -9,6 +9,7 @@ use crate::account::{
 use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::attachment::{
     AttachmentCacheSizeParams, AttachmentClearCacheParams, AttachmentFetchParams,
+    MessageSourceParams,
 };
 use crate::cal_action::CalendarActionPlan;
 use crate::calendar::{
@@ -1576,6 +1577,11 @@ pub enum RequestParams {
     AttachmentFetch {
         params: AttachmentFetchParams,
     },
+    /// The original source of a message, fetched from its provider for an
+    /// `.eml` export. Read-only, so a replay is harmless.
+    MessageSource {
+        params: MessageSourceParams,
+    },
     /// Attachments roadmap Phase 6: settings-UI cache-size readout.
     /// Sums live + tombstoned `attachment_blobs.length` for the
     /// "Cache using X.Y GB" indicator.
@@ -1806,6 +1812,7 @@ impl RequestParams {
             Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
             Self::OauthExchangeCode { .. } => "oauth.exchange_code",
             Self::AttachmentFetch { .. } => "attachment.fetch",
+            Self::MessageSource { .. } => "message.source",
             Self::AttachmentCacheSize { .. } => "attachment.cache_size",
             Self::AttachmentClearCache { .. } => "attachment.clear_cache",
             Self::ExtractStatus { .. } => "extract.status",
@@ -1960,6 +1967,8 @@ impl RequestParams {
             // Cache miss runs the provider's fetch_attachment, which
             // can be slow on large attachments over slow links.
             Self::AttachmentFetch { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
+            // A whole message, attachments included, from the provider.
+            Self::MessageSource { .. } => RequestTimeoutKind::Finite(Duration::from_secs(120)),
             // Single SQL aggregate over `attachment_blobs`; sub-second
             // on any realistic cache.
             Self::AttachmentCacheSize { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
@@ -2043,6 +2052,7 @@ impl RequestParams {
             | Self::EncryptForStorage { .. }
             | Self::DecryptForStorage { .. }
             | Self::AttachmentFetch { .. }
+            | Self::MessageSource { .. }
             | Self::AttachmentCacheSize { .. }
             // Phase 8c: clear-cache is idempotent. A second call
             // returning (blobs_tombstoned=0, bytes_reclaimed=0) is
@@ -2257,6 +2267,7 @@ impl RequestParams {
             Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::OauthExchangeCode { params } => serde_json::json!({ "params": params }),
             Self::AttachmentFetch { params } => serde_json::json!({ "params": params }),
+            Self::MessageSource { params } => serde_json::json!({ "params": params }),
             Self::AttachmentCacheSize { params } => serde_json::json!({ "params": params }),
             Self::AttachmentClearCache { params } => serde_json::json!({ "params": params }),
             Self::ExtractStatus { params } => serde_json::json!({ "params": params }),
@@ -2861,6 +2872,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("attachment.fetch params: {e}"))?;
                 Ok(Self::AttachmentFetch { params: p.params })
+            }
+            "message.source" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: MessageSourceParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("message.source params: {e}"))?;
+                Ok(Self::MessageSource { params: p.params })
             }
             "attachment.cache_size" => {
                 #[derive(Deserialize, Default)]

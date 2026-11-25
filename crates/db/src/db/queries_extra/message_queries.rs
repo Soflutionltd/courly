@@ -129,29 +129,3 @@ pub fn list_message_ids_for_account(
     }
     Ok(out)
 }
-
-/// Load raw email source for a message (Source view / Save As).
-///
-/// NOTE: Raw source is not stored in the messages table in the seed
-/// database. This returns a placeholder. When real sync is running,
-/// raw source would be stored in the body store or a dedicated column.
-pub fn get_message_raw_source(
-    conn: &ReadConn<'_>,
-    account_id: &str,
-    message_id: &str,
-) -> Result<String, String> {
-    // Check the message exists
-    let exists: bool = conn
-        .query_row(
-            "SELECT 1 FROM messages WHERE account_id = ?1 AND id = ?2",
-            params![account_id, message_id],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
-
-    if exists {
-        Ok("(raw source not available - message bodies are stored in the body store)".to_string())
-    } else {
-        Err("Message not found".to_string())
-    }
-}

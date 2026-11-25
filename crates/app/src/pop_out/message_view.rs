@@ -53,6 +53,8 @@ pub enum MessageViewMessage {
     Delete,
     Print,
     SaveAs,
+    /// The message was written to the chosen file, or why it was not.
+    SaveAsFinished(Result<(), String>),
     /// Open or close the message action context menu.
     OpenContextMenu,
     CloseContextMenu,

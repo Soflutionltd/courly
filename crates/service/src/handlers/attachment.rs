@@ -19,7 +19,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use service_api::{
     AttachmentCacheSizeAck, AttachmentClearCacheAck, AttachmentFetchAck, AttachmentFetchParams,
-    ServiceError,
+    MessageSourceAck, MessageSourceParams, ServiceError,
 };
 
 use crate::attachment_materialize::{self, MaterializedBlob};
@@ -52,6 +52,71 @@ async fn try_inline_image_materialize(
     let materialized =
         attachment_materialize::write_bytes_to_tmp(boot_state, content_hash, bytes).await?;
     Ok(Some(materialized))
+}
+
+/// `message.source`: fetch the message's original source from its provider
+/// and write it to the temporary folder the UI copies it from. An empty
+/// answer is an error, never an empty file presented as the message.
+pub(crate) async fn handle_message_source(
+    boot_state: &Arc<BootSharedState>,
+    params: MessageSourceParams,
+) -> Result<Value, ServiceError> {
+    let read_db = boot_state.read_db_state().ok_or_else(|| {
+        ServiceError::Internal(
+            "read db not loaded; UI must wait for boot.ready before calling message.source".into(),
+        )
+    })?;
+    let account_id = params.account_id.clone();
+    let message_id = params.message_id.clone();
+    let stored = read_db
+        .with_read(move |conn| {
+            let row = conn.query_row(
+                "SELECT id, imap_folder, imap_uid, imap_uidvalidity \
+                 FROM messages WHERE account_id = ?1 AND id = ?2",
+                rusqlite::params![account_id, message_id],
+                |row| {
+                    Ok(crate::conduit::attachment::StoredMessageRef {
+                        message_id: row.get(0)?,
+                        imap_folder: row.get(1)?,
+                        imap_uid: row.get(2)?,
+                        imap_uidvalidity: row.get(3)?,
+                    })
+                },
+            );
+            match row {
+                Ok(stored) => Ok(Some(stored)),
+                Err(db::db::ReadError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
+                Err(error) => Err(format!("read message: {error}")),
+            }
+        })
+        .await
+        .map_err(ServiceError::Internal)?
+        .ok_or_else(|| ServiceError::Internal("message not found".into()))?;
+
+    let sync_runtime = boot_state.sync_runtime().ok_or_else(|| {
+        ServiceError::Internal("sync runtime not installed; message.source unavailable".into())
+    })?;
+    let bytes = sync_runtime
+        .attachment_byte_source()
+        .fetch_message_rfc822(&params.account_id, stored)
+        .await
+        .map_err(|error| ServiceError::Internal(format!("message source: {error}")))?;
+    if bytes.is_empty() {
+        return Err(ServiceError::Internal(
+            "message source: the provider returned nothing".into(),
+        ));
+    }
+    let content_hash = db::blob_hash::BlobHash::hash(&bytes);
+    let MaterializedBlob {
+        path: _,
+        relative_path,
+        size_bytes,
+    } = attachment_materialize::write_bytes_to_tmp(boot_state, &content_hash, bytes).await?;
+    serde_json::to_value(MessageSourceAck {
+        size_bytes,
+        relative_path,
+    })
+    .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 pub(crate) async fn handle_fetch(
