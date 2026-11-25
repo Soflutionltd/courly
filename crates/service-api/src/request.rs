@@ -39,6 +39,7 @@ use crate::settings::SettingsSetParams;
 use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
+use crate::sender::SenderBlockParams;
 use crate::smart_folder::SmartFolderCreateParams;
 use crate::sync::{
     SyncCancelAccountParams, SyncFocusFolderParams, SyncResumeAccountParams,
@@ -1287,6 +1288,20 @@ pub enum RequestParams {
     TemplateDelete {
         params: TemplateDeleteParams,
     },
+    /// Add an address to an account's `blocked_senders` list. Idempotent:
+    /// blocking an address twice leaves one row.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    SenderBlock {
+        params: SenderBlockParams,
+    },
+    /// Remove an address from an account's `blocked_senders` list.
+    /// Idempotent; unblocking an address that is not blocked returns Ok.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    SenderUnblock {
+        params: SenderBlockParams,
+    },
     /// Phase 6a: assign `sort_order` to a flat list of signature ids
     /// in one transaction. Per-account ordering hazard documented on
     /// the wire type - stale acks are tolerable today; a generation
@@ -1780,6 +1795,8 @@ impl RequestParams {
             Self::SignatureReorder { .. } => "signature.reorder",
             Self::TemplateSave { .. } => "template.save",
             Self::TemplateDelete { .. } => "template.delete",
+            Self::SenderBlock { .. } => "sender.block",
+            Self::SenderUnblock { .. } => "sender.unblock",
             Self::LabelGroupReorder { .. } => "label_group.reorder",
             Self::LabelSave { .. } => "label.save",
             Self::LabelDelete { .. } => "label.delete",
@@ -1934,6 +1951,8 @@ impl RequestParams {
             | Self::SignatureReorder { .. }
             | Self::TemplateSave { .. }
             | Self::TemplateDelete { .. }
+            | Self::SenderBlock { .. }
+            | Self::SenderUnblock { .. }
             | Self::LabelGroupReorder { .. }
             | Self::ContactsGroupSave { .. }
             | Self::ContactsGroupDelete { .. }
@@ -2111,6 +2130,8 @@ impl RequestParams {
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
             | Self::TemplateDelete { .. }
+            | Self::SenderBlock { .. }
+            | Self::SenderUnblock { .. }
             // Deleting a draft that is already gone is a no-op.
             | Self::ActionDeleteDraft { .. }
             | Self::LabelGroupReorder { .. }
@@ -2233,6 +2254,9 @@ impl RequestParams {
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
             Self::TemplateSave { params } => serde_json::json!({ "params": params }),
             Self::TemplateDelete { params } => serde_json::json!({ "params": params }),
+            Self::SenderBlock { params } | Self::SenderUnblock { params } => {
+                serde_json::json!({ "params": params })
+            }
             Self::LabelGroupReorder { params } => serde_json::json!({ "params": params }),
             Self::LabelSave { params } => serde_json::json!({ "params": params }),
             Self::LabelDelete { params } => serde_json::json!({ "params": params }),
@@ -2576,6 +2600,19 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("template.delete params: {e}"))?;
                 Ok(Self::TemplateDelete { params: p.params })
+            }
+            "sender.block" | "sender.unblock" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SenderBlockParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("{method} params: {e}"))?;
+                if method == "sender.block" {
+                    Ok(Self::SenderBlock { params: p.params })
+                } else {
+                    Ok(Self::SenderUnblock { params: p.params })
+                }
             }
             "label_group.reorder" => {
                 #[derive(Deserialize)]
@@ -5241,6 +5278,32 @@ mod tests {
                 original.timeout(),
                 RequestTimeoutKind::Finite(Duration::from_secs(5)),
             );
+        }
+    }
+
+    #[test]
+    fn sender_block_requests_round_trip_and_may_be_replayed() {
+        let params = SenderBlockParams {
+            account_id: "acct-1".into(),
+            sender_address: "spammer@example.com".into(),
+        };
+        let block = RequestParams::SenderBlock {
+            params: params.clone(),
+        };
+        let unblock = RequestParams::SenderUnblock { params };
+        for (original, method) in [(block, "sender.block"), (unblock, "sender.unblock")] {
+            assert_eq!(original.method_name(), method);
+            let parsed = RequestParams::from_method_params(
+                original.method_name(),
+                Some(original.params_value()),
+            )
+            .expect("parse");
+            assert_eq!(parsed, original);
+            assert_eq!(
+                original.timeout(),
+                RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            );
+            assert_eq!(original.idempotency(), Idempotency::Conditional);
         }
     }
 

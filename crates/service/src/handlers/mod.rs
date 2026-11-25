@@ -20,6 +20,7 @@ mod label;
 mod oauth;
 mod pending_ops_kick;
 mod pinned_search;
+mod sender;
 mod settings;
 mod signature;
 mod smart_folder;
@@ -127,6 +128,10 @@ pub(crate) async fn dispatch(
         RequestParams::TemplateSave { params } => template::handle_save(&boot_state, params).await,
         RequestParams::TemplateDelete { params } => {
             template::handle_delete(&boot_state, params).await
+        }
+        RequestParams::SenderBlock { params } => sender::handle_block(&boot_state, params).await,
+        RequestParams::SenderUnblock { params } => {
+            sender::handle_unblock(&boot_state, params).await
         }
         RequestParams::LabelGroupReorder { params } => {
             label::handle_reorder(&boot_state, params).await
