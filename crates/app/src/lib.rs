@@ -49,6 +49,7 @@ pub mod harness;
 mod helpers;
 mod i18n;
 mod icon;
+mod install_location;
 mod main_view;
 #[cfg(target_os = "macos")]
 mod menu_bar;
@@ -107,6 +108,7 @@ pub fn run_app_blocking() -> RunResult {
     env_logger::init();
     log::info!("Courly starting");
     i18n::init();
+    install_location::install_from_download();
     #[cfg(feature = "hotpath")]
     let _hotpath = hotpath::HotpathGuardBuilder::new("courly::main")
         .percentiles(&[50.0, 95.0, 99.0])
