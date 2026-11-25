@@ -20,7 +20,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "action-types"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "async-trait",
  "conduit-types",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "app"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "base64 0.23.1",
  "blake3",
@@ -950,7 +950,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cal"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "action-types",
  "async-trait",
@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "cmdk"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "hotpath 0.27.0",
  "nucleo-matcher",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "aes-gcm",
  "ammonia",
@@ -1675,7 +1675,7 @@ dependencies = [
 
 [[package]]
 name = "coverage"
-version = "0.2.9"
+version = "0.2.10"
 
 [[package]]
 name = "cpubits"
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "crypto-key"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -1990,7 +1990,7 @@ checksum = "c286de4e81ea2590afc24d754e0f83810c566f50a1388fa75ebd57928c0d9745"
 
 [[package]]
 name = "db"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "blake3",
  "db-read",
@@ -2012,7 +2012,7 @@ dependencies = [
 
 [[package]]
 name = "db-read"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "blake3",
  "db",
@@ -2034,7 +2034,7 @@ dependencies = [
 
 [[package]]
 name = "db-read-lockdown"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "db-read",
  "rusqlite",
@@ -2123,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "dev-seed"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "db",
  "flate2",
@@ -3624,7 +3624,7 @@ dependencies = [
 
 [[package]]
 name = "iced-drop"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "hotpath 0.27.0",
  "iced_core",
@@ -4012,7 +4012,7 @@ checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
 
 [[package]]
 name = "import"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "calcard",
  "encoding_rs",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "label-colors"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "hotpath 0.27.0",
  "log",
@@ -4532,7 +4532,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
 name = "llm"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "async-trait",
  "hotpath 0.27.0",
@@ -4730,7 +4730,7 @@ checksum = "ccbc27cb02a58a311a404769a22f5abf63fe3173b290d80be7c534f9c7023151"
 
 [[package]]
 name = "mail-html"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -6317,7 +6317,7 @@ dependencies = [
 
 [[package]]
 name = "process-lifetime"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "libc",
  "log",
@@ -6861,7 +6861,7 @@ dependencies = [
 
 [[package]]
 name = "rte"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "base64 0.23.1",
  "bitflags 2.13.2",
@@ -6874,7 +6874,7 @@ dependencies = [
 
 [[package]]
 name = "rtsk"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "ammonia",
  "async-trait",
@@ -6922,7 +6922,7 @@ dependencies = [
 
 [[package]]
 name = "runner"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "app",
  "libc",
@@ -7155,7 +7155,7 @@ dependencies = [
 
 [[package]]
 name = "search"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "cargo_toml",
  "hotpath 0.27.0",
@@ -7191,7 +7191,7 @@ dependencies = [
 
 [[package]]
 name = "seen"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "db-read",
  "hotpath 0.27.0",
@@ -7377,7 +7377,7 @@ dependencies = [
 
 [[package]]
 name = "service"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "action-types",
  "async-trait",
@@ -7442,7 +7442,7 @@ dependencies = [
 
 [[package]]
 name = "service-api"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "bytes",
  "serde",
@@ -7455,7 +7455,7 @@ dependencies = [
 
 [[package]]
 name = "service-state"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "db",
  "log",
@@ -7658,7 +7658,7 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
 name = "smart-folder"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "db-read",
  "hotpath 0.27.0",
@@ -7796,7 +7796,7 @@ dependencies = [
 
 [[package]]
 name = "squeeze"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "base64 0.23.1",
  "clap",
@@ -7826,7 +7826,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "crc32fast",
  "db",
@@ -8153,7 +8153,7 @@ dependencies = [
 
 [[package]]
 name = "sync"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "db",
  "hotpath 0.27.0",
@@ -8240,7 +8240,7 @@ dependencies = [
 
 [[package]]
 name = "system-fonts"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "hotpath 0.27.0",
  "tokio",
@@ -8981,7 +8981,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "types"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "hotpath 0.27.0",
  "serde",
