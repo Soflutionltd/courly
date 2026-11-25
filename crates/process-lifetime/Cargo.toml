@@ -10,8 +10,11 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-log = "0.4"
 tokio = { workspace = true, features = ["process"] }
+
+# Only the Linux parent-death path logs.
+[target.'cfg(target_os = "linux")'.dependencies]
+log = "0.4"
 
 [target.'cfg(unix)']
 dev-dependencies = {}
