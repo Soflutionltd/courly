@@ -17,4 +17,4 @@ mod outcome;
 
 pub use context::{ActionContext, CalendarAccountOpener, CalendarActionContext, FlightGuard};
 pub use log::MutationLog;
-pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind, account_error_to_action_error};

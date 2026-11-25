@@ -29,11 +29,11 @@
 
 use action_types::{ActionError, ActionOutcome, CalendarAccountOpener, CalendarActionContext};
 use async_trait::async_trait;
-use conduit_types::{Account, AccountId, ProtocolKind};
 use cal::actions::{
     CalendarEventInput, create_calendar_event, delete_calendar_event, rsvp_calendar_event,
     update_calendar_event,
 };
+use conduit_types::{Account, AccountId, ProtocolKind};
 use service_api::{
     CalendarActionWireOperation, CalendarOperationResult, RsvpResponse, WireCalendarEventInput,
     WireCalendarOperation, WireRsvpReply,
@@ -99,6 +99,21 @@ impl CalendarAccountOpener for ServiceCalendarAccountOpener {
             .await
             .map_err(|e| ActionError::remote(e.to_string()))?;
         Ok(Some((opened.account, kind)))
+    }
+}
+
+/// The calendar action context over the Service's own action context: the
+/// same writer half and key, with the Service's calendar account opener.
+pub fn calendar_context(ctx: &action_types::ActionContext) -> CalendarActionContext {
+    CalendarActionContext {
+        write_db: ctx.write_db.clone(),
+        read_db: ctx.db.clone(),
+        encryption_key: ctx.encryption_key,
+        opener: Arc::new(ServiceCalendarAccountOpener::new(
+            ctx.db.clone(),
+            ctx.write_db.clone(),
+            ctx.encryption_key,
+        )),
     }
 }
 

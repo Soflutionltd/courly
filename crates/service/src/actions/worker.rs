@@ -674,16 +674,7 @@ async fn run_one_calendar(
     // ActionContext now carries `write_db` directly so calendar
     // dispatch reuses the writer half compile-checked through the
     // type system, no legacy raw-Arc writer-state end-run.
-    let cal_ctx = action_types::CalendarActionContext {
-        write_db: ctx.write_db.clone(),
-        read_db: ctx.db.clone(),
-        encryption_key: ctx.encryption_key,
-        opener: std::sync::Arc::new(crate::cal_actions::ServiceCalendarAccountOpener::new(
-            ctx.db.clone(),
-            ctx.write_db.clone(),
-            ctx.encryption_key,
-        )),
-    };
+    let cal_ctx = crate::cal_actions::calendar_context(ctx);
     let cal_op = service_api::CalendarActionWireOperation {
         operation_id: OperationId(op.operation_id),
         account_id: op.account_id.clone(),

@@ -81,6 +81,13 @@ fn unsupported(operation: &str) -> ActionError {
     ))
 }
 
+/// The kind of the pending operation that retries a calendar creation the
+/// provider did not confirm.
+pub const RETRY_CREATE_OPERATION: &str = "calendarCreate";
+/// A creation is retried until the provider confirms it or this many
+/// attempts have failed.
+const RETRY_CREATE_MAX: i64 = 10;
+
 pub async fn create_calendar_event(
     ctx: &CalendarActionContext,
     account_id: &str,
@@ -129,62 +136,259 @@ pub async fn create_calendar_event(
             return out;
         }
     };
-    let opened = match open_calendar_account(ctx, account_id).await {
-        Ok(Some(v)) => v,
-        Ok(None) => {
-            let out = ActionOutcome::LocalOnly {
-                reason: ActionError::remote("no calendar backend for account"),
-                retryable: false,
-            };
-            mlog.emit(&out);
-            return out;
-        }
-        Err(reason) => {
-            let out = ActionOutcome::LocalOnly {
-                reason,
-                retryable: false,
-            };
-            mlog.emit(&out);
-            return out;
-        }
-    };
-    let (account, provider) = opened;
-    let out = if !account.capabilities().pim_methods.event_create {
-        ActionOutcome::LocalOnly {
-            reason: unsupported("creation"),
-            retryable: false,
-        }
-    } else {
-        match account
-            .event_create(idmap::input_to_event_create(&calendar_remote_id, &input))
-            .await
-        {
-            Ok(remote_id) => {
-                let native_id = idmap::strip_event_id(provider, &remote_id);
-                mlog.set_remote_id(&native_id);
-                let db = ctx.write_db.clone();
-                let eid = event_id.clone();
-                let _ = db
-                    .with_write_mapped(
-                        move |conn| {
-                            set_calendar_event_remote_id_and_etag(conn, &eid, &native_id, None)
-                                .map_err(ActionError::db)
-                        },
-                        ActionError::db,
-                    )
-                    .await;
-                ActionOutcome::Success
-            }
-            Err(error) => ActionOutcome::LocalOnly {
-                reason: ActionError::remote(error.to_string()),
-                retryable: false,
+    let out = push_created_event(
+        ctx,
+        account_id,
+        &event_id,
+        &calendar_remote_id,
+        &input,
+        &mut mlog,
+    )
+    .await;
+    // The event stays in Courly; a failure the provider may yet accept is
+    // retried from the pending queue, under the same creation key.
+    if let ActionOutcome::LocalOnly {
+        retryable: true,
+        reason,
+    } = &out
+        && reason.is_retryable()
+    {
+        enqueue_create_retry(ctx, account_id, &event_id).await;
+    }
+    mlog.emit(&out);
+    out
+}
+
+/// Retry, from the pending queue, the provider creation of the local event
+/// `event_id`. The event is read as it is now, so an edit made while it
+/// waited goes out; an event deleted meanwhile, or already confirmed, has
+/// nothing left to create.
+pub async fn retry_create_calendar_event(
+    ctx: &CalendarActionContext,
+    account_id: &str,
+    event_id: &str,
+) -> ActionOutcome {
+    let mut mlog = MutationLog::begin("retry_create_calendar_event", account_id, event_id);
+    let db = ctx.write_db.clone();
+    let eid = event_id.to_string();
+    let aid = account_id.to_string();
+    let read = db
+        .with_write_mapped(
+            move |conn| {
+                let Some(stored) = read_local_event(conn, &eid)? else {
+                    return Ok(None);
+                };
+                let remote = stored
+                    .calendar_id
+                    .as_deref()
+                    .map(|cid| lookup_calendar_remote_id(conn, &aid, cid))
+                    .transpose()?;
+                Ok(Some((stored, remote)))
             },
+            ActionError::db,
+        )
+        .await;
+    let out = match read {
+        Ok(None) => ActionOutcome::NoOp,
+        Ok(Some((stored, _))) if stored.remote_event_id.is_some() => ActionOutcome::NoOp,
+        Ok(Some((_, None))) => ActionOutcome::Failed {
+            error: ActionError::not_found("the event has no calendar to be created in"),
+        },
+        Ok(Some((stored, Some(calendar_remote_id)))) => {
+            push_created_event(
+                ctx,
+                account_id,
+                event_id,
+                &calendar_remote_id,
+                &stored.input,
+                &mut mlog,
+            )
+            .await
         }
+        Err(error) => ActionOutcome::Failed { error },
     };
     mlog.emit(&out);
     out
 }
 
+/// Create the local event `event_id` at its provider and link the two.
+///
+/// The local id is the creation key, so every attempt is the same creation:
+/// a retry after a lost answer gets back the event the first attempt made.
+async fn push_created_event(
+    ctx: &CalendarActionContext,
+    account_id: &str,
+    event_id: &str,
+    calendar_remote_id: &str,
+    input: &CalendarEventInput,
+    mlog: &mut MutationLog,
+) -> ActionOutcome {
+    let (account, provider) = match open_calendar_account(ctx, account_id).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return ActionOutcome::LocalOnly {
+                reason: ActionError::remote_with_kind(
+                    action_types::RemoteFailureKind::Permanent,
+                    "no calendar backend for account",
+                ),
+                retryable: false,
+            };
+        }
+        Err(reason) => {
+            let retryable = reason.is_retryable();
+            return ActionOutcome::LocalOnly { reason, retryable };
+        }
+    };
+    if !account.capabilities().pim_methods.event_create {
+        return ActionOutcome::LocalOnly {
+            reason: unsupported("creation"),
+            retryable: false,
+        };
+    }
+    let created = account
+        .event_create(idmap::input_to_event_create(
+            calendar_remote_id,
+            input,
+            event_id,
+        ))
+        .await;
+    let remote_id = match created {
+        Ok(remote_id) => remote_id,
+        Err(error) => {
+            let reason = action_types::account_error_to_action_error(&error);
+            let retryable = reason.is_retryable();
+            return ActionOutcome::LocalOnly { reason, retryable };
+        }
+    };
+    let native_id = idmap::strip_event_id(provider, &remote_id);
+    mlog.set_remote_id(&native_id);
+    let db = ctx.write_db.clone();
+    let eid = event_id.to_string();
+    let aid = account_id.to_string();
+    let linked = db
+        .with_write_mapped(
+            move |conn| link_created_event(conn, &aid, &eid, &native_id),
+            ActionError::db,
+        )
+        .await;
+    match linked {
+        Ok(()) => ActionOutcome::Success,
+        // The provider holds the event but Courly could not record which
+        // one it is. Saying "done" would leave the two unlinked and the
+        // next sync would bring the event in a second time. A retry asks
+        // again under the same key, gets the same event back, and links it.
+        Err(error) => ActionOutcome::LocalOnly {
+            reason: ActionError::remote_with_kind(
+                action_types::RemoteFailureKind::Transient,
+                format!(
+                    "the created event could not be linked: {}",
+                    error.user_message()
+                ),
+            ),
+            retryable: true,
+        },
+    }
+}
+
+/// Record that the local event `event_id` is the provider's `native_id`.
+///
+/// A sync that ran between the provider's creation and this link may
+/// already have brought that event in as a row of its own. Then that row is
+/// the event, and the local placeholder goes, rather than two rows showing
+/// one appointment.
+fn link_created_event(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    event_id: &str,
+    native_id: &str,
+) -> Result<(), ActionError> {
+    let synced: Option<String> = conn
+        .query_row(
+            "SELECT id FROM calendar_events \
+             WHERE account_id = ?1 AND remote_event_id = ?2 AND id != ?3 LIMIT 1",
+            rusqlite::params![account_id, native_id, event_id],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(ActionError::db(format!("synced copy lookup: {other}"))),
+        })?;
+    if synced.is_some() {
+        return db::db::queries_extra::calendars::delete_calendar_event_sync(conn, event_id)
+            .map_err(ActionError::db);
+    }
+    set_calendar_event_remote_id_and_etag(conn, event_id, native_id, None).map_err(ActionError::db)
+}
+
+/// A local event as stored, with what a creation needs.
+struct StoredEvent {
+    remote_event_id: Option<String>,
+    calendar_id: Option<String>,
+    input: CalendarEventInput,
+}
+
+fn read_local_event(
+    conn: &WriteConn<'_>,
+    event_id: &str,
+) -> Result<Option<StoredEvent>, ActionError> {
+    let row = conn.query_row(
+        "SELECT remote_event_id, calendar_id, summary, description, location, start_time, \
+                end_time, is_all_day, timezone, recurrence_rule, availability, visibility \
+         FROM calendar_events WHERE id = ?1",
+        rusqlite::params![event_id],
+        |row| {
+            Ok(StoredEvent {
+                remote_event_id: row.get(0)?,
+                calendar_id: row.get(1)?,
+                input: CalendarEventInput {
+                    title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    description: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    location: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                    start_time: row.get(5)?,
+                    end_time: row.get(6)?,
+                    is_all_day: row.get::<_, Option<i64>>(7)?.unwrap_or(0) != 0,
+                    timezone: row.get(8)?,
+                    recurrence_rule: row.get(9)?,
+                    availability: row.get(10)?,
+                    visibility: row.get(11)?,
+                },
+            })
+        },
+    );
+    match row {
+        Ok(stored) => Ok(Some(stored)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(other) => Err(ActionError::db(format!("local event read: {other}"))),
+    }
+}
+
+/// Queue a retry of the creation of `event_id`. A failure to queue is
+/// logged, not hidden: the event stays in Courly and the outcome already
+/// tells the user it did not reach the provider.
+async fn enqueue_create_retry(ctx: &CalendarActionContext, account_id: &str, event_id: &str) {
+    let op_id = uuid::Uuid::new_v4().to_string();
+    let aid = account_id.to_string();
+    let eid = event_id.to_string();
+    let queued = ctx
+        .write_db
+        .clone()
+        .with_write(move |conn| {
+            db::db::pending_ops::db_pending_ops_enqueue_sync(
+                conn,
+                &op_id,
+                &aid,
+                RETRY_CREATE_OPERATION,
+                &eid,
+                "{}",
+                RETRY_CREATE_MAX,
+            )
+        })
+        .await;
+    if let Err(error) = queued {
+        log::warn!("calendar create retry for {event_id} not queued: {error}");
+    }
+}
 pub async fn update_calendar_event(
     ctx: &CalendarActionContext,
     _account_id: &str,
@@ -605,5 +809,195 @@ mod tests {
             ),
             other => panic!("expected Failed for an unsynced RSVP, got {other:?}"),
         }
+    }
+
+    /// An opener that cannot reach the provider, the way a lost connection
+    /// fails: transiently.
+    struct OfflineOpener;
+
+    #[async_trait::async_trait]
+    impl CalendarAccountOpener for OfflineOpener {
+        async fn open(
+            &self,
+            _account_id: &str,
+        ) -> Result<Option<(Arc<dyn Account>, ProtocolKind)>, ActionError> {
+            Err(ActionError::remote_with_kind(
+                action_types::RemoteFailureKind::Transient,
+                "network unreachable",
+            ))
+        }
+    }
+
+    fn offline_ctx(dir: &std::path::Path) -> CalendarActionContext {
+        let mut ctx = test_ctx(dir);
+        ctx.opener = Arc::new(OfflineOpener);
+        ctx.write_db
+            .with_write_sync(|conn| {
+                conn.execute(
+                    "INSERT INTO accounts (id, email) VALUES ('acct', 'acct@example.test')",
+                    [],
+                )
+                .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, remote_id) VALUES ('cal', 'acct', 'cal-remote')",
+                    [],
+                )
+                .map_err(|e| e.to_string())
+                .map(|_| ())
+            })
+            .expect("seed account and calendar");
+        ctx
+    }
+
+    fn input() -> CalendarEventInput {
+        CalendarEventInput {
+            title: "Planning".to_string(),
+            description: String::new(),
+            location: String::new(),
+            start_time: 1_793_628_000,
+            end_time: 1_793_631_600,
+            is_all_day: false,
+            timezone: None,
+            recurrence_rule: None,
+            availability: None,
+            visibility: None,
+        }
+    }
+
+    fn queued_creations(ctx: &CalendarActionContext) -> Vec<String> {
+        ctx.write_db
+            .with_write_sync(|conn| {
+                let mut stmt = conn
+                    .prepare("SELECT resource_id FROM pending_operations WHERE operation_type = ?1")
+                    .map_err(|e| e.to_string())?;
+                stmt.query_map([RETRY_CREATE_OPERATION], |row| row.get(0))
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<String>, _>>()
+                    .map_err(|e| e.to_string())
+            })
+            .expect("read queue")
+    }
+
+    /// The review's case: a creation the provider could not be reached for
+    /// stays in Courly and waits in the pending queue, instead of being
+    /// filed as done with no retry.
+    #[tokio::test]
+    async fn a_creation_the_provider_missed_is_queued_for_retry() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let ctx = offline_ctx(tmp.path());
+
+        let outcome = create_calendar_event(&ctx, "acct", "cal", input()).await;
+        assert!(
+            matches!(
+                outcome,
+                ActionOutcome::LocalOnly {
+                    retryable: true,
+                    ..
+                }
+            ),
+            "{outcome:?}"
+        );
+        let queued = queued_creations(&ctx);
+        assert_eq!(queued.len(), 1, "one retry queued");
+        let still_local: i64 = ctx
+            .write_db
+            .with_write_sync(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM calendar_events WHERE id = ?1 AND remote_event_id IS NULL",
+                    [&queued[0]],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())
+            })
+            .expect("count");
+        assert_eq!(still_local, 1, "the event stays in Courly, unlinked");
+    }
+
+    /// A retry reads the event as it is now: deleted meanwhile, there is
+    /// nothing to create; linked meanwhile, nothing left to do.
+    #[tokio::test]
+    async fn a_retry_of_a_gone_or_linked_event_does_nothing() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let ctx = offline_ctx(tmp.path());
+        create_calendar_event(&ctx, "acct", "cal", input()).await;
+        let event_id = queued_creations(&ctx).remove(0);
+
+        ctx.write_db
+            .with_write_sync(|conn| {
+                set_calendar_event_remote_id_and_etag(conn, &event_id, "remote-1", None)
+            })
+            .expect("link");
+        let linked = retry_create_calendar_event(&ctx, "acct", &event_id).await;
+        assert!(matches!(linked, ActionOutcome::NoOp), "{linked:?}");
+
+        let gone = retry_create_calendar_event(&ctx, "acct", "no-such-event").await;
+        assert!(matches!(gone, ActionOutcome::NoOp), "{gone:?}");
+    }
+
+    /// A sync that brought the provider's event in before Courly linked its
+    /// own copy leaves one row, not two: the local placeholder goes.
+    #[tokio::test]
+    async fn linking_after_a_sync_brought_the_event_in_keeps_one_row() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let ctx = offline_ctx(tmp.path());
+        create_calendar_event(&ctx, "acct", "cal", input()).await;
+        let placeholder = queued_creations(&ctx).remove(0);
+
+        let rows = ctx
+            .write_db
+            .with_write_sync(|conn| {
+                let synced = db::db::queries_extra::calendars::create_calendar_event_sync(
+                    conn,
+                    &db::db::queries_extra::calendars::LocalCalendarEventParams {
+                        account_id: "acct".to_string(),
+                        summary: "Planning".to_string(),
+                        description: String::new(),
+                        location: String::new(),
+                        start_time: 1_793_628_000,
+                        end_time: 1_793_631_600,
+                        is_all_day: false,
+                        calendar_id: Some("cal".to_string()),
+                        timezone: None,
+                        recurrence_rule: None,
+                        availability: None,
+                        visibility: None,
+                    },
+                )?;
+                set_calendar_event_remote_id_and_etag(conn, &synced, "remote-1", None)?;
+                link_created_event(conn, "acct", &placeholder, "remote-1")
+                    .map_err(|e| e.to_string())?;
+                conn.query_row(
+                    "SELECT COUNT(*) FROM calendar_events WHERE account_id = 'acct'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|e| e.to_string())
+            })
+            .expect("link");
+        assert_eq!(rows, 1, "the synced row is the event; the placeholder went");
+    }
+
+    /// With no synced copy, linking records the provider's id on the event.
+    #[tokio::test]
+    async fn linking_records_the_provider_id() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let ctx = offline_ctx(tmp.path());
+        create_calendar_event(&ctx, "acct", "cal", input()).await;
+        let event_id = queued_creations(&ctx).remove(0);
+
+        let remote: Option<String> = ctx
+            .write_db
+            .with_write_sync(|conn| {
+                link_created_event(conn, "acct", &event_id, "remote-9")
+                    .map_err(|e| e.to_string())?;
+                conn.query_row(
+                    "SELECT remote_event_id FROM calendar_events WHERE id = ?1",
+                    [&event_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())
+            })
+            .expect("link");
+        assert_eq!(remote.as_deref(), Some("remote-9"));
     }
 }

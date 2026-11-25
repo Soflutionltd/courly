@@ -223,8 +223,16 @@ pub fn parse_rsvp(value: &str) -> RsvpStatus {
     }
 }
 
-pub fn input_to_event_create(calendar_remote_id: &str, input: &CalendarEventInput) -> EventCreate {
+/// The provider creation for a Courly event. `client_key` is the local
+/// event's id: every attempt sends the same one, so a retry after a lost
+/// answer finds the event instead of making a second.
+pub fn input_to_event_create(
+    calendar_remote_id: &str,
+    input: &CalendarEventInput,
+    client_key: &str,
+) -> EventCreate {
     EventCreate {
+        client_key: Some(client_key.to_ascii_lowercase()),
         calendar_id: CalendarId(calendar_remote_id.to_string()),
         title: Some(input.title.clone()),
         description: Some(input.description.clone()),
@@ -849,8 +857,18 @@ mod tests {
 
     #[test]
     fn idmap_input_to_event_create_maps_recurrence_and_defaults() {
-        let create = input_to_event_create("cal-remote", &sample_input());
+        let create = input_to_event_create(
+            "cal-remote",
+            &sample_input(),
+            "0B9F3C1E-6A2D-4F1B-9C3E-2D7A5B8E1F40",
+        );
         assert_eq!(create.calendar_id, CalendarId("cal-remote".to_string()));
+        // The local event id is the creation key, in the lowercase every
+        // provider takes.
+        assert_eq!(
+            create.client_key.as_deref(),
+            Some("0b9f3c1e-6a2d-4f1b-9c3e-2d7a5b8e1f40")
+        );
         assert_eq!(create.title, Some("Launch".to_string()));
         assert_eq!(create.status, EventStatus::Confirmed);
         assert_eq!(create.availability, EventAvailability::Free);
