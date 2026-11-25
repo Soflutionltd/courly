@@ -164,6 +164,8 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
+    /// `sender.block` answered: the blocked address, or why it failed.
+    SenderBlocked(Result<String, String>),
     /// Attachments roadmap Phase 5: a Save / Save All dialog returned
     /// a chosen folder; remember it for the next Save inside the same
     /// thread. The tuple key is `(account_id, thread_id)`.

@@ -40,6 +40,7 @@ pub enum RowMenuItem {
     Categorize,
     Uncategorize,
     ToggleSpam,
+    BlockSender,
     Move,
     ToggleMute,
     Delete,

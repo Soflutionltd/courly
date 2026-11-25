@@ -239,6 +239,7 @@ impl ReadyApp {
             }
             Message::Compose => self.open_new_message(),
             Message::Noop => Task::none(),
+            Message::SenderBlocked(result) => self.handle_sender_blocked(result),
             Message::AttachmentSaveFolderRemembered(key, folder) => {
                 self.attachment_last_folders.remember(key, folder);
                 Task::none()

@@ -1501,6 +1501,42 @@ impl ServiceClient {
         Ok(())
     }
 
+    /// Add `sender_address` to the account's blocked list via
+    /// `sender.block`; returns whether it was newly blocked.
+    pub async fn block_sender(
+        &self,
+        account_id: String,
+        sender_address: String,
+    ) -> Result<bool, ClientError> {
+        let ack: service_api::SenderBlockAck = self
+            .request(RequestParams::SenderBlock {
+                params: service_api::SenderBlockParams {
+                    account_id,
+                    sender_address,
+                },
+            })
+            .await?;
+        Ok(ack.newly_blocked)
+    }
+
+    /// Remove `sender_address` from the account's blocked list via
+    /// `sender.unblock`; returns whether it was blocked. Idempotent.
+    pub async fn unblock_sender(
+        &self,
+        account_id: String,
+        sender_address: String,
+    ) -> Result<bool, ClientError> {
+        let ack: service_api::SenderUnblockAck = self
+            .request(RequestParams::SenderUnblock {
+                params: service_api::SenderBlockParams {
+                    account_id,
+                    sender_address,
+                },
+            })
+            .await?;
+        Ok(ack.was_blocked)
+    }
+
     /// Delete a template via `template.delete`. Idempotent.
     pub async fn delete_template(&self, id: String) -> Result<(), ClientError> {
         let _ack: TemplateDeleteAck = self

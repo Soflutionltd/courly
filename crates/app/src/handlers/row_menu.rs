@@ -200,6 +200,11 @@ impl ReadyApp {
                 ),
                 CommandId::EmailSpam,
             ),
+            plain(
+                RowMenuItem::BlockSender,
+                t!("main.row_menu.block_sender"),
+                single && has_sender && self.service_client.is_some(),
+            ),
             command(
                 RowMenuItem::Move,
                 t!("main.row_menu.move"),
@@ -291,6 +296,7 @@ impl ReadyApp {
             RowMenuItem::ToggleFlag => self.handle_email_action(MailActionIntent::ToggleStar),
             RowMenuItem::TogglePin => self.handle_email_action(MailActionIntent::TogglePin),
             RowMenuItem::ToggleSpam => self.handle_email_action(MailActionIntent::ToggleSpam),
+            RowMenuItem::BlockSender => self.block_menu_sender(),
             RowMenuItem::ToggleMute => self.handle_email_action(MailActionIntent::ToggleMute),
             RowMenuItem::Archive => self.handle_email_action(MailActionIntent::Archive),
             RowMenuItem::Delete => {
@@ -385,6 +391,56 @@ impl ReadyApp {
         self.thread_list
             .selected_thread
             .and_then(|index| self.thread_list.threads.get(index))
+    }
+
+    /// Block the selected thread's sender on its account: the thread goes
+    /// to Spam now through the regular spam action, and the service's
+    /// blocked sender sweep sends that address's later mail there too.
+    fn block_menu_sender(&mut self) -> Task<Message> {
+        let Some(address) = self.menu_sender() else {
+            return Task::none();
+        };
+        let Some(account_id) = self.menu_thread().map(|thread| thread.account_id.clone()) else {
+            return Task::none();
+        };
+        let Some(client) = self.service_client.clone() else {
+            self.status_bar.show_confirmation(
+                t!(
+                    "main.row_menu.block_failed",
+                    error = t!("main.side_panel.templates.service_unavailable")
+                )
+                .into_owned(),
+            );
+            return Task::none();
+        };
+        let to_spam = if command_dispatch::build_context(self).thread_in_spam == Some(true) {
+            Task::none()
+        } else {
+            self.handle_email_action(MailActionIntent::ToggleSpam)
+        };
+        let block = Task::perform(
+            async move {
+                client
+                    .block_sender(account_id, address.clone())
+                    .await
+                    .map(|_| address)
+                    .map_err(|e| e.to_string())
+            },
+            Message::SenderBlocked,
+        );
+        Task::batch([to_spam, block])
+    }
+
+    pub(crate) fn handle_sender_blocked(
+        &mut self,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        let text = match result {
+            Ok(address) => t!("main.row_menu.sender_blocked", address = address),
+            Err(error) => t!("main.row_menu.block_failed", error = error),
+        };
+        self.status_bar.show_confirmation(text.into_owned());
+        Task::none()
     }
 
     fn menu_sender(&self) -> Option<String> {
