@@ -127,6 +127,87 @@ pub fn blocked_among(
     Ok(blocked)
 }
 
+/// One inbox thread holding mail that arrived from a blocked sender after the
+/// block and has not been sent to Spam yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedInboxThread {
+    pub account_id: String,
+    pub thread_id: String,
+    pub message_ids: Vec<String>,
+}
+
+/// Inbox mail from blocked senders that the sweep has not handled. Mail
+/// older than the block stays where it is, and a message the sweep already
+/// sent to Spam is never picked again, so moving it back to the inbox by
+/// hand sticks.
+///
+/// Runs on every action-worker wakeup, so it must stay cheap on very large
+/// mailboxes: the `CROSS JOIN` pins the plan to walk the (small) blocked list
+/// first, then only the messages dated after each block through
+/// `idx_messages_date`, instead of scanning the inbox or the whole table.
+pub fn blocked_inbox_threads(conn: &WriteConn<'_>) -> Result<Vec<BlockedInboxThread>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT m.account_id, m.thread_id, m.id
+             FROM blocked_senders b
+             CROSS JOIN messages m
+               ON m.account_id = b.account_id
+              AND m.date >= b.created_at * 1000
+             JOIN message_folders mf
+               ON mf.account_id = m.account_id AND mf.message_id = m.id
+              AND mf.folder_id = 'INBOX'
+             WHERE lower(trim(m.from_address)) = b.sender_address
+               AND NOT EXISTS (
+                   SELECT 1 FROM blocked_sender_moves bm
+                   WHERE bm.account_id = m.account_id AND bm.message_id = m.id
+               )
+             ORDER BY m.account_id, m.thread_id",
+        )
+        .map_err(|e| format!("prepare blocked inbox lookup: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("blocked inbox lookup: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("blocked inbox row: {e}"))?;
+
+    let mut threads: Vec<BlockedInboxThread> = Vec::new();
+    for (account_id, thread_id, message_id) in rows {
+        match threads.last_mut() {
+            Some(last) if last.account_id == account_id && last.thread_id == thread_id => {
+                last.message_ids.push(message_id);
+            }
+            _ => threads.push(BlockedInboxThread {
+                account_id,
+                thread_id,
+                message_ids: vec![message_id],
+            }),
+        }
+    }
+    Ok(threads)
+}
+
+/// Remember that these messages were sent to Spam by the block sweep.
+pub fn record_blocked_moves(
+    conn: &WriteConn<'_>,
+    account_id: &str,
+    message_ids: &[String],
+) -> Result<(), String> {
+    for message_id in message_ids {
+        conn.execute(
+            "INSERT OR IGNORE INTO blocked_sender_moves (account_id, message_id) VALUES (?1, ?2)",
+            params![account_id, message_id],
+        )
+        .map_err(|e| format!("record blocked move: {e}"))?;
+    }
+    Ok(())
+}
+
 pub async fn db_block_sender(
     db: &WriterPool,
     account_id: String,
@@ -226,6 +307,99 @@ mod tests {
             unblock_sender(&conn, "acc", "spammer@example.com")
                 .expect("second unblock")
                 .is_none()
+        );
+    }
+
+    /// One inbox thread with one message from `from` dated `date_ms`.
+    fn add_inbox_message(
+        raw: &Connection,
+        thread_id: &str,
+        message_id: &str,
+        from: &str,
+        date_ms: i64,
+    ) {
+        raw.execute(
+            "INSERT OR IGNORE INTO folders (account_id, id, name) VALUES ('acc', 'INBOX', 'Inbox')",
+            [],
+        )
+        .expect("inbox folder");
+        raw.execute(
+            "INSERT OR IGNORE INTO threads (id, account_id) VALUES (?1, 'acc')",
+            [thread_id],
+        )
+        .expect("thread");
+        raw.execute(
+            "INSERT INTO messages (id, account_id, thread_id, from_address, date)
+             VALUES (?1, 'acc', ?2, ?3, ?4)",
+            rusqlite::params![message_id, thread_id, from, date_ms],
+        )
+        .expect("message");
+        raw.execute(
+            "INSERT INTO message_folders (account_id, message_id, folder_id) VALUES ('acc', ?1, 'INBOX')",
+            [message_id],
+        )
+        .expect("message folder");
+    }
+
+    #[test]
+    fn the_sweep_takes_only_mail_received_after_the_block_and_only_once() {
+        let raw = open_with_account();
+        let conn = WriteConn::from_raw(&raw);
+        block_sender(&conn, "acc", "spammer@example.com").expect("block");
+        raw.execute("UPDATE blocked_senders SET created_at = 1000", [])
+            .expect("fix block time");
+
+        add_inbox_message(&raw, "t-old", "m-old", "spammer@example.com", 999_000);
+        add_inbox_message(&raw, "t-new", "m-new", " Spammer@Example.com ", 1_000_000);
+        add_inbox_message(
+            &raw,
+            "t-friend",
+            "m-friend",
+            "friend@example.com",
+            2_000_000,
+        );
+
+        let found = blocked_inbox_threads(&conn).expect("sweep");
+        assert_eq!(
+            found,
+            vec![BlockedInboxThread {
+                account_id: "acc".into(),
+                thread_id: "t-new".into(),
+                message_ids: vec!["m-new".into()],
+            }]
+        );
+
+        record_blocked_moves(&conn, "acc", &found[0].message_ids).expect("record");
+        assert!(
+            blocked_inbox_threads(&conn)
+                .expect("second sweep")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_sweep_reads_messages_through_the_date_index() {
+        let raw = open_with_account();
+        let plan: Vec<String> = raw
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT m.id FROM blocked_senders b
+                 CROSS JOIN messages m
+                   ON m.account_id = b.account_id AND m.date >= b.created_at * 1000
+                 JOIN message_folders mf
+                   ON mf.account_id = m.account_id AND mf.message_id = m.id
+                  AND mf.folder_id = 'INBOX'
+                 WHERE lower(trim(m.from_address)) = b.sender_address",
+            )
+            .expect("explain")
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("plan rows")
+            .collect::<Result<_, _>>()
+            .expect("plan");
+        let joined = plan.join(" | ");
+        assert!(
+            joined.contains("idx_messages_date"),
+            "expected the date index, got: {joined}"
         );
     }
 
