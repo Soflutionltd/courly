@@ -61,8 +61,16 @@ impl ReadyApp {
                 Ok(WritebackOutcome::Success) => {
                     Message::Settings(SettingsMessage::ContactsLoaded(contacts))
                 }
-                Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
+                Ok(WritebackOutcome::LocalOnly { reason, retryable }) => {
                     log::warn!("Contact save local-only: {reason}");
+                    // A refusal the Service queued for retry says so: the
+                    // change is not lost, it is on its way.
+                    let reason = if retryable {
+                        rust_i18n::t!("settings.people.write_retrying", reason = reason)
+                            .into_owned()
+                    } else {
+                        reason
+                    };
                     Message::Settings(SettingsMessage::ContactWriteIncomplete(contacts, reason))
                 }
                 Err(e) => {

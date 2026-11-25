@@ -280,6 +280,29 @@ async fn dispatch_pending_op(
 ) -> ActionOutcome {
     let params: serde_json::Value = serde_json::from_str(params_json).unwrap_or_default();
 
+    // Contact and calendar writes the provider did not confirm: retried
+    // through their own pipelines, not as a mail operation.
+    match operation_type {
+        cal::actions::RETRY_CREATE_OPERATION => {
+            let cal_ctx = crate::cal_actions::calendar_context(ctx);
+            return cal::actions::retry_create_calendar_event(&cal_ctx, account_id, resource_id)
+                .await;
+        }
+        super::contacts::RETRY_SAVE_OPERATION | super::contacts::RETRY_CREATE_OPERATION => {
+            let accounts =
+                super::contacts::ContactAccounts(sync_runtime.map(SyncRuntime::resident_engine));
+            return super::contacts::retry_contact_write(
+                ctx,
+                &accounts,
+                operation_type,
+                resource_id,
+                params_json,
+            )
+            .await;
+        }
+        _ => {}
+    }
+
     let op = match operation_type {
         "archive" => MailOperation::Archive,
         "trash" => MailOperation::Trash,

@@ -114,7 +114,11 @@ pub(crate) async fn handle_contact_save_with_writeback(
         source: params.source,
         server_id: params.server_id,
     };
-    let accounts = ContactAccounts(boot_state.sync_runtime());
+    let accounts = ContactAccounts(
+        boot_state
+            .sync_runtime()
+            .map(|runtime| runtime.resident_engine()),
+    );
     let outcome = crate::actions::contacts::save_contact(&ctx, &accounts, input).await;
     let ack = ContactSaveWithWritebackAck {
         writeback: outcome_to_writeback(outcome)?,
@@ -127,7 +131,11 @@ pub(crate) async fn handle_contact_delete(
     params: ContactDeleteParams,
 ) -> Result<Value, ServiceError> {
     let ctx = action_context(boot_state)?;
-    let accounts = ContactAccounts(boot_state.sync_runtime());
+    let accounts = ContactAccounts(
+        boot_state
+            .sync_runtime()
+            .map(|runtime| runtime.resident_engine()),
+    );
     let outcome = crate::actions::contacts::delete_contact(&ctx, &accounts, &params.id).await;
     let ack = ContactDeleteAck {
         writeback: outcome_to_writeback(outcome)?,

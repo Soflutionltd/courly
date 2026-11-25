@@ -499,6 +499,12 @@ impl SyncRuntime {
         self.inner.resident_engine.action_account(account_id).await
     }
 
+    /// A handle on the resident engine, for code that outlives a borrow of
+    /// the runtime (a contact write retried from the pending queue).
+    pub(crate) fn resident_engine(&self) -> crate::conduit::ResidentEngine {
+        self.inner.resident_engine.clone()
+    }
+
     pub(crate) fn attachment_byte_source(
         &self,
     ) -> crate::conduit::attachment::AttachmentByteSource {

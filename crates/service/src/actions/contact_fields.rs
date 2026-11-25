@@ -2,8 +2,9 @@
 //! lands in an address book's card, which may hold more values than
 //! Courly shows (other numbers, other addresses, labels).
 
-/// The fields of a contact the editor shows.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The fields of a contact the editor shows. Serializable so an edit an
+/// address book has not confirmed waits in the pending queue as itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ContactFields {
     pub display_name: Option<String>,
     pub email: String,

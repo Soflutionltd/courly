@@ -787,6 +787,19 @@ impl SyncEngine {
         Ok(self.live_account(account_id)?.contact_get(contact).await?)
     }
 
+    /// Search an account's address books. Forwards to
+    /// [`Account::contact_search`].
+    pub async fn contact_search(
+        &self,
+        account_id: &AccountId,
+        request: conduit_types::ContactSearchRequest,
+    ) -> Result<conduit_types::Page<conduit_types::ContactCard>, Error> {
+        Ok(self
+            .live_account(account_id)?
+            .contact_search(request)
+            .await?)
+    }
+
     /// Create one contact card. Forwards to [`Account::contact_create`].
     pub async fn contact_create(
         &self,
