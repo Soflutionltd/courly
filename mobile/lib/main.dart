@@ -1,6 +1,7 @@
 import 'package:courly_mobile/screens/inbox_screen.dart';
 import 'package:courly_mobile/src/rust/api/engine.dart';
 import 'package:courly_mobile/src/rust/frb_generated.dart';
+import 'package:courly_mobile/theme.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -33,9 +34,8 @@ class CourlyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Courly',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF16B3B0)),
-      ),
+      theme: CourlyTheme.light(),
+      darkTheme: CourlyTheme.dark(),
       home: _EngineGate(startEngine: startEngine),
     );
   }

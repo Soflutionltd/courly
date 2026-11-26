@@ -6,7 +6,10 @@ import 'package:courly_mobile/src/rust/api/actions.dart';
 import 'package:courly_mobile/src/rust/api/compose.dart';
 import 'package:courly_mobile/screens/thread_screen.dart';
 import 'package:courly_mobile/src/rust/api/mailbox.dart';
+import 'package:courly_mobile/theme.dart';
 import 'package:courly_mobile/widgets/account_avatar.dart';
+import 'package:courly_mobile/widgets/sender_avatar.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// The inbox of every account, or of the one chosen in the side menu, as
@@ -158,19 +161,6 @@ class _InboxScreenState extends State<InboxScreen> {
   Widget build(BuildContext context) {
     final selected = _selectedAccount;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(selected?.name ?? 'Boîte de réception'),
-        leading: Builder(
-          builder: (context) => IconButton(
-            key: const Key('open-menu'),
-            tooltip: 'Comptes et dossiers',
-            icon: selected == null
-                ? const Icon(Icons.menu)
-                : AccountAvatar(account: selected, size: 32),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-      ),
       drawer: _AccountDrawer(
         accounts: _accounts,
         selectedId: _accountId,
@@ -182,81 +172,117 @@ class _InboxScreenState extends State<InboxScreen> {
           _addAccount();
         },
       ),
-      body: _body(context),
+      body: RefreshIndicator(
+        onRefresh: _reload,
+        edgeOffset: 120,
+        child: CustomScrollView(
+          key: const Key('inbox-list'),
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverAppBar.large(
+              pinned: true,
+              title: Text(selected?.name ?? 'Boîte de réception'),
+              leading: Builder(
+                builder: (context) => IconButton(
+                  key: const Key('open-menu'),
+                  tooltip: 'Comptes et dossiers',
+                  icon: selected == null
+                      ? const Icon(LucideIcons.menu, size: 22)
+                      : AccountAvatar(account: selected, size: 30),
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+            ),
+            ..._body(context),
+          ],
+        ),
+      ),
       floatingActionButton: _accounts.isEmpty
           ? null
           : FloatingActionButton(
               key: const Key('new-message'),
               tooltip: 'Nouveau message',
               onPressed: _newMessage,
-              child: const Icon(Icons.edit_outlined),
+              child: const Icon(LucideIcons.squarePen, size: 24),
             ),
     );
   }
 
-  Widget _body(BuildContext context) {
+  List<Widget> _body(BuildContext context) {
+    Widget fill(Widget child) =>
+        SliverFillRemaining(hasScrollBody: false, child: child);
     if (!_loaded) {
-      return const Center(child: CircularProgressIndicator());
+      return [fill(const Center(child: CircularProgressIndicator()))];
     }
     final error = _loadError;
     if (error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'La boîte de réception n\'a pas pu être lue : $error',
-            textAlign: TextAlign.center,
+      return [
+        fill(
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'La boîte de réception n\'a pas pu être lue : $error',
+                textAlign: TextAlign.center,
+              ),
+            ),
           ),
         ),
-      );
+      ];
     }
     if (_accounts.isEmpty) {
-      return _NoAccount(onAddAccount: _addAccount);
+      return [fill(_NoAccount(onAddAccount: _addAccount))];
     }
     if (_threads.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _reload,
-        child: ListView(
-          children: const [
-            SizedBox(height: 160),
-            Center(child: Text('Synchronisation en cours…')),
-          ],
+      return [
+        fill(
+          Center(
+            child: Text(
+              'Synchronisation en cours…',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
         ),
-      );
+      ];
     }
-    return RefreshIndicator(
-      onRefresh: _reload,
-      child: ListView.separated(
-        key: const Key('inbox-list'),
-        itemCount: _threads.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, index) {
-          final thread = _threads[index];
-          return Dismissible(
-            key: ValueKey('thread-${thread.accountId}-${thread.id}'),
-            background: const _SwipeAction(
-              color: Color(0xFF2E7D32),
-              icon: Icons.archive_outlined,
-              label: 'Archiver',
-              alignment: Alignment.centerLeft,
-            ),
-            secondaryBackground: const _SwipeAction(
-              color: Color(0xFFC62828),
-              icon: Icons.delete_outline,
-              label: 'Supprimer',
-              alignment: Alignment.centerRight,
-            ),
-            onDismissed: (direction) => _actOnRow(
-              thread,
-              direction == DismissDirection.startToEnd
-                  ? ThreadOutcome.archived
-                  : ThreadOutcome.deleted,
-            ),
-            child: _ThreadRow(thread: thread, onTap: () => _openThread(thread)),
-          );
-        },
+    return [
+      SliverPadding(
+        padding: const EdgeInsets.only(bottom: 96),
+        sliver: SliverList.builder(
+          itemCount: _threads.length,
+          itemBuilder: (context, index) {
+            final thread = _threads[index];
+            return Dismissible(
+              key: ValueKey('thread-${thread.accountId}-${thread.id}'),
+              background: const _SwipeAction(
+                color: CourlyTheme.archive,
+                icon: LucideIcons.archive,
+                label: 'Archiver',
+                alignment: Alignment.centerLeft,
+              ),
+              secondaryBackground: const _SwipeAction(
+                color: CourlyTheme.delete,
+                icon: LucideIcons.trash2,
+                label: 'Supprimer',
+                alignment: Alignment.centerRight,
+              ),
+              onDismissed: (direction) => _actOnRow(
+                thread,
+                direction == DismissDirection.startToEnd
+                    ? ThreadOutcome.archived
+                    : ThreadOutcome.deleted,
+              ),
+              child: _ThreadRow(
+                thread: thread,
+                onTap: () => _openThread(thread),
+              ),
+            );
+          },
+        ),
       ),
-    );
+    ];
   }
 }
 
@@ -282,13 +308,20 @@ class _SwipeAction extends StatelessWidget {
       child: Align(
         alignment: alignment,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white),
-              const SizedBox(height: 4),
-              Text(label, style: const TextStyle(color: Colors.white)),
+              Icon(icon, color: Colors.white, size: 22),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
@@ -312,22 +345,49 @@ class _NoAccount extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.mail_outline,
-              size: 56,
-              color: theme.colorScheme.primary,
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                LucideIcons.mail,
+                size: 32,
+                color: theme.colorScheme.primary,
+              ),
             ),
-            const SizedBox(height: 16),
-            Text('Aucun compte', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 20),
+            Text(
+              'Aucun compte',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Ajoutez votre adresse Outlook, Gmail, Exchange, iCloud ou autre.',
               textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
             FilledButton(
               key: const Key('add-account'),
               onPressed: onAddAccount,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(220, 50),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               child: const Text('Ajouter un compte'),
             ),
           ],
@@ -337,6 +397,9 @@ class _NoAccount extends StatelessWidget {
   }
 }
 
+/// One conversation in the list, compact as in Outlook: the sender's
+/// coloured initials, their name and the time on one line, the subject,
+/// then one line of preview. Unread ones carry a teal dot and bold text.
 class _ThreadRow extends StatelessWidget {
   const _ThreadRow({required this.thread, required this.onTap});
 
@@ -346,60 +409,149 @@ class _ThreadRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final unread = !thread.isRead;
-    final weight = unread ? FontWeight.w700 : FontWeight.w400;
-    return ListTile(
-      onTap: onTap,
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              thread.sender.isEmpty ? '(sans expéditeur)' : thread.sender,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: weight),
-            ),
+    final sender = thread.sender.isEmpty ? '(sans expéditeur)' : thread.sender;
+    return Material(
+      color: scheme.surface,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 12, 16, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 40,
+                child: unread
+                    ? Center(
+                        child: Container(
+                          key: const Key('unread-dot'),
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: scheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              SenderAvatar(name: sender),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color:
+                            theme.dividerTheme.color ?? scheme.outlineVariant,
+                        width: theme.dividerTheme.thickness ?? 0.6,
+                      ),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                sender,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: unread
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            if (thread.hasAttachments)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Icon(
+                                  LucideIcons.paperclip,
+                                  size: 14,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            Text(
+                              _when(thread.dateMs),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: unread
+                                    ? scheme.primary
+                                    : scheme.onSurfaceVariant,
+                                fontWeight: unread
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          thread.subject.isEmpty
+                              ? '(sans objet)'
+                              : thread.subject,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: unread
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          thread.snippet,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          Text(
-            _when(thread.dateMs),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: unread ? theme.colorScheme.primary : null,
-            ),
-          ),
-        ],
+        ),
       ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            thread.subject.isEmpty ? '(sans objet)' : thread.subject,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: weight,
-              color: theme.colorScheme.onSurface,
-            ),
-          ),
-          Text(thread.snippet, maxLines: 2, overflow: TextOverflow.ellipsis),
-        ],
-      ),
-      trailing: thread.hasAttachments
-          ? const Icon(Icons.attach_file, size: 18)
-          : null,
     );
   }
 
-  /// Today's time, else the day and month, as Outlook's list shows it.
+  static const _weekdays = [
+    'lun.',
+    'mar.',
+    'mer.',
+    'jeu.',
+    'ven.',
+    'sam.',
+    'dim.',
+  ];
+
+  /// The time today, "Hier", the weekday within the week, else the date,
+  /// as Outlook's list shows it.
   static String _when(int? dateMs) {
     if (dateMs == null) return '';
     final date = DateTime.fromMillisecondsSinceEpoch(dateMs);
     final now = DateTime.now();
-    final sameDay =
-        date.year == now.year && date.month == now.month && date.day == now.day;
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(date.year, date.month, date.day);
+    final daysAgo = today.difference(day).inDays;
     String two(int value) => value.toString().padLeft(2, '0');
-    return sameDay
-        ? '${two(date.hour)}:${two(date.minute)}'
-        : '${two(date.day)}/${two(date.month)}';
+    if (daysAgo <= 0) return '${two(date.hour)}:${two(date.minute)}';
+    if (daysAgo == 1) return 'Hier';
+    if (daysAgo < 7) return _weekdays[date.weekday - 1];
+    if (date.year == now.year) return '${two(date.day)}/${two(date.month)}';
+    return '${two(date.day)}/${two(date.month)}/${date.year % 100}';
   }
 }
 
@@ -442,7 +594,7 @@ class _AccountDrawer extends StatelessWidget {
                     onTap: () => onShowAccount(null),
                     child: const CircleAvatar(
                       radius: 24,
-                      child: Icon(Icons.public),
+                      child: Icon(LucideIcons.globe),
                     ),
                   ),
                   for (final account in accounts)
@@ -461,7 +613,7 @@ class _AccountDrawer extends StatelessWidget {
                       radius: 24,
                       backgroundColor:
                           theme.colorScheme.surfaceContainerHighest,
-                      child: const Icon(Icons.add),
+                      child: const Icon(LucideIcons.plus),
                     ),
                   ),
                 ],
@@ -484,7 +636,7 @@ class _AccountDrawer extends StatelessWidget {
                   ),
                   ListTile(
                     leading: Icon(
-                      Icons.inbox,
+                      LucideIcons.inbox,
                       color: theme.colorScheme.primary,
                     ),
                     title: Text(
