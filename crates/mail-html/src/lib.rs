@@ -1746,6 +1746,26 @@ mod tests {
         );
     }
 
+    /// An Apple receipt opens its item table with a `colspan="3"
+    /// width="350"` header. Giving those 350px to the first column alone
+    /// pushed the item's name into the price column, where a browser keeps
+    /// the 64px icon column as narrow as its cell asks.
+    #[test]
+    fn a_spanning_cell_does_not_widen_its_first_column() {
+        let mail = render_html(
+            r#"<body style="margin:0"><table width="660" cellspacing="0" cellpadding="0">
+               <tr><td colspan="3" width="350">App Store</td></tr>
+               <tr><td width="64"></td>
+               <td><a href="https://example.com/">Item</a></td>
+               <td width="100">2,99</td></tr></table></body>"#,
+        );
+        let left = mail.links[0].x;
+        assert!(
+            (60.0..120.0).contains(&left),
+            "the item starts at {left}, not just after the 64px icon column"
+        );
+    }
+
     /// Rightmost painted (non-white) column of the first tile, in display px.
     fn ink_right(mail: &RenderedMail) -> f32 {
         let tile = &mail.tiles[0];

@@ -261,6 +261,7 @@ pub(crate) fn build_table_context(
     let mut first_cell_border: Option<ServoArc<Border>> = None;
     // Percentage widths set on first-row cells: (column index, percentage, padding + border)
     let mut percent_columns: Vec<(u16, f32, f32)> = Vec::new();
+    let mut spanning_widths: Vec<SpanningWidth> = Vec::new();
     let mut calc_values: Vec<LengthPercentage> = Vec::new();
     // Header row groups are laid out before other rows, and footer row groups after
     let row_group_order = |doc: &BaseDocument, child_id: NodeId| -> u8 {
@@ -292,9 +293,11 @@ pub(crate) fn build_table_context(
                 &mut column_sizes,
                 &mut first_cell_border,
                 &mut percent_columns,
+                &mut spanning_widths,
             );
         }
     }
+    share_spanning_widths(&mut column_sizes, &spanning_widths);
     let remaining_column = if is_fixed {
         style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(1.0))
     } else {
@@ -515,6 +518,40 @@ fn collect_columns(
     }
 }
 
+/// The declared width of a cell spanning several columns, in the auto layout.
+struct SpanningWidth {
+    first_column: u16,
+    columns: u16,
+    /// Border-box width.
+    width: f32,
+}
+
+/// Give each spanning cell's width to the columns it spans, shared equally,
+/// when none of them has a width of its own. A receipt's header row of
+/// `colspan="2" width="320"` over two columns of plain labels then lays out
+/// as wide as in a browser. Columns that already have a width from a cell
+/// of their own are left as they are: that cell knows its column better.
+fn share_spanning_widths(columns: &mut Vec<TrackSizingFunction>, spans: &[SpanningWidth]) {
+    for span in spans {
+        let first = usize::from(span.first_column);
+        let end = first + usize::from(span.columns);
+        if columns.len() < end {
+            columns.resize(end, style_helpers::auto());
+        }
+        if columns[first..end]
+            .iter()
+            .any(|column| definite_length(column).is_some())
+        {
+            continue;
+        }
+        let share = span.width / f32::from(span.columns);
+        for column in &mut columns[first..end] {
+            *column =
+                style_helpers::minmax(style_helpers::min_content(), style_helpers::length(share));
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn collect_table_cells(
     doc: &mut BaseDocument,
@@ -530,6 +567,7 @@ fn collect_table_cells(
     columns: &mut Vec<TrackSizingFunction>,
     first_cell_border: &mut Option<ServoArc<Border>>,
     percent_columns: &mut Vec<(u16, f32, f32)>,
+    spanning_widths: &mut Vec<SpanningWidth>,
 ) {
     let node = &mut doc.nodes[node_id];
 
@@ -580,6 +618,7 @@ fn collect_table_cells(
                     columns,
                     first_cell_border,
                     percent_columns,
+                    spanning_widths,
                 );
             }
             doc.nodes[node_id].children = children;
@@ -621,6 +660,7 @@ fn collect_table_cells(
                     columns,
                     first_cell_border,
                     percent_columns,
+                    spanning_widths,
                 );
             }
             doc.nodes[node_id].children = children;
@@ -663,7 +703,30 @@ fn collect_table_cells(
             let col_needs_width =
                 (col as usize) >= columns.len() || columns[col as usize].max.is_auto();
             let later_auto_row = *row > 1 && !is_fixed;
-            if (*row == 1 && col_needs_width) || later_auto_row {
+            // A cell spanning several columns sizes all of them together, not
+            // the first one alone. Taking its width for its first column made a
+            // receipt's `colspan="3" width="350"` header push the 64px icon
+            // column to 350px, so the item's name ran into the price column.
+            // In the auto layout its width is shared out once every cell is
+            // known (`share_spanning_widths`).
+            let spans_one_column = colspan == 1 || is_fixed;
+            if !spans_one_column && style.size.width.tag() == taffy::CompactLength::LENGTH_TAG {
+                let padding = style.padding.resolve_or_zero(None, resolve_calc_value);
+                let border = style.border.resolve_or_zero(None, resolve_calc_value);
+                let len = style.size.width.value();
+                let outer = match style.box_sizing {
+                    taffy::BoxSizing::ContentBox => {
+                        len + padding.left + padding.right + border.left + border.right
+                    }
+                    taffy::BoxSizing::BorderBox => len,
+                };
+                spanning_widths.push(SpanningWidth {
+                    first_column: col,
+                    columns: colspan,
+                    width: outer,
+                });
+            }
+            if spans_one_column && ((*row == 1 && col_needs_width) || later_auto_row) {
                 let column: TrackSizingFunction = match style.size.width.tag() {
                     taffy::CompactLength::LENGTH_TAG => {
                         let len = style.size.width.value();
