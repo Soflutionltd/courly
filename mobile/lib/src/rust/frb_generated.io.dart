@@ -3,8 +3,10 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/accounts.dart';
 import 'api/database.dart';
 import 'api/engine.dart';
+import 'api/mailbox.dart';
 import 'api/microsoft.dart';
 
 import 'dart:async';
@@ -27,25 +29,88 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  AccountSummary dco_decode_account_summary(dynamic raw);
+
+  @protected
+  AddFailure dco_decode_add_failure(dynamic raw);
+
+  @protected
+  AddPasswordResult dco_decode_add_password_result(dynamic raw);
+
+  @protected
   AddedAccount dco_decode_added_account(dynamic raw);
+
+  @protected
+  bool dco_decode_bool(dynamic raw);
+
+  @protected
+  AddFailure dco_decode_box_autoadd_add_failure(dynamic raw);
+
+  @protected
+  AddedAccount dco_decode_box_autoadd_added_account(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  ImapServers dco_decode_box_autoadd_imap_servers(dynamic raw);
 
   @protected
   DatabaseReport dco_decode_database_report(dynamic raw);
 
   @protected
+  DiscoveredAccount dco_decode_discovered_account(dynamic raw);
+
+  @protected
   EngineReady dco_decode_engine_ready(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
+
+  @protected
+  ImapServers dco_decode_imap_servers(dynamic raw);
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<AccountSummary> dco_decode_list_account_summary(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<ThreadSummary> dco_decode_list_thread_summary(dynamic raw);
 
   @protected
   MicrosoftSignIn dco_decode_microsoft_sign_in(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  AddFailure? dco_decode_opt_box_autoadd_add_failure(dynamic raw);
+
+  @protected
+  AddedAccount? dco_decode_opt_box_autoadd_added_account(dynamic raw);
+
+  @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  ImapServers? dco_decode_opt_box_autoadd_imap_servers(dynamic raw);
+
+  @protected
+  SignInMethod dco_decode_sign_in_method(dynamic raw);
+
+  @protected
+  ThreadSummary dco_decode_thread_summary(dynamic raw);
+
+  @protected
+  int dco_decode_u_16(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -63,25 +128,102 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  AccountSummary sse_decode_account_summary(SseDeserializer deserializer);
+
+  @protected
+  AddFailure sse_decode_add_failure(SseDeserializer deserializer);
+
+  @protected
+  AddPasswordResult sse_decode_add_password_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   AddedAccount sse_decode_added_account(SseDeserializer deserializer);
+
+  @protected
+  bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  AddFailure sse_decode_box_autoadd_add_failure(SseDeserializer deserializer);
+
+  @protected
+  AddedAccount sse_decode_box_autoadd_added_account(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  ImapServers sse_decode_box_autoadd_imap_servers(SseDeserializer deserializer);
 
   @protected
   DatabaseReport sse_decode_database_report(SseDeserializer deserializer);
 
   @protected
+  DiscoveredAccount sse_decode_discovered_account(SseDeserializer deserializer);
+
+  @protected
   EngineReady sse_decode_engine_ready(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
+
+  @protected
+  ImapServers sse_decode_imap_servers(SseDeserializer deserializer);
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<AccountSummary> sse_decode_list_account_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<ThreadSummary> sse_decode_list_thread_summary(
+    SseDeserializer deserializer,
+  );
 
   @protected
   MicrosoftSignIn sse_decode_microsoft_sign_in(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  AddFailure? sse_decode_opt_box_autoadd_add_failure(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  AddedAccount? sse_decode_opt_box_autoadd_added_account(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  ImapServers? sse_decode_opt_box_autoadd_imap_servers(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SignInMethod sse_decode_sign_in_method(SseDeserializer deserializer);
+
+  @protected
+  ThreadSummary sse_decode_thread_summary(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_u_16(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -96,16 +238,52 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
-
-  @protected
-  bool sse_decode_bool(SseDeserializer deserializer);
-
-  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_account_summary(
+    AccountSummary self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_add_failure(AddFailure self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_add_password_result(
+    AddPasswordResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_added_account(AddedAccount self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_add_failure(
+    AddFailure self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_added_account(
+    AddedAccount self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_imap_servers(
+    ImapServers self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_database_report(
@@ -114,14 +292,41 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_discovered_account(
+    DiscoveredAccount self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_engine_ready(EngineReady self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_imap_servers(ImapServers self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_account_summary(
+    List<AccountSummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_thread_summary(
+    List<ThreadSummary> self,
     SseSerializer serializer,
   );
 
@@ -135,6 +340,39 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_add_failure(
+    AddFailure? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_added_account(
+    AddedAccount? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_imap_servers(
+    ImapServers? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_sign_in_method(SignInMethod self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_thread_summary(ThreadSummary self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_u_16(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -145,12 +383,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer);
 }
 
 // Section: wire_class

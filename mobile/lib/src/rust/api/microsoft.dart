@@ -11,9 +11,13 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `PendingSignIn`
 
 /// Prepare a Microsoft sign-in. A sign-in started earlier and never
-/// finished is replaced.
-Future<MicrosoftSignIn> microsoftSignInStart() =>
-    RustLib.instance.api.crateApiMicrosoftMicrosoftSignInStart();
+/// finished is replaced. With the address the user typed, Microsoft goes
+/// straight to that account instead of showing its account picker, as on
+/// the desktop.
+Future<MicrosoftSignIn> microsoftSignInStart({String? emailHint}) => RustLib
+    .instance
+    .api
+    .crateApiMicrosoftMicrosoftSignInStart(emailHint: emailHint);
 
 /// Finish the sign-in from the URL Microsoft redirected to: exchange the
 /// code, create the account and start its first sync.

@@ -48,10 +48,21 @@ pub struct AddedAccount {
 }
 
 /// Prepare a Microsoft sign-in. A sign-in started earlier and never
-/// finished is replaced.
-pub fn microsoft_sign_in_start() -> Result<MicrosoftSignIn, String> {
+/// finished is replaced. With the address the user typed, Microsoft goes
+/// straight to that account instead of showing its account picker, as on
+/// the desktop.
+pub fn microsoft_sign_in_start(email_hint: Option<String>) -> Result<MicrosoftSignIn, String> {
     let provider = GenericOAuthProvider::microsoft_graph_default();
-    let request = provider.authorization_request();
+    let mut request = provider.authorization_request();
+    if let Some(email) = email_hint
+        .map(|e| e.trim().to_owned())
+        .filter(|e| !e.is_empty())
+    {
+        request.extra_auth_params.retain(|(key, _)| key != "prompt");
+        request
+            .extra_auth_params
+            .push(("login_hint".to_owned(), email));
+    }
     let (auth_url, code_verifier, state) = build_authorization_url(&request, REDIRECT_URI)?;
     *PENDING
         .lock()
@@ -146,7 +157,7 @@ pub fn microsoft_sign_in_finish(callback_url: String) -> Result<AddedAccount, St
 
 /// The color of a new account: the first preset, as the desktop wizard
 /// uses when the user picks none.
-fn default_account_color() -> Result<String, String> {
+pub(crate) fn default_account_color() -> Result<String, String> {
     label_colors::preset_colors::all_presets()
         .first()
         .map(|(_, background, _)| (*background).to_owned())
@@ -155,7 +166,7 @@ fn default_account_color() -> Result<String, String> {
 
 /// The account's name in the list: its domain, capitalised, as the
 /// desktop wizard pre-fills it.
-fn account_name_for(email: &str) -> String {
+pub(crate) fn account_name_for(email: &str) -> String {
     let domain = email.split('@').nth(1).unwrap_or(email);
     let first = domain.split('.').next().unwrap_or(domain);
     let mut chars = first.chars();
@@ -228,11 +239,19 @@ mod tests {
 
     #[test]
     fn the_start_url_targets_microsoft_with_the_phone_redirect_and_pkce() {
-        let start = microsoft_sign_in_start().expect("start");
+        let start = microsoft_sign_in_start(Some("jo@contoso.com".to_owned())).expect("start");
         assert_eq!(start.callback_scheme, MICROSOFT_CALLBACK_SCHEME);
         let url = url::Url::parse(&start.auth_url).expect("url");
         assert_eq!(url.host_str(), Some("login.microsoftonline.com"));
         let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(
+            pairs.get("login_hint").map(String::as_str),
+            Some("jo@contoso.com")
+        );
+        assert!(
+            !pairs.contains_key("prompt"),
+            "the hint replaces the picker"
+        );
         assert_eq!(
             pairs.get("redirect_uri").map(String::as_str),
             Some(REDIRECT_URI)

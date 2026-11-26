@@ -3,8 +3,10 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/accounts.dart';
 import 'api/database.dart';
 import 'api/engine.dart';
+import 'api/mailbox.dart';
 import 'api/microsoft.dart';
 
 import 'dart:async';
@@ -71,7 +73,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1189901422;
+  int get rustContentHash => -969108112;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -83,15 +85,37 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<AddPasswordResult> crateApiAccountsAddPasswordAccount({
+    required String email,
+    required String password,
+    required ImapServers servers,
+  });
+
+  Future<DiscoveredAccount> crateApiAccountsDiscoverAccount({
+    required String email,
+  });
+
   Future<BigInt> crateApiEngineEnginePing();
 
+  Future<List<ThreadSummary>> crateApiMailboxInboxThreads({
+    required String dataDir,
+    String? accountId,
+    required int limit,
+  });
+
   Future<void> crateApiDatabaseInitApp();
+
+  Future<List<AccountSummary>> crateApiMailboxListAccounts({
+    required String dataDir,
+  });
 
   Future<AddedAccount> crateApiMicrosoftMicrosoftSignInFinish({
     required String callbackUrl,
   });
 
-  Future<MicrosoftSignIn> crateApiMicrosoftMicrosoftSignInStart();
+  Future<MicrosoftSignIn> crateApiMicrosoftMicrosoftSignInStart({
+    String? emailHint,
+  });
 
   Future<DatabaseReport> crateApiDatabaseOpenCourlyDatabase({
     required String dataDir,
@@ -109,6 +133,73 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
+  Future<AddPasswordResult> crateApiAccountsAddPasswordAccount({
+    required String email,
+    required String password,
+    required ImapServers servers,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(email, serializer);
+          sse_encode_String(password, serializer);
+          sse_encode_box_autoadd_imap_servers(servers, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_add_password_result,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiAccountsAddPasswordAccountConstMeta,
+        argValues: [email, password, servers],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiAccountsAddPasswordAccountConstMeta =>
+      const TaskConstMeta(
+        debugName: "add_password_account",
+        argNames: ["email", "password", "servers"],
+      );
+
+  @override
+  Future<DiscoveredAccount> crateApiAccountsDiscoverAccount({
+    required String email,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(email, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_discovered_account,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiAccountsDiscoverAccountConstMeta,
+        argValues: [email],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiAccountsDiscoverAccountConstMeta =>
+      const TaskConstMeta(debugName: "discover_account", argNames: ["email"]);
+
+  @override
   Future<BigInt> crateApiEngineEnginePing() {
     return handler.executeNormal(
       NormalTask(
@@ -117,7 +208,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 1,
+            funcId: 3,
             port: port_,
           );
         },
@@ -136,6 +227,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "engine_ping", argNames: []);
 
   @override
+  Future<List<ThreadSummary>> crateApiMailboxInboxThreads({
+    required String dataDir,
+    String? accountId,
+    required int limit,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dataDir, serializer);
+          sse_encode_opt_String(accountId, serializer);
+          sse_encode_u_32(limit, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_thread_summary,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMailboxInboxThreadsConstMeta,
+        argValues: [dataDir, accountId, limit],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMailboxInboxThreadsConstMeta =>
+      const TaskConstMeta(
+        debugName: "inbox_threads",
+        argNames: ["dataDir", "accountId", "limit"],
+      );
+
+  @override
   Future<void> crateApiDatabaseInitApp() {
     return handler.executeNormal(
       NormalTask(
@@ -144,7 +272,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 5,
             port: port_,
           );
         },
@@ -163,6 +291,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
+  Future<List<AccountSummary>> crateApiMailboxListAccounts({
+    required String dataDir,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dataDir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_account_summary,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMailboxListAccountsConstMeta,
+        argValues: [dataDir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMailboxListAccountsConstMeta =>
+      const TaskConstMeta(debugName: "list_accounts", argNames: ["dataDir"]);
+
+  @override
   Future<AddedAccount> crateApiMicrosoftMicrosoftSignInFinish({
     required String callbackUrl,
   }) {
@@ -174,7 +332,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 7,
             port: port_,
           );
         },
@@ -196,15 +354,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<MicrosoftSignIn> crateApiMicrosoftMicrosoftSignInStart() {
+  Future<MicrosoftSignIn> crateApiMicrosoftMicrosoftSignInStart({
+    String? emailHint,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_String(emailHint, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 8,
             port: port_,
           );
         },
@@ -213,14 +374,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiMicrosoftMicrosoftSignInStartConstMeta,
-        argValues: [],
+        argValues: [emailHint],
         apiImpl: this,
       ),
     );
   }
 
   TaskConstMeta get kCrateApiMicrosoftMicrosoftSignInStartConstMeta =>
-      const TaskConstMeta(debugName: "microsoft_sign_in_start", argNames: []);
+      const TaskConstMeta(
+        debugName: "microsoft_sign_in_start",
+        argNames: ["emailHint"],
+      );
 
   @override
   Future<DatabaseReport> crateApiDatabaseOpenCourlyDatabase({
@@ -234,7 +398,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 9,
             port: port_,
           );
         },
@@ -265,7 +429,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 10,
             port: port_,
           );
         },
@@ -290,6 +454,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AccountSummary dco_decode_account_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return AccountSummary(
+      id: dco_decode_String(arr[0]),
+      email: dco_decode_String(arr[1]),
+      name: dco_decode_String(arr[2]),
+      color: dco_decode_opt_String(arr[3]),
+    );
+  }
+
+  @protected
+  AddFailure dco_decode_add_failure(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return AddFailure.values[raw as int];
+  }
+
+  @protected
+  AddPasswordResult dco_decode_add_password_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return AddPasswordResult(
+      added: dco_decode_opt_box_autoadd_added_account(arr[0]),
+      failure: dco_decode_opt_box_autoadd_add_failure(arr[1]),
+      detail: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
   AddedAccount dco_decode_added_account(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -303,6 +500,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
+  AddFailure dco_decode_box_autoadd_add_failure(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_add_failure(raw);
+  }
+
+  @protected
+  AddedAccount dco_decode_box_autoadd_added_account(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_added_account(raw);
+  }
+
+  @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_i_64(raw);
+  }
+
+  @protected
+  ImapServers dco_decode_box_autoadd_imap_servers(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_imap_servers(raw);
+  }
+
+  @protected
   DatabaseReport dco_decode_database_report(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -312,6 +539,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       schemaVersion: dco_decode_u_32(arr[0]),
       migrationsApplied: dco_decode_u_32(arr[1]),
       tableCount: dco_decode_u_32(arr[2]),
+    );
+  }
+
+  @protected
+  DiscoveredAccount dco_decode_discovered_account(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return DiscoveredAccount(
+      method: dco_decode_sign_in_method(arr[0]),
+      servers: dco_decode_opt_box_autoadd_imap_servers(arr[1]),
+      appPasswordUrl: dco_decode_opt_String(arr[2]),
     );
   }
 
@@ -329,15 +569,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int dco_decode_i_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeI64(raw);
+  }
+
+  @protected
+  ImapServers dco_decode_imap_servers(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return ImapServers(
+      imapHost: dco_decode_String(arr[0]),
+      imapPort: dco_decode_u_16(arr[1]),
+      imapSecurity: dco_decode_String(arr[2]),
+      smtpHost: dco_decode_String(arr[3]),
+      smtpPort: dco_decode_u_16(arr[4]),
+      smtpSecurity: dco_decode_String(arr[5]),
+      username: dco_decode_String(arr[6]),
+    );
+  }
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
   }
 
   @protected
+  List<AccountSummary> dco_decode_list_account_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_account_summary).toList();
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  List<ThreadSummary> dco_decode_list_thread_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_thread_summary).toList();
   }
 
   @protected
@@ -356,6 +637,61 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  AddFailure? dco_decode_opt_box_autoadd_add_failure(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_add_failure(raw);
+  }
+
+  @protected
+  AddedAccount? dco_decode_opt_box_autoadd_added_account(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_added_account(raw);
+  }
+
+  @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_i_64(raw);
+  }
+
+  @protected
+  ImapServers? dco_decode_opt_box_autoadd_imap_servers(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_imap_servers(raw);
+  }
+
+  @protected
+  SignInMethod dco_decode_sign_in_method(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return SignInMethod.values[raw as int];
+  }
+
+  @protected
+  ThreadSummary dco_decode_thread_summary(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return ThreadSummary(
+      id: dco_decode_String(arr[0]),
+      accountId: dco_decode_String(arr[1]),
+      subject: dco_decode_String(arr[2]),
+      snippet: dco_decode_String(arr[3]),
+      sender: dco_decode_String(arr[4]),
+      dateMs: dco_decode_opt_box_autoadd_i_64(arr[5]),
+      isRead: dco_decode_bool(arr[6]),
+      hasAttachments: dco_decode_bool(arr[7]),
+      isPinned: dco_decode_bool(arr[8]),
+    );
+  }
+
+  @protected
+  int dco_decode_u_16(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -390,6 +726,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AccountSummary sse_decode_account_summary(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_email = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_color = sse_decode_opt_String(deserializer);
+    return AccountSummary(
+      id: var_id,
+      email: var_email,
+      name: var_name,
+      color: var_color,
+    );
+  }
+
+  @protected
+  AddFailure sse_decode_add_failure(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return AddFailure.values[inner];
+  }
+
+  @protected
+  AddPasswordResult sse_decode_add_password_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_added = sse_decode_opt_box_autoadd_added_account(deserializer);
+    var var_failure = sse_decode_opt_box_autoadd_add_failure(deserializer);
+    var var_detail = sse_decode_String(deserializer);
+    return AddPasswordResult(
+      added: var_added,
+      failure: var_failure,
+      detail: var_detail,
+    );
+  }
+
+  @protected
   AddedAccount sse_decode_added_account(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_accountId = sse_decode_String(deserializer);
@@ -403,6 +776,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  AddFailure sse_decode_box_autoadd_add_failure(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_add_failure(deserializer));
+  }
+
+  @protected
+  AddedAccount sse_decode_box_autoadd_added_account(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_added_account(deserializer));
+  }
+
+  @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
+  ImapServers sse_decode_box_autoadd_imap_servers(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_imap_servers(deserializer));
+  }
+
+  @protected
   DatabaseReport sse_decode_database_report(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_schemaVersion = sse_decode_u_32(deserializer);
@@ -412,6 +819,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       schemaVersion: var_schemaVersion,
       migrationsApplied: var_migrationsApplied,
       tableCount: var_tableCount,
+    );
+  }
+
+  @protected
+  DiscoveredAccount sse_decode_discovered_account(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_method = sse_decode_sign_in_method(deserializer);
+    var var_servers = sse_decode_opt_box_autoadd_imap_servers(deserializer);
+    var var_appPasswordUrl = sse_decode_opt_String(deserializer);
+    return DiscoveredAccount(
+      method: var_method,
+      servers: var_servers,
+      appPasswordUrl: var_appPasswordUrl,
     );
   }
 
@@ -429,6 +851,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int sse_decode_i_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getInt32();
+  }
+
+  @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getPlatformInt64();
+  }
+
+  @protected
+  ImapServers sse_decode_imap_servers(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_imapHost = sse_decode_String(deserializer);
+    var var_imapPort = sse_decode_u_16(deserializer);
+    var var_imapSecurity = sse_decode_String(deserializer);
+    var var_smtpHost = sse_decode_String(deserializer);
+    var var_smtpPort = sse_decode_u_16(deserializer);
+    var var_smtpSecurity = sse_decode_String(deserializer);
+    var var_username = sse_decode_String(deserializer);
+    return ImapServers(
+      imapHost: var_imapHost,
+      imapPort: var_imapPort,
+      imapSecurity: var_imapSecurity,
+      smtpHost: var_smtpHost,
+      smtpPort: var_smtpPort,
+      smtpSecurity: var_smtpSecurity,
+      username: var_username,
+    );
+  }
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -441,10 +896,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<AccountSummary> sse_decode_list_account_summary(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <AccountSummary>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_account_summary(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  List<ThreadSummary> sse_decode_list_thread_summary(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ThreadSummary>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_thread_summary(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -467,6 +950,94 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  AddFailure? sse_decode_opt_box_autoadd_add_failure(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_add_failure(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  AddedAccount? sse_decode_opt_box_autoadd_added_account(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_added_account(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_i_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  ImapServers? sse_decode_opt_box_autoadd_imap_servers(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_imap_servers(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  SignInMethod sse_decode_sign_in_method(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return SignInMethod.values[inner];
+  }
+
+  @protected
+  ThreadSummary sse_decode_thread_summary(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_accountId = sse_decode_String(deserializer);
+    var var_subject = sse_decode_String(deserializer);
+    var var_snippet = sse_decode_String(deserializer);
+    var var_sender = sse_decode_String(deserializer);
+    var var_dateMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_isRead = sse_decode_bool(deserializer);
+    var var_hasAttachments = sse_decode_bool(deserializer);
+    var var_isPinned = sse_decode_bool(deserializer);
+    return ThreadSummary(
+      id: var_id,
+      accountId: var_accountId,
+      subject: var_subject,
+      snippet: var_snippet,
+      sender: var_sender,
+      dateMs: var_dateMs,
+      isRead: var_isRead,
+      hasAttachments: var_hasAttachments,
+      isPinned: var_isPinned,
+    );
+  }
+
+  @protected
+  int sse_decode_u_16(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint16();
   }
 
   @protected
@@ -493,21 +1064,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getInt32();
-  }
-
-  @protected
-  bool sse_decode_bool(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getUint8() != 0;
-  }
-
-  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
+  }
+
+  @protected
+  void sse_encode_account_summary(
+    AccountSummary self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.email, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_String(self.color, serializer);
+  }
+
+  @protected
+  void sse_encode_add_failure(AddFailure self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_add_password_result(
+    AddPasswordResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_added_account(self.added, serializer);
+    sse_encode_opt_box_autoadd_add_failure(self.failure, serializer);
+    sse_encode_String(self.detail, serializer);
   }
 
   @protected
@@ -516,6 +1104,48 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.accountId, serializer);
     sse_encode_String(self.email, serializer);
     sse_encode_opt_String(self.displayName, serializer);
+  }
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_add_failure(
+    AddFailure self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_add_failure(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_added_account(
+    AddedAccount self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_added_account(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_imap_servers(
+    ImapServers self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_imap_servers(self, serializer);
   }
 
   @protected
@@ -530,11 +1160,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_discovered_account(
+    DiscoveredAccount self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_sign_in_method(self.method, serializer);
+    sse_encode_opt_box_autoadd_imap_servers(self.servers, serializer);
+    sse_encode_opt_String(self.appPasswordUrl, serializer);
+  }
+
+  @protected
   void sse_encode_engine_ready(EngineReady self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self.schemaVersion, serializer);
     sse_encode_u_32(self.migrationsApplied, serializer);
     sse_encode_list_String(self.recoveryWarnings, serializer);
+  }
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putInt32(self);
+  }
+
+  @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putPlatformInt64(self);
+  }
+
+  @protected
+  void sse_encode_imap_servers(ImapServers self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.imapHost, serializer);
+    sse_encode_u_16(self.imapPort, serializer);
+    sse_encode_String(self.imapSecurity, serializer);
+    sse_encode_String(self.smtpHost, serializer);
+    sse_encode_u_16(self.smtpPort, serializer);
+    sse_encode_String(self.smtpSecurity, serializer);
+    sse_encode_String(self.username, serializer);
   }
 
   @protected
@@ -547,6 +1212,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_account_summary(
+    List<AccountSummary> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_account_summary(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -554,6 +1231,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
+  }
+
+  @protected
+  void sse_encode_list_thread_summary(
+    List<ThreadSummary> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_thread_summary(item, serializer);
+    }
   }
 
   @protected
@@ -577,6 +1266,84 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_add_failure(
+    AddFailure? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_add_failure(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_added_account(
+    AddedAccount? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_added_account(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_i_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_imap_servers(
+    ImapServers? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_imap_servers(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_sign_in_method(SignInMethod self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_thread_summary(ThreadSummary self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.accountId, serializer);
+    sse_encode_String(self.subject, serializer);
+    sse_encode_String(self.snippet, serializer);
+    sse_encode_String(self.sender, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.dateMs, serializer);
+    sse_encode_bool(self.isRead, serializer);
+    sse_encode_bool(self.hasAttachments, serializer);
+    sse_encode_bool(self.isPinned, serializer);
+  }
+
+  @protected
+  void sse_encode_u_16(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint16(self);
+  }
+
+  @protected
   void sse_encode_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint32(self);
@@ -597,17 +1364,5 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_unit(void self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-  }
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putInt32(self);
-  }
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putUint8(self ? 1 : 0);
   }
 }
