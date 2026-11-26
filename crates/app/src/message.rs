@@ -164,6 +164,18 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
+    /// Block the selected thread's sender, from the toolbar, the menu bar
+    /// or the command palette.
+    BlockSelectedSender,
+    /// Mark every message of the open folder read, from the toolbar or the
+    /// palette; the menu bar's Mark All as Read does the same.
+    MarkOpenFolderRead,
+    /// `sender.block` answered: the blocked address, or why it failed.
+    SenderBlocked(Result<String, String>),
+    /// `sender.unblock` answered: the unblocked address, or why it failed.
+    SenderUnblocked(Result<String, String>),
+    /// The blocked senders of every account were read from the database.
+    BlockedSendersLoaded(Result<Vec<crate::ui::settings::BlockedSender>, String>),
     /// Attachments roadmap Phase 5: a Save / Save All dialog returned
     /// a chosen folder; remember it for the next Save inside the same
     /// thread. The tuple key is `(account_id, thread_id)`.

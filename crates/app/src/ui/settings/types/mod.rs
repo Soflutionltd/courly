@@ -322,6 +322,15 @@ impl LabelGroupEditorState {
     }
 }
 
+/// One blocked address as Settings lists it, with the account it is
+/// blocked on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedSender {
+    pub account_id: String,
+    pub account_email: String,
+    pub address: String,
+}
+
 pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
@@ -349,6 +358,8 @@ pub struct Settings {
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
+    /// Addresses whose mail goes to Spam, loaded from the database.
+    pub blocked_senders: Vec<BlockedSender>,
     pub date_display: DateDisplay,
     pub default_rendering_mode: RenderingMode,
     pub email_body_background: EmailBodyBackground,
@@ -727,6 +738,7 @@ impl Default for Settings {
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
+            blocked_senders: Vec::new(),
             date_display: DateDisplay::RelativeOffset,
             default_rendering_mode: RenderingMode::default(),
             email_body_background: EmailBodyBackground::default(),

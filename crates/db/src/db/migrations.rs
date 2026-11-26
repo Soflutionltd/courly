@@ -118,6 +118,24 @@ static MIGRATIONS: &[Migration] = &[
               )
               WHERE has_attachments = 1;",
     },
+    Migration {
+        version: 107,
+        description: "Blocked senders",
+        sql: "CREATE TABLE blocked_senders (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                sender_address TEXT NOT NULL,
+                provider_rule_id TEXT,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE(account_id, sender_address)
+              );
+              CREATE TABLE blocked_sender_moves (
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                message_id TEXT NOT NULL,
+                moved_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id, message_id)
+              );",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.

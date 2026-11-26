@@ -534,6 +534,19 @@ pub struct DbAllowlistEntry {
     pub created_at: i64,
 }
 
+// ── Blocked senders ─────────────────────────────────────────
+
+/// A sender whose mail Courly sends to Spam. `provider_rule_id` names the
+/// server-side rule that does the same job when the provider has one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbBlockedSender {
+    pub id: String,
+    pub account_id: String,
+    pub sender_address: String,
+    pub provider_rule_id: Option<String>,
+    pub created_at: i64,
+}
+
 // ── Phishing Allowlist ──────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

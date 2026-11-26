@@ -328,6 +328,12 @@ pub fn unlock<'a>() -> Text<'a> {
 pub fn shield<'a>() -> Text<'a> {
     to_text('\u{e158}')
 }
+pub fn user_x<'a>() -> Text<'a> {
+    to_text('\u{e1a3}')
+}
+pub fn mail_check<'a>() -> Text<'a> {
+    to_text('\u{e361}')
+}
 pub fn zap<'a>() -> Text<'a> {
     to_text('\u{e1b4}')
 }

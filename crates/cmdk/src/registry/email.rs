@@ -52,6 +52,18 @@ pub(super) fn register_email(out: &mut Vec<CommandDescriptor>) {
         "Report Spam / Not Spam",
         "Mark the thread as spam, or remove the spam flag if already marked. Can be undone.",
     ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::EmailBlockSender,
+            "Block",
+            "Email",
+            None,
+            |ctx| ctx.has_single_selection() && ctx.allows_remove_items(),
+            &["block", "junk", "spam", "sender"],
+        ),
+        "Block Sender",
+        "Move the thread to Spam and send every later message from its sender there too, on every device. Unblock from Settings.",
+    ));
     register_email_toggles(out);
     register_email_other(out);
 }
@@ -72,6 +84,18 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         )),
         "Mark as Read / Unread",
         "Toggle the read/unread status of the selected thread. Can be undone.",
+    ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::EmailMarkAllRead,
+            "Mark All as Read",
+            "Email",
+            None,
+            |ctx| ctx.allows_set_seen() && ctx.current_view.is_mailbox(),
+            &["seen", "read", "folder"],
+        ),
+        "Mark All as Read",
+        "Mark every message of the open folder as read, on the server too.",
     ));
     out.push(with_docs(undoable(toggle(
         CommandId::EmailStar, "Star", "Unstar", "Email",

@@ -499,6 +499,12 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
     );
     b.item(
         &message,
+        A::Command(C::EmailBlockSender),
+        &tr("main.row_menu.block_sender"),
+        None,
+    );
+    b.item(
+        &message,
         A::Command(C::EmailUnsubscribe),
         &tr("main.menu_bar.unsubscribe"),
         None,
@@ -956,6 +962,22 @@ impl ReadyApp {
             MenuAction::Account(index) => {
                 self.update(Message::Sidebar(SidebarMessage::SelectAccount(index)))
             }
+        }
+    }
+}
+
+impl ReadyApp {
+    /// Mark the open folder read, as the menu bar's Mark All as Read does.
+    /// Nothing happens on a view that is not one folder holding messages.
+    pub(crate) fn mark_open_folder_read(&mut self) -> Task<Message> {
+        match self
+            .sidebar
+            .selected_folder()
+            .filter(|folder| folder.holds_messages)
+            .and_then(|folder| folder_command(MenuAction::MarkFolderRead, folder))
+        {
+            Some(command) => self.handle_folder_command(command),
+            None => Task::none(),
         }
     }
 }

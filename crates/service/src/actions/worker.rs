@@ -158,6 +158,9 @@ async fn run(
         // Triggered by `pending_ops.kick`; same wakeup as the journal
         // / pending-ops drains.
         crate::snooze_runner::drain_due_snoozes(&action_ctx).await;
+        // Inbox mail that arrived from a blocked sender goes to Spam
+        // through the standard `SetSpam` action on the same wakeup.
+        crate::blocked_sender_runner::drain_blocked_senders(&action_ctx, sync_runtime).await;
         // Phase 2 task 18: each wakeup also drains the transient-retry
         // queue (`pending_operations`). Sharing a wakeup signal with
         // the journal drain keeps the worker single-purpose; both

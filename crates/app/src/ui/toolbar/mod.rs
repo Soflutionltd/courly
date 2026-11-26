@@ -18,10 +18,14 @@ use crate::icon;
 pub enum ToolbarItem {
     Delete,
     Archive,
-    Junk,
+    /// Block the sender, as Outlook's toolbar does. A bar saved when this
+    /// slot was the junk button gets Block in its place.
+    #[serde(alias = "junk")]
+    Block,
     Move,
     Flag,
     ReadUnread,
+    MarkAllRead,
     Snooze,
     Reply,
     ReplyAll,
@@ -36,13 +40,14 @@ pub enum ToolbarItem {
 
 impl ToolbarItem {
     /// Every button, in the customize panel's order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Delete,
         Self::Archive,
-        Self::Junk,
+        Self::Block,
         Self::Move,
         Self::Flag,
         Self::ReadUnread,
+        Self::MarkAllRead,
         Self::Snooze,
         Self::Reply,
         Self::ReplyAll,
@@ -59,10 +64,11 @@ impl ToolbarItem {
         match self {
             Self::Delete => CommandId::EmailTrash,
             Self::Archive => CommandId::EmailArchive,
-            Self::Junk => CommandId::EmailSpam,
+            Self::Block => CommandId::EmailBlockSender,
             Self::Move => CommandId::EmailMoveToFolder,
             Self::Flag => CommandId::EmailStar,
             Self::ReadUnread => CommandId::EmailMarkRead,
+            Self::MarkAllRead => CommandId::EmailMarkAllRead,
             Self::Snooze => CommandId::EmailSnooze,
             Self::Reply => CommandId::ComposeReply,
             Self::ReplyAll => CommandId::ComposeReplyAll,
@@ -80,10 +86,11 @@ impl ToolbarItem {
         match self {
             Self::Delete => icon::trash(),
             Self::Archive => icon::archive(),
-            Self::Junk => icon::shield(),
+            Self::Block => icon::user_x(),
             Self::Move => icon::folder(),
             Self::Flag => icon::flag(),
             Self::ReadUnread => icon::mail(),
+            Self::MarkAllRead => icon::mail_check(),
             Self::Snooze => icon::clock(),
             Self::Reply => icon::reply(),
             Self::ReplyAll => icon::reply_all(),
@@ -119,7 +126,7 @@ impl Default for ToolbarLayout {
             items: vec![
                 ToolbarItem::Delete,
                 ToolbarItem::Archive,
-                ToolbarItem::Junk,
+                ToolbarItem::Block,
                 ToolbarItem::Move,
                 ToolbarItem::Categorize,
                 ToolbarItem::Flag,
@@ -527,7 +534,7 @@ impl Toolbar {
 mod tests {
     use super::*;
 
-    use ToolbarItem::{Archive, Delete, Flag, Junk, Move, Pin};
+    use ToolbarItem::{Archive, Block, Delete, Flag, Move, Pin};
 
     fn bar(items: &[ToolbarItem]) -> Toolbar {
         Toolbar {
@@ -558,7 +565,7 @@ mod tests {
 
     #[test]
     fn the_gap_slides_open_where_the_button_lands_and_shut_where_it_left() {
-        let mut toolbar = bar(&[Archive, Delete, Flag, Junk, Move]);
+        let mut toolbar = bar(&[Archive, Delete, Flag, Block, Move]);
         toolbar.update(ToolbarMessage::DragStart(DragSource::Bar(1)));
         let lifted = std::time::Instant::now();
         let drag = toolbar.drag.as_ref().expect("dragging");
@@ -586,34 +593,34 @@ mod tests {
 
     #[test]
     fn dragging_a_button_right_reorders_the_bar() {
-        let mut toolbar = bar(&[Delete, Archive, Junk, Move]);
+        let mut toolbar = bar(&[Delete, Archive, Block, Move]);
         let event = drag(
             &mut toolbar,
             DragSource::Bar(0),
             Some(DropTarget::Before(3)),
         );
-        assert_eq!(toolbar.layout.items, vec![Archive, Junk, Delete, Move]);
+        assert_eq!(toolbar.layout.items, vec![Archive, Block, Delete, Move]);
         assert!(matches!(event, Some(ToolbarEvent::LayoutChanged(_))));
     }
 
     #[test]
     fn dragging_a_button_left_and_to_the_end() {
-        let mut toolbar = bar(&[Delete, Archive, Junk]);
+        let mut toolbar = bar(&[Delete, Archive, Block]);
         drag(
             &mut toolbar,
             DragSource::Bar(2),
             Some(DropTarget::Before(0)),
         );
-        assert_eq!(toolbar.layout.items, vec![Junk, Delete, Archive]);
+        assert_eq!(toolbar.layout.items, vec![Block, Delete, Archive]);
         drag(&mut toolbar, DragSource::Bar(0), Some(DropTarget::End));
-        assert_eq!(toolbar.layout.items, vec![Delete, Archive, Junk]);
+        assert_eq!(toolbar.layout.items, vec![Delete, Archive, Block]);
     }
 
     #[test]
     fn a_button_dropped_off_the_bar_is_removed() {
-        let mut toolbar = bar(&[Delete, Archive, Junk]);
+        let mut toolbar = bar(&[Delete, Archive, Block]);
         let event = drag(&mut toolbar, DragSource::Bar(1), None);
-        assert_eq!(toolbar.layout.items, vec![Delete, Junk]);
+        assert_eq!(toolbar.layout.items, vec![Delete, Block]);
         assert!(event.is_some());
     }
 
@@ -630,14 +637,14 @@ mod tests {
 
     #[test]
     fn a_pointer_that_jumps_in_one_event_still_drags() {
-        let mut toolbar = bar(&[Delete, Archive, Junk]);
+        let mut toolbar = bar(&[Delete, Archive, Block]);
         toolbar.update(ToolbarMessage::CursorMoved(Point::new(80.0, 10.0)));
         toolbar.update(ToolbarMessage::DragStart(DragSource::Bar(1)));
         toolbar.update(ToolbarMessage::DragLeave(DropTarget::Before(1)));
         toolbar.update(ToolbarMessage::DragOver(DropTarget::Before(0)));
         toolbar.update(ToolbarMessage::CursorMoved(Point::new(5.0, 10.0)));
         assert!(toolbar.update(ToolbarMessage::DragEnd).is_some());
-        assert_eq!(toolbar.layout.items, vec![Archive, Delete, Junk]);
+        assert_eq!(toolbar.layout.items, vec![Archive, Delete, Block]);
     }
 
     #[test]
@@ -702,6 +709,15 @@ mod tests {
             ToolbarLayout::default()
         );
         assert_eq!(ToolbarLayout::parse(None), ToolbarLayout::default());
+    }
+
+    #[test]
+    fn a_bar_saved_with_the_junk_button_gets_block_in_its_place() {
+        let saved = r#"{"items":["delete","junk","archive"],"labels":"always"}"#;
+        assert_eq!(
+            ToolbarLayout::parse(Some(saved)),
+            layout_of(&[Delete, Block, Archive], LabelMode::Always)
+        );
     }
 
     fn layout_of(items: &[ToolbarItem], labels: LabelMode) -> ToolbarLayout {

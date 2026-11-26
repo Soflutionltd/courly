@@ -555,6 +555,16 @@ pub struct DbTemplate {
     pub body_html: String,
 }
 
+// ── Blocked senders ─────────────────────────────────────────
+
+/// One blocked address, with the email of the account it is blocked on.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbBlockedSenderEntry {
+    pub account_id: String,
+    pub account_email: String,
+    pub sender_address: String,
+}
+
 // ── Signature ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

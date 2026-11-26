@@ -21,6 +21,7 @@ mod push;
 mod redacted;
 mod request;
 mod response;
+mod sender;
 mod settings;
 mod signature;
 mod smart_folder;
@@ -132,6 +133,7 @@ pub use request::{
     TestThreadReadParams,
 };
 pub use response::{HealthPingResponse, ShutdownResponse};
+pub use sender::{SenderBlockAck, SenderBlockParams, SenderUnblockAck};
 pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
 pub use signature::{
     SignatureCreateAck, SignatureCreateParams, SignatureDeleteAck, SignatureDeleteParams,

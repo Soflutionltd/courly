@@ -57,6 +57,25 @@ pub enum ViewType {
     PublicFolder,
 }
 
+impl ViewType {
+    /// Whether the view is one real folder of a mailbox, the only kind of
+    /// view a folder-wide action such as marking all read applies to.
+    /// Virtual views (Starred, Snoozed, All Mail, bundles, searches) span
+    /// several folders.
+    pub fn is_mailbox(self) -> bool {
+        matches!(
+            self,
+            Self::Inbox
+                | Self::Sent
+                | Self::Trash
+                | Self::Spam
+                | Self::SidebarItem
+                | Self::SharedMailbox
+                | Self::PublicFolder
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandContext {

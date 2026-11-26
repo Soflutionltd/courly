@@ -2,6 +2,7 @@ mod accounts;
 pub mod actions;
 mod attachment_compress;
 mod attachment_materialize;
+mod blocked_sender_runner;
 pub mod conduit;
 mod body_text_repair;
 mod boot;

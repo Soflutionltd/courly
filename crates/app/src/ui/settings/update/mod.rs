@@ -173,6 +173,18 @@ impl Component for Settings {
                 self.confirm_delete_signature = None;
                 return (Task::none(), None);
             }
+            SettingsMessage::UnblockSender {
+                account_id,
+                address,
+            } => {
+                return (
+                    Task::none(),
+                    Some(SettingsEvent::UnblockSender {
+                        account_id,
+                        address,
+                    }),
+                );
+            }
             SettingsMessage::ListDragMove(list_id, point) => {
                 return (self.handle_drag_move(&list_id, point), None);
             }
@@ -783,6 +795,7 @@ impl Settings {
                     prefs.vip_senders.clone_from(&self.vip_senders);
                 }
             }
+            SettingsMessage::BlockedSendersLoaded(senders) => self.blocked_senders = senders,
             SettingsMessage::AiProviderChanged(v) => {
                 self.ai_provider = v;
                 self.open_select = None;

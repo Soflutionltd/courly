@@ -49,6 +49,14 @@ pub enum SettingsMessage {
     VipEmailChanged(String),
     AddVipSender,
     RemoveVipSender(String),
+    // Blocked senders
+    /// The blocked list was read from the database.
+    BlockedSendersLoaded(Vec<super::BlockedSender>),
+    /// The user asked to unblock one address on one account.
+    UnblockSender {
+        account_id: String,
+        address: String,
+    },
     // AI
     AiProviderChanged(String),
     AiModelChanged(String),
@@ -294,6 +302,11 @@ pub enum SettingsEvent {
     ImportPastedSignature(String),
     /// Request the App to delete a signature by ID.
     DeleteSignature(String),
+    /// Request the App to unblock an address on an account via the Service.
+    UnblockSender {
+        account_id: String,
+        address: String,
+    },
     /// Request the App to reorder signatures by ID list.
     ReorderSignatures(Vec<String>),
     /// Request the App to save a contact.

@@ -6911,7 +6911,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
  "types",
  "unicode-segmentation",
  "url",

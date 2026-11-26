@@ -1,5 +1,5 @@
-use iced::Length;
-use iced::widget::{Space, column, text};
+use iced::widget::{Space, button, column, container, row, text};
+use iced::{Alignment, Length};
 use rust_i18n::t;
 
 use crate::ui::layout::*;
@@ -223,8 +223,68 @@ pub(super) fn reading_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
             ),
         ],
     ));
+    col = col.push(blocked_senders_section(state));
 
     col.into()
+}
+
+/// Addresses whose mail goes to Junk, one row each with its account and an
+/// Unblock button. Blocking happens from a message's right-click menu.
+fn blocked_senders_section(state: &Settings) -> iced::Element<'_, SettingsMessage> {
+    let mut list = column![].spacing(SPACE_XXXS).width(Length::Fill);
+    let note = if state.blocked_senders.is_empty() {
+        t!("settings.general.blocked_senders_empty")
+    } else {
+        t!("settings.general.blocked_senders_description")
+    };
+    list = list.push(
+        container(
+            text(note)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill),
+    );
+    for blocked in &state.blocked_senders {
+        list = list.push(
+            container(
+                row![
+                    container(
+                        column![
+                            text(blocked.address.clone())
+                                .size(TEXT_LG)
+                                .style(text::base),
+                            text(blocked.account_email.clone())
+                                .size(TEXT_SM)
+                                .style(theme::TextClass::Tertiary.style()),
+                        ]
+                        .spacing(SPACE_XXXS),
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                    button(
+                        text(t!("settings.general.unblock"))
+                            .size(TEXT_SM)
+                            .style(text::danger)
+                    )
+                    .on_press(SettingsMessage::UnblockSender {
+                        account_id: blocked.account_id.clone(),
+                        address: blocked.address.clone(),
+                    })
+                    .padding(PAD_ICON_BTN)
+                    .style(theme::ButtonClass::Action.style()),
+                ]
+                .align_y(Alignment::Center),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill),
+        );
+    }
+    section(
+        tr(t!("settings.general.blocked_senders")),
+        vec![static_row(list)],
+    )
 }
 
 pub(super) fn sending_section(state: &Settings) -> iced::Element<'_, SettingsMessage> {
