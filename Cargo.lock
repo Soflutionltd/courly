@@ -5088,7 +5088,9 @@ dependencies = [
  "crypto-key",
  "db",
  "flutter_rust_bridge",
+ "label-colors",
  "log",
+ "rtsk",
  "rusqlite",
  "serde",
  "serde_json",
@@ -5096,6 +5098,7 @@ dependencies = [
  "service-api",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]

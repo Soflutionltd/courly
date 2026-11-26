@@ -4,6 +4,8 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/database.dart';
+import 'api/engine.dart';
+import 'api/microsoft.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -69,7 +71,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -581495265;
+  int get rustContentHash => -1189901422;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -81,11 +83,21 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<BigInt> crateApiEngineEnginePing();
+
   Future<void> crateApiDatabaseInitApp();
+
+  Future<AddedAccount> crateApiMicrosoftMicrosoftSignInFinish({
+    required String callbackUrl,
+  });
+
+  Future<MicrosoftSignIn> crateApiMicrosoftMicrosoftSignInStart();
 
   Future<DatabaseReport> crateApiDatabaseOpenCourlyDatabase({
     required String dataDir,
   });
+
+  Future<EngineReady> crateApiEngineStartEngine({required String dataDir});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -97,7 +109,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
-  Future<void> crateApiDatabaseInitApp() {
+  Future<BigInt> crateApiEngineEnginePing() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -106,6 +118,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             generalizedFrbRustBinding,
             serializer,
             funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_64,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineEnginePingConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineEnginePingConstMeta =>
+      const TaskConstMeta(debugName: "engine_ping", argNames: []);
+
+  @override
+  Future<void> crateApiDatabaseInitApp() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
             port: port_,
           );
         },
@@ -124,6 +163,66 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
+  Future<AddedAccount> crateApiMicrosoftMicrosoftSignInFinish({
+    required String callbackUrl,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(callbackUrl, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_added_account,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMicrosoftMicrosoftSignInFinishConstMeta,
+        argValues: [callbackUrl],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMicrosoftMicrosoftSignInFinishConstMeta =>
+      const TaskConstMeta(
+        debugName: "microsoft_sign_in_finish",
+        argNames: ["callbackUrl"],
+      );
+
+  @override
+  Future<MicrosoftSignIn> crateApiMicrosoftMicrosoftSignInStart() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_microsoft_sign_in,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMicrosoftMicrosoftSignInStartConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMicrosoftMicrosoftSignInStartConstMeta =>
+      const TaskConstMeta(debugName: "microsoft_sign_in_start", argNames: []);
+
+  @override
   Future<DatabaseReport> crateApiDatabaseOpenCourlyDatabase({
     required String dataDir,
   }) {
@@ -135,7 +234,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 5,
             port: port_,
           );
         },
@@ -156,10 +255,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: ["dataDir"],
       );
 
+  @override
+  Future<EngineReady> crateApiEngineStartEngine({required String dataDir}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dataDir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_engine_ready,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineStartEngineConstMeta,
+        argValues: [dataDir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineStartEngineConstMeta =>
+      const TaskConstMeta(debugName: "start_engine", argNames: ["dataDir"]);
+
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as String;
+  }
+
+  @protected
+  AddedAccount dco_decode_added_account(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return AddedAccount(
+      accountId: dco_decode_String(arr[0]),
+      email: dco_decode_String(arr[1]),
+      displayName: dco_decode_opt_String(arr[2]),
+    );
   }
 
   @protected
@@ -176,15 +316,58 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  EngineReady dco_decode_engine_ready(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return EngineReady(
+      schemaVersion: dco_decode_u_32(arr[0]),
+      migrationsApplied: dco_decode_u_32(arr[1]),
+      recoveryWarnings: dco_decode_list_String(arr[2]),
+    );
+  }
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
   }
 
   @protected
+  MicrosoftSignIn dco_decode_microsoft_sign_in(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return MicrosoftSignIn(
+      authUrl: dco_decode_String(arr[0]),
+      callbackScheme: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  String? dco_decode_opt_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
   int dco_decode_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
   }
 
   @protected
@@ -207,6 +390,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AddedAccount sse_decode_added_account(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_accountId = sse_decode_String(deserializer);
+    var var_email = sse_decode_String(deserializer);
+    var var_displayName = sse_decode_opt_String(deserializer);
+    return AddedAccount(
+      accountId: var_accountId,
+      email: var_email,
+      displayName: var_displayName,
+    );
+  }
+
+  @protected
   DatabaseReport sse_decode_database_report(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_schemaVersion = sse_decode_u_32(deserializer);
@@ -220,6 +416,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  EngineReady sse_decode_engine_ready(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_schemaVersion = sse_decode_u_32(deserializer);
+    var var_migrationsApplied = sse_decode_u_32(deserializer);
+    var var_recoveryWarnings = sse_decode_list_String(deserializer);
+    return EngineReady(
+      schemaVersion: var_schemaVersion,
+      migrationsApplied: var_migrationsApplied,
+      recoveryWarnings: var_recoveryWarnings,
+    );
+  }
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <String>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -227,9 +448,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MicrosoftSignIn sse_decode_microsoft_sign_in(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_authUrl = sse_decode_String(deserializer);
+    var var_callbackScheme = sse_decode_String(deserializer);
+    return MicrosoftSignIn(
+      authUrl: var_authUrl,
+      callbackScheme: var_callbackScheme,
+    );
+  }
+
+  @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int sse_decode_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint32();
+  }
+
+  @protected
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
   }
 
   @protected
@@ -262,6 +511,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_added_account(AddedAccount self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.accountId, serializer);
+    sse_encode_String(self.email, serializer);
+    sse_encode_opt_String(self.displayName, serializer);
+  }
+
+  @protected
   void sse_encode_database_report(
     DatabaseReport self,
     SseSerializer serializer,
@@ -270,6 +527,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.schemaVersion, serializer);
     sse_encode_u_32(self.migrationsApplied, serializer);
     sse_encode_u_32(self.tableCount, serializer);
+  }
+
+  @protected
+  void sse_encode_engine_ready(EngineReady self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.schemaVersion, serializer);
+    sse_encode_u_32(self.migrationsApplied, serializer);
+    sse_encode_list_String(self.recoveryWarnings, serializer);
+  }
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_String(item, serializer);
+    }
   }
 
   @protected
@@ -283,9 +557,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_microsoft_sign_in(
+    MicrosoftSignIn self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.authUrl, serializer);
+    sse_encode_String(self.callbackScheme, serializer);
+  }
+
+  @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint32(self);
+  }
+
+  @protected
+  void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putBigUint64(self);
   }
 
   @protected

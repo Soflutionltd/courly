@@ -113,7 +113,7 @@ fn running_engine() -> Result<&'static Engine, String> {
 }
 
 /// Send one request and wait for its response, decoded as `T`.
-fn call<T: serde::de::DeserializeOwned>(params: RequestParams) -> Result<T, String> {
+pub(crate) fn call<T: serde::de::DeserializeOwned>(params: RequestParams) -> Result<T, String> {
     let engine = running_engine()?;
     let id = engine.next_id.fetch_add(1, Ordering::Relaxed);
     let (reply_tx, reply_rx) = oneshot::channel();

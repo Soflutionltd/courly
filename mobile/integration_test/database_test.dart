@@ -8,14 +8,14 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async => await RustLib.init());
 
-  testWidgets('the Rust core opens the Courly database on the device', (
+  testWidgets('the Courly engine boots on the device and offers sign-in', (
     tester,
   ) async {
     await tester.pumpWidget(const CourlyApp());
-    await tester.pumpAndSettle();
+    await tester.pumpAndSettle(const Duration(seconds: 1));
 
-    expect(find.byKey(const Key('database-error')), findsNothing);
-    expect(find.byKey(const Key('database-report')), findsOneWidget);
-    expect(find.textContaining('Courly core ready'), findsOneWidget);
+    expect(find.byKey(const Key('engine-error')), findsNothing);
+    expect(find.byKey(const Key('engine-ready')), findsOneWidget);
+    expect(find.byKey(const Key('add-microsoft')), findsOneWidget);
   });
 }

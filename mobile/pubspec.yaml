@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: 2.13.0
+  flutter_web_auth_2: ^6.1.0
   material_ui: ^1.1.0
   mobile_bridge:
     path: rust_builder
