@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="courly_mobile"
+        android:label="Courly"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
