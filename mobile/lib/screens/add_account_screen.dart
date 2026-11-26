@@ -1,8 +1,10 @@
 import 'package:courly_mobile/screens/password_account_screen.dart';
 import 'package:courly_mobile/src/rust/api/accounts.dart';
 import 'package:courly_mobile/src/rust/api/microsoft.dart';
+import 'package:courly_mobile/widgets/glass.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// The sheet the "+" opens, as in Outlook: add a mail account, or cancel.
@@ -17,7 +19,7 @@ Future<bool?> showAddAccountSheet(BuildContext context) async {
         children: [
           ListTile(
             key: const Key('sheet-add-mail'),
-            leading: const Icon(Icons.mail_outline),
+            leading: const Icon(LucideIcons.mail),
             title: const Text('Ajouter un compte de courrier'),
             subtitle: const Text('Outlook, Gmail, Exchange, iCloud…'),
             onTap: () => Navigator.of(sheetContext).pop(true),
@@ -144,15 +146,14 @@ class _AddAccountScreenState extends State<AddAccountScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          key: const Key('close-add-account'),
-          tooltip: 'Fermer',
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(false),
-        ),
-        title: const Text('Ajouter un compte'),
+    return GlassPage(
+      title: 'Ajouter un compte',
+      leading: GlassIconButton(
+        key: const Key('close-add-account'),
+        symbol: 'xmark',
+        icon: LucideIcons.x,
+        label: 'Fermer',
+        onPressed: () => Navigator.of(context).pop(false),
       ),
       body: SafeArea(
         child: ListView(
@@ -174,7 +175,6 @@ class _AddAccountScreenState extends State<AddAccountScreen> {
               autofillHints: const [AutofillHints.email],
               decoration: const InputDecoration(
                 labelText: 'Adresse de courrier',
-                border: OutlineInputBorder(),
               ),
               onSubmitted: (_) {
                 if (_looksLikeAddress && !_isWorking) _continue();

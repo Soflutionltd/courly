@@ -1,4 +1,6 @@
 import 'package:courly_mobile/src/rust/api/accounts.dart';
+import 'package:courly_mobile/widgets/glass.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -155,8 +157,14 @@ class _PasswordAccountScreenState extends State<PasswordAccountScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isManual = widget.discovered.method == SignInMethod.manual;
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.email)),
+    return GlassPage(
+      title: widget.email,
+      leading: GlassIconButton(
+        symbol: 'chevron.left',
+        icon: LucideIcons.chevronLeft,
+        label: 'Retour',
+        onPressed: () => Navigator.of(context).maybePop(),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
@@ -183,7 +191,7 @@ class _PasswordAccountScreenState extends State<PasswordAccountScreen> {
                       OutlinedButton.icon(
                         key: const Key('open-app-passwords'),
                         onPressed: _openAppPasswords,
-                        icon: const Icon(Icons.open_in_new),
+                        icon: const Icon(LucideIcons.externalLink, size: 18),
                         label: const Text(
                           'Créer un mot de passe d\'application',
                         ),
@@ -207,11 +215,10 @@ class _PasswordAccountScreenState extends State<PasswordAccountScreen> {
                 labelText: _isGmail
                     ? 'Mot de passe d\'application'
                     : 'Mot de passe',
-                border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   tooltip: _isPasswordHidden ? 'Afficher' : 'Masquer',
                   icon: Icon(
-                    _isPasswordHidden ? Icons.visibility : Icons.visibility_off,
+                    _isPasswordHidden ? LucideIcons.eye : LucideIcons.eyeOff,
                   ),
                   onPressed: () =>
                       setState(() => _isPasswordHidden = !_isPasswordHidden),
@@ -254,10 +261,7 @@ class _PasswordAccountScreenState extends State<PasswordAccountScreen> {
                   controller: _username,
                   enabled: !_isWorking,
                   autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'Identifiant',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: 'Identifiant'),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -325,10 +329,7 @@ class _ServerFields extends StatelessWidget {
           enabled: enabled,
           autocorrect: false,
           keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            labelText: 'Serveur',
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(labelText: 'Serveur'),
         ),
         const SizedBox(height: 8),
         Row(
@@ -339,20 +340,14 @@ class _ServerFields extends StatelessWidget {
                 controller: port,
                 enabled: enabled,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Port',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: 'Port'),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<String>(
                 initialValue: security,
-                decoration: const InputDecoration(
-                  labelText: 'Sécurité',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: 'Sécurité'),
                 items: [
                   for (final value in securities)
                     DropdownMenuItem(

@@ -2,6 +2,9 @@ import 'package:courly_mobile/screens/compose_screen.dart';
 import 'package:courly_mobile/src/rust/api/actions.dart';
 import 'package:courly_mobile/src/rust/api/compose.dart';
 import 'package:courly_mobile/src/rust/api/thread.dart';
+import 'package:courly_mobile/widgets/glass.dart';
+import 'package:courly_mobile/widgets/sender_avatar.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -130,51 +133,52 @@ class _ThreadScreenState extends State<ThreadScreen> {
   @override
   Widget build(BuildContext context) {
     final thread = _thread;
-    return Scaffold(
-      appBar: AppBar(
-        actions: [
-          IconButton(
-            key: const Key('archive-thread'),
-            tooltip: 'Archiver',
-            icon: const Icon(Icons.archive_outlined),
-            onPressed: () => _act(ThreadOutcome.archived),
-          ),
-          IconButton(
-            key: const Key('delete-thread'),
-            tooltip: 'Supprimer',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => _act(ThreadOutcome.deleted),
-          ),
-        ],
+    return GlassPage(
+      leading: GlassIconButton(
+        key: const Key('back'),
+        symbol: 'chevron.left',
+        icon: LucideIcons.chevronLeft,
+        label: 'Retour',
+        onPressed: () => Navigator.of(context).maybePop(),
       ),
-      body: _body(context, thread),
-      bottomNavigationBar: thread == null || thread.messages.isEmpty
+      actions: [
+        AdaptiveAppBarAction(
+          iosSymbol: 'archivebox',
+          icon: LucideIcons.archive,
+          label: 'Archiver',
+          onPressed: () => _act(ThreadOutcome.archived),
+        ),
+        AdaptiveAppBarAction(
+          iosSymbol: 'trash',
+          icon: LucideIcons.trash2,
+          label: 'Supprimer',
+          onPressed: () => _act(ThreadOutcome.deleted),
+        ),
+      ],
+      // Built inside the page, where the padding includes the glass bar.
+      body: Builder(builder: (context) => _body(context, thread)),
+      bottom: thread == null || thread.messages.isEmpty
           ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        key: const Key('reply'),
-                        onPressed: () => _reply(ComposeMode.reply),
-                        icon: const Icon(Icons.reply),
-                        label: const Text('Répondre'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        key: const Key('reply-all'),
-                        onPressed: () => _reply(ComposeMode.replyAll),
-                        icon: const Icon(Icons.reply_all),
-                        label: const Text('Répondre à tous'),
-                      ),
-                    ),
-                  ],
+          : Row(
+              children: [
+                Expanded(
+                  child: GlassLabelButton(
+                    key: const Key('reply'),
+                    label: 'Répondre',
+                    icon: LucideIcons.reply,
+                    onPressed: () => _reply(ComposeMode.reply),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GlassLabelButton(
+                    key: const Key('reply-all'),
+                    label: 'Répondre à tous',
+                    icon: LucideIcons.replyAll,
+                    onPressed: () => _reply(ComposeMode.replyAll),
+                  ),
+                ),
+              ],
             ),
     );
   }
@@ -199,7 +203,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
     final latest = thread.messages.isEmpty ? null : thread.messages.last.id;
     return ListView(
       key: const Key('thread-view'),
-      padding: const EdgeInsets.only(bottom: 32),
+      // Starts below the glass bar and ends above the reply buttons.
+      padding: EdgeInsets.only(
+        top: MediaQuery.paddingOf(context).top,
+        bottom: MediaQuery.paddingOf(context).bottom + 88,
+      ),
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
@@ -245,7 +253,7 @@ class _RemoteImagesNotice extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.image_not_supported_outlined, size: 20),
+          const Icon(LucideIcons.imageOff, size: 20),
           const SizedBox(width: 8),
           const Expanded(
             child: Text(
@@ -278,9 +286,6 @@ class _MessageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final initial = message.sender.isEmpty
-        ? '?'
-        : message.sender.characters.first.toUpperCase();
     final header = InkWell(
       onTap: onToggle,
       child: Padding(
@@ -288,7 +293,7 @@ class _MessageCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CircleAvatar(radius: 18, child: Text(initial)),
+            SenderAvatar(name: message.sender, size: 36),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -443,7 +448,7 @@ class _Attachments extends StatelessWidget {
         for (final attachment in attachments)
           ListTile(
             dense: true,
-            leading: const Icon(Icons.insert_drive_file_outlined),
+            leading: const Icon(LucideIcons.file),
             title: Text(
               attachment.filename.isEmpty ? '(sans nom)' : attachment.filename,
               maxLines: 1,

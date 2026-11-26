@@ -1,15 +1,5 @@
 import 'dart:async';
 
-import 'package:adaptive_platform_ui/adaptive_platform_ui.dart'
-    show
-        AdaptiveAppBar,
-        AdaptiveAppBarAction,
-        AdaptiveScaffold,
-        IOS26Button,
-        IOS26ButtonSize,
-        IOS26ButtonStyle,
-        PlatformInfo,
-        SFSymbol;
 import 'package:courly_mobile/screens/add_account_screen.dart';
 import 'package:courly_mobile/screens/compose_screen.dart';
 import 'package:courly_mobile/src/rust/api/actions.dart';
@@ -18,6 +8,7 @@ import 'package:courly_mobile/screens/thread_screen.dart';
 import 'package:courly_mobile/src/rust/api/mailbox.dart';
 import 'package:courly_mobile/theme.dart';
 import 'package:courly_mobile/widgets/account_avatar.dart';
+import 'package:courly_mobile/widgets/glass.dart';
 import 'package:courly_mobile/widgets/sender_avatar.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
@@ -37,6 +28,8 @@ class InboxScreen extends StatefulWidget {
 class _InboxScreenState extends State<InboxScreen> {
   /// How often the list is read again while accounts sync.
   static const _refreshEvery = Duration(seconds: 5);
+
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<AccountSummary> _accounts = const [];
   List<ThreadSummary> _threads = const [];
@@ -171,7 +164,8 @@ class _InboxScreenState extends State<InboxScreen> {
   Widget build(BuildContext context) {
     final selected = _selectedAccount;
     final theme = Theme.of(context);
-    return Scaffold(
+    return GlassPage(
+      scaffoldKey: _scaffoldKey,
       drawer: _AccountDrawer(
         accounts: _accounts,
         selectedId: _accountId,
@@ -183,55 +177,39 @@ class _InboxScreenState extends State<InboxScreen> {
           _addAccount();
         },
       ),
-      // The bar is iOS's own UIToolbar, Liquid Glass on iOS 26: the list
-      // scrolls underneath it and shows through.
-      body: Builder(
-        builder: (context) => AdaptiveScaffold(
-          backgroundColor: theme.colorScheme.surface,
-          appBar: AdaptiveAppBar(
-            useNativeToolbar: true,
-            tintColor: theme.colorScheme.primary,
-            leading: _MenuButton(
-              account: selected,
-              onPressed: () => Scaffold.of(context).openDrawer(),
-            ),
-            actions: [
-              if (_accounts.isNotEmpty)
-                AdaptiveAppBarAction(
-                  iosSymbol: 'square.and.pencil',
-                  icon: LucideIcons.squarePen,
-                  label: 'Nouveau message',
-                  onPressed: _newMessage,
-                ),
-            ],
+      leading: _MenuButton(
+        account: selected,
+        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+      ),
+      actions: [
+        if (_accounts.isNotEmpty)
+          AdaptiveAppBarAction(
+            iosSymbol: 'square.and.pencil',
+            icon: LucideIcons.squarePen,
+            label: 'Nouveau message',
+            onPressed: _newMessage,
           ),
-          body: Stack(
-            children: [
-              RefreshIndicator(
-                onRefresh: _reload,
-                child: CustomScrollView(
-                  key: const Key('inbox-list'),
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
-                    SliverSafeArea(
-                      bottom: false,
-                      sliver: SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-                          child: Text(
-                            selected?.name ?? 'Boîte de réception',
-                            style: theme.textTheme.headlineMedium,
-                          ),
-                        ),
-                      ),
-                    ),
-                    ..._body(context),
-                  ],
+      ],
+      body: RefreshIndicator(
+        onRefresh: _reload,
+        child: CustomScrollView(
+          key: const Key('inbox-list'),
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverSafeArea(
+              bottom: false,
+              sliver: SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                  child: Text(
+                    selected?.name ?? 'Boîte de réception',
+                    style: theme.textTheme.headlineMedium,
+                  ),
                 ),
               ),
-              const _ScrollEdgeFade(),
-            ],
-          ),
+            ),
+            ..._body(context),
+          ],
         ),
       ),
     );
@@ -317,40 +295,6 @@ class _InboxScreenState extends State<InboxScreen> {
 
 /// What shows under a row while it is swiped, as in Outlook: archive to
 /// the right in green, delete to the left in red.
-/// iOS 26's scroll edge effect, which UIKit only draws over its own scroll
-/// views: the list fades out under the status bar and the glass buttons
-/// instead of showing through at full contrast.
-class _ScrollEdgeFade extends StatelessWidget {
-  const _ScrollEdgeFade();
-
-  @override
-  Widget build(BuildContext context) {
-    final surface = Theme.of(context).colorScheme.surface;
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      height: MediaQuery.paddingOf(context).top + 12,
-      child: IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                surface,
-                surface.withValues(alpha: 0.85),
-                surface.withValues(alpha: 0),
-              ],
-              stops: const [0, 0.55, 1],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// The button that opens the side menu: the chosen account's badge, or
 /// the menu glyph when every account is shown.
 class _MenuButton extends StatelessWidget {
@@ -362,40 +306,18 @@ class _MenuButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = account;
-    if (!PlatformInfo.isIOS26OrHigher()) {
-      return IconButton(
-        key: const Key('open-menu'),
-        tooltip: 'Comptes et dossiers',
-        onPressed: onPressed,
-        icon: selected == null
-            ? const Icon(LucideIcons.menu, size: 22)
-            : AccountAvatar(account: selected, size: 30),
-      );
-    }
-    // A Liquid Glass capsule of its own, like the compose button opposite.
-    const size = Size(44, 44);
-    return Semantics(
+    return KeyedSubtree(
       key: const Key('open-menu'),
-      label: 'Comptes et dossiers',
-      button: true,
       child: selected == null
-          ? IOS26Button.sfSymbol(
+          ? GlassIconButton(
+              symbol: 'line.3.horizontal',
+              icon: LucideIcons.menu,
+              label: 'Comptes et dossiers',
               onPressed: onPressed,
-              sfSymbol: SFSymbol(
-                'line.3.horizontal',
-                size: 17,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              size: IOS26ButtonSize.large,
-              minSize: size,
-              useSmoothRectangleBorder: false,
             )
-          : IOS26Button.child(
+          : GlassChildButton(
+              label: 'Comptes et dossiers',
               onPressed: onPressed,
-              style: IOS26ButtonStyle.glass,
-              size: IOS26ButtonSize.large,
-              minSize: size,
-              useSmoothRectangleBorder: false,
               child: AccountAvatar(account: selected, size: 32),
             ),
     );

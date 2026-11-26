@@ -1,4 +1,6 @@
 import 'package:courly_mobile/src/rust/api/compose.dart';
+import 'package:courly_mobile/widgets/glass.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -166,31 +168,46 @@ class _ComposeScreenState extends State<ComposeScreen> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _close();
       },
-      child: Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            key: const Key('close-compose'),
-            tooltip: 'Fermer',
-            icon: const Icon(Icons.close),
-            onPressed: _close,
-          ),
-          title: Text(_title),
-          actions: [
-            IconButton(
-              key: const Key('send-mail'),
-              tooltip: 'Envoyer',
-              icon: _sending
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send),
-              onPressed: _draft == null || _sending ? null : _send,
-            ),
-          ],
+      child: GlassPage(
+        title: _title,
+        leading: GlassIconButton(
+          key: const Key('close-compose'),
+          symbol: 'xmark',
+          icon: LucideIcons.x,
+          label: 'Fermer',
+          onPressed: _close,
         ),
-        body: _bodyView(context),
+        actions: [
+          AdaptiveAppBarAction(
+            iosSymbol: 'arrow.up',
+            icon: LucideIcons.send,
+            label: 'Envoyer',
+            prominent: true,
+            tintColor: Theme.of(context).colorScheme.primary,
+            onPressed: _send,
+          ),
+        ],
+        // Built inside the page, where the padding includes the glass bar.
+        body: Builder(
+          builder: (context) => Column(
+            children: [
+              if (_sending)
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: MediaQuery.paddingOf(context).top,
+                  ),
+                  child: const LinearProgressIndicator(minHeight: 2),
+                ),
+              Expanded(
+                child: MediaQuery.removePadding(
+                  context: context,
+                  removeTop: _sending,
+                  child: _bodyView(context),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -226,7 +243,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
               : IconButton(
                   key: const Key('show-copies'),
                   tooltip: 'Cc et Cci',
-                  icon: const Icon(Icons.expand_more),
+                  icon: const Icon(LucideIcons.chevronDown, size: 20),
                   onPressed: () => setState(() => _showCopies = true),
                 ),
           child: _Field(
@@ -272,9 +289,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
             maxLines: null,
             keyboardType: TextInputType.multiline,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration.collapsed(
-              hintText: 'Votre message',
-            ),
+            decoration: _bareField.copyWith(hintText: 'Votre message'),
           ),
         ),
         if (draft.quotePreviewHtml.isNotEmpty)
@@ -347,7 +362,7 @@ class _Field extends StatelessWidget {
       textCapitalization: capitalization,
       autofocus: autofocus,
       autocorrect: keyboardType != TextInputType.emailAddress,
-      decoration: const InputDecoration.collapsed(hintText: ''),
+      decoration: _bareField,
     );
   }
 }
@@ -402,3 +417,14 @@ class _QuotePreviewState extends State<_QuotePreview> {
     );
   }
 }
+
+/// A field with no box, as Mail's compose fields: the rows' own dividers
+/// frame it, so the app's filled and outlined field style must not apply.
+const _bareField = InputDecoration(
+  isCollapsed: true,
+  filled: false,
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  disabledBorder: InputBorder.none,
+);
