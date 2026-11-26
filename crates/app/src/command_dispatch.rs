@@ -497,6 +497,7 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
 
         // Undo
         CommandId::Undo => Some(Message::Undo),
+        CommandId::Redo => Some(Message::Redo),
 
         // Pinned searches
         CommandId::PinnedSearchesClearAll => Some(Message::ClearAllPinnedSearches),

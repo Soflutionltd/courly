@@ -162,8 +162,19 @@ impl ReadyApp {
             return Task::batch(tasks);
         }
 
-        tasks.push(self.run_email_action(intent, &selected_threads));
+        tasks.push(self.run_email_action(intent, &selected_threads, false));
         Task::batch(tasks)
+    }
+
+    /// Perform again the action undone last, on the threads it was given.
+    pub(crate) fn redo_last_action(&mut self) -> Task<Message> {
+        let Some(entry) = self.undo_stack.pop_undone() else {
+            return Task::none();
+        };
+        let Some(redo) = entry.redo else {
+            return Task::none();
+        };
+        self.run_email_action(redo.intent, &redo.threads, true)
     }
 
     /// Delete a draft not yet synced. Its row goes at the click; the store
@@ -186,22 +197,31 @@ impl ReadyApp {
         self.run_email_action(
             crate::action_resolve::MailActionIntent::PermanentDelete,
             &threads,
+            false,
         )
     }
 
+    /// Resolve, plan and dispatch an intent on threads. `redone` marks a
+    /// replay by redo, which keeps the rest of the redo list.
     fn run_email_action(
         &mut self,
         intent: crate::action_resolve::MailActionIntent,
         selected_threads: &[(String, String)],
+        redone: bool,
     ) -> Task<Message> {
         // ── Resolve → Plan → Dispatch ───────────────────────────
         use crate::action_resolve::{self as ar, OptimisticMutation, UiContext};
         let ui_ctx = UiContext {
             selection: self.sidebar.selection.clone(),
         };
+        let redo = ar::RedoAction {
+            intent: intent.clone(),
+            threads: selected_threads.to_vec(),
+        };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
 
-        let Some(plan) = ar::build_execution_plan(outcome, selected_threads, &mut self.thread_list)
+        let Some(mut plan) =
+            ar::build_execution_plan(outcome, selected_threads, &mut self.thread_list)
         else {
             // NoOp (Unsubscribe): no core operation, the open thread's
             // list headers say how to leave. The result toast comes from
@@ -238,6 +258,11 @@ impl ReadyApp {
             }
         }
 
+        plan.replay = if redone {
+            ar::Replay::Redone(redo)
+        } else {
+            ar::Replay::Fresh(redo)
+        };
         self.dispatch_plan_advancing(plan)
     }
 
@@ -488,6 +513,7 @@ impl ReadyApp {
                         .collect(),
                     held_selection: false,
                 },
+                replay: plan.replay.for_account(&account_id),
             };
             tasks.push(self.dispatch_plan_with_undo(sub_plan, undo_description.cloned()));
         }
@@ -1054,7 +1080,17 @@ impl ReadyApp {
             let payloads = ar::build_undo_payloads(plan, outcomes);
             if !payloads.is_empty() {
                 let desc = ar::undo_description(&payloads);
-                self.undo_stack.push(desc, payloads);
+                match &plan.replay {
+                    ar::Replay::Redone(redo) => {
+                        self.undo_stack
+                            .push_redone(desc, payloads, Some(redo.clone()));
+                    }
+                    ar::Replay::Fresh(redo) => {
+                        self.undo_stack
+                            .push_action(desc, payloads, Some(redo.clone()));
+                    }
+                    ar::Replay::None => self.undo_stack.push_action(desc, payloads, None),
+                }
             }
         }
 
@@ -1096,7 +1132,10 @@ impl ReadyApp {
     /// to cancel those retry rows before dispatching the inverse plan.
     pub(crate) fn dispatch_undo(
         &mut self,
-        entry: &cmdk::UndoEntry<crate::action_resolve::MailUndoPayload>,
+        entry: &cmdk::UndoEntry<
+            crate::action_resolve::MailUndoPayload,
+            Option<crate::action_resolve::RedoAction>,
+        >,
     ) -> Task<Message> {
         use crate::action_resolve as ar;
         use service_api::actions::MailOperation;
@@ -1169,6 +1208,7 @@ impl ReadyApp {
             compensation: ar::CompensationContext::None,
             optimistic: Vec::new(),
             hidden: ar::HiddenThreads::default(),
+            replay: ar::Replay::None,
         };
         Task::batch([
             cancel_task,

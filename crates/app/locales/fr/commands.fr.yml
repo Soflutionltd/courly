@@ -132,6 +132,7 @@ _version: 1
 "cmd.Sync Current Folder": "Synchroniser le dossier actuel"
 "cmd.Command Palette": "Palette de commandes"
 "cmd.Undo": "Annuler"
+"cmd.Redo": "Répéter"
 "cmd.Rebuild Search Index": "Reconstruire l'index de recherche"
 "cmd.Save Search": "Enregistrer la recherche"
 "cmd.Save as Smart Folder": "Enregistrer comme dossier intelligent"

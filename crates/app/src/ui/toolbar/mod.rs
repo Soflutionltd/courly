@@ -36,12 +36,13 @@ pub enum ToolbarItem {
     Categorize,
     Sync,
     Undo,
+    Redo,
     Unsubscribe,
 }
 
 impl ToolbarItem {
     /// Every button, in the customize panel's order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::Delete,
         Self::Archive,
         Self::Block,
@@ -59,6 +60,7 @@ impl ToolbarItem {
         Self::Categorize,
         Self::Sync,
         Self::Undo,
+        Self::Redo,
         Self::Unsubscribe,
     ];
 
@@ -81,6 +83,7 @@ impl ToolbarItem {
             Self::Categorize => CommandId::EmailAddLabel,
             Self::Sync => CommandId::AppSyncFolder,
             Self::Undo => CommandId::Undo,
+            Self::Redo => CommandId::Redo,
             Self::Unsubscribe => CommandId::EmailUnsubscribe,
         }
     }
@@ -104,6 +107,7 @@ impl ToolbarItem {
             Self::Categorize => icon::tag(),
             Self::Sync => icon::refresh(),
             Self::Undo => icon::undo(),
+            Self::Redo => icon::redo(),
             Self::Unsubscribe => icon::x(),
         }
     }

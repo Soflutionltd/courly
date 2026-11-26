@@ -77,6 +77,18 @@ pub(super) fn register_app(out: &mut Vec<CommandDescriptor>) {
     ));
     out.push(with_docs(
         desc_kw(
+            CommandId::Redo,
+            "Redo",
+            "App",
+            Some(KeyBinding::cmd_or_ctrl_shift('z')),
+            always,
+            &["repeat", "redo", "again"],
+        ),
+        "Redo",
+        "Perform again the action undone last, on the same messages.",
+    ));
+    out.push(with_docs(
+        desc_kw(
             CommandId::AppRebuildSearchIndex,
             "Rebuild Search Index",
             "App",

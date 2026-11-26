@@ -1140,10 +1140,15 @@ impl ReadyApp {
             }
             Message::Undo => {
                 if let Some(entry) = self.undo_stack.pop() {
-                    return self.dispatch_undo(&entry);
+                    let task = self.dispatch_undo(&entry);
+                    if entry.redo.is_some() {
+                        self.undo_stack.stash_undone(entry);
+                    }
+                    return task;
                 }
                 Task::none()
             }
+            Message::Redo => self.redo_last_action(),
             Message::UndoCompleted { desc, ref outcomes } => {
                 if outcomes.is_empty() {
                     return Task::none();

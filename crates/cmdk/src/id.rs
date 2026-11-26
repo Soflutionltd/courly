@@ -93,6 +93,7 @@ pub enum CommandId {
 
     // Undo
     Undo,
+    Redo,
 
     // Smart Folders
     SmartFolderSave,
@@ -186,6 +187,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::AppSyncFolder, "app.syncFolder"),
     (CommandId::AppOpenPalette, "app.openPalette"),
     (CommandId::Undo, "app.undo"),
+    (CommandId::Redo, "app.redo"),
     (CommandId::SmartFolderSave, "smartFolder.save"),
     (CommandId::PinnedSearchesClearAll, "pinnedSearches.clearAll"),
     (CommandId::AppRebuildSearchIndex, "app.rebuildSearchIndex"),
@@ -290,6 +292,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::AppSyncFolder,
     CommandId::AppOpenPalette,
     CommandId::Undo,
+    CommandId::Redo,
     CommandId::SmartFolderSave,
     CommandId::PinnedSearchesClearAll,
     CommandId::AppRebuildSearchIndex,

@@ -713,6 +713,52 @@ pub struct ActionExecutionPlan {
     /// Threads taken out of the list up front because the action moves
     /// them out of the current view.
     pub hidden: HiddenThreads,
+    /// How this plan can be performed again once undone.
+    pub replay: Replay,
+}
+
+/// What redo needs: the intent as the user gave it and the threads it was
+/// given for. Replaying it runs the very path the first click ran, so the
+/// list, the server and the next undo all follow as they did then.
+#[derive(Debug, Clone)]
+pub struct RedoAction {
+    pub intent: MailActionIntent,
+    pub threads: Vec<(String, String)>,
+}
+
+/// Whether a plan can be redone after its undo, and whether it is itself a
+/// redo (which keeps the rest of the redo list).
+#[derive(Debug, Clone, Default)]
+pub enum Replay {
+    /// An inverse plan, or one built outside the action intents.
+    #[default]
+    None,
+    /// A plan the user asked for.
+    Fresh(RedoAction),
+    /// A plan performed again by redo.
+    Redone(RedoAction),
+}
+
+impl Replay {
+    /// The same replay, limited to the threads of one account, for a plan
+    /// split per account.
+    #[must_use]
+    pub fn for_account(&self, account_id: &str) -> Self {
+        let limit = |action: &RedoAction| RedoAction {
+            intent: action.intent.clone(),
+            threads: action
+                .threads
+                .iter()
+                .filter(|(account, _)| account == account_id)
+                .cloned()
+                .collect(),
+        };
+        match self {
+            Self::None => Self::None,
+            Self::Fresh(action) => Self::Fresh(limit(action)),
+            Self::Redone(action) => Self::Redone(limit(action)),
+        }
+    }
 }
 
 // ── Resolution ──────────────────────────────────────────
@@ -852,6 +898,7 @@ pub fn build_execution_plan(
                 compensation: resolved.compensation,
                 optimistic: vec![],
                 hidden,
+                replay: Replay::None,
             })
         }
         ResolveOutcome::PerThreadToggle {
@@ -901,6 +948,7 @@ pub fn build_execution_plan(
                 compensation,
                 optimistic,
                 hidden: HiddenThreads::default(),
+                replay: Replay::None,
             })
         }
         ResolveOutcome::NoOp => None,
@@ -1012,6 +1060,29 @@ mod tests {
     }
 
     #[test]
+    fn a_split_plan_redoes_only_its_own_accounts_threads() {
+        let replay = Replay::Fresh(RedoAction {
+            intent: MailActionIntent::Archive,
+            threads: vec![
+                ("a".to_owned(), "t1".to_owned()),
+                ("b".to_owned(), "t2".to_owned()),
+                ("a".to_owned(), "t3".to_owned()),
+            ],
+        });
+        let Replay::Fresh(limited) = replay.for_account("a") else {
+            panic!("a fresh replay stays fresh");
+        };
+        assert_eq!(
+            limited.threads,
+            vec![
+                ("a".to_owned(), "t1".to_owned()),
+                ("a".to_owned(), "t3".to_owned())
+            ]
+        );
+        assert!(matches!(Replay::None.for_account("a"), Replay::None));
+    }
+
+    #[test]
     fn undoing_a_move_takes_back_what_the_move_took() {
         let plan = ActionExecutionPlan {
             operations: vec![(
@@ -1026,6 +1097,7 @@ mod tests {
             compensation: CompensationContext::None,
             optimistic: Vec::new(),
             hidden: HiddenThreads::default(),
+            replay: Replay::None,
         };
         let outcomes = [service_api::actions::ActionOutcome::Success];
         let payloads = build_undo_payloads(&plan, &outcomes);

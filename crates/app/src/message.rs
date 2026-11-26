@@ -496,6 +496,8 @@ pub enum Message {
 
     // Undo
     Undo,
+    /// Perform again the action undone last.
+    Redo,
     /// Undo compensation completed.
     UndoCompleted {
         desc: String,

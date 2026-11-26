@@ -132,6 +132,7 @@ _version: 1
 "cmd.Sync Current Folder": "Sync Current Folder"
 "cmd.Command Palette": "Command Palette"
 "cmd.Undo": "Undo"
+"cmd.Redo": "Redo"
 "cmd.Rebuild Search Index": "Rebuild Search Index"
 "cmd.Save Search": "Save Search"
 "cmd.Save as Smart Folder": "Save as Smart Folder"

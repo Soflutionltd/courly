@@ -154,7 +154,11 @@ pub struct ReadyApp {
     pub(crate) toolbar: crate::ui::toolbar::Toolbar,
     pub(crate) search_scope: crate::ui::search_scope::SearchScopeState,
     pub(crate) palette: Palette,
-    pub(crate) undo_stack: UndoStack<crate::action_resolve::MailUndoPayload>,
+    /// Undo entries, each with the intent that redoes it once undone.
+    pub(crate) undo_stack: UndoStack<
+        crate::action_resolve::MailUndoPayload,
+        Option<crate::action_resolve::RedoAction>,
+    >,
 
     // Chat state
     pub(crate) chat_timeline: Option<crate::ui::chat_timeline::ChatTimeline>,
