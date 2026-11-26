@@ -1,8 +1,6 @@
+import 'package:courly_mobile/screens/inbox_screen.dart';
 import 'package:courly_mobile/src/rust/api/engine.dart';
-import 'package:courly_mobile/src/rust/api/microsoft.dart';
 import 'package:courly_mobile/src/rust/frb_generated.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -11,144 +9,78 @@ Future<void> main() async {
   runApp(const CourlyApp());
 }
 
-/// Starts the Courly engine on the app's private support folder.
-Future<EngineReady> startDeviceEngine() async {
+/// The app's private support folder, where the Courly engine keeps its
+/// database, its key and its stores.
+Future<String> deviceDataDir() async {
   final supportDirectory = await getApplicationSupportDirectory();
   await supportDirectory.create(recursive: true);
-  return startEngine(dataDir: supportDirectory.path);
+  return supportDirectory.path;
 }
 
-/// Runs a Microsoft sign-in in Apple's authentication session and adds
-/// the account it returns.
-Future<AddedAccount> addMicrosoftAccount() async {
-  final signIn = await microsoftSignInStart();
-  final callbackUrl = await FlutterWebAuth2.authenticate(
-    url: signIn.authUrl,
-    callbackUrlScheme: signIn.callbackScheme,
-  );
-  return microsoftSignInFinish(callbackUrl: callbackUrl);
+/// Starts the Courly engine on the device data folder and returns it.
+Future<String> startDeviceEngine() async {
+  final dataDir = await deviceDataDir();
+  await startEngine(dataDir: dataDir);
+  return dataDir;
 }
 
 class CourlyApp extends StatelessWidget {
-  const CourlyApp({
-    super.key,
-    this.startEngine = startDeviceEngine,
-    this.addAccount = addMicrosoftAccount,
-  });
+  const CourlyApp({super.key, this.startEngine = startDeviceEngine});
 
-  final Future<EngineReady> Function() startEngine;
-  final Future<AddedAccount> Function() addAccount;
+  final Future<String> Function() startEngine;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Courly',
-      home: HomeScreen(startEngine: startEngine, addAccount: addAccount),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF16B3B0)),
+      ),
+      home: _EngineGate(startEngine: startEngine),
     );
   }
 }
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({
-    super.key,
-    required this.startEngine,
-    required this.addAccount,
-  });
+/// Shows the inbox once the engine has booted, or why it could not.
+class _EngineGate extends StatefulWidget {
+  const _EngineGate({required this.startEngine});
 
-  final Future<EngineReady> Function() startEngine;
-  final Future<AddedAccount> Function() addAccount;
+  final Future<String> Function() startEngine;
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<_EngineGate> createState() => _EngineGateState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  late final Future<EngineReady> _engine = widget.startEngine();
-  bool _isSigningIn = false;
-  AddedAccount? _account;
-  String? _signInError;
-
-  Future<void> _signIn() async {
-    setState(() {
-      _isSigningIn = true;
-      _signInError = null;
-    });
-    try {
-      final account = await widget.addAccount();
-      setState(() => _account = account);
-    } on PlatformException catch (error) {
-      // The user closing Apple's sheet is not an error worth showing.
-      setState(() {
-        _signInError = error.code == 'CANCELED'
-            ? null
-            : error.message ?? error.code;
-      });
-    } catch (error) {
-      setState(() => _signInError = '$error');
-    } finally {
-      setState(() => _isSigningIn = false);
-    }
-  }
+class _EngineGateState extends State<_EngineGate> {
+  late final Future<String> _dataDir = widget.startEngine();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Courly')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: FutureBuilder<EngineReady>(
-            future: _engine,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Text(
+    return FutureBuilder<String>(
+      future: _dataDir,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
                   'Le moteur Courly n\'a pas démarré : ${snapshot.error}',
                   key: const Key('engine-error'),
                   textAlign: TextAlign.center,
-                );
-              }
-              if (snapshot.data == null) {
-                return const CircularProgressIndicator();
-              }
-              return _accountSection(context);
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _accountSection(BuildContext context) {
-    final account = _account;
-    if (account != null) {
-      return Text(
-        'Compte ajouté\n${account.email}\nSynchronisation en cours',
-        key: const Key('account-added'),
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.titleMedium,
-      );
-    }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      key: const Key('engine-ready'),
-      children: [
-        FilledButton(
-          key: const Key('add-microsoft'),
-          onPressed: _isSigningIn ? null : _signIn,
-          child: Text(
-            _isSigningIn ? 'Connexion…' : 'Ajouter un compte Microsoft',
-          ),
-        ),
-        if (_signInError != null) ...[
-          const SizedBox(height: 16),
-          Text(
-            _signInError!,
-            key: const Key('sign-in-error'),
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        ],
-      ],
+                ),
+              ),
+            ),
+          );
+        }
+        final dataDir = snapshot.data;
+        if (dataDir == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return InboxScreen(dataDir: dataDir);
+      },
     );
   }
 }
