@@ -76,8 +76,12 @@ for target in "${TARGETS[@]}"; do
   SLICES+=("target/${target}/release/courly")
 done
 lipo -create "${SLICES[@]}" -output "$APP/Contents/MacOS/courly"
-lipo "$APP/Contents/MacOS/courly" -verify_arch arm64 x86_64 ||
-  die "the universal binary lacks an architecture"
+# One architecture per check: this lipo reads every name after
+# -verify_arch past the first as another input file.
+for arch in arm64 x86_64; do
+  lipo "$APP/Contents/MacOS/courly" -verify_arch "$arch" ||
+    die "the universal binary lacks the $arch architecture"
+done
 
 echo "==> Bundling"
 ICONSET="${OUT}/AppIcon.iconset"
