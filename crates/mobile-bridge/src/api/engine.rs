@@ -112,6 +112,12 @@ fn running_engine() -> Result<&'static Engine, String> {
         .ok_or_else(|| "the engine is not running; call start_engine first".to_owned())
 }
 
+/// Run `future` to completion on the engine's runtime, from a thread that
+/// is not one of its own (every bridge call is).
+pub(crate) fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, String> {
+    Ok(running_engine()?.runtime.block_on(future))
+}
+
 /// Send one request and wait for its response, decoded as `T`.
 pub(crate) fn call<T: serde::de::DeserializeOwned>(params: RequestParams) -> Result<T, String> {
     let engine = running_engine()?;
