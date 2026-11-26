@@ -21,6 +21,10 @@ A new Flutter FFI plugin project.
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
   s.platform = :ios, '11.0'
+  # The Courly core reads the system proxy and network state
+  # (SystemConfiguration) and does TLS through the Security framework;
+  # a static Rust library cannot pull system frameworks in on its own.
+  s.frameworks = 'SystemConfiguration', 'Security'
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }

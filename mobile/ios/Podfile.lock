@@ -1,21 +1,39 @@
 PODS:
   - Flutter (1.0.0)
+  - flutter_web_auth_2 (6.0.0):
+    - Flutter
+  - integration_test (0.0.1):
+    - Flutter
   - mobile_bridge (0.0.1):
+    - Flutter
+  - url_launcher_ios (0.0.1):
     - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
+  - flutter_web_auth_2 (from `.symlinks/plugins/flutter_web_auth_2/ios`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - mobile_bridge (from `.symlinks/plugins/mobile_bridge/ios`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
+  flutter_web_auth_2:
+    :path: ".symlinks/plugins/flutter_web_auth_2/ios"
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
   mobile_bridge:
     :path: ".symlinks/plugins/mobile_bridge/ios"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
 
 SPEC CHECKSUMS:
   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
-  mobile_bridge: 43b9e89cfcf3740cd8a78832636a30651993dcc8
+  flutter_web_auth_2: 879fc9621f1d303eb0fd710f85bae788ef5c26b6
+  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
+  mobile_bridge: cb2fb9dde839d745e6c9646fb2b511edea623a13
+  url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
 PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
 
