@@ -85,6 +85,7 @@ _version: 1
 "cmd.Reply": "Reply"
 "cmd.Reply All": "Reply All"
 "cmd.Forward": "Forward"
+"cmd.Forward as Attachment": "Forward as Attachment"
 "cmd.New Task": "New Task"
 "cmd.Create Task": "Create Task"
 "cmd.Task from Email": "Task from Email"

@@ -73,6 +73,8 @@ pub enum ComposeAction {
     Reply,
     ReplyAll,
     Forward,
+    /// Forward the message as an attached `.eml`, as Outlook does.
+    ForwardAsAttachment,
 }
 
 #[derive(Debug, Clone)]
@@ -426,6 +428,9 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
         CommandId::ComposeReply => Some(Message::ComposeAction(ComposeAction::Reply)),
         CommandId::ComposeReplyAll => Some(Message::ComposeAction(ComposeAction::ReplyAll)),
         CommandId::ComposeForward => Some(Message::ComposeAction(ComposeAction::Forward)),
+        CommandId::ComposeForwardAsAttachment => {
+            Some(Message::ComposeAction(ComposeAction::ForwardAsAttachment))
+        }
 
         // Tasks
         CommandId::TaskCreate => Some(Message::TaskAction(TaskAction::Create)),

@@ -30,6 +30,7 @@ pub enum ToolbarItem {
     Reply,
     ReplyAll,
     Forward,
+    ForwardAsAttachment,
     Pin,
     Mute,
     Categorize,
@@ -40,7 +41,7 @@ pub enum ToolbarItem {
 
 impl ToolbarItem {
     /// Every button, in the customize panel's order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Delete,
         Self::Archive,
         Self::Block,
@@ -52,6 +53,7 @@ impl ToolbarItem {
         Self::Reply,
         Self::ReplyAll,
         Self::Forward,
+        Self::ForwardAsAttachment,
         Self::Pin,
         Self::Mute,
         Self::Categorize,
@@ -73,6 +75,7 @@ impl ToolbarItem {
             Self::Reply => CommandId::ComposeReply,
             Self::ReplyAll => CommandId::ComposeReplyAll,
             Self::Forward => CommandId::ComposeForward,
+            Self::ForwardAsAttachment => CommandId::ComposeForwardAsAttachment,
             Self::Pin => CommandId::EmailPin,
             Self::Mute => CommandId::EmailMute,
             Self::Categorize => CommandId::EmailAddLabel,
@@ -95,6 +98,7 @@ impl ToolbarItem {
             Self::Reply => icon::reply(),
             Self::ReplyAll => icon::reply_all(),
             Self::Forward => icon::forward(),
+            Self::ForwardAsAttachment => icon::paperclip(),
             Self::Pin => icon::pin(),
             Self::Mute => icon::bell(),
             Self::Categorize => icon::tag(),

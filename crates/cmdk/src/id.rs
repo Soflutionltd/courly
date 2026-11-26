@@ -50,6 +50,7 @@ pub enum CommandId {
     ComposeReply,
     ComposeReplyAll,
     ComposeForward,
+    ComposeForwardAsAttachment,
 
     // Tasks
     TaskCreate,
@@ -146,6 +147,10 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::ComposeReply, "compose.reply"),
     (CommandId::ComposeReplyAll, "compose.replyAll"),
     (CommandId::ComposeForward, "compose.forward"),
+    (
+        CommandId::ComposeForwardAsAttachment,
+        "compose.forwardAsAttachment",
+    ),
     (CommandId::TaskCreate, "task.create"),
     (CommandId::TaskCreateFromEmail, "task.createFromEmail"),
     (CommandId::TaskTogglePanel, "task.togglePanel"),
@@ -252,6 +257,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::ComposeReply,
     CommandId::ComposeReplyAll,
     CommandId::ComposeForward,
+    CommandId::ComposeForwardAsAttachment,
     CommandId::TaskCreate,
     CommandId::TaskCreateFromEmail,
     CommandId::TaskTogglePanel,

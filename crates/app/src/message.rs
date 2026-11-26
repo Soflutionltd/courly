@@ -164,6 +164,12 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
+    /// The original source of a message to forward as an attachment was
+    /// fetched, or why it could not be.
+    ForwardAsAttachmentReady(
+        crate::handlers::pop_out::ForwardAsAttachment,
+        Result<crate::pop_out::compose::ComposeAttachment, String>,
+    ),
     /// Block the selected thread's sender, from the toolbar, the menu bar
     /// or the command palette.
     BlockSelectedSender,

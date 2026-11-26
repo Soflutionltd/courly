@@ -430,6 +430,12 @@ impl ReadyApp {
         &mut self,
         action: &crate::command_dispatch::ComposeAction,
     ) -> Task<Message> {
+        if matches!(
+            action,
+            crate::command_dispatch::ComposeAction::ForwardAsAttachment
+        ) {
+            return self.forward_as_attachment();
+        }
         let selected_thread = self
             .thread_list
             .selected_thread
@@ -450,6 +456,8 @@ impl ReadyApp {
             crate::command_dispatch::ComposeAction::Forward => ComposeMode::Forward {
                 original_subject: subject,
             },
+            // Handled before the match, which only builds quoting modes.
+            crate::command_dispatch::ComposeAction::ForwardAsAttachment => return Task::none(),
         };
 
         let thread_id = selected_thread.map(|t| t.id.as_str());

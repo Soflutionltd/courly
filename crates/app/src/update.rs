@@ -240,6 +240,9 @@ impl ReadyApp {
             Message::Compose => self.open_new_message(),
             Message::Noop => Task::none(),
             Message::BlockSelectedSender => self.block_menu_sender(),
+            Message::ForwardAsAttachmentReady(request, result) => {
+                self.handle_forward_as_attachment_ready(&request, result)
+            }
             Message::MarkOpenFolderRead => self.mark_open_folder_read(),
             Message::SenderBlocked(result) => self.handle_sender_blocked(result),
             Message::SenderUnblocked(result) => self.handle_sender_unblocked(result),

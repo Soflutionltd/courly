@@ -85,6 +85,7 @@ _version: 1
 "cmd.Reply": "Répondre"
 "cmd.Reply All": "Répondre à tous"
 "cmd.Forward": "Transférer"
+"cmd.Forward as Attachment": "Transférer en tant que pièce jointe"
 "cmd.New Task": "Nouvelle tâche"
 "cmd.Create Task": "Créer une tâche"
 "cmd.Task from Email": "Tâche à partir du message"

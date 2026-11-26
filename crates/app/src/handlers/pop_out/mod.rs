@@ -13,6 +13,8 @@ mod compose_send;
 pub(crate) use compose_send::{DelayedSend, SendOrigin, submit_held_sends};
 mod compose_signature;
 mod dispatcher;
+mod forward_attachment;
+pub(crate) use forward_attachment::ForwardAsAttachment;
 mod message_view;
 mod save_as;
 mod session;

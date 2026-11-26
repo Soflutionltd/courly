@@ -53,4 +53,16 @@ pub(super) fn register_compose(out: &mut Vec<CommandDescriptor>) {
         "Forward",
         "Forward the selected message to new recipients.",
     ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::ComposeForwardAsAttachment,
+            "Forward as Attachment",
+            "Compose",
+            None,
+            |ctx| ctx.has_single_selection() && ctx.allows_submit(),
+            &["send", "share", "eml", "attachment"],
+        ),
+        "Forward as Attachment",
+        "Forward the selected message as an attached .eml file, headers and attachments included.",
+    ));
 }
