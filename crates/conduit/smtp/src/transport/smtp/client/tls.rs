@@ -267,10 +267,25 @@ impl Certificate {
     }
 
     /// Create a [`Certificate`] from a PEM encoded certificate.
+    ///
+    /// The iOS Security framework has no PEM import, so on iOS this is
+    /// refused as unsupported; convert to DER and use [`Self::from_der`].
+    #[cfg(not(target_os = "ios"))]
     pub fn from_pem(pem: &[u8]) -> Result<Self, Error> {
         Ok(Self {
             native_tls: native_tls::Certificate::from_pem(pem).map_err(error::tls)?,
         })
+    }
+
+    /// Create a [`Certificate`] from a PEM encoded certificate.
+    ///
+    /// The iOS Security framework has no PEM import, so on iOS this is
+    /// refused as unsupported; convert to DER and use [`Self::from_der`].
+    #[cfg(target_os = "ios")]
+    pub fn from_pem(_pem: &[u8]) -> Result<Self, Error> {
+        Err(error::feature_unsupported(
+            "PEM certificates are not supported on iOS; use a DER certificate",
+        ))
     }
 
     /// Create a [`Certificate`] from an existing native-tls certificate.
@@ -306,10 +321,24 @@ impl Debug for Identity {
 }
 
 impl Identity {
+    /// Build a client identity from a PEM certificate chain and a PKCS #8
+    /// key. The iOS Security framework cannot import a PKCS #8 key, so on
+    /// iOS this is refused as unsupported.
+    #[cfg(not(target_os = "ios"))]
     pub fn from_pem(pem: &[u8], key: &[u8]) -> Result<Self, Error> {
         Ok(Self {
             native_tls: native_tls::Identity::from_pkcs8(pem, key).map_err(error::tls)?,
         })
+    }
+
+    /// Build a client identity from a PEM certificate chain and a PKCS #8
+    /// key. The iOS Security framework cannot import a PKCS #8 key, so on
+    /// iOS this is refused as unsupported.
+    #[cfg(target_os = "ios")]
+    pub fn from_pem(_pem: &[u8], _key: &[u8]) -> Result<Self, Error> {
+        Err(error::feature_unsupported(
+            "PKCS #8 client identities are not supported on iOS",
+        ))
     }
 
     /// Create an [`Identity`] from an existing native-tls identity.
