@@ -151,9 +151,12 @@ class GlassIconButton extends StatelessWidget {
         icon: Icon(icon, size: 22),
       );
     }
+    // The glass is a native view that Flutter's own pointer events never
+    // reach; the semantics tap lets VoiceOver, and tests, press it too.
     return Semantics(
       label: label,
       button: true,
+      onTap: onPressed,
       child: IOS26Button.sfSymbol(
         onPressed: onPressed,
         sfSymbol: SFSymbol(
@@ -188,9 +191,12 @@ class GlassChildButton extends StatelessWidget {
     if (!PlatformInfo.isIOS26OrHigher()) {
       return IconButton(tooltip: label, onPressed: onPressed, icon: child);
     }
+    // The glass is a native view that Flutter's own pointer events never
+    // reach; the semantics tap lets VoiceOver, and tests, press it too.
     return Semantics(
       label: label,
       button: true,
+      onTap: onPressed,
       child: IOS26Button.child(
         onPressed: onPressed,
         style: IOS26ButtonStyle.glass,
