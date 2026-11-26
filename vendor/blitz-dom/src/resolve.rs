@@ -457,8 +457,47 @@ impl BaseDocument {
         state.physicalise_and_round_layout(root_element_id);
         #[cfg(not(feature = "writing-mode"))]
         taffy::round_layout(&mut state, root_element_id);
+        keep_thin_borders_visible(&mut self.nodes);
 
         // println!("\n\n");
         // taffy::print_tree(self, root_node_id)
+    }
+}
+
+/// Rounding the layout to whole pixels rounds each edge of a box on its
+/// own, so a border thinner than a pixel (a 1px border at a reading zoom
+/// below 1, which Stylo snaps to half a pixel on a 2x screen) comes out 0
+/// or 1 wide depending on where its box falls: of a column of identical
+/// bordered buttons, some keep their border and the rest lose some or all
+/// of it. Browsers never let a non-zero border vanish, so a side that had
+/// width and rounded to nothing is given one pixel.
+fn keep_thin_borders_visible(nodes: &mut crate::NodeTree) {
+    for (_, node) in nodes.iter_mut() {
+        if !matches!(
+            node.data,
+            crate::NodeData::Element(_) | crate::NodeData::AnonymousBlock(_)
+        ) {
+            continue;
+        }
+        let unrounded = node.unrounded_layout().border;
+        let rounded = node.final_layout().border;
+        let kept = taffy::Rect {
+            left: thin_border_kept(unrounded.left, rounded.left),
+            right: thin_border_kept(unrounded.right, rounded.right),
+            top: thin_border_kept(unrounded.top, rounded.top),
+            bottom: thin_border_kept(unrounded.bottom, rounded.bottom),
+        };
+        if kept != rounded {
+            node.final_layout_mut().border = kept;
+        }
+    }
+}
+
+/// One rounded border side, raised to a pixel when it had width before.
+fn thin_border_kept(unrounded: f32, rounded: f32) -> f32 {
+    if unrounded > 0.0 && rounded < 1.0 {
+        1.0
+    } else {
+        rounded
     }
 }

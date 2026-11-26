@@ -860,6 +860,53 @@ mod tests {
         0.299 * f32::from(red) + 0.587 * f32::from(green) + 0.114 * f32::from(blue)
     }
 
+    /// At a reading zoom below 1 a 1px border is thinner than a layout
+    /// pixel, and rounding the layout used to leave it 0 or 1 wide by where
+    /// its box fell: of a column of identical bordered buttons (a Zendesk
+    /// survey's), some kept their border and the others lost all or part of
+    /// it. Each box here starts at a different fraction of a pixel; down
+    /// the middle of the boxes, every one must show its top and its bottom
+    /// edge.
+    #[test]
+    fn thin_borders_survive_a_fractional_zoom() {
+        let boxes: String = [3, 7, 11, 13, 17, 5]
+            .iter()
+            .map(|gap| {
+                format!(
+                    r#"<div style="border:1px solid #000;width:100px;height:20px;margin-bottom:{gap}px"></div>"#
+                )
+            })
+            .collect();
+        let mail = render(RenderRequest {
+            html: format!(r#"<body style="margin:0">{boxes}</body>"#),
+            width: 300.0,
+            zoom: 0.9,
+            inline_images: HashMap::new(),
+            remote: None,
+            appearance: Appearance::default(),
+            quote_only: false,
+        });
+        // Every device row: a border is under two device pixels thick here,
+        // so one row in two could fall between its lines.
+        let column = 90;
+        let mut edges = 0;
+        let mut inside = false;
+        for tile in &mail.tiles {
+            let row = tile.px_width.to_usize().expect("tile width");
+            for y in 0..tile.px_height.to_usize().expect("tile height") {
+                let offset = (y * row + column) * 4;
+                let dark = luma([
+                    tile.rgba[offset],
+                    tile.rgba[offset + 1],
+                    tile.rgba[offset + 2],
+                ]) < 128.0;
+                edges += usize::from(dark && !inside);
+                inside = dark;
+            }
+        }
+        assert_eq!(edges, 12, "{edges} of the 12 top and bottom edges painted");
+    }
+
     /// Pixels darker than plain text's antialiasing threshold in the CSS
     /// square from the origin to (`size`, `size`).
     fn inked_pixels(mail: &RenderedMail, size: usize) -> usize {
