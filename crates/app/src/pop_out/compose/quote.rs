@@ -178,9 +178,8 @@ pub fn outgoing_body(
     // The reply is sent as the editor shows it: paragraphs one under the
     // other with the empty lines that were typed, and links told apart by
     // their colour, without the underline each mail client would add.
-    let mut html = crate::signature_html::plain_links(
-        &crate::signature_html::mail_paragraphs(editor_html),
-    );
+    let mut html =
+        crate::signature_html::plain_links(&crate::signature_html::mail_paragraphs(editor_html));
     let mut text = editor_text.trim_end().to_string();
     if let Some(signature) = signature {
         html.push_str(&format!("<div id=\"Signature\">{}</div>", signature.html));

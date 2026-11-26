@@ -80,6 +80,7 @@ _version: 1
 "cmd.Select All": "Select All"
 "cmd.Select All Threads": "Select All Threads"
 "cmd.Select From Here": "Select From Here"
+"cmd.Print": "Print"
 "cmd.Select All From Here": "Select All From Here"
 "cmd.Compose New Email": "Compose New Email"
 "cmd.Reply": "Reply"

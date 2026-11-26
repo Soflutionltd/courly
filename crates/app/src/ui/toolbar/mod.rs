@@ -32,6 +32,7 @@ pub enum ToolbarItem {
     Forward,
     ForwardAsAttachment,
     CreateMeeting,
+    Print,
     Pin,
     Mute,
     Categorize,
@@ -43,7 +44,7 @@ pub enum ToolbarItem {
 
 impl ToolbarItem {
     /// Every button, in the customize panel's order.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Delete,
         Self::Archive,
         Self::Block,
@@ -57,6 +58,7 @@ impl ToolbarItem {
         Self::Forward,
         Self::ForwardAsAttachment,
         Self::CreateMeeting,
+        Self::Print,
         Self::Pin,
         Self::Mute,
         Self::Categorize,
@@ -81,6 +83,7 @@ impl ToolbarItem {
             Self::Forward => CommandId::ComposeForward,
             Self::ForwardAsAttachment => CommandId::ComposeForwardAsAttachment,
             Self::CreateMeeting => CommandId::CalendarMeetingFromEmail,
+            Self::Print => CommandId::EmailPrint,
             Self::Pin => CommandId::EmailPin,
             Self::Mute => CommandId::EmailMute,
             Self::Categorize => CommandId::EmailAddLabel,
@@ -106,6 +109,7 @@ impl ToolbarItem {
             Self::Forward => icon::forward(),
             Self::ForwardAsAttachment => icon::paperclip(),
             Self::CreateMeeting => icon::calendar_plus(),
+            Self::Print => icon::printer(),
             Self::Pin => icon::pin(),
             Self::Mute => icon::bell(),
             Self::Categorize => icon::tag(),

@@ -547,7 +547,11 @@ impl Settings {
         if let Some(label) = ui.email_body_background.as_deref() {
             self.email_body_background = EmailBodyBackground::from_label(label);
         }
-        if let Some(display) = ui.date_display.as_deref().and_then(date_display_from_setting) {
+        if let Some(display) = ui
+            .date_display
+            .as_deref()
+            .and_then(date_display_from_setting)
+        {
             self.date_display = display;
         }
         self.notifications_enabled = settings.notifications_enabled;
@@ -1157,7 +1161,10 @@ mod tests {
         ui.mark_as_read_behavior = Some("instantly".into());
         settings.apply_bootstrap(&ui, &default_settings_snapshot());
         assert_eq!(settings.mark_as_read, "Instantly");
-        assert_eq!(MarkAsRead::from_setting(&settings.mark_as_read), MarkAsRead::Instantly);
+        assert_eq!(
+            MarkAsRead::from_setting(&settings.mark_as_read),
+            MarkAsRead::Instantly
+        );
 
         settings.begin_editing();
         let _ = crate::component::Component::update(

@@ -500,6 +500,8 @@ pub enum Message {
     Redo,
     /// Open a new meeting prefilled from the open message.
     MeetingFromEmail,
+    /// Print the open message through the system print panel.
+    PrintMessage,
     /// Undo compensation completed.
     UndoCompleted {
         desc: String,

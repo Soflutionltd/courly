@@ -44,6 +44,7 @@ pub enum CommandId {
     EmailSnooze,
     EmailSelectAll,
     EmailSelectFromHere,
+    EmailPrint,
 
     // Compose
     ComposeNew,
@@ -145,6 +146,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::EmailSnooze, "email.snooze"),
     (CommandId::EmailSelectAll, "email.selectAll"),
     (CommandId::EmailSelectFromHere, "email.selectFromHere"),
+    (CommandId::EmailPrint, "email.print"),
     (CommandId::ComposeNew, "compose.new"),
     (CommandId::ComposeReply, "compose.reply"),
     (CommandId::ComposeReplyAll, "compose.replyAll"),
@@ -260,6 +262,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::EmailSnooze,
     CommandId::EmailSelectAll,
     CommandId::EmailSelectFromHere,
+    CommandId::EmailPrint,
     CommandId::ComposeNew,
     CommandId::ComposeReply,
     CommandId::ComposeReplyAll,

@@ -130,7 +130,10 @@ fn sender_of(row: &NewMailRow) -> String {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .or(row.from_address.as_deref())
-        .map_or_else(|| t!("main.notifications.unknown_sender").into_owned(), str::to_owned)
+        .map_or_else(
+            || t!("main.notifications.unknown_sender").into_owned(),
+            str::to_owned,
+        )
 }
 
 fn subject_of(row: &NewMailRow) -> String {
@@ -138,7 +141,10 @@ fn subject_of(row: &NewMailRow) -> String {
         .as_deref()
         .map(str::trim)
         .filter(|subject| !subject.is_empty())
-        .map_or_else(|| t!("main.notifications.no_subject").into_owned(), str::to_owned)
+        .map_or_else(
+            || t!("main.notifications.no_subject").into_owned(),
+            str::to_owned,
+        )
 }
 
 #[cfg(test)]
@@ -163,7 +169,11 @@ mod tests {
     fn the_first_look_only_records_what_is_there() {
         let mut watch = NewMailWatch::new(1_000_000_000);
         assert!(watch.needs_priming());
-        assert!(watch.take_new(vec![row("m1", "a@x.io", "Primary")]).is_empty());
+        assert!(
+            watch
+                .take_new(vec![row("m1", "a@x.io", "Primary")])
+                .is_empty()
+        );
         assert!(!watch.needs_priming());
         let fresh = watch.take_new(vec![
             row("m2", "b@x.io", "Primary"),
@@ -171,7 +181,11 @@ mod tests {
         ]);
         assert_eq!(fresh.len(), 1);
         assert_eq!(fresh[0].message_id, "m2");
-        assert!(watch.take_new(vec![row("m2", "b@x.io", "Primary")]).is_empty());
+        assert!(
+            watch
+                .take_new(vec![row("m2", "b@x.io", "Primary")])
+                .is_empty()
+        );
     }
 
     #[test]
@@ -180,7 +194,10 @@ mod tests {
         prefs.vip_senders = vec!["boss@x.io".into()];
         assert!(should_notify(&prefs, &row("1", "someone@x.io", "Primary")));
         assert!(!should_notify(&prefs, &row("2", "shop@x.io", "Promotions")));
-        assert!(should_notify(&prefs, &row("3", " Boss@X.io ", "Promotions")));
+        assert!(should_notify(
+            &prefs,
+            &row("3", " Boss@X.io ", "Promotions")
+        ));
 
         prefs.smart_notifications = false;
         assert!(should_notify(&prefs, &row("4", "shop@x.io", "Promotions")));
@@ -191,7 +208,9 @@ mod tests {
 
     #[test]
     fn many_messages_collapse_into_one_banner_that_opens_the_newest() {
-        let rows: Vec<_> = (0..5).map(|i| row(&i.to_string(), "a@x.io", "Primary")).collect();
+        let rows: Vec<_> = (0..5)
+            .map(|i| row(&i.to_string(), "a@x.io", "Primary"))
+            .collect();
         let summary = banners(&rows);
         assert_eq!(summary.len(), 1);
         assert_eq!(
@@ -202,7 +221,10 @@ mod tests {
         let few = banners(&rows[..2]);
         assert_eq!(few.len(), 2);
         assert_eq!(few[0].title, "a@x.io");
-        assert_eq!(thread_of(&few[0].identifier), Some(("acc".into(), "t-1".into())));
+        assert_eq!(
+            thread_of(&few[0].identifier),
+            Some(("acc".into(), "t-1".into()))
+        );
         assert_eq!(thread_of("other"), None);
     }
 }

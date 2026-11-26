@@ -88,7 +88,8 @@ pub fn undo_send_delay(seconds: &str) -> std::time::Duration {
 }
 
 /// Inbox categories a notification can be limited to, in display order.
-pub const NOTIFY_CATEGORIES: &[&str] = &["Primary", "Updates", "Promotions", "Social", "Newsletters"];
+pub const NOTIFY_CATEGORIES: &[&str] =
+    &["Primary", "Updates", "Promotions", "Social", "Newsletters"];
 
 /// Categories stored as "Primary,Updates", keeping only known ones.
 pub fn notify_categories_from_setting(value: &str) -> Vec<String> {
@@ -190,7 +191,10 @@ mod tests {
         );
         assert_eq!(
             vip_senders_from_setting(" Boss@Example.com \n\nceo@example.com"),
-            vec!["boss@example.com".to_string(), "ceo@example.com".to_string()]
+            vec![
+                "boss@example.com".to_string(),
+                "ceo@example.com".to_string()
+            ]
         );
     }
 

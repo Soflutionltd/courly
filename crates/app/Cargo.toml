@@ -73,6 +73,11 @@ block2 = "0.6.2"
 objc2 = "0.6.5"
 objc2-foundation = "0.3.2"
 objc2-user-notifications = "0.3.2"
+# Printing: WebKit lays the message out as Apple Mail does and AppKit runs
+# the system print panel.
+objc2-app-kit = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-web-kit = "0.3.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

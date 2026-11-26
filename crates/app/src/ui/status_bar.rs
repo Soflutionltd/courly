@@ -782,7 +782,9 @@ impl StatusBar {
                 container(
                     row![
                         icon::send().size(ICON_MD).style(TextClass::Accent.style()),
-                        text(send_text).size(TEXT_SM).style(TextClass::Accent.style()),
+                        text(send_text)
+                            .size(TEXT_SM)
+                            .style(TextClass::Accent.style()),
                         cancel,
                     ]
                     .spacing(SPACE_SM)

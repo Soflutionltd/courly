@@ -1150,6 +1150,7 @@ impl ReadyApp {
             }
             Message::Redo => self.redo_last_action(),
             Message::MeetingFromEmail => self.create_meeting_from_email(),
+            Message::PrintMessage => self.print_open_message(),
             Message::UndoCompleted { desc, ref outcomes } => {
                 if outcomes.is_empty() {
                     return Task::none();

@@ -80,6 +80,7 @@ _version: 1
 "cmd.Select All": "Tout sélectionner"
 "cmd.Select All Threads": "Sélectionner toutes les conversations"
 "cmd.Select From Here": "Sélectionner à partir d'ici"
+"cmd.Print": "Imprimer"
 "cmd.Select All From Here": "Tout sélectionner à partir d'ici"
 "cmd.Compose New Email": "Rédiger un nouveau message"
 "cmd.Reply": "Répondre"

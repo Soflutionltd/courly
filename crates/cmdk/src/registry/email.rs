@@ -212,4 +212,16 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         "Select All From Here",
         "Extend the selection from the current thread to the end of the list.",
     ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::EmailPrint,
+            "Print",
+            "Email",
+            Some(KeyBinding::cmd_or_ctrl('p')),
+            needs_single_selection,
+            &["print", "pdf", "paper"],
+        ),
+        "Print",
+        "Print the selected message through the system print panel, or save it as PDF.",
+    ));
 }
