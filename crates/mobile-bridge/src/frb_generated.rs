@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1495217607;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1972306657;
 
 // Section: executor
 
@@ -80,6 +80,83 @@ fn wire__crate__api__accounts__add_password_account_impl(
                         api_password,
                         api_servers,
                     ))?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__actions__archive_thread_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "archive_thread",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_account_id = <String>::sse_decode(&mut deserializer);
+            let api_thread_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::api::actions::archive_thread(api_account_id, api_thread_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__compose__compose_draft_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "compose_draft",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_data_dir = <String>::sse_decode(&mut deserializer);
+            let api_mode = <crate::api::compose::ComposeMode>::sse_decode(&mut deserializer);
+            let api_account_id = <String>::sse_decode(&mut deserializer);
+            let api_reply_source =
+                <Option<crate::api::compose::ReplySource>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::compose::compose_draft(
+                        api_data_dir,
+                        api_mode,
+                        api_account_id,
+                        api_reply_source,
+                    )?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -392,6 +469,40 @@ fn wire__crate__api__database__open_courly_database_impl(
         },
     )
 }
+fn wire__crate__api__compose__send_mail_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "send_mail",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_data_dir = <String>::sse_decode(&mut deserializer);
+            let api_mail = <crate::api::compose::OutgoingMail>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::compose::send_mail(api_data_dir, api_mail)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__engine__start_engine_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -460,6 +571,41 @@ fn wire__crate__api__thread__thread_detail_impl(
                         api_thread_id,
                         api_load_remote_images,
                     )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__actions__trash_thread_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "trash_thread",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_account_id = <String>::sse_decode(&mut deserializer);
+            let api_thread_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::api::actions::trash_thread(api_account_id, api_thread_id)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -556,6 +702,39 @@ impl SseDecode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_u8().unwrap() != 0
+    }
+}
+
+impl SseDecode for crate::api::compose::ComposeDraft {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_accountId = <String>::sse_decode(deserializer);
+        let mut var_fromEmail = <String>::sse_decode(deserializer);
+        let mut var_to = <Vec<String>>::sse_decode(deserializer);
+        let mut var_cc = <Vec<String>>::sse_decode(deserializer);
+        let mut var_subject = <String>::sse_decode(deserializer);
+        let mut var_quotePreviewHtml = <String>::sse_decode(deserializer);
+        return crate::api::compose::ComposeDraft {
+            account_id: var_accountId,
+            from_email: var_fromEmail,
+            to: var_to,
+            cc: var_cc,
+            subject: var_subject,
+            quote_preview_html: var_quotePreviewHtml,
+        };
+    }
+}
+
+impl SseDecode for crate::api::compose::ComposeMode {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::compose::ComposeMode::New,
+            1 => crate::api::compose::ComposeMode::Reply,
+            2 => crate::api::compose::ComposeMode::ReplyAll,
+            _ => unreachable!("Invalid variant for ComposeMode: {}", inner),
+        };
     }
 }
 
@@ -812,6 +991,56 @@ impl SseDecode for Option<crate::api::accounts::ImapServers> {
     }
 }
 
+impl SseDecode for Option<crate::api::compose::ReplySource> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::compose::ReplySource>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for crate::api::compose::OutgoingMail {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_mode = <crate::api::compose::ComposeMode>::sse_decode(deserializer);
+        let mut var_accountId = <String>::sse_decode(deserializer);
+        let mut var_to = <Vec<String>>::sse_decode(deserializer);
+        let mut var_cc = <Vec<String>>::sse_decode(deserializer);
+        let mut var_bcc = <Vec<String>>::sse_decode(deserializer);
+        let mut var_subject = <String>::sse_decode(deserializer);
+        let mut var_bodyText = <String>::sse_decode(deserializer);
+        let mut var_replySource =
+            <Option<crate::api::compose::ReplySource>>::sse_decode(deserializer);
+        return crate::api::compose::OutgoingMail {
+            mode: var_mode,
+            account_id: var_accountId,
+            to: var_to,
+            cc: var_cc,
+            bcc: var_bcc,
+            subject: var_subject,
+            body_text: var_bodyText,
+            reply_source: var_replySource,
+        };
+    }
+}
+
+impl SseDecode for crate::api::compose::ReplySource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_threadId = <String>::sse_decode(deserializer);
+        let mut var_messageId = <String>::sse_decode(deserializer);
+        let mut var_utcOffsetMinutes = <i32>::sse_decode(deserializer);
+        return crate::api::compose::ReplySource {
+            thread_id: var_threadId,
+            message_id: var_messageId,
+            utc_offset_minutes: var_utcOffsetMinutes,
+        };
+    }
+}
+
 impl SseDecode for crate::api::accounts::SignInMethod {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -913,29 +1142,33 @@ fn pde_ffi_dispatcher_primary_impl(
         1 => {
             wire__crate__api__accounts__add_password_account_impl(port, ptr, rust_vec_len, data_len)
         }
-        2 => wire__crate__api__accounts__discover_account_impl(port, ptr, rust_vec_len, data_len),
-        3 => wire__crate__api__engine__engine_ping_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__crate__api__mailbox__inbox_threads_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__database__init_app_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__mailbox__list_accounts_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__thread__mark_thread_read_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__microsoft__microsoft_sign_in_finish_impl(
+        2 => wire__crate__api__actions__archive_thread_impl(port, ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__compose__compose_draft_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__accounts__discover_account_impl(port, ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__engine__engine_ping_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__mailbox__inbox_threads_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__database__init_app_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__mailbox__list_accounts_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__thread__mark_thread_read_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__microsoft__microsoft_sign_in_finish_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        9 => wire__crate__api__microsoft__microsoft_sign_in_start_impl(
+        11 => wire__crate__api__microsoft__microsoft_sign_in_start_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        10 => {
+        12 => {
             wire__crate__api__database__open_courly_database_impl(port, ptr, rust_vec_len, data_len)
         }
-        11 => wire__crate__api__engine__start_engine_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__thread__thread_detail_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__compose__send_mail_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__engine__start_engine_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__thread__thread_detail_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__actions__trash_thread_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1064,6 +1297,53 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::thread::AttachmentView>
     for crate::api::thread::AttachmentView
 {
     fn into_into_dart(self) -> crate::api::thread::AttachmentView {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::compose::ComposeDraft {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.account_id.into_into_dart().into_dart(),
+            self.from_email.into_into_dart().into_dart(),
+            self.to.into_into_dart().into_dart(),
+            self.cc.into_into_dart().into_dart(),
+            self.subject.into_into_dart().into_dart(),
+            self.quote_preview_html.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::compose::ComposeDraft
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::compose::ComposeDraft>
+    for crate::api::compose::ComposeDraft
+{
+    fn into_into_dart(self) -> crate::api::compose::ComposeDraft {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::compose::ComposeMode {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::New => 0.into_dart(),
+            Self::Reply => 1.into_dart(),
+            Self::ReplyAll => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::compose::ComposeMode
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::compose::ComposeMode>
+    for crate::api::compose::ComposeMode
+{
+    fn into_into_dart(self) -> crate::api::compose::ComposeMode {
         self
     }
 }
@@ -1209,6 +1489,55 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::microsoft::MicrosoftSignIn>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::compose::OutgoingMail {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.mode.into_into_dart().into_dart(),
+            self.account_id.into_into_dart().into_dart(),
+            self.to.into_into_dart().into_dart(),
+            self.cc.into_into_dart().into_dart(),
+            self.bcc.into_into_dart().into_dart(),
+            self.subject.into_into_dart().into_dart(),
+            self.body_text.into_into_dart().into_dart(),
+            self.reply_source.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::compose::OutgoingMail
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::compose::OutgoingMail>
+    for crate::api::compose::OutgoingMail
+{
+    fn into_into_dart(self) -> crate::api::compose::OutgoingMail {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::compose::ReplySource {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.thread_id.into_into_dart().into_dart(),
+            self.message_id.into_into_dart().into_dart(),
+            self.utc_offset_minutes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::compose::ReplySource
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::compose::ReplySource>
+    for crate::api::compose::ReplySource
+{
+    fn into_into_dart(self) -> crate::api::compose::ReplySource {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::accounts::SignInMethod {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -1349,6 +1678,35 @@ impl SseEncode for bool {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         serializer.cursor.write_u8(self as _).unwrap();
+    }
+}
+
+impl SseEncode for crate::api::compose::ComposeDraft {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.account_id, serializer);
+        <String>::sse_encode(self.from_email, serializer);
+        <Vec<String>>::sse_encode(self.to, serializer);
+        <Vec<String>>::sse_encode(self.cc, serializer);
+        <String>::sse_encode(self.subject, serializer);
+        <String>::sse_encode(self.quote_preview_html, serializer);
+    }
+}
+
+impl SseEncode for crate::api::compose::ComposeMode {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::compose::ComposeMode::New => 0,
+                crate::api::compose::ComposeMode::Reply => 1,
+                crate::api::compose::ComposeMode::ReplyAll => 2,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -1536,6 +1894,39 @@ impl SseEncode for Option<crate::api::accounts::ImapServers> {
         if let Some(value) = self {
             <crate::api::accounts::ImapServers>::sse_encode(value, serializer);
         }
+    }
+}
+
+impl SseEncode for Option<crate::api::compose::ReplySource> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::compose::ReplySource>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for crate::api::compose::OutgoingMail {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::compose::ComposeMode>::sse_encode(self.mode, serializer);
+        <String>::sse_encode(self.account_id, serializer);
+        <Vec<String>>::sse_encode(self.to, serializer);
+        <Vec<String>>::sse_encode(self.cc, serializer);
+        <Vec<String>>::sse_encode(self.bcc, serializer);
+        <String>::sse_encode(self.subject, serializer);
+        <String>::sse_encode(self.body_text, serializer);
+        <Option<crate::api::compose::ReplySource>>::sse_encode(self.reply_source, serializer);
+    }
+}
+
+impl SseEncode for crate::api::compose::ReplySource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.thread_id, serializer);
+        <String>::sse_encode(self.message_id, serializer);
+        <i32>::sse_encode(self.utc_offset_minutes, serializer);
     }
 }
 

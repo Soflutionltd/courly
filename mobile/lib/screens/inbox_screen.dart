@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:courly_mobile/screens/add_account_screen.dart';
+import 'package:courly_mobile/screens/compose_screen.dart';
+import 'package:courly_mobile/src/rust/api/actions.dart';
+import 'package:courly_mobile/src/rust/api/compose.dart';
 import 'package:courly_mobile/screens/thread_screen.dart';
 import 'package:courly_mobile/src/rust/api/mailbox.dart';
 import 'package:courly_mobile/widgets/account_avatar.dart';
@@ -78,8 +81,8 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   Future<void> _openThread(ThreadSummary thread) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final outcome = await Navigator.of(context).push<ThreadOutcome>(
+      MaterialPageRoute(
         builder: (_) => ThreadScreen(
           dataDir: widget.dataDir,
           accountId: thread.accountId,
@@ -88,7 +91,60 @@ class _InboxScreenState extends State<InboxScreen> {
         ),
       ),
     );
+    if (outcome != null) {
+      _tell(
+        outcome == ThreadOutcome.archived
+            ? 'Conversation archivée'
+            : 'Conversation supprimée',
+      );
+    }
     _reload();
+  }
+
+  /// Archive or delete straight from the list: the row leaves at once and
+  /// comes back if the engine refuses.
+  Future<void> _actOnRow(ThreadSummary thread, ThreadOutcome outcome) async {
+    setState(
+      () => _threads = [
+        for (final other in _threads)
+          if (other.id != thread.id || other.accountId != thread.accountId)
+            other,
+      ],
+    );
+    try {
+      final run = outcome == ThreadOutcome.archived
+          ? archiveThread
+          : trashThread;
+      await run(accountId: thread.accountId, threadId: thread.id);
+      _tell(
+        outcome == ThreadOutcome.archived
+            ? 'Conversation archivée'
+            : 'Conversation supprimée',
+      );
+    } catch (error) {
+      _tell('L\'action a échoué : $error');
+    }
+    _reload();
+  }
+
+  Future<void> _newMessage() async {
+    final accountId = _accountId ?? _accounts.first.id;
+    final sent = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ComposeScreen(
+          dataDir: widget.dataDir,
+          mode: ComposeMode.new_,
+          accountId: accountId,
+        ),
+      ),
+    );
+    if (sent == true) _tell('Message envoyé');
+  }
+
+  void _tell(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   AccountSummary? get _selectedAccount {
@@ -127,6 +183,14 @@ class _InboxScreenState extends State<InboxScreen> {
         },
       ),
       body: _body(context),
+      floatingActionButton: _accounts.isEmpty
+          ? null
+          : FloatingActionButton(
+              key: const Key('new-message'),
+              tooltip: 'Nouveau message',
+              onPressed: _newMessage,
+              child: const Icon(Icons.edit_outlined),
+            ),
     );
   }
 
@@ -168,12 +232,66 @@ class _InboxScreenState extends State<InboxScreen> {
         separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, index) {
           final thread = _threads[index];
-          return _ThreadRow(
-            key: ValueKey('thread-${thread.id}'),
-            thread: thread,
-            onTap: () => _openThread(thread),
+          return Dismissible(
+            key: ValueKey('thread-${thread.accountId}-${thread.id}'),
+            background: const _SwipeAction(
+              color: Color(0xFF2E7D32),
+              icon: Icons.archive_outlined,
+              label: 'Archiver',
+              alignment: Alignment.centerLeft,
+            ),
+            secondaryBackground: const _SwipeAction(
+              color: Color(0xFFC62828),
+              icon: Icons.delete_outline,
+              label: 'Supprimer',
+              alignment: Alignment.centerRight,
+            ),
+            onDismissed: (direction) => _actOnRow(
+              thread,
+              direction == DismissDirection.startToEnd
+                  ? ThreadOutcome.archived
+                  : ThreadOutcome.deleted,
+            ),
+            child: _ThreadRow(thread: thread, onTap: () => _openThread(thread)),
           );
         },
+      ),
+    );
+  }
+}
+
+/// What shows under a row while it is swiped, as in Outlook: archive to
+/// the right in green, delete to the left in red.
+class _SwipeAction extends StatelessWidget {
+  const _SwipeAction({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.alignment,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: color,
+      child: Align(
+        alignment: alignment,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white),
+              const SizedBox(height: 4),
+              Text(label, style: const TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -220,7 +338,7 @@ class _NoAccount extends StatelessWidget {
 }
 
 class _ThreadRow extends StatelessWidget {
-  const _ThreadRow({super.key, required this.thread, required this.onTap});
+  const _ThreadRow({required this.thread, required this.onTap});
 
   final ThreadSummary thread;
   final VoidCallback onTap;

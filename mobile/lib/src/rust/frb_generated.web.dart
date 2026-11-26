@@ -7,6 +7,8 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api/accounts.dart';
+import 'api/actions.dart';
+import 'api/compose.dart';
 import 'api/database.dart';
 import 'api/engine.dart';
 import 'api/mailbox.dart';
@@ -60,6 +62,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ImapServers dco_decode_box_autoadd_imap_servers(dynamic raw);
+
+  @protected
+  OutgoingMail dco_decode_box_autoadd_outgoing_mail(dynamic raw);
+
+  @protected
+  ReplySource dco_decode_box_autoadd_reply_source(dynamic raw);
+
+  @protected
+  ComposeDraft dco_decode_compose_draft(dynamic raw);
+
+  @protected
+  ComposeMode dco_decode_compose_mode(dynamic raw);
 
   @protected
   DatabaseReport dco_decode_database_report(dynamic raw);
@@ -117,6 +131,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ImapServers? dco_decode_opt_box_autoadd_imap_servers(dynamic raw);
+
+  @protected
+  ReplySource? dco_decode_opt_box_autoadd_reply_source(dynamic raw);
+
+  @protected
+  OutgoingMail dco_decode_outgoing_mail(dynamic raw);
+
+  @protected
+  ReplySource dco_decode_reply_source(dynamic raw);
 
   @protected
   SignInMethod dco_decode_sign_in_method(dynamic raw);
@@ -178,6 +201,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ImapServers sse_decode_box_autoadd_imap_servers(SseDeserializer deserializer);
+
+  @protected
+  OutgoingMail sse_decode_box_autoadd_outgoing_mail(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ReplySource sse_decode_box_autoadd_reply_source(SseDeserializer deserializer);
+
+  @protected
+  ComposeDraft sse_decode_compose_draft(SseDeserializer deserializer);
+
+  @protected
+  ComposeMode sse_decode_compose_mode(SseDeserializer deserializer);
 
   @protected
   DatabaseReport sse_decode_database_report(SseDeserializer deserializer);
@@ -247,6 +284,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ImapServers? sse_decode_opt_box_autoadd_imap_servers(
     SseDeserializer deserializer,
   );
+
+  @protected
+  ReplySource? sse_decode_opt_box_autoadd_reply_source(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  OutgoingMail sse_decode_outgoing_mail(SseDeserializer deserializer);
+
+  @protected
+  ReplySource sse_decode_reply_source(SseDeserializer deserializer);
 
   @protected
   SignInMethod sse_decode_sign_in_method(SseDeserializer deserializer);
@@ -325,6 +373,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ImapServers self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_box_autoadd_outgoing_mail(
+    OutgoingMail self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_reply_source(
+    ReplySource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_compose_draft(ComposeDraft self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_compose_mode(ComposeMode self, SseSerializer serializer);
 
   @protected
   void sse_encode_database_report(
@@ -418,6 +484,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ImapServers? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_opt_box_autoadd_reply_source(
+    ReplySource? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_outgoing_mail(OutgoingMail self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reply_source(ReplySource self, SseSerializer serializer);
 
   @protected
   void sse_encode_sign_in_method(SignInMethod self, SseSerializer serializer);

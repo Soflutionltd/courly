@@ -1,10 +1,17 @@
+import 'package:courly_mobile/screens/compose_screen.dart';
+import 'package:courly_mobile/src/rust/api/actions.dart';
+import 'package:courly_mobile/src/rust/api/compose.dart';
 import 'package:courly_mobile/src/rust/api/thread.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+/// What became of a conversation the reader left from its screen.
+enum ThreadOutcome { archived, deleted }
+
 /// One conversation, opened from the inbox: its messages oldest first, the
 /// latest one open and the earlier ones folded to a line, as in Outlook.
+/// Archiving or deleting it pops the screen with the [ThreadOutcome].
 class ThreadScreen extends StatefulWidget {
   const ThreadScreen({
     super.key,
@@ -73,6 +80,48 @@ class _ThreadScreenState extends State<ThreadScreen> {
     }
   }
 
+  Future<void> _act(ThreadOutcome outcome) async {
+    try {
+      final run = outcome == ThreadOutcome.archived
+          ? archiveThread
+          : trashThread;
+      await run(accountId: widget.accountId, threadId: widget.threadId);
+      if (!mounted) return;
+      Navigator.of(context).pop(outcome);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('L\'action a échoué : $error')));
+    }
+  }
+
+  Future<void> _reply(ComposeMode mode) async {
+    final thread = _thread;
+    if (thread == null || thread.messages.isEmpty) return;
+    final latest = thread.messages.last;
+    final sent = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ComposeScreen(
+          dataDir: widget.dataDir,
+          mode: mode,
+          accountId: widget.accountId,
+          replySource: ReplySource(
+            threadId: widget.threadId,
+            messageId: latest.id,
+            utcOffsetMinutes: DateTime.fromMillisecondsSinceEpoch(
+              latest.dateMs.toInt(),
+            ).timeZoneOffset.inMinutes,
+          ),
+        ),
+      ),
+    );
+    if (sent == true && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Message envoyé')));
+    }
+  }
+
   void _showRemoteImages() {
     setState(() => _loadRemoteImages = true);
     _load();
@@ -81,7 +130,53 @@ class _ThreadScreenState extends State<ThreadScreen> {
   @override
   Widget build(BuildContext context) {
     final thread = _thread;
-    return Scaffold(appBar: AppBar(), body: _body(context, thread));
+    return Scaffold(
+      appBar: AppBar(
+        actions: [
+          IconButton(
+            key: const Key('archive-thread'),
+            tooltip: 'Archiver',
+            icon: const Icon(Icons.archive_outlined),
+            onPressed: () => _act(ThreadOutcome.archived),
+          ),
+          IconButton(
+            key: const Key('delete-thread'),
+            tooltip: 'Supprimer',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => _act(ThreadOutcome.deleted),
+          ),
+        ],
+      ),
+      body: _body(context, thread),
+      bottomNavigationBar: thread == null || thread.messages.isEmpty
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('reply'),
+                        onPressed: () => _reply(ComposeMode.reply),
+                        icon: const Icon(Icons.reply),
+                        label: const Text('Répondre'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('reply-all'),
+                        onPressed: () => _reply(ComposeMode.replyAll),
+                        icon: const Icon(Icons.reply_all),
+                        label: const Text('Répondre à tous'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+    );
   }
 
   Widget _body(BuildContext context, ThreadView? thread) {

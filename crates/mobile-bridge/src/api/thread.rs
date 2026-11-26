@@ -64,7 +64,7 @@ fn content_security_policy(allow_remote: bool) -> &'static str {
     }
 }
 
-fn open_read_only(path: &Path) -> Result<rusqlite::Connection, String> {
+pub(crate) fn open_read_only(path: &Path) -> Result<rusqlite::Connection, String> {
     rusqlite::Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -192,7 +192,7 @@ pub fn mark_thread_read(account_id: String, thread_id: String) -> Result<(), Str
 /// Replace each `cid:` reference with the image bytes as a `data:` URI.
 /// Runs after sanitizing, which drops `data:` images found in the mail
 /// itself.
-fn embed_inline_images(html: &str, images: &HashMap<String, Vec<u8>>) -> String {
+pub(crate) fn embed_inline_images(html: &str, images: &HashMap<String, Vec<u8>>) -> String {
     let mut out = html.to_owned();
     for (cid, bytes) in images {
         let cid = cid.trim_start_matches('<').trim_end_matches('>');
@@ -207,7 +207,7 @@ fn embed_inline_images(html: &str, images: &HashMap<String, Vec<u8>>) -> String 
 }
 
 /// The image type from its first bytes; the store keeps bytes only.
-fn image_mime_type(bytes: &[u8]) -> &'static str {
+pub(crate) fn image_mime_type(bytes: &[u8]) -> &'static str {
     match bytes {
         [0x89, b'P', b'N', b'G', ..] => "image/png",
         [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
@@ -233,7 +233,7 @@ fn image_mime_type(bytes: &[u8]) -> &'static str {
 }
 
 /// A plain-text message, escaped and kept with its line breaks.
-fn plain_text_body(text: &str) -> String {
+pub(crate) fn plain_text_body(text: &str) -> String {
     let escaped = text
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -242,7 +242,7 @@ fn plain_text_body(text: &str) -> String {
 }
 
 /// Wrap a sanitized body in a document sized for the phone.
-fn html_document(body: &str, csp: &str) -> String {
+pub(crate) fn html_document(body: &str, csp: &str) -> String {
     format!(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">\
 <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\
