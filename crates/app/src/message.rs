@@ -164,6 +164,9 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
+    /// Block the selected thread's sender, from the toolbar, the menu bar
+    /// or the command palette.
+    BlockSelectedSender,
     /// `sender.block` answered: the blocked address, or why it failed.
     SenderBlocked(Result<String, String>),
     /// `sender.unblock` answered: the unblocked address, or why it failed.

@@ -57,6 +57,8 @@ Read the doc before starting work in its area. Subagents launched for these task
 
 Use `brokkr` (not `cargo`) for check/test. Output is never capped or scoped: every diagnostic prints, every time. Errors in files with unstaged changes are listed first.
 
+Installing brokkr: it is an external tool, not part of this repository. Soflution keeps a private copy of it at `Soflutionltd/brokkr` (the original has no license, so it must never be copied into this public repository). Clone that copy to `~/Cursor/App/Outils/brokkr` and run `cargo install --path ~/Cursor/App/Outils/brokkr --locked`; the `upstream` remote there tracks the original author's repository for updates. brokkr is Linux-only (it relies on pidfd, prctl, statx, cgroups and /proc) and does not build on macOS: on a Mac, run it inside a Linux machine or container, or use plain `cargo` with the same checks.
+
 - `brokkr check` - gremlins + clippy + all tests
 - `brokkr check -p <crate>` - scope to one package (e.g. `-p app`). You generally do not want to run this; a single `brokkr check` is faster than 2-3 `-p` runs
 - `brokkr check -- --test <file>` - forward args to `cargo test` (args after the second `--` go to the test binary)

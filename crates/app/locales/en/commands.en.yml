@@ -52,6 +52,7 @@ _version: 1
 "cmd.Delete - Move to Trash": "Delete - Move to Trash"
 "cmd.Permanently Delete": "Permanently Delete"
 "cmd.Spam": "Spam"
+"cmd.Block": "Block"
 "cmd.Not Spam": "Not Spam"
 "cmd.Report Spam / Not Spam": "Report Spam / Not Spam"
 "cmd.Mark Read": "Mark Read"

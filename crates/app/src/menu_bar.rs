@@ -499,6 +499,12 @@ fn build(profiles: &[ProfileRow]) -> (Menu, Vec<Entry>) {
     );
     b.item(
         &message,
+        A::Command(C::EmailBlockSender),
+        &tr("main.row_menu.block_sender"),
+        None,
+    );
+    b.item(
+        &message,
         A::Command(C::EmailUnsubscribe),
         &tr("main.menu_bar.unsubscribe"),
         None,

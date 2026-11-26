@@ -239,6 +239,7 @@ impl ReadyApp {
             }
             Message::Compose => self.open_new_message(),
             Message::Noop => Task::none(),
+            Message::BlockSelectedSender => self.block_menu_sender(),
             Message::SenderBlocked(result) => self.handle_sender_blocked(result),
             Message::SenderUnblocked(result) => self.handle_sender_unblocked(result),
             Message::BlockedSendersLoaded(result) => {

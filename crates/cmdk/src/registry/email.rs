@@ -52,6 +52,18 @@ pub(super) fn register_email(out: &mut Vec<CommandDescriptor>) {
         "Report Spam / Not Spam",
         "Mark the thread as spam, or remove the spam flag if already marked. Can be undone.",
     ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::EmailBlockSender,
+            "Block",
+            "Email",
+            None,
+            |ctx| ctx.has_single_selection() && ctx.allows_remove_items(),
+            &["block", "junk", "spam", "sender"],
+        ),
+        "Block Sender",
+        "Move the thread to Spam and send every later message from its sender there too, on every device. Unblock from Settings.",
+    ));
     register_email_toggles(out);
     register_email_other(out);
 }

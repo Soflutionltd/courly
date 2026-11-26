@@ -396,7 +396,8 @@ impl ReadyApp {
     /// Block the selected thread's sender on its account: the thread goes
     /// to Spam now through the regular spam action, and the service's
     /// blocked sender sweep sends that address's later mail there too.
-    fn block_menu_sender(&mut self) -> Task<Message> {
+    /// Reached from the row menu, the toolbar, the menu bar and the palette.
+    pub(crate) fn block_menu_sender(&mut self) -> Task<Message> {
         let Some(address) = self.menu_sender() else {
             return Task::none();
         };
