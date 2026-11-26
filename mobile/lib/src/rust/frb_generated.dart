@@ -8,6 +8,7 @@ import 'api/database.dart';
 import 'api/engine.dart';
 import 'api/mailbox.dart';
 import 'api/microsoft.dart';
+import 'api/thread.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -73,7 +74,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -969108112;
+  int get rustContentHash => 1495217607;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -109,6 +110,11 @@ abstract class RustLibApi extends BaseApi {
     required String dataDir,
   });
 
+  Future<void> crateApiThreadMarkThreadRead({
+    required String accountId,
+    required String threadId,
+  });
+
   Future<AddedAccount> crateApiMicrosoftMicrosoftSignInFinish({
     required String callbackUrl,
   });
@@ -122,6 +128,13 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<EngineReady> crateApiEngineStartEngine({required String dataDir});
+
+  Future<ThreadView> crateApiThreadThreadDetail({
+    required String dataDir,
+    required String accountId,
+    required String threadId,
+    required bool loadRemoteImages,
+  });
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -321,6 +334,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "list_accounts", argNames: ["dataDir"]);
 
   @override
+  Future<void> crateApiThreadMarkThreadRead({
+    required String accountId,
+    required String threadId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(accountId, serializer);
+          sse_encode_String(threadId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiThreadMarkThreadReadConstMeta,
+        argValues: [accountId, threadId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiThreadMarkThreadReadConstMeta =>
+      const TaskConstMeta(
+        debugName: "mark_thread_read",
+        argNames: ["accountId", "threadId"],
+      );
+
+  @override
   Future<AddedAccount> crateApiMicrosoftMicrosoftSignInFinish({
     required String callbackUrl,
   }) {
@@ -332,7 +380,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 8,
             port: port_,
           );
         },
@@ -365,7 +413,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -398,7 +446,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 10,
             port: port_,
           );
         },
@@ -429,7 +477,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 11,
             port: port_,
           );
         },
@@ -446,6 +494,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiEngineStartEngineConstMeta =>
       const TaskConstMeta(debugName: "start_engine", argNames: ["dataDir"]);
+
+  @override
+  Future<ThreadView> crateApiThreadThreadDetail({
+    required String dataDir,
+    required String accountId,
+    required String threadId,
+    required bool loadRemoteImages,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dataDir, serializer);
+          sse_encode_String(accountId, serializer);
+          sse_encode_String(threadId, serializer);
+          sse_encode_bool(loadRemoteImages, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_thread_view,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiThreadThreadDetailConstMeta,
+        argValues: [dataDir, accountId, threadId, loadRemoteImages],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiThreadThreadDetailConstMeta => const TaskConstMeta(
+    debugName: "thread_detail",
+    argNames: ["dataDir", "accountId", "threadId", "loadRemoteImages"],
+  );
 
   @protected
   String dco_decode_String(dynamic raw) {
@@ -496,6 +582,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       accountId: dco_decode_String(arr[0]),
       email: dco_decode_String(arr[1]),
       displayName: dco_decode_opt_String(arr[2]),
+    );
+  }
+
+  @protected
+  AttachmentView dco_decode_attachment_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return AttachmentView(
+      id: dco_decode_String(arr[0]),
+      messageId: dco_decode_String(arr[1]),
+      filename: dco_decode_String(arr[2]),
+      mimeType: dco_decode_String(arr[3]),
+      size: dco_decode_opt_box_autoadd_i_64(arr[4]),
     );
   }
 
@@ -610,6 +711,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<AttachmentView> dco_decode_list_attachment_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_attachment_view).toList();
+  }
+
+  @protected
+  List<MessageView> dco_decode_list_message_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_message_view).toList();
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
@@ -619,6 +732,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<ThreadSummary> dco_decode_list_thread_summary(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_thread_summary).toList();
+  }
+
+  @protected
+  MessageView dco_decode_message_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return MessageView(
+      id: dco_decode_String(arr[0]),
+      sender: dco_decode_String(arr[1]),
+      senderAddress: dco_decode_String(arr[2]),
+      recipients: dco_decode_list_String(arr[3]),
+      dateMs: dco_decode_i_64(arr[4]),
+      isRead: dco_decode_bool(arr[5]),
+      isOwnMessage: dco_decode_bool(arr[6]),
+      preview: dco_decode_String(arr[7]),
+      html: dco_decode_String(arr[8]),
+    );
   }
 
   @protected
@@ -685,6 +817,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       isRead: dco_decode_bool(arr[6]),
       hasAttachments: dco_decode_bool(arr[7]),
       isPinned: dco_decode_bool(arr[8]),
+    );
+  }
+
+  @protected
+  ThreadView dco_decode_thread_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return ThreadView(
+      subject: dco_decode_String(arr[0]),
+      messages: dco_decode_list_message_view(arr[1]),
+      attachments: dco_decode_list_attachment_view(arr[2]),
+      remoteImagesBlocked: dco_decode_bool(arr[3]),
     );
   }
 
@@ -772,6 +918,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       accountId: var_accountId,
       email: var_email,
       displayName: var_displayName,
+    );
+  }
+
+  @protected
+  AttachmentView sse_decode_attachment_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_messageId = sse_decode_String(deserializer);
+    var var_filename = sse_decode_String(deserializer);
+    var var_mimeType = sse_decode_String(deserializer);
+    var var_size = sse_decode_opt_box_autoadd_i_64(deserializer);
+    return AttachmentView(
+      id: var_id,
+      messageId: var_messageId,
+      filename: var_filename,
+      mimeType: var_mimeType,
+      size: var_size,
     );
   }
 
@@ -910,6 +1073,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<AttachmentView> sse_decode_list_attachment_view(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <AttachmentView>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_attachment_view(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MessageView>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_message_view(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -928,6 +1117,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_thread_summary(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  MessageView sse_decode_message_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_sender = sse_decode_String(deserializer);
+    var var_senderAddress = sse_decode_String(deserializer);
+    var var_recipients = sse_decode_list_String(deserializer);
+    var var_dateMs = sse_decode_i_64(deserializer);
+    var var_isRead = sse_decode_bool(deserializer);
+    var var_isOwnMessage = sse_decode_bool(deserializer);
+    var var_preview = sse_decode_String(deserializer);
+    var var_html = sse_decode_String(deserializer);
+    return MessageView(
+      id: var_id,
+      sender: var_sender,
+      senderAddress: var_senderAddress,
+      recipients: var_recipients,
+      dateMs: var_dateMs,
+      isRead: var_isRead,
+      isOwnMessage: var_isOwnMessage,
+      preview: var_preview,
+      html: var_html,
+    );
   }
 
   @protected
@@ -1035,6 +1249,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ThreadView sse_decode_thread_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_subject = sse_decode_String(deserializer);
+    var var_messages = sse_decode_list_message_view(deserializer);
+    var var_attachments = sse_decode_list_attachment_view(deserializer);
+    var var_remoteImagesBlocked = sse_decode_bool(deserializer);
+    return ThreadView(
+      subject: var_subject,
+      messages: var_messages,
+      attachments: var_attachments,
+      remoteImagesBlocked: var_remoteImagesBlocked,
+    );
+  }
+
+  @protected
   int sse_decode_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint16();
@@ -1104,6 +1333,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.accountId, serializer);
     sse_encode_String(self.email, serializer);
     sse_encode_opt_String(self.displayName, serializer);
+  }
+
+  @protected
+  void sse_encode_attachment_view(
+    AttachmentView self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.messageId, serializer);
+    sse_encode_String(self.filename, serializer);
+    sse_encode_String(self.mimeType, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.size, serializer);
   }
 
   @protected
@@ -1224,6 +1466,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_attachment_view(
+    List<AttachmentView> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_attachment_view(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_message_view(
+    List<MessageView> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_message_view(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -1243,6 +1509,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_thread_summary(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_message_view(MessageView self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.sender, serializer);
+    sse_encode_String(self.senderAddress, serializer);
+    sse_encode_list_String(self.recipients, serializer);
+    sse_encode_i_64(self.dateMs, serializer);
+    sse_encode_bool(self.isRead, serializer);
+    sse_encode_bool(self.isOwnMessage, serializer);
+    sse_encode_String(self.preview, serializer);
+    sse_encode_String(self.html, serializer);
   }
 
   @protected
@@ -1335,6 +1615,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.isRead, serializer);
     sse_encode_bool(self.hasAttachments, serializer);
     sse_encode_bool(self.isPinned, serializer);
+  }
+
+  @protected
+  void sse_encode_thread_view(ThreadView self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.subject, serializer);
+    sse_encode_list_message_view(self.messages, serializer);
+    sse_encode_list_attachment_view(self.attachments, serializer);
+    sse_encode_bool(self.remoteImagesBlocked, serializer);
   }
 
   @protected

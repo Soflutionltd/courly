@@ -5085,6 +5085,8 @@ dependencies = [
 name = "mobile_bridge"
 version = "0.2.10"
 dependencies = [
+ "base64 0.23.1",
+ "common",
  "crypto-key",
  "db",
  "flutter_rust_bridge",

@@ -19,6 +19,8 @@ service-api = { path = "../service-api" }
 crypto-key = { path = "../crypto-key" }
 rtsk = { path = "../core" }
 label-colors = { path = "../label-colors" }
+common = { path = "../common" }
+base64.workspace = true
 url = "2"
 tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "sync"] }
 serde.workspace = true

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:courly_mobile/screens/add_account_screen.dart';
+import 'package:courly_mobile/screens/thread_screen.dart';
 import 'package:courly_mobile/src/rust/api/mailbox.dart';
 import 'package:courly_mobile/widgets/account_avatar.dart';
 import 'package:material_ui/material_ui.dart';
@@ -74,6 +75,20 @@ class _InboxScreenState extends State<InboxScreen> {
   Future<void> _addAccount() async {
     final added = await showAddAccountSheet(context);
     if (added == true) _reload();
+  }
+
+  Future<void> _openThread(ThreadSummary thread) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ThreadScreen(
+          dataDir: widget.dataDir,
+          accountId: thread.accountId,
+          threadId: thread.id,
+          markRead: !thread.isRead,
+        ),
+      ),
+    );
+    _reload();
   }
 
   AccountSummary? get _selectedAccount {
@@ -151,7 +166,14 @@ class _InboxScreenState extends State<InboxScreen> {
         key: const Key('inbox-list'),
         itemCount: _threads.length,
         separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, index) => _ThreadRow(thread: _threads[index]),
+        itemBuilder: (context, index) {
+          final thread = _threads[index];
+          return _ThreadRow(
+            key: ValueKey('thread-${thread.id}'),
+            thread: thread,
+            onTap: () => _openThread(thread),
+          );
+        },
       ),
     );
   }
@@ -198,9 +220,10 @@ class _NoAccount extends StatelessWidget {
 }
 
 class _ThreadRow extends StatelessWidget {
-  const _ThreadRow({required this.thread});
+  const _ThreadRow({super.key, required this.thread, required this.onTap});
 
   final ThreadSummary thread;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -208,6 +231,7 @@ class _ThreadRow extends StatelessWidget {
     final unread = !thread.isRead;
     final weight = unread ? FontWeight.w700 : FontWeight.w400;
     return ListTile(
+      onTap: onTap,
       title: Row(
         children: [
           Expanded(

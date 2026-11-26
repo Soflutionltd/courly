@@ -11,6 +11,7 @@ import 'api/database.dart';
 import 'api/engine.dart';
 import 'api/mailbox.dart';
 import 'api/microsoft.dart';
+import 'api/thread.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -41,6 +42,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AddedAccount dco_decode_added_account(dynamic raw);
+
+  @protected
+  AttachmentView dco_decode_attachment_view(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
@@ -82,10 +86,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<AccountSummary> dco_decode_list_account_summary(dynamic raw);
 
   @protected
+  List<AttachmentView> dco_decode_list_attachment_view(dynamic raw);
+
+  @protected
+  List<MessageView> dco_decode_list_message_view(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
   List<ThreadSummary> dco_decode_list_thread_summary(dynamic raw);
+
+  @protected
+  MessageView dco_decode_message_view(dynamic raw);
 
   @protected
   MicrosoftSignIn dco_decode_microsoft_sign_in(dynamic raw);
@@ -110,6 +123,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ThreadSummary dco_decode_thread_summary(dynamic raw);
+
+  @protected
+  ThreadView dco_decode_thread_view(dynamic raw);
 
   @protected
   int dco_decode_u_16(dynamic raw);
@@ -142,6 +158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AddedAccount sse_decode_added_account(SseDeserializer deserializer);
+
+  @protected
+  AttachmentView sse_decode_attachment_view(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
@@ -187,12 +206,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<AttachmentView> sse_decode_list_attachment_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
   List<ThreadSummary> sse_decode_list_thread_summary(
     SseDeserializer deserializer,
   );
+
+  @protected
+  MessageView sse_decode_message_view(SseDeserializer deserializer);
 
   @protected
   MicrosoftSignIn sse_decode_microsoft_sign_in(SseDeserializer deserializer);
@@ -223,6 +253,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ThreadSummary sse_decode_thread_summary(SseDeserializer deserializer);
+
+  @protected
+  ThreadView sse_decode_thread_view(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_16(SseDeserializer deserializer);
@@ -259,6 +292,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_added_account(AddedAccount self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_attachment_view(
+    AttachmentView self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
@@ -321,6 +360,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_attachment_view(
+    List<AttachmentView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_message_view(
+    List<MessageView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -331,6 +382,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     List<ThreadSummary> self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_message_view(MessageView self, SseSerializer serializer);
 
   @protected
   void sse_encode_microsoft_sign_in(
@@ -370,6 +424,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_thread_summary(ThreadSummary self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_thread_view(ThreadView self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_16(int self, SseSerializer serializer);
