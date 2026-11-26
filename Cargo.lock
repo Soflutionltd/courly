@@ -5085,10 +5085,17 @@ dependencies = [
 name = "mobile_bridge"
 version = "0.2.10"
 dependencies = [
+ "crypto-key",
  "db",
  "flutter_rust_bridge",
+ "log",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "service",
+ "service-api",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

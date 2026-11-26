@@ -14,6 +14,13 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 flutter_rust_bridge = "=2.13.0"
 db = { path = "../db" }
 rusqlite.workspace = true
+service = { path = "../service" }
+service-api = { path = "../service-api" }
+crypto-key = { path = "../crypto-key" }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "sync"] }
+serde.workspace = true
+serde_json.workspace = true
+log = "0.4"
 
 # Phones get SQLite compiled into the app: the system copy on iOS is not
 # linked by the Flutter plugin, and its version varies with the OS release
