@@ -498,6 +498,8 @@ pub enum Message {
     Undo,
     /// Perform again the action undone last.
     Redo,
+    /// Open a new meeting prefilled from the open message.
+    MeetingFromEmail,
     /// Undo compensation completed.
     UndoCompleted {
         desc: String,

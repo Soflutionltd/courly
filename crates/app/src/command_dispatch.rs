@@ -479,6 +479,7 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
             crate::ui::calendar::CalendarView::Month,
         )),
         CommandId::CalendarToday => Some(Message::CalendarToday),
+        CommandId::CalendarMeetingFromEmail => Some(Message::MeetingFromEmail),
         CommandId::CalendarCreateEvent => Some(Message::Calendar(Box::new(
             crate::ui::calendar::CalendarMessage::CreateEvent,
         ))),

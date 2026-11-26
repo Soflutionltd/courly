@@ -815,6 +815,94 @@ impl ReadyApp {
             ),
         ])
     }
+
+    /// Open a new meeting from the open message, as Outlook's Create
+    /// meeting does: the subject as its title, the body as its notes, and
+    /// everyone on the message but the user's own addresses invited. The
+    /// meeting is created on the account that received the message when it
+    /// has a calendar there.
+    pub(crate) fn create_meeting_from_email(&mut self) -> Task<Message> {
+        let Some(message) = self.reading_pane.thread_messages.first() else {
+            return Task::none();
+        };
+        let own: Vec<&str> = self
+            .sidebar
+            .accounts
+            .iter()
+            .map(|account| account.email.as_str())
+            .collect();
+        let attendees = meeting_attendees(
+            &own,
+            message.from_name.as_deref(),
+            message.from_address.as_deref(),
+            message.to_addresses.as_deref().unwrap_or_default(),
+            message.cc_addresses.as_deref().unwrap_or_default(),
+        );
+        let date = self.calendar.selected_date;
+        let hour = self.calendar.selected_hour.unwrap_or(9);
+        let mut event = CalendarEventData::new_at(date, hour);
+        event.title = message.subject.clone().unwrap_or_default();
+        event.description = message
+            .body_text
+            .clone()
+            .filter(|text| !text.trim().is_empty())
+            .or_else(|| message.snippet.clone())
+            .unwrap_or_default();
+        event.attendees = attendees;
+        let account_id = message.account_id.clone();
+        self.pre_assign_calendar_if_unambiguous(&mut event, Some(&account_id));
+        self.pre_assign_calendar_if_unambiguous(&mut event, None);
+
+        let switch = self.update(Message::SetAppMode(crate::AppMode::Calendar));
+        let account_id = event.account_id.clone();
+        self.calendar.workflow = CalendarWorkflow::CreatingEvent {
+            account_id,
+            session: EditorSession::new(event),
+        };
+        self.calendar.sync_surfaces();
+        switch
+    }
+}
+
+/// The people a meeting made from a message invites: its sender, then its
+/// To and Cc, each once, without the user's own addresses.
+fn meeting_attendees(
+    own: &[&str],
+    from_name: Option<&str>,
+    from_address: Option<&str>,
+    to: &str,
+    cc: &str,
+) -> Vec<crate::ui::calendar::AttendeeEntry> {
+    use rtsk::seen_addresses::parse::parse_address_list;
+
+    let sender = from_address
+        .filter(|address| !address.trim().is_empty())
+        .map(|address| {
+            (
+                from_name.filter(|name| !name.is_empty()).map(String::from),
+                address.to_string(),
+            )
+        });
+    let mut seen: Vec<String> = Vec::new();
+    sender
+        .into_iter()
+        .chain(parse_address_list(to))
+        .chain(parse_address_list(cc))
+        .filter_map(|(name, email)| {
+            let key = email.to_lowercase();
+            let is_own = own.iter().any(|mine| mine.eq_ignore_ascii_case(&email));
+            if is_own || seen.contains(&key) {
+                return None;
+            }
+            seen.push(key);
+            Some(crate::ui::calendar::AttendeeEntry {
+                email,
+                name,
+                rsvp_status: "needs-action".to_string(),
+                is_organizer: false,
+            })
+        })
+        .collect()
 }
 
 /// Build a `WireCalendarEventInput` from the editor draft. Phase 6c-8
@@ -973,6 +1061,24 @@ fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData
 mod tests {
     use super::*;
     use jiff::civil::Date;
+
+    #[test]
+    fn a_meeting_invites_everyone_on_the_message_but_me_once() {
+        let attendees = meeting_attendees(
+            &["me@example.com"],
+            Some("Jo"),
+            Some("jo@example.com"),
+            "Me <ME@example.com>, Sam <sam@example.com>",
+            "jo@example.com, Kim <kim@example.com>",
+        );
+        let emails: Vec<&str> = attendees.iter().map(|a| a.email.as_str()).collect();
+        assert_eq!(
+            emails,
+            vec!["jo@example.com", "sam@example.com", "kim@example.com"]
+        );
+        assert_eq!(attendees[0].name.as_deref(), Some("Jo"));
+        assert!(attendees.iter().all(|a| a.rsvp_status == "needs-action"));
+    }
 
     fn local_date(ts: i64) -> Date {
         jiff::Timestamp::from_second(ts)

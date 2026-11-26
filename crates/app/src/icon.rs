@@ -291,6 +291,9 @@ pub fn undo<'a>() -> Text<'a> {
 pub fn redo<'a>() -> Text<'a> {
     to_text('\u{e143}')
 }
+pub fn calendar_plus<'a>() -> Text<'a> {
+    to_text('\u{e2bc}')
+}
 pub fn refresh<'a>() -> Text<'a> {
     to_text('\u{e145}')
 }

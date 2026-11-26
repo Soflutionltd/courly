@@ -3,7 +3,7 @@ use crate::id::CommandId;
 use crate::keybinding::KeyBinding;
 
 use super::builders::{desc, desc_kw, with_docs};
-use super::scoring::always;
+use super::scoring::{always, needs_single_selection};
 
 pub(super) fn register_calendar(out: &mut Vec<CommandDescriptor>) {
     out.push(with_docs(
@@ -103,6 +103,18 @@ pub(super) fn register_calendar(out: &mut Vec<CommandDescriptor>) {
         ),
         "Create Event",
         "Open the event creation dialog.",
+    ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::CalendarMeetingFromEmail,
+            "Create Meeting",
+            "Calendar",
+            None,
+            needs_single_selection,
+            &["meeting", "invite", "event", "from email"],
+        ),
+        "Create Meeting from Email",
+        "Open a new meeting from the selected message: its subject, its text, and everyone on it but you invited.",
     ));
     out.push(with_docs(
         desc_kw(

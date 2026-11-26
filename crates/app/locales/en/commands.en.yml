@@ -123,6 +123,8 @@ _version: 1
 "cmd.Go to Today": "Go to Today"
 "cmd.New Event": "New Event"
 "cmd.Create Event": "Create Event"
+"cmd.Create Meeting": "Create Meeting"
+"cmd.Create Meeting from Email": "Create Meeting from Email"
 "cmd.Pop Out": "Pop Out"
 "cmd.Pop Out Calendar": "Pop Out Calendar"
 "cmd.Ask AI": "Ask AI"

@@ -82,6 +82,7 @@ pub enum CommandId {
     CalendarViewMonth,
     CalendarToday,
     CalendarCreateEvent,
+    CalendarMeetingFromEmail,
     CalendarPopOut,
 
     // App
@@ -178,6 +179,10 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::CalendarViewMonth, "calendar.viewMonth"),
     (CommandId::CalendarToday, "calendar.today"),
     (CommandId::CalendarCreateEvent, "calendar.createEvent"),
+    (
+        CommandId::CalendarMeetingFromEmail,
+        "calendar.meetingFromEmail",
+    ),
     (CommandId::CalendarPopOut, "calendar.popOut"),
     (CommandId::SwitchToCalendar, "calendar.switchTo"),
     (CommandId::SwitchToMail, "app.switchToMail"),
@@ -283,6 +288,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::CalendarViewMonth,
     CommandId::CalendarToday,
     CommandId::CalendarCreateEvent,
+    CommandId::CalendarMeetingFromEmail,
     CommandId::CalendarPopOut,
     CommandId::SwitchToCalendar,
     CommandId::SwitchToMail,

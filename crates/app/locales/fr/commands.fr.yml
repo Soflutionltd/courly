@@ -123,6 +123,8 @@ _version: 1
 "cmd.Go to Today": "Aller à aujourd'hui"
 "cmd.New Event": "Nouvel événement"
 "cmd.Create Event": "Créer un événement"
+"cmd.Create Meeting": "Créer une réunion"
+"cmd.Create Meeting from Email": "Créer une réunion à partir du message"
 "cmd.Pop Out": "Ouvrir dans une fenêtre"
 "cmd.Pop Out Calendar": "Ouvrir le calendrier dans une fenêtre"
 "cmd.Ask AI": "Demander à l'IA"
