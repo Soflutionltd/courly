@@ -85,6 +85,18 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         "Mark as Read / Unread",
         "Toggle the read/unread status of the selected thread. Can be undone.",
     ));
+    out.push(with_docs(
+        desc_kw(
+            CommandId::EmailMarkAllRead,
+            "Mark All as Read",
+            "Email",
+            None,
+            |ctx| ctx.allows_set_seen() && ctx.current_view.is_mailbox(),
+            &["seen", "read", "folder"],
+        ),
+        "Mark All as Read",
+        "Mark every message of the open folder as read, on the server too.",
+    ));
     out.push(with_docs(undoable(toggle(
         CommandId::EmailStar, "Star", "Unstar", "Email",
         Some(KeyBinding::key('s')),

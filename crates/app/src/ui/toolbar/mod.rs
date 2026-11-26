@@ -25,6 +25,7 @@ pub enum ToolbarItem {
     Move,
     Flag,
     ReadUnread,
+    MarkAllRead,
     Snooze,
     Reply,
     ReplyAll,
@@ -39,13 +40,14 @@ pub enum ToolbarItem {
 
 impl ToolbarItem {
     /// Every button, in the customize panel's order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Delete,
         Self::Archive,
         Self::Block,
         Self::Move,
         Self::Flag,
         Self::ReadUnread,
+        Self::MarkAllRead,
         Self::Snooze,
         Self::Reply,
         Self::ReplyAll,
@@ -66,6 +68,7 @@ impl ToolbarItem {
             Self::Move => CommandId::EmailMoveToFolder,
             Self::Flag => CommandId::EmailStar,
             Self::ReadUnread => CommandId::EmailMarkRead,
+            Self::MarkAllRead => CommandId::EmailMarkAllRead,
             Self::Snooze => CommandId::EmailSnooze,
             Self::Reply => CommandId::ComposeReply,
             Self::ReplyAll => CommandId::ComposeReplyAll,
@@ -87,6 +90,7 @@ impl ToolbarItem {
             Self::Move => icon::folder(),
             Self::Flag => icon::flag(),
             Self::ReadUnread => icon::mail(),
+            Self::MarkAllRead => icon::mail_check(),
             Self::Snooze => icon::clock(),
             Self::Reply => icon::reply(),
             Self::ReplyAll => icon::reply_all(),

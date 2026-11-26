@@ -966,6 +966,22 @@ impl ReadyApp {
     }
 }
 
+impl ReadyApp {
+    /// Mark the open folder read, as the menu bar's Mark All as Read does.
+    /// Nothing happens on a view that is not one folder holding messages.
+    pub(crate) fn mark_open_folder_read(&mut self) -> Task<Message> {
+        match self
+            .sidebar
+            .selected_folder()
+            .filter(|folder| folder.holds_messages)
+            .and_then(|folder| folder_command(MenuAction::MarkFolderRead, folder))
+        {
+            Some(command) => self.handle_folder_command(command),
+            None => Task::none(),
+        }
+    }
+}
+
 /// The folder command a Folder menu item runs on the open folder. Only
 /// marking read covers several accounts; the rest need one own folder.
 fn folder_command(action: MenuAction, folder: SelectedFolder) -> Option<FolderCommand> {

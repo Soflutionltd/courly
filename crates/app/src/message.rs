@@ -167,6 +167,9 @@ pub enum Message {
     /// Block the selected thread's sender, from the toolbar, the menu bar
     /// or the command palette.
     BlockSelectedSender,
+    /// Mark every message of the open folder read, from the toolbar or the
+    /// palette; the menu bar's Mark All as Read does the same.
+    MarkOpenFolderRead,
     /// `sender.block` answered: the blocked address, or why it failed.
     SenderBlocked(Result<String, String>),
     /// `sender.unblock` answered: the unblocked address, or why it failed.

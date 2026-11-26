@@ -401,6 +401,7 @@ pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
         CommandId::EmailSpam => Some(Message::EmailAction(MailActionIntent::ToggleSpam)),
         CommandId::EmailBlockSender => Some(Message::BlockSelectedSender),
         CommandId::EmailMarkRead => Some(Message::EmailAction(MailActionIntent::ToggleRead)),
+        CommandId::EmailMarkAllRead => Some(Message::MarkOpenFolderRead),
         CommandId::EmailStar => Some(Message::EmailAction(MailActionIntent::ToggleStar)),
         CommandId::EmailPin => Some(Message::EmailAction(MailActionIntent::TogglePin)),
         CommandId::EmailMute => Some(Message::EmailAction(MailActionIntent::ToggleMute)),
