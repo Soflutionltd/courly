@@ -94,261 +94,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "conduit-caldav"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "conduit-dav-core",
- "conduit-net",
- "conduit-types",
- "bytes",
- "caldata",
- "futures",
- "jiff",
- "quick-xml",
- "reqwest",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "conduit-carddav"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "conduit-dav-core",
- "conduit-net",
- "conduit-types",
- "bytes",
- "caldata",
- "futures",
- "quick-xml",
- "reqwest",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "conduit-dav-core"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "conduit-net",
- "conduit-types",
- "bytes",
- "futures",
- "quick-xml",
- "reqwest",
- "tokio",
-]
-
-[[package]]
-name = "conduit-google"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "base64 0.23.1",
- "conduit-net",
- "conduit-types",
- "bytes",
- "futures",
- "jiff",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "conduit-graph"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "base64 0.23.1",
- "conduit-net",
- "conduit-types",
- "bytes",
- "futures",
- "getrandom 0.4.3",
- "jiff",
- "quick-xml",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "conduit-imap"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "conduit-caldav",
- "conduit-carddav",
- "conduit-net",
- "conduit-sasl",
- "conduit-smtp",
- "conduit-types",
- "bytes",
- "flate2",
- "futures",
- "getrandom 0.4.3",
- "jiff",
- "native-tls",
- "nom",
- "pretty_assertions",
- "proptest",
- "socket2",
- "thiserror",
- "tokio",
- "tokio-native-tls",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "zeroize",
-]
-
-[[package]]
-name = "conduit-jmap"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "base64 0.23.1",
- "conduit-net",
- "conduit-types",
- "bytes",
- "futures",
- "http",
- "jiff",
- "native-tls",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-native-tls",
- "tokio-util",
- "tokio-websockets",
- "tracing",
-]
-
-[[package]]
-name = "conduit-net"
-version = "0.1.0"
-dependencies = [
- "conduit-types",
- "bytes",
- "futures",
- "http",
- "httpdate",
- "native-tls",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "conduit-sasl"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "hmac",
- "md-5",
- "pbkdf2",
- "sha1",
- "sha2",
- "stringprep",
- "subtle",
- "thiserror",
- "zeroize",
-]
-
-[[package]]
-name = "conduit-smtp"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "conduit-net",
- "conduit-sasl",
- "conduit-types",
- "ed25519-compact",
- "email-encoding",
- "email_address",
- "fastrand",
- "futures",
- "getrandom 0.4.3",
- "hostname",
- "httpdate",
- "idna",
- "mime",
- "native-tls",
- "nom",
- "percent-encoding",
- "quoted_printable",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "socket2",
- "tokio",
- "tokio-native-tls",
- "tracing",
- "tracing-subscriber",
- "url",
- "zeroize",
-]
-
-[[package]]
-name = "conduit-sync"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "conduit-google",
- "conduit-graph",
- "conduit-imap",
- "conduit-jmap",
- "conduit-net",
- "conduit-types",
- "bytes",
- "dashmap",
- "futures",
- "jiff",
- "sha2",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "conduit-types"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "bytes",
- "encoding_rs",
- "futures",
- "jiff",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -386,6 +131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -505,6 +251,261 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
+name = "conduit-caldav"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "caldata",
+ "conduit-dav-core",
+ "conduit-net",
+ "conduit-types",
+ "futures",
+ "jiff",
+ "quick-xml",
+ "reqwest",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "conduit-carddav"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "caldata",
+ "conduit-dav-core",
+ "conduit-net",
+ "conduit-types",
+ "futures",
+ "quick-xml",
+ "reqwest",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "conduit-dav-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "conduit-net",
+ "conduit-types",
+ "futures",
+ "quick-xml",
+ "reqwest",
+ "tokio",
+]
+
+[[package]]
+name = "conduit-google"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64 0.23.1",
+ "bytes",
+ "conduit-net",
+ "conduit-types",
+ "futures",
+ "jiff",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "conduit-graph"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64 0.23.1",
+ "bytes",
+ "conduit-net",
+ "conduit-types",
+ "futures",
+ "getrandom 0.4.3",
+ "jiff",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "conduit-imap"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "conduit-caldav",
+ "conduit-carddav",
+ "conduit-net",
+ "conduit-sasl",
+ "conduit-smtp",
+ "conduit-types",
+ "flate2",
+ "futures",
+ "getrandom 0.4.3",
+ "jiff",
+ "native-tls",
+ "nom",
+ "pretty_assertions",
+ "proptest",
+ "socket2",
+ "thiserror",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "zeroize",
+]
+
+[[package]]
+name = "conduit-jmap"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "base64 0.23.1",
+ "bytes",
+ "conduit-net",
+ "conduit-types",
+ "futures",
+ "http",
+ "jiff",
+ "native-tls",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
+ "tokio-websockets",
+ "tracing",
+]
+
+[[package]]
+name = "conduit-net"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "conduit-types",
+ "futures",
+ "http",
+ "httpdate",
+ "native-tls",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "conduit-sasl"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "hmac",
+ "md-5",
+ "pbkdf2",
+ "sha1",
+ "sha2",
+ "stringprep",
+ "subtle",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "conduit-smtp"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "conduit-net",
+ "conduit-sasl",
+ "conduit-types",
+ "ed25519-compact",
+ "email-encoding",
+ "email_address",
+ "fastrand",
+ "futures",
+ "getrandom 0.4.3",
+ "hostname",
+ "httpdate",
+ "idna",
+ "mime",
+ "native-tls",
+ "nom",
+ "percent-encoding",
+ "quoted_printable",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "socket2",
+ "tokio",
+ "tokio-native-tls",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "zeroize",
+]
+
+[[package]]
+name = "conduit-sync"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "conduit-google",
+ "conduit-graph",
+ "conduit-imap",
+ "conduit-jmap",
+ "conduit-net",
+ "conduit-types",
+ "dashmap",
+ "futures",
+ "jiff",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "conduit-types"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "encoding_rs",
+ "futures",
+ "jiff",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -573,12 +574,13 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "914c195c4d7fbc5ed7f88d14cbf85914d5c664967658d43404b263913a477e82"
 dependencies = [
  "cpubits",
  "ctutils",
+ "getrandom 0.4.3",
  "num-traits",
  "rand_core",
  "serdect",
@@ -591,7 +593,9 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
+ "getrandom 0.4.3",
  "hybrid-array",
+ "rand_core",
 ]
 
 [[package]]
@@ -612,9 +616,9 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 
 [[package]]
 name = "ctutils"
-version = "0.4.3"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
+checksum = "261af4dc7a06ea8a527a8717d8cbba3417530d6ea14e1edb3de6b67806be474f"
 dependencies = [
  "cmov",
 ]
@@ -714,6 +718,7 @@ dependencies = [
  "const-oid",
  "crypto-common",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -835,9 +840,9 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -1688,9 +1693,9 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pkcs1"
-version = "0.8.0-rc.5"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f485dbafe293ea6ccaa7d82bc591651a796eb8a9aec3df040b057b706073dbc3"
+checksum = "6250dd7321adbe93d12b750aee0ced159fd13e77f625edcdf1cb6f83cd99f650"
 dependencies = [
  "der",
  "spki",
@@ -1939,17 +1944,20 @@ dependencies = [
 
 [[package]]
 name = "rsa"
-version = "0.10.0-rc.19"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33405e321e16ef941ca66e254f6904c3aafd3c7ff001fb88bf11c73eb75c2b85"
+checksum = "23e77fd77e0dea28b3011fd62d15445b7de7959333b0276d930e03be0f755699"
 dependencies = [
  "const-oid",
  "crypto-bigint",
+ "crypto-common",
  "crypto-primes",
  "digest",
+ "hmac",
  "pkcs1",
  "pkcs8",
  "rand_core",
+ "sha2",
  "signature",
  "spki",
  "zeroize",
@@ -1979,9 +1987,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "once_cell",
  "rustls-pki-types",
@@ -2001,9 +2009,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "e3a0760a887c14823fca5a1c970b01d47c328c696c0c64829d1df50e8f853fd5"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -2621,9 +2629,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

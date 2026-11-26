@@ -5,7 +5,7 @@
     <path d="M 44 25 L 44 32 L 49 35"/>
   </g>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#3F5250">
-    <text x="72" y="30" font-size="16" font-weight="700">Windows, Linux, Intel Mac</text>
+    <text x="72" y="30" font-size="16" font-weight="700">Windows and Linux</text>
     <text x="72" y="48" font-size="13" font-weight="500" fill="#6B7F7D">Coming soon</text>
   </g>
 </svg>
