@@ -1,4 +1,4 @@
-import 'package:courly_mobile/screens/inbox_screen.dart';
+import 'package:courly_mobile/screens/mailboxes_screen.dart';
 import 'package:courly_mobile/src/rust/api/engine.dart';
 import 'package:courly_mobile/src/rust/frb_generated.dart';
 import 'package:courly_mobile/theme.dart';
@@ -79,7 +79,7 @@ class _EngineGateState extends State<_EngineGate> {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        return InboxScreen(dataDir: dataDir);
+        return MailboxesScreen(dataDir: dataDir);
       },
     );
   }

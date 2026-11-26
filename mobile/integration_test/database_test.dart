@@ -28,9 +28,10 @@ void main() {
     await pumpUntilFound(tester, find.byKey(const Key('open-menu')));
     expect(find.byKey(const Key('engine-error')), findsNothing);
 
-    tester.semantics.tap(find.semantics.byLabel('Comptes et dossiers'));
+    // Back from the inbox of every account to the mailboxes page.
+    tester.semantics.tap(find.semantics.byLabel('Boîtes aux lettres'));
     await pumpUntilFound(tester, find.byKey(const Key('drawer-add-account')));
-    // The drawer exists before it has slid in: let it finish.
+    // The page exists before the inbox has slid off it: let it finish.
     await tester.pump(const Duration(milliseconds: 600));
     await tester.tap(find.byKey(const Key('drawer-add-account')));
     await pumpUntilFound(tester, find.byKey(const Key('sheet-add-mail')));
@@ -46,7 +47,7 @@ void main() {
     );
 
     tester.semantics.tap(find.semantics.byLabel('Fermer'));
-    await pumpUntilFound(tester, find.byKey(const Key('open-menu')));
+    await pumpUntilFound(tester, find.byKey(const Key('drawer-add-account')));
     await tester.pump(const Duration(seconds: 1));
     expect(find.byKey(const Key('email-field')), findsNothing);
     semantics.dispose();

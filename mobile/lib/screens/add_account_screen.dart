@@ -2,35 +2,35 @@ import 'package:courly_mobile/screens/password_account_screen.dart';
 import 'package:courly_mobile/src/rust/api/accounts.dart';
 import 'package:courly_mobile/src/rust/api/microsoft.dart';
 import 'package:courly_mobile/widgets/glass.dart';
+import 'package:cupertino_ui/cupertino_ui.dart'
+    show
+        CupertinoActionSheet,
+        CupertinoActionSheetAction,
+        showCupertinoModalPopup;
 import 'package:flutter/services.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// The sheet the "+" opens, as in Outlook: add a mail account, or cancel.
+/// The iOS action sheet the "Add an account" row opens: add a mail
+/// account, or cancel.
 /// Resolves to `true` once an account was added, so the caller reloads.
 Future<bool?> showAddAccountSheet(BuildContext context) async {
-  final wantsMail = await showModalBottomSheet<bool>(
+  final wantsMail = await showCupertinoModalPopup<bool>(
     context: context,
-    showDragHandle: true,
-    builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            key: const Key('sheet-add-mail'),
-            leading: const Icon(LucideIcons.mail),
-            title: const Text('Ajouter un compte de courrier'),
-            subtitle: const Text('Outlook, Gmail, Exchange, iCloud…'),
-            onTap: () => Navigator.of(sheetContext).pop(true),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            key: const Key('sheet-cancel'),
-            title: const Text('Annuler', textAlign: TextAlign.center),
-            onTap: () => Navigator.of(sheetContext).pop(false),
-          ),
-        ],
+    builder: (sheetContext) => CupertinoActionSheet(
+      title: const Text('Outlook, Gmail, Exchange, iCloud…'),
+      actions: [
+        CupertinoActionSheetAction(
+          key: const Key('sheet-add-mail'),
+          onPressed: () => Navigator.of(sheetContext).pop(true),
+          child: const Text('Ajouter un compte de courrier'),
+        ),
+      ],
+      cancelButton: CupertinoActionSheetAction(
+        key: const Key('sheet-cancel'),
+        onPressed: () => Navigator.of(sheetContext).pop(false),
+        child: const Text('Annuler'),
       ),
     ),
   );

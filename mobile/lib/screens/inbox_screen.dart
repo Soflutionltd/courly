@@ -7,19 +7,20 @@ import 'package:courly_mobile/src/rust/api/compose.dart';
 import 'package:courly_mobile/screens/thread_screen.dart';
 import 'package:courly_mobile/src/rust/api/mailbox.dart';
 import 'package:courly_mobile/theme.dart';
-import 'package:courly_mobile/widgets/account_avatar.dart';
 import 'package:courly_mobile/widgets/glass.dart';
 import 'package:courly_mobile/widgets/sender_avatar.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// The inbox of every account, or of the one chosen in the side menu, as
-/// in Outlook: the account column and the folders slide in from the left,
-/// and the "+" at the bottom of the column adds an account.
+/// The inbox of every account, or of [accountId] alone, opened over the
+/// mailboxes page as in Apple Mail: the glass back button returns to it.
 class InboxScreen extends StatefulWidget {
-  const InboxScreen({super.key, required this.dataDir});
+  const InboxScreen({super.key, required this.dataDir, this.accountId});
 
   final String dataDir;
+
+  /// The account shown, or every account when null.
+  final String? accountId;
 
   @override
   State<InboxScreen> createState() => _InboxScreenState();
@@ -29,11 +30,8 @@ class _InboxScreenState extends State<InboxScreen> {
   /// How often the list is read again while accounts sync.
   static const _refreshEvery = Duration(seconds: 5);
 
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
-
   List<AccountSummary> _accounts = const [];
   List<ThreadSummary> _threads = const [];
-  String? _accountId;
   String? _loadError;
   bool _loaded = false;
   Timer? _refresh;
@@ -56,7 +54,7 @@ class _InboxScreenState extends State<InboxScreen> {
       final accounts = await listAccounts(dataDir: widget.dataDir);
       final threads = await inboxThreads(
         dataDir: widget.dataDir,
-        accountId: _accountId,
+        accountId: widget.accountId,
         limit: 100,
       );
       if (!mounted) return;
@@ -73,12 +71,6 @@ class _InboxScreenState extends State<InboxScreen> {
         _loaded = true;
       });
     }
-  }
-
-  void _showAccount(String? accountId) {
-    setState(() => _accountId = accountId);
-    Navigator.of(context).pop();
-    _reload();
   }
 
   Future<void> _addAccount() async {
@@ -134,7 +126,7 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   Future<void> _newMessage() async {
-    final accountId = _accountId ?? _accounts.first.id;
+    final accountId = widget.accountId ?? _accounts.first.id;
     final sent = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -155,7 +147,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   AccountSummary? get _selectedAccount {
     for (final account in _accounts) {
-      if (account.id == _accountId) return account;
+      if (account.id == widget.accountId) return account;
     }
     return null;
   }
@@ -165,21 +157,12 @@ class _InboxScreenState extends State<InboxScreen> {
     final selected = _selectedAccount;
     final theme = Theme.of(context);
     return GlassPage(
-      scaffoldKey: _scaffoldKey,
-      drawer: _AccountDrawer(
-        accounts: _accounts,
-        selectedId: _accountId,
-        onShowAccount: _showAccount,
-        onAddAccount: () {
-          // Synchronous, so the drawer is gone before the sheet is pushed;
-          // `maybePop` would resolve later and close the sheet instead.
-          Navigator.of(context).pop();
-          _addAccount();
-        },
-      ),
-      leading: _MenuButton(
-        account: selected,
-        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+      leading: GlassIconButton(
+        key: const Key('open-menu'),
+        symbol: 'chevron.left',
+        icon: LucideIcons.chevronLeft,
+        label: 'Boîtes aux lettres',
+        onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
         if (_accounts.isNotEmpty)
@@ -295,35 +278,6 @@ class _InboxScreenState extends State<InboxScreen> {
 
 /// What shows under a row while it is swiped, as in Outlook: archive to
 /// the right in green, delete to the left in red.
-/// The button that opens the side menu: the chosen account's badge, or
-/// the menu glyph when every account is shown.
-class _MenuButton extends StatelessWidget {
-  const _MenuButton({required this.account, required this.onPressed});
-
-  final AccountSummary? account;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = account;
-    return KeyedSubtree(
-      key: const Key('open-menu'),
-      child: selected == null
-          ? GlassIconButton(
-              symbol: 'line.3.horizontal',
-              icon: LucideIcons.menu,
-              label: 'Comptes et dossiers',
-              onPressed: onPressed,
-            )
-          : GlassChildButton(
-              label: 'Comptes et dossiers',
-              onPressed: onPressed,
-              child: AccountAvatar(account: selected, size: 32),
-            ),
-    );
-  }
-}
-
 class _SwipeAction extends StatelessWidget {
   const _SwipeAction({
     required this.color,
@@ -588,147 +542,5 @@ class _ThreadRow extends StatelessWidget {
     if (daysAgo < 7) return _weekdays[date.weekday - 1];
     if (date.year == now.year) return '${two(date.day)}/${two(date.month)}';
     return '${two(date.day)}/${two(date.month)}/${date.year % 100}';
-  }
-}
-
-/// The side menu: the account column on the left, as in Outlook, with
-/// "all accounts" on top and "+" at the bottom, and the folders of the
-/// chosen account on the right.
-class _AccountDrawer extends StatelessWidget {
-  const _AccountDrawer({
-    required this.accounts,
-    required this.selectedId,
-    required this.onShowAccount,
-    required this.onAddAccount,
-  });
-
-  final List<AccountSummary> accounts;
-  final String? selectedId;
-  final ValueChanged<String?> onShowAccount;
-  final VoidCallback onAddAccount;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    AccountSummary? selected;
-    for (final account in accounts) {
-      if (account.id == selectedId) selected = account;
-    }
-    return Drawer(
-      child: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 76,
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                children: [
-                  _ColumnButton(
-                    selected: selectedId == null,
-                    tooltip: 'Tous les comptes',
-                    onTap: () => onShowAccount(null),
-                    child: const CircleAvatar(
-                      radius: 24,
-                      child: Icon(LucideIcons.globe),
-                    ),
-                  ),
-                  for (final account in accounts)
-                    _ColumnButton(
-                      selected: account.id == selectedId,
-                      tooltip: account.email,
-                      onTap: () => onShowAccount(account.id),
-                      child: AccountAvatar(account: account, size: 48),
-                    ),
-                  _ColumnButton(
-                    key: const Key('drawer-add-account'),
-                    selected: false,
-                    tooltip: 'Ajouter un compte',
-                    onTap: onAddAccount,
-                    child: CircleAvatar(
-                      radius: 24,
-                      backgroundColor:
-                          theme.colorScheme.surfaceContainerHighest,
-                      child: const Icon(LucideIcons.plus),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                children: [
-                  ListTile(
-                    title: Text(
-                      selected?.name ?? 'Tous les comptes',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    subtitle: Text(
-                      selected?.email ??
-                          '${accounts.length} compte${accounts.length > 1 ? 's' : ''}',
-                    ),
-                  ),
-                  ListTile(
-                    leading: Icon(
-                      LucideIcons.inbox,
-                      color: theme.colorScheme.primary,
-                    ),
-                    title: Text(
-                      'Boîte de réception',
-                      style: TextStyle(color: theme.colorScheme.primary),
-                    ),
-                    selected: true,
-                    onTap: () => Navigator.of(context).maybePop(),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ColumnButton extends StatelessWidget {
-  const _ColumnButton({
-    super.key,
-    required this.selected,
-    required this.tooltip,
-    required this.onTap,
-    required this.child,
-  });
-
-  final bool selected;
-  final String tooltip;
-  final VoidCallback onTap;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Tooltip(
-        message: tooltip,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 30,
-          child: Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? color : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: child,
-          ),
-        ),
-      ),
-    );
   }
 }

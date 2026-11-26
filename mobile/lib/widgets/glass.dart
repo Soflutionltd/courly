@@ -31,6 +31,7 @@ class GlassPage extends StatelessWidget {
     this.bottom,
     this.drawer,
     this.scaffoldKey,
+    this.backgroundColor,
   });
 
   /// The page content. It sees the bar's height in its top padding, so a
@@ -46,6 +47,9 @@ class GlassPage extends StatelessWidget {
   final Widget? drawer;
   final GlobalKey<ScaffoldState>? scaffoldKey;
 
+  /// The page colour, the theme's surface when null.
+  final Color? backgroundColor;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -54,7 +58,7 @@ class GlassPage extends StatelessWidget {
       key: scaffoldKey,
       drawer: drawer,
       body: AdaptiveScaffold(
-        backgroundColor: scheme.surface,
+        backgroundColor: backgroundColor ?? scheme.surface,
         appBar: AdaptiveAppBar(
           useNativeToolbar: true,
           title: title,
@@ -65,8 +69,9 @@ class GlassPage extends StatelessWidget {
         body: Stack(
           children: [
             Positioned.fill(child: body),
-            const ScrollEdgeFade(),
-            if (floating != null) const ScrollEdgeFade(atBottom: true),
+            ScrollEdgeFade(color: backgroundColor),
+            if (floating != null)
+              ScrollEdgeFade(atBottom: true, color: backgroundColor),
             if (floating != null)
               Positioned(
                 left: 0,
@@ -91,14 +96,17 @@ class GlassPage extends StatelessWidget {
 /// views: content fades out under the status bar and the glass bar instead
 /// of showing through at full contrast.
 class ScrollEdgeFade extends StatelessWidget {
-  const ScrollEdgeFade({super.key, this.atBottom = false});
+  const ScrollEdgeFade({super.key, this.atBottom = false, this.color});
+
+  /// The page colour the content fades into, the theme's surface when null.
+  final Color? color;
 
   /// Under floating bottom buttons instead of under the top bar.
   final bool atBottom;
 
   @override
   Widget build(BuildContext context) {
-    final surface = Theme.of(context).colorScheme.surface;
+    final surface = color ?? Theme.of(context).colorScheme.surface;
     final padding = MediaQuery.paddingOf(context);
     return Positioned(
       top: atBottom ? null : 0,
