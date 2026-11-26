@@ -1728,6 +1728,24 @@ mod tests {
         );
     }
 
+    /// Outlook signatures put a 120px logo in a `width="10"` cell. A browser
+    /// widens the column to the logo; capping the column at its declared
+    /// width let the logo run under the name and address in the next cell.
+    #[test]
+    fn a_cell_narrower_than_its_content_grows_to_it() {
+        let mail = render_html(
+            r#"<body style="margin:0"><table cellspacing="0" cellpadding="0" width="470"><tr>
+               <td width="10" valign="top"><div style="width:120px;height:40px"></div></td>
+               <td valign="top"><a href="https://example.com/">Name</a></td>
+               </tr></table></body>"#,
+        );
+        let left = mail.links[0].x;
+        assert!(
+            left >= 119.0,
+            "the second cell starts at {left}, over the 120px first cell"
+        );
+    }
+
     /// Rightmost painted (non-white) column of the first tile, in display px.
     fn ink_right(mail: &RenderedMail) -> f32 {
         let tile = &mail.tiles[0];

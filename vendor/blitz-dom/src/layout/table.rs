@@ -681,8 +681,12 @@ fn collect_table_cells(
                             // In the auto layout a cell's width is the width it would
                             // like, not one it insists on: the column shrinks towards
                             // its content when the table has less room, as in browsers.
+                            // It never shrinks below that content, though: an `auto`
+                            // minimum would be capped at this fixed maximum by the
+                            // grid's automatic minimum size, so a 120px logo in a
+                            // `width="10"` cell overflowed onto the next column.
                             style_helpers::minmax(
-                                style_helpers::auto(),
+                                style_helpers::min_content(),
                                 style_helpers::length(outer),
                             )
                         }
