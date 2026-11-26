@@ -505,6 +505,12 @@ impl SyncRuntime {
         self.inner.resident_engine.clone()
     }
 
+    /// The only way service code creates, changes or removes a provider's
+    /// server-side filter rules.
+    pub(crate) fn server_filters(&self) -> crate::conduit::server_filters::ServerFilterSurface {
+        crate::conduit::server_filters::ServerFilterSurface::new(self.inner.resident_engine.clone())
+    }
+
     pub(crate) fn attachment_byte_source(
         &self,
     ) -> crate::conduit::attachment::AttachmentByteSource {

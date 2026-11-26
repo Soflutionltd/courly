@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use common::types::NamespaceAttribution;
 use conduit_types::{
-    AccountErrorKind, AccountId, ContainerId, FilterAction, FilterCondition, FilterRuleCreate,
-    FolderRole, ServerFilterCreate, ServerFilterId,
+    AccountErrorKind, ContainerId, FilterAction, FilterCondition, FilterRuleCreate, FolderRole,
+    ServerFilterCreate, ServerFilterId,
 };
 use serde_json::Value;
 use service_api::{SenderBlockAck, SenderBlockParams, SenderUnblockAck, ServiceError};
@@ -23,6 +23,7 @@ use service_api::{SenderBlockAck, SenderBlockParams, SenderUnblockAck, ServiceEr
 use crate::boot::BootSharedState;
 use crate::conduit::ConduitProviderKind;
 use crate::conduit::resident::ResidentActionAccount;
+use crate::conduit::server_filters::{ServerFilterError, ServerFilterSurface};
 
 pub(crate) async fn handle_block(
     boot_state: &Arc<BootSharedState>,
@@ -36,10 +37,19 @@ pub(crate) async fn handle_block(
         .await
         .map_err(ServiceError::Internal)?;
 
-    if newly_blocked && let Some(account) = graph_account(boot_state, &params.account_id).await {
+    if newly_blocked
+        && let Some((account, filters)) = graph_account(boot_state, &params.account_id).await
+    {
         // The local block already holds: if the rule cannot be created the
         // sweep still sends this sender's mail to Spam while Courly runs.
-        match create_junk_rule(&account, &params.account_id, &params.sender_address).await {
+        match create_junk_rule(
+            &account,
+            &filters,
+            &params.account_id,
+            &params.sender_address,
+        )
+        .await
+        {
             Ok(rule_id) => {
                 let account_id = params.account_id.clone();
                 let address = params.sender_address.clone();
@@ -84,14 +94,14 @@ pub(crate) async fn handle_unblock(
     // would keep landing in Junk after the user unblocked them. A failure
     // leaves the block in place so the user can retry.
     if let Some(rule_id) = rule_id {
-        let account = graph_account(boot_state, &params.account_id)
+        let (_, filters) = graph_account(boot_state, &params.account_id)
             .await
             .ok_or_else(|| {
                 ServiceError::Internal(
                     "the account is not connected; its junk rule cannot be removed yet".into(),
                 )
             })?;
-        delete_junk_rule(&account, &params.account_id, rule_id).await?;
+        delete_junk_rule(&filters, &params.account_id, rule_id).await?;
     }
 
     let account_id = params.account_id.clone();
@@ -107,15 +117,18 @@ pub(crate) async fn handle_unblock(
     .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
-/// The account's resident handle when it is a Microsoft (Graph) account the
-/// engine can reach now; `None` for other providers or an offline account.
+/// The account's resident handle, with the server filter surface to change
+/// its rules, when it is a Microsoft (Graph) account the engine can reach
+/// now; `None` for other providers or an offline account.
 async fn graph_account(
     boot_state: &Arc<BootSharedState>,
     account_id: &str,
-) -> Option<ResidentActionAccount> {
+) -> Option<(ResidentActionAccount, ServerFilterSurface)> {
     let runtime = boot_state.sync_runtime()?;
     match runtime.resident_action_account(account_id).await {
-        Ok(account) if account.provider == ConduitProviderKind::Graph => Some(account),
+        Ok(account) if account.provider == ConduitProviderKind::Graph => {
+            Some((account, runtime.server_filters()))
+        }
         Ok(_) => None,
         Err(error) => {
             log::warn!("sender rule: account {account_id} not reachable: {error}");
@@ -126,6 +139,7 @@ async fn graph_account(
 
 async fn create_junk_rule(
     account: &ResidentActionAccount,
+    filters: &ServerFilterSurface,
     account_id: &str,
     sender_address: &str,
 ) -> Result<ServerFilterId, String> {
@@ -144,29 +158,21 @@ async fn create_junk_rule(
         actions: vec![FilterAction::MoveTo(ContainerId(junk))],
         stop_processing: true,
     };
-    account
-        .engine
-        .filter_create(
-            &AccountId(account_id.to_string()),
-            ServerFilterCreate::Rule(rule),
-        )
+    filters
+        .create(account_id, ServerFilterCreate::Rule(rule))
         .await
         .map_err(|error| error.to_string())
 }
 
 async fn delete_junk_rule(
-    account: &ResidentActionAccount,
+    filters: &ServerFilterSurface,
     account_id: &str,
     rule_id: String,
 ) -> Result<(), ServiceError> {
-    match account
-        .engine
-        .filter_delete(&AccountId(account_id.to_string()), ServerFilterId(rule_id))
-        .await
-    {
+    match filters.delete(account_id, ServerFilterId(rule_id)).await {
         Ok(()) => Ok(()),
         // Removed by hand in Outlook already: nothing left to undo.
-        Err(conduit_sync::Error::Account(error))
+        Err(ServerFilterError::Engine(conduit_sync::Error::Account(error)))
             if matches!(error.kind(), AccountErrorKind::NotFound(_)) =>
         {
             Ok(())
