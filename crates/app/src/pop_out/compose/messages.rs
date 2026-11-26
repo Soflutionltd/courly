@@ -106,6 +106,9 @@ pub enum ComposeMessage {
     FilesSelected(Vec<ComposeAttachment>),
     /// Remove an attachment by index.
     RemoveAttachment(usize),
+    /// Switch an attachment between travelling in the message and being
+    /// sent as a link to the account's cloud drive.
+    ToggleAttachmentDelivery(usize),
     // ── Context menu ──
     /// Show the token context menu at a given position.
     ShowTokenContextMenu {

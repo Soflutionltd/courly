@@ -3678,7 +3678,7 @@ fn parse_send_attachment(
             None | Some("attached") => service_api::AttachmentDelivery::Attached,
             Some("cloud_link") => service_api::AttachmentDelivery::CloudLink,
             Some(other) => {
-                return Err(lua_error_message(&format!(
+                return Err(lua_error_message(format!(
                     "ActionSend attachment delivery must be attached or cloud_link, got {other}"
                 )));
             }

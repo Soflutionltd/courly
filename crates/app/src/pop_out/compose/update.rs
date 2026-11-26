@@ -571,10 +571,23 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::FilesSelected(files) => {
             state.attachments.extend(files);
+            super::types::link_oversized_attachments(&mut state.attachments);
         }
         ComposeMessage::RemoveAttachment(idx) => {
             if idx < state.attachments.len() {
                 state.attachments.remove(idx);
+            }
+        }
+        ComposeMessage::ToggleAttachmentDelivery(idx) => {
+            if let Some(attachment) = state.attachments.get_mut(idx) {
+                attachment.delivery = match attachment.delivery {
+                    service_api::AttachmentDelivery::Attached => {
+                        service_api::AttachmentDelivery::CloudLink
+                    }
+                    service_api::AttachmentDelivery::CloudLink => {
+                        service_api::AttachmentDelivery::Attached
+                    }
+                };
             }
         }
         ComposeMessage::SignatureResolved {

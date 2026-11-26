@@ -276,9 +276,9 @@ async fn send_email_inner(
 /// account's own cloud drive (OneDrive for Graph, Google Drive for Gmail),
 /// shared with anyone who has the link, and replace it in the message by a
 /// download block appended to both bodies. Files sent the classic way are
-/// left untouched. An account without a drive fails the send with the
-/// provider's `Unsupported` error rather than silently attaching a file the
-/// server would refuse.
+/// left untouched. An account without a drive (IMAP, JMAP) is refused
+/// before anything is uploaded, with a message that says so, rather than
+/// silently attaching a file the server would refuse.
 async fn host_cloud_attachments(
     action_account: &crate::conduit::resident::ResidentActionAccount,
     request: &mut SendRequest,
@@ -292,6 +292,18 @@ async fn host_cloud_attachments(
     }
 
     let account = AccountId(request.account_id.clone());
+    let has_drive = action_account
+        .engine
+        .account_capabilities(&account)
+        .map_err(engine_error_to_action_error)?
+        .pim_methods
+        .host_attachment;
+    if !has_drive {
+        return Err(ActionError::invalid_state(
+            "This account has no OneDrive or Google Drive to host files sent as links. \
+             Attach them to the message instead.",
+        ));
+    }
     let mut hosted = Vec::with_capacity(linked.len());
     for att in linked {
         let size = att.data.len() as u64;

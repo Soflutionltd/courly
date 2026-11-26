@@ -38,6 +38,36 @@ pub struct ComposeAttachment {
     pub delivery: service_api::AttachmentDelivery,
 }
 
+/// Largest total of attached file bytes a message carries before the
+/// biggest files switch to cloud links. Gmail refuses a message over
+/// 25 MB and Exchange Online over 35 MB by default, both counted after
+/// base64 encoding, which adds a third: 18 MiB of files is about 24 MB
+/// on the wire, under both.
+pub const ATTACHED_BYTES_LIMIT: usize = 18 * 1024 * 1024;
+
+/// Switch the largest attached files to cloud links until what stays in
+/// the message fits under `ATTACHED_BYTES_LIMIT`. A file the user already
+/// set to a link is left alone, and so is everything once it fits.
+pub fn link_oversized_attachments(attachments: &mut [ComposeAttachment]) {
+    let attached_total = |attachments: &[ComposeAttachment]| -> usize {
+        attachments
+            .iter()
+            .filter(|att| att.delivery == service_api::AttachmentDelivery::Attached)
+            .map(|att| att.data.len())
+            .sum()
+    };
+    while attached_total(attachments) > ATTACHED_BYTES_LIMIT {
+        let Some(largest) = attachments
+            .iter_mut()
+            .filter(|att| att.delivery == service_api::AttachmentDelivery::Attached)
+            .max_by_key(|att| att.data.len())
+        else {
+            return;
+        };
+        largest.delivery = service_api::AttachmentDelivery::CloudLink;
+    }
+}
+
 impl ComposeAttachment {
     /// Human-readable file size.
     pub fn display_size(&self) -> String {
@@ -138,4 +168,55 @@ pub struct TokenContextMenuState {
     pub field: RecipientField,
     pub position: Point,
     pub kind: ContextMenuKind,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use service_api::AttachmentDelivery::{Attached, CloudLink};
+
+    fn file(
+        name: &str,
+        mib: usize,
+        delivery: service_api::AttachmentDelivery,
+    ) -> ComposeAttachment {
+        ComposeAttachment {
+            name: name.to_string(),
+            mime_type: "application/octet-stream".to_string(),
+            data: Arc::new(vec![0; mib * 1024 * 1024]),
+            delivery,
+        }
+    }
+
+    fn deliveries(attachments: &[ComposeAttachment]) -> Vec<service_api::AttachmentDelivery> {
+        attachments.iter().map(|att| att.delivery).collect()
+    }
+
+    #[test]
+    fn small_files_stay_in_the_message() {
+        let mut attachments = vec![file("a", 5, Attached), file("b", 10, Attached)];
+        link_oversized_attachments(&mut attachments);
+        assert_eq!(deliveries(&attachments), vec![Attached, Attached]);
+    }
+
+    #[test]
+    fn the_largest_files_switch_to_links_until_the_rest_fits() {
+        let mut attachments = vec![
+            file("small", 4, Attached),
+            file("huge", 40, Attached),
+            file("medium", 16, Attached),
+        ];
+        link_oversized_attachments(&mut attachments);
+        assert_eq!(
+            deliveries(&attachments),
+            vec![Attached, CloudLink, CloudLink]
+        );
+    }
+
+    #[test]
+    fn a_file_already_linked_does_not_count() {
+        let mut attachments = vec![file("linked", 100, CloudLink), file("doc", 10, Attached)];
+        link_oversized_attachments(&mut attachments);
+        assert_eq!(deliveries(&attachments), vec![CloudLink, Attached]);
+    }
 }

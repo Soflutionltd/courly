@@ -294,12 +294,34 @@ pub(super) fn attachment_list<'a>(
             .padding(PAD_ICON_BTN)
             .style(theme::ButtonClass::BareIcon.style());
 
+        let as_link = att.delivery == service_api::AttachmentDelivery::CloudLink;
+        let (leading_icon, toggle_label) = if as_link {
+            (icon::cloud(), t!("compose.attach_instead"))
+        } else {
+            (icon::paperclip(), t!("compose.send_as_link"))
+        };
+        let delivery_btn = button(
+            row![
+                icon::cloud().size(ICON_XS).style(text::secondary),
+                text(toggle_label).size(TEXT_XS).style(text::secondary),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleAttachmentDelivery(idx)),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
+
         let att_row = row![
-            icon::paperclip().size(ICON_SM).style(text::secondary),
+            leading_icon.size(ICON_SM).style(text::secondary),
             text(&att.name).size(TEXT_SM),
             text(size_label)
                 .size(TEXT_XS)
                 .style(theme::TextClass::Tertiary.style()),
+            delivery_btn,
             remove_btn,
         ]
         .spacing(SPACE_XS)

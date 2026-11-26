@@ -58,6 +58,9 @@ pub fn pin<'a>() -> Text<'a> {
 pub fn paperclip<'a>() -> Text<'a> {
     to_text('\u{e12d}')
 }
+pub fn cloud<'a>() -> Text<'a> {
+    to_text('\u{e088}')
+}
 
 // ── Navigation ───────────────────────────────────────────
 pub fn search<'a>() -> Text<'a> {
