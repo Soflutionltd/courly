@@ -6,7 +6,7 @@ use std::{
 };
 
 use ed25519_compact::{KeyPair, Seed};
-use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey, pkcs1v15::Pkcs1v15Sign};
+use rsa::{PrivateKey, pkcs1::DecodeRsaPrivateKey, pkcs1v15::Pkcs1v15Sign};
 use sha2::{Digest, Sha256};
 
 use crate::message::{
@@ -108,12 +108,12 @@ pub struct DkimSigningKey(InnerDkimSigningKey);
 
 #[derive(Debug)]
 enum InnerDkimSigningKey {
-    Rsa(RsaPrivateKey),
+    Rsa(PrivateKey),
     Ed25519(KeyPair),
 }
 
-impl From<RsaPrivateKey> for DkimSigningKey {
-    fn from(value: RsaPrivateKey) -> Self {
+impl From<PrivateKey> for DkimSigningKey {
+    fn from(value: PrivateKey) -> Self {
         Self(InnerDkimSigningKey::Rsa(value))
     }
 }
@@ -131,7 +131,7 @@ impl DkimSigningKey {
     ) -> Result<DkimSigningKey, DkimSigningKeyError> {
         Ok(Self(match algorithm {
             DkimSigningAlgorithm::Rsa => InnerDkimSigningKey::Rsa(
-                RsaPrivateKey::from_pkcs1_pem(private_key)
+                PrivateKey::from_pkcs1_pem(private_key)
                     .map_err(|err| DkimSigningKeyError(InnerDkimSigningKeyError::Rsa(err)))?,
             ),
             DkimSigningAlgorithm::Ed25519 => {
@@ -454,7 +454,7 @@ fn dkim_sign_fixed_time(message: &mut Message, dkim_config: &DkimConfig, timesta
 
 #[cfg(test)]
 mod test {
-    use rsa::{RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
+    use rsa::{PrivateKey, pkcs1::DecodeRsaPrivateKey};
 
     use super::{
         super::{
@@ -751,7 +751,7 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
 
     #[test]
     fn signing_key_can_wrap_rsa_key_object() {
-        let key = RsaPrivateKey::from_pkcs1_pem(KEY_RSA).unwrap();
+        let key = PrivateKey::from_pkcs1_pem(KEY_RSA).unwrap();
         let signing_key = DkimSigningKey::from(key);
 
         assert!(matches!(
@@ -803,6 +803,7 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
             "simple/simple",
             "Date:From:Subject:To",
             "f3Zksdcjqa/xRBwdyFzIXWCcgP7XTgxjCgYsXOMKQl4=",
+            SIGNATURE_RSA_SIMPLE,
         );
     }
 
@@ -838,8 +839,24 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
             "relaxed/relaxed",
             "date:from:subject:to",
             "qN8je6qJgWFGSnN2MycC/XKPbN6BOrMJyAX2h4m19Ss=",
+            SIGNATURE_RSA_RELAXED,
         );
     }
+
+    // Produced by rsa 0.10.0-rc.19 before the move to 0.10.0, and still
+    // produced after it: the migration did not change a single signature.
+    const SIGNATURE_RSA_SIMPLE: &str = concat!(
+        "MSYJrUQMsvLKLlY3Qb5FGgsrWEfb7guE4VEfNsu4pqdmiFCbqrvX7N89unpyYzdKc2oh6hMLXNcpBaxBT4zOWGWD",
+        "Y/yI7ov6LxYzSzSSEyr2OFFHir7jQq5YgWisWUNequpu7JXJOgOqpjQScqTeyoO8341z8cdOXExuY3NZA2oBJBBF",
+        "ajgJEhkOcWb3pzh0wWfOYeVyaA/41PTLKFC5NFoKVo0RBOH1zws46wRC8Bh0SFUVNu3e1ILDqv+tZfP51JhIuJpi",
+        "M637oG3RFhW54xXJMy4dtimdiY385RIQ+IYmGWJKkrqgruN8M2HtF7IZrPeFpF81N51XPAWL4/SzfQ==",
+    );
+    const SIGNATURE_RSA_RELAXED: &str = concat!(
+        "qrq9Nix74ErFLue1LmLtbYDvDPpDZwZh+H7+f+XdnqK9nDxltufFaCUTtXEwSIYfkmLuhnjZ0sx/3iXXrGoaJKvR",
+        "gUP5CTkq5GjQb9ggg/0+uzDFIQZjPSSBgz7j4KOj0PSnqOiDmlZstrzAQEEpwRamnGBKWOupk9yrGYusFKpV2yjl",
+        "etE5J+DW6Pg+V5knB65OM70S/Fm/fyrD1Wb7eCCktBShg3siJh7uFhi6owWkSEcIfFFuenR5KGo9tpDAubm/6ZsS",
+        "NlNWRpYep0N0hLx0/NvdfO8XLY3VLdjhFKrK3XABIL9WneAudjpGyx3bs+k+jlq7+bZAEHmwtLXrOA==",
+    );
 
     const TEST_MESSAGE_HEADERS: &str = std::concat!(
         "From: Test O'Leary <test+ezrz@example.net>\r\n",
@@ -866,6 +883,7 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
         canonicalization: &str,
         headers_list: &str,
         body_hash: &str,
+        signature: &str,
     ) {
         assert!(
             signed.contains("DKIM-Signature: v=1; a=rsa-sha256; d=example.org; s=dkimtest;\r\n"),
@@ -882,10 +900,27 @@ cJ5Ku0OTwRtSMaseRPX+T4EfG1Caa/eunPPN4rh+CSup2BVVarOT
             "{signed}"
         );
 
-        let signature_line = signed
-            .lines()
-            .find(|line| line.starts_with(" b="))
-            .expect("signed message should contain a DKIM signature value");
-        assert!(signature_line.trim_end().len() > " b=".len());
+        // RSASSA-PKCS1-v1_5 is deterministic: the same key, message and time
+        // give the same signature byte for byte, so the exact value is pinned
+        // rather than only its presence.
+        assert_eq!(dkim_b_value(signed), signature, "{signed}");
+    }
+
+    /// The `b=` value of the DKIM-Signature header, with its folding removed.
+    fn dkim_b_value(signed: &str) -> String {
+        let mut value = String::new();
+        let mut in_value = false;
+        for line in signed.split("\r\n") {
+            if in_value {
+                if !line.starts_with([' ', '\t']) {
+                    break;
+                }
+                value.push_str(line.trim());
+            } else if let Some(rest) = line.strip_prefix(" b=") {
+                in_value = true;
+                value.push_str(rest.trim());
+            }
+        }
+        value
     }
 }
