@@ -3,14 +3,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Soflutionltd/courly/releases/latest"><img src="assets/readme/download-macos.svg" alt="Download Courly for Mac" height="56"></a>
+  <a href="https://github.com/Soflutionltd/courly/releases/latest/download/Courly.dmg"><img src="assets/readme/download-macos.svg" alt="Download Courly for Mac" height="56"></a>
   &nbsp;
-  <img src="assets/readme/coming-soon.svg" alt="Windows, Linux and Intel Mac: coming soon" height="56">
+  <img src="assets/readme/coming-soon.svg" alt="Windows and Linux: coming soon" height="56">
 </p>
 
 <p align="center">
   <a href="https://github.com/Soflutionltd/courly/releases/latest"><img src="https://img.shields.io/github/v/release/Soflutionltd/courly?color=16B3B0&label=version" alt="Latest version"></a>
-  <img src="https://img.shields.io/badge/macOS-13%2B%20%C2%B7%20Apple%20silicon-22C97A?logo=apple&logoColor=white" alt="macOS 13 or later, Apple silicon">
+  <img src="https://img.shields.io/badge/macOS-13%2B%20%C2%B7%20Apple%20silicon%20%26%20Intel-22C97A?logo=apple&logoColor=white" alt="macOS 13 or later, Apple silicon and Intel">
   <img src="https://img.shields.io/badge/written%20in-Rust-0E8F8C?logo=rust&logoColor=white" alt="Written in Rust">
   <img src="https://img.shields.io/badge/no%20Electron-no%20web%20view-16B3B0" alt="No Electron, no web view">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Shield%201.0.0-16B3B0" alt="License: PolyForm Shield 1.0.0"></a>
@@ -29,12 +29,11 @@
 
 | Your computer | Status |
 | --- | --- |
-| **Mac with Apple silicon** (M1 or later), macOS 13 or later | [**Download the latest version**](https://github.com/Soflutionltd/courly/releases/latest) |
-| Mac with an Intel processor | Coming soon |
+| **Mac**, Apple silicon or Intel, macOS 13 or later | [**Download Courly.dmg**](https://github.com/Soflutionltd/courly/releases/latest/download/Courly.dmg) |
 | Windows | Coming soon |
 | Linux | Coming soon |
 
-Not sure which Mac you have? Open the Apple menu, then **About This Mac**: a chip named M1, M2, M3 or M4 is Apple silicon.
+One download serves every Mac: the same app runs natively on Apple silicon and on Intel processors.
 
 ## A look around
 
@@ -196,13 +195,13 @@ pie showData
 
 ## Install
 
-1. Click **Download for Mac** at the top of this page and take the `.app.tar.gz` file of the latest version.
-2. Open it: macOS unpacks the app.
-3. Drag **Courly** into your **Applications** folder and open it.
+1. Click **Download for Mac** at the top of this page.
+2. Open `Courly.dmg`.
+3. Double-click **Courly** in the window that opens: it installs itself in your **Applications** folder and starts. Dragging it onto Applications works too.
 
 Courly is signed and notarized by Apple. It checks for new versions on its own and offers to install them.
 
-**Requirements:** a Mac with Apple silicon (M1 or later) and macOS 13 Ventura or later. Builds for Windows, Linux and Intel Macs are coming.
+**Requirements:** a Mac with Apple silicon or an Intel processor, and macOS 13 Ventura or later. Builds for Windows and Linux are coming.
 
 ## Build from source
 
