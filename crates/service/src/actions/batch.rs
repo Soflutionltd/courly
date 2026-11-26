@@ -707,7 +707,7 @@ async fn op_local(
 /// for the operations that move one.
 fn folders_moved_between(op: &MailOperation) -> Option<(Option<&str>, Option<&str>)> {
     match op {
-        MailOperation::Archive => Some((Some("INBOX"), None)),
+        MailOperation::Archive => Some((Some("INBOX"), Some("archive"))),
         MailOperation::Trash => Some((Some("INBOX"), Some("TRASH"))),
         MailOperation::SetSpam { to: true } => Some((Some("INBOX"), Some("SPAM"))),
         MailOperation::SetSpam { to: false } => Some((Some("SPAM"), Some("INBOX"))),

@@ -209,10 +209,23 @@ async fn pending_op_retry_is_not_refused_by_its_own_flight_guard() {
 
 // ── Local mutation tests ────────────────────────────────────────────
 
+/// Give the test account the Archive folder Graph, JMAP, Gmail's sync and
+/// most IMAP servers provide.
+fn insert_archive_folder(ctx: &ActionContext, account_id: &str) {
+    with_test_conn(ctx, |conn| {
+        conn.execute(
+            "INSERT INTO folders (account_id, id, name, is_undeletable) VALUES (?1, 'archive', 'Archive', 1)",
+            params![account_id],
+        )
+        .expect("insert archive folder");
+    });
+}
+
 #[tokio::test]
 async fn archive_local_removes_inbox_label() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
+    insert_archive_folder(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
     insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
     assert!(has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
@@ -220,6 +233,23 @@ async fn archive_local_removes_inbox_label() {
     let result = super::archive::archive_local(&ctx, "acc1", "t1").await;
     assert!(result.is_ok());
     assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
+    assert!(
+        has_thread_folder(&ctx, "acc1", "t1", "archive"),
+        "an archived thread is filed in Archive at once, out of the all-accounts Inbox"
+    );
+}
+
+#[tokio::test]
+async fn archive_without_an_archive_folder_only_leaves_the_inbox() {
+    let (ctx, _tmp) = make_test_ctx();
+    insert_test_account(&ctx, "acc1");
+    insert_test_thread(&ctx, "acc1", "t1");
+    insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
+
+    let result = super::archive::archive_local(&ctx, "acc1", "t1").await;
+    assert_eq!(result.ok(), Some(true));
+    assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
+    assert!(!has_thread_folder(&ctx, "acc1", "t1", "archive"));
 }
 
 #[tokio::test]
@@ -227,9 +257,14 @@ async fn archive_local_is_idempotent() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
+    insert_archive_folder(&ctx, "acc1");
     // No INBOX label - archive is a no-op but should not error
     let result = super::archive::archive_local(&ctx, "acc1", "t1").await;
-    assert!(result.is_ok());
+    assert_eq!(result.ok(), Some(false));
+    assert!(
+        !has_thread_folder(&ctx, "acc1", "t1", "archive"),
+        "a thread outside the Inbox is left where it is"
+    );
 }
 
 #[tokio::test]
@@ -435,6 +470,7 @@ async fn a_sync_pass_after_a_local_trash_keeps_the_thread_out_of_the_inbox() {
 async fn a_sync_pass_after_a_local_archive_keeps_the_thread_out_of_the_inbox() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
+    insert_archive_folder(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
     insert_thread_folder(&ctx, "acc1", "t1", "INBOX");
     insert_inbox_message(&ctx, "acc1", "t1");
@@ -445,6 +481,7 @@ async fn a_sync_pass_after_a_local_archive_keeps_the_thread_out_of_the_inbox() {
     sync_recompute(&ctx, "acc1", "t1");
 
     assert!(!has_thread_folder(&ctx, "acc1", "t1", "INBOX"));
+    assert!(has_thread_folder(&ctx, "acc1", "t1", "archive"));
 }
 
 #[tokio::test]
