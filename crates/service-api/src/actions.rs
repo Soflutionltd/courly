@@ -256,6 +256,8 @@ pub struct SendAttachment {
     pub data: bytes::Bytes,
     /// Optional Content-ID for inline images (without angle brackets).
     pub content_id: Option<String>,
+    /// Whether the file travels in the message or as a cloud link.
+    pub delivery: crate::AttachmentDelivery,
 }
 
 /// Everything needed to send a single email.

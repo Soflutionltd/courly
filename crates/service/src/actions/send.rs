@@ -43,7 +43,7 @@ pub async fn send_scheduled(
 async fn send_email_inner(
     ctx: &ActionContext,
     sync_runtime: Option<&SyncRuntime>,
-    request: SendRequest,
+    mut request: SendRequest,
     scheduled_at: Option<SystemTime>,
 ) -> ActionOutcome {
     let mut mlog = MutationLog::begin("send_email", &request.account_id, &request.draft_id);
@@ -181,6 +181,13 @@ async fn send_email_inner(
         }
     }
 
+    if let Err(error) = host_cloud_attachments(&action_account, &mut request).await {
+        let _ = mark_draft_failed(&ctx.write_db, draft_id_outer).await;
+        let outcome = ActionOutcome::Failed { error };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
     let conduit_request = match to_conduit_send_request(&request, scheduled_at) {
         Ok(request) => request,
         Err(error) => {
@@ -263,6 +270,129 @@ async fn send_email_inner(
     };
     mlog.emit(&outcome);
     outcome
+}
+
+/// Upload every attachment the user chose to send as a link to the
+/// account's own cloud drive (OneDrive for Graph, Google Drive for Gmail),
+/// shared with anyone who has the link, and replace it in the message by a
+/// download block appended to both bodies. Files sent the classic way are
+/// left untouched. An account without a drive fails the send with the
+/// provider's `Unsupported` error rather than silently attaching a file the
+/// server would refuse.
+async fn host_cloud_attachments(
+    action_account: &crate::conduit::resident::ResidentActionAccount,
+    request: &mut SendRequest,
+) -> Result<(), ActionError> {
+    let (linked, attached): (Vec<_>, Vec<_>) = std::mem::take(&mut request.attachments)
+        .into_iter()
+        .partition(|att| att.delivery == service_api::AttachmentDelivery::CloudLink);
+    request.attachments = attached;
+    if linked.is_empty() {
+        return Ok(());
+    }
+
+    let account = AccountId(request.account_id.clone());
+    let mut hosted = Vec::with_capacity(linked.len());
+    for att in linked {
+        let size = att.data.len() as u64;
+        let meta = conduit_types::CloudUploadMeta::new(
+            &att.filename,
+            &att.mime_type,
+            size,
+            conduit_types::ShareScope::Anyone,
+        );
+        let link = action_account
+            .engine
+            .host_attachment(&account, att.data, meta)
+            .map_err(engine_error_to_action_error)?
+            .await
+            .map_err(|error| crate::conduit::account_error_to_action_error(&error))?;
+        hosted.push(CloudLink {
+            filename: att.filename,
+            size,
+            url: link.share_url,
+        });
+    }
+
+    request.body_html = append_before_body_end(&request.body_html, &cloud_links_html(&hosted));
+    request.body_text = format!("{}{}", request.body_text, cloud_links_text(&hosted));
+    Ok(())
+}
+
+struct CloudLink {
+    filename: String,
+    size: u64,
+    url: String,
+}
+
+fn cloud_links_html(links: &[CloudLink]) -> String {
+    let mut html = String::from(
+        "<div style=\"margin-top:16px;padding:12px 16px;border:1px solid #d0d7de;\
+         border-radius:8px;font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:14px\">",
+    );
+    for link in links {
+        html.push_str(&format!(
+            "<div style=\"margin:4px 0\"><a href=\"{url}\">{name}</a> \
+             <span style=\"color:#57606a\">({size})</span></div>",
+            url = escape_html(&link.url),
+            name = escape_html(&link.filename),
+            size = human_size(link.size),
+        ));
+    }
+    html.push_str("</div>");
+    html
+}
+
+fn cloud_links_text(links: &[CloudLink]) -> String {
+    let mut text = String::from("\n\n");
+    for link in links {
+        text.push_str(&format!(
+            "{} ({}): {}\n",
+            link.filename,
+            human_size(link.size),
+            link.url
+        ));
+    }
+    text
+}
+
+/// Insert `block` just before the last `</body>` so it renders inside the
+/// document; a fragment without a body tag gets it appended.
+fn append_before_body_end(html: &str, block: &str) -> String {
+    match html.to_ascii_lowercase().rfind("</body>") {
+        Some(index) => format!("{}{}{}", &html[..index], block, &html[index..]),
+        None => format!("{html}{block}"),
+    }
+}
+
+fn escape_html(raw: &str) -> String {
+    let mut escaped = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
+}
+
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 /// Delete a local draft. If it has a `remote_draft_id`, also deletes
@@ -604,5 +734,45 @@ mod tests {
         // `to_conduit_send_request` schedule round-trip test in
         // `crate::send`).
         assert!(scheduled_send_gate(true).is_ok());
+    }
+
+    fn sample_link() -> CloudLink {
+        CloudLink {
+            filename: "plans <final>.zip".to_string(),
+            size: 300 * 1024 * 1024,
+            url: "https://example.com/s?a=1&b=2".to_string(),
+        }
+    }
+
+    #[test]
+    fn cloud_link_block_lands_inside_the_body() {
+        let html = append_before_body_end(
+            "<html><BODY><p>Hi</p></BODY></html>",
+            &cloud_links_html(&[sample_link()]),
+        );
+        let block_at = html.find("plans &lt;final&gt;.zip").expect("escaped name");
+        let body_end = html.find("</BODY>").expect("body end kept");
+        assert!(
+            block_at < body_end,
+            "block must render inside the body: {html}"
+        );
+        assert!(html.contains("href=\"https://example.com/s?a=1&amp;b=2\""));
+        assert!(html.contains("300.0 MB"));
+    }
+
+    #[test]
+    fn cloud_link_block_appends_to_a_fragment() {
+        let html = append_before_body_end("<p>Hi</p>", "<div>x</div>");
+        assert_eq!(html, "<p>Hi</p><div>x</div>");
+    }
+
+    #[test]
+    fn cloud_link_text_lists_name_size_and_url() {
+        assert_eq!(
+            cloud_links_text(&[sample_link()]),
+            "\n\nplans <final>.zip (300.0 MB): https://example.com/s?a=1&b=2\n"
+        );
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1536), "1.5 KB");
     }
 }

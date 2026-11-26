@@ -34,6 +34,8 @@ pub struct ComposeAttachment {
     pub mime_type: String,
     /// File contents.
     pub data: Arc<Vec<u8>>,
+    /// Whether the file travels in the message or as a cloud link.
+    pub delivery: service_api::AttachmentDelivery,
 }
 
 impl ComposeAttachment {

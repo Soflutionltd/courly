@@ -214,12 +214,14 @@ impl ReadyApp {
                 mime_type: a.mime_type.clone(),
                 data: a.data.as_ref().clone().into(),
                 content_id: None,
+                delivery: a.delivery,
             })
             .chain(inline_images.into_iter().map(|image| SendAttachment {
                 filename: image.filename,
                 mime_type: image.mime_type,
                 data: image.data.into(),
                 content_id: Some(image.content_id),
+                delivery: service_api::AttachmentDelivery::Attached,
             }))
             .collect();
 
@@ -618,6 +620,7 @@ fn stage_and_build_wire(
             mime: att.mime_type,
             filename: att.filename,
             content_id: att.content_id,
+            delivery: att.delivery,
         });
     }
 

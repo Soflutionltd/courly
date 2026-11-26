@@ -108,6 +108,9 @@ pub struct AttachmentEntry {
     pub name: String,
     pub mime_type: String,
     pub file: String,
+    /// A session saved before this field existed attached every file.
+    #[serde(default)]
+    pub delivery: service_api::AttachmentDelivery,
 }
 
 /// Minimal data needed to restore a message view window.
@@ -211,6 +214,7 @@ pub fn store_attachments(
                 name: attachment.name.clone(),
                 mime_type: attachment.mime_type.clone(),
                 file,
+                delivery: attachment.delivery,
             })
         })
         .collect()
@@ -233,6 +237,7 @@ pub fn load_attachments(
                     name: entry.name.clone(),
                     mime_type: entry.mime_type.clone(),
                     data: std::sync::Arc::new(data),
+                    delivery: entry.delivery,
                 }
             })
         })
@@ -269,6 +274,7 @@ mod tests {
             name: name.to_string(),
             mime_type: "application/pdf".to_string(),
             data: std::sync::Arc::new(data.to_vec()),
+            delivery: service_api::AttachmentDelivery::Attached,
         }
     }
 
@@ -310,6 +316,7 @@ mod tests {
             name: "a.pdf".to_string(),
             mime_type: "application/pdf".to_string(),
             file: "../secret".to_string(),
+            delivery: service_api::AttachmentDelivery::Attached,
         };
         assert!(load_attachments(dir.path(), &[entry]).is_empty());
     }

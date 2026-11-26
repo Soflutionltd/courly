@@ -234,6 +234,7 @@ mod tests {
             mime_type: "text/plain".to_string(),
             data: b"file content".to_vec().into(),
             content_id: None,
+            delivery: service_api::AttachmentDelivery::Attached,
         });
 
         req.attachments[0].content_id = Some("cid-1".to_string());

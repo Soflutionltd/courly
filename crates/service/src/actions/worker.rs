@@ -451,6 +451,7 @@ async fn build_send_request(
                 // way into conduit's `AttachmentInline`.
                 data: data.into(),
                 content_id: att.content_id,
+                delivery: att.delivery,
             });
         }
         Ok::<_, String>(crate::send::SendRequest {

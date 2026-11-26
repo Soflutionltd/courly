@@ -620,6 +620,7 @@ fn handle_compose_attach_files(window_id: iced::window::Id) -> Task<Message> {
                     name,
                     mime_type,
                     data: Arc::new(data),
+                    delivery: service_api::AttachmentDelivery::Attached,
                 });
             }
             attachments

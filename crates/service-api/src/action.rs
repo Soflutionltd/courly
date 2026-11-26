@@ -388,6 +388,22 @@ pub struct SendWireAttachment {
     pub mime: String,
     pub filename: String,
     pub content_id: Option<String>,
+    /// How the file reaches the recipients. Absent means attached.
+    #[serde(default)]
+    pub delivery: AttachmentDelivery,
+}
+
+/// How one attachment reaches the recipients.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentDelivery {
+    /// A copy of the file travels inside the message.
+    #[default]
+    Attached,
+    /// The file is uploaded to the sending account's cloud drive (OneDrive
+    /// or Google Drive) and the message carries a link anyone can open,
+    /// for files over what the provider accepts in a message.
+    CloudLink,
 }
 
 /// Where the Service should look for the attachment bytes during the
@@ -730,12 +746,27 @@ mod tests {
                 mime: "application/pdf".into(),
                 filename: "report.pdf".into(),
                 content_id: None,
+                delivery: AttachmentDelivery::CloudLink,
             }],
             scheduled_at: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         let recovered: SendWireRequest = serde_json::from_value(json).expect("deserialize");
         assert_eq!(req, recovered);
+    }
+
+    /// A request written before delivery existed attaches every file.
+    #[test]
+    fn an_attachment_without_delivery_is_attached() {
+        let attachment: SendWireAttachment = serde_json::from_value(serde_json::json!({
+            "source": {"kind": "staging_file", "relative_path": "0.bin", "content_hash": vec![0u8; 32]},
+            "size": 1,
+            "mime": "text/plain",
+            "filename": "a.txt",
+            "content_id": null
+        }))
+        .expect("deserialize");
+        assert_eq!(attachment.delivery, AttachmentDelivery::Attached);
     }
 
     #[test]

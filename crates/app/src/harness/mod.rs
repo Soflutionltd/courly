@@ -3674,6 +3674,15 @@ fn parse_send_attachment(
         filename: get_string_field(state, att_idx, "filename")?
             .ok_or_else(|| lua_error_message("ActionSend attachment requires filename"))?,
         content_id: get_string_field(state, att_idx, "content_id")?,
+        delivery: match get_string_field(state, att_idx, "delivery")?.as_deref() {
+            None | Some("attached") => service_api::AttachmentDelivery::Attached,
+            Some("cloud_link") => service_api::AttachmentDelivery::CloudLink,
+            Some(other) => {
+                return Err(lua_error_message(&format!(
+                    "ActionSend attachment delivery must be attached or cloud_link, got {other}"
+                )));
+            }
+        },
     })
 }
 

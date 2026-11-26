@@ -3438,6 +3438,7 @@ mod tests {
                 mime: "application/pdf".into(),
                 filename: "x.pdf".into(),
                 content_id: None,
+                delivery: crate::action::AttachmentDelivery::Attached,
             }],
             scheduled_at: None,
         };

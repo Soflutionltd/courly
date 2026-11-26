@@ -36,11 +36,11 @@ pub use account::{
     VerifyAccountAck, VerifyAccountParams, VerifyFailureReason,
 };
 pub use action::{
-    ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, JobStatusResponse,
-    MarkChatReadAck, OperationId, OperationOutcome, OperationResult, PlanId, PlanSummary,
-    RemoteFailure, SendAck, SendAttachmentSource, SendIntent, SendWireAttachment, SendWireMessage,
-    SendWireRequest, SyncProgress, WireFolderId, WireJobStatus, WireLabelGroupId, WireLabelId,
-    WireMailOperation,
+    ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, AttachmentDelivery,
+    JobStatusResponse, MarkChatReadAck, OperationId, OperationOutcome, OperationResult, PlanId,
+    PlanSummary, RemoteFailure, SendAck, SendAttachmentSource, SendIntent, SendWireAttachment,
+    SendWireMessage, SendWireRequest, SyncProgress, WireFolderId, WireJobStatus, WireLabelGroupId,
+    WireLabelId, WireMailOperation,
 };
 pub use attachment::{
     AttachmentCacheSizeAck, AttachmentCacheSizeParams, AttachmentClearCacheAck,
@@ -91,8 +91,7 @@ pub use internal::{
 pub use label::{
     LabelDeleteAck, LabelDeleteParams, LabelGroupDeleteAck, LabelGroupDeleteParams,
     LabelGroupReorderAck, LabelGroupReorderParams, LabelGroupSaveAck, LabelGroupSaveParams,
-    LabelSaveAck,
-    LabelSaveParams,
+    LabelSaveAck, LabelSaveParams,
 };
 pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
@@ -142,8 +141,8 @@ pub use sync::{
     AccountPausedNotification, IndexCommitted, MailboxChanged, SubscriptionStateNotification,
     SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncFocusFolderAck,
     SyncFocusFolderParams, SyncPauseReason, SyncResult, SyncResumeAccountParams, SyncResumeAck,
-    SyncResyncAccountParams, SyncResyncAck, SyncRunId, SyncServerSearchAck,
-    SyncServerSearchParams, SyncStartAccountParams, SyncStartAck,
+    SyncResyncAccountParams, SyncResyncAck, SyncRunId, SyncServerSearchAck, SyncServerSearchParams,
+    SyncStartAccountParams, SyncStartAck,
 };
 pub use template::{TemplateDeleteAck, TemplateDeleteParams, TemplateSaveAck, TemplateSaveParams};
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};

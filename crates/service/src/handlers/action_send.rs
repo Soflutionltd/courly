@@ -83,6 +83,10 @@ pub(crate) struct JournaledAttachment {
     pub content_id: Option<String>,
     pub size: u64,
     pub content_hash: [u8; 32],
+    /// A send journaled before this field existed carried every file
+    /// in the message.
+    #[serde(default)]
+    pub delivery: service_api::AttachmentDelivery,
 }
 
 pub(super) async fn handle(
@@ -188,6 +192,7 @@ fn transfer_attachments(
             content_id: att.content_id,
             size: att.size,
             content_hash,
+            delivery: att.delivery,
         });
     }
 
