@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use iced::widget::{Canvas, Space, canvas, container, image, text};
-use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse};
+use iced::widget::{Space, container, image, text};
+use iced::{Alignment, Color, Element, Length, Theme};
 
 use crate::font;
 use crate::ui::label_paint::LabelPaint;
@@ -19,12 +19,8 @@ fn avatar_circle_with_color<'a, M: 'a>(name: &str, size: f32, color: Color) -> E
         AVATAR_ONE_LETTER_FONT_RATIO
     };
 
-    let circle = Canvas::new(CirclePainter { color, size })
-        .width(size)
-        .height(size);
-
     iced::widget::stack![
-        circle,
+        disc(color, size),
         container(
             text(letters)
                 .size(size * font_ratio)
@@ -87,16 +83,14 @@ fn round_picture(handle: image::Handle, size: f32) -> iced::widget::Image<image:
 }
 
 pub fn color_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
-    let dot = Canvas::new(DotPainter { color })
-        .width(DOT_SIZE)
-        .height(DOT_SIZE);
-    container(dot).center_y(Length::Shrink).into()
+    container(disc(color, DOT_SIZE))
+        .center_y(Length::Shrink)
+        .into()
 }
 
 /// A color dot at a custom size.
 pub fn color_dot_sized<'a, M: 'a>(color: Color, size: f32) -> Element<'a, M> {
-    let dot = Canvas::new(DotPainter { color }).width(size).height(size);
-    container(dot).center_y(Length::Shrink).into()
+    container(disc(color, size)).center_y(Length::Shrink).into()
 }
 
 // Label dots render only `paint.bg()` - a single-color disc has no
@@ -109,10 +103,9 @@ pub fn label_color_dot<'a, M: 'a>(paint: LabelPaint) -> Element<'a, M> {
 }
 
 pub fn label_dot<'a, M: 'a>(paint: LabelPaint) -> Element<'a, M> {
-    let dot = Canvas::new(DotPainter { color: paint.bg() })
-        .width(LABEL_DOT_SIZE)
-        .height(LABEL_DOT_SIZE);
-    container(dot).center_y(Length::Shrink).into()
+    container(disc(paint.bg(), LABEL_DOT_SIZE))
+        .center_y(Length::Shrink)
+        .into()
 }
 
 /// Decorative radio circle: outer ring (primary color when selected, muted
@@ -145,49 +138,21 @@ pub fn radio_circle<'a, M: 'a>(selected: bool) -> Element<'a, M> {
         .into()
 }
 
-struct CirclePainter {
-    color: Color,
-    size: f32,
-}
-
-impl<M> canvas::Program<M> for CirclePainter {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry<Renderer>> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let radius = self.size / 2.0;
-        let circle = canvas::path::Path::circle(iced::Point::new(radius, radius), radius);
-        frame.fill(&circle, self.color);
-        vec![frame.into_geometry()]
-    }
-}
-
-struct DotPainter {
-    color: Color,
-}
-
-impl<M> canvas::Program<M> for DotPainter {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry<Renderer>> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let radius = DOT_SIZE / 2.0;
-        let circle = canvas::path::Path::circle(iced::Point::new(radius, radius), radius);
-        frame.fill(&circle, self.color);
-        vec![frame.into_geometry()]
-    }
+/// A filled disc `size` across, drawn as a fully rounded quad. The quad
+/// shader smooths its edge by itself; a canvas circle is a mesh, and one
+/// mesh on screen makes the renderer hold a multisampled buffer as large as
+/// the window (82 MB at 2560x1600) for as long as it shows.
+fn disc<'a, M: 'a>(color: Color, size: f32) -> Element<'a, M> {
+    container(Space::new())
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(color.into()),
+            border: iced::Border {
+                radius: (size / 2.0).into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
 }
