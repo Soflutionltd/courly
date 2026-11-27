@@ -216,7 +216,9 @@ pub struct Tile {
     pub height: f32,
     pub px_width: u32,
     pub px_height: u32,
-    pub rgba: Vec<u8>,
+    /// The tile's rows. Every tile of a mail is a view into the one buffer
+    /// the mail was painted in, not a copy of its part.
+    pub rgba: Bytes,
 }
 
 #[derive(Debug, Clone)]
@@ -504,7 +506,7 @@ pub fn render(request: RenderRequest) -> RenderedMail {
     );
 
     let (cut_rows, quote_headers) = quote_rows(&document, quote_cards, zoom * scale, px_height);
-    let tiles = split_into_tiles(&buffer, px_width, px_height, scale, &cut_rows);
+    let tiles = split_into_tiles(buffer, px_width, px_height, scale, &cut_rows);
     let links = collect_links(&document, zoom);
     let text = text::collect_text(&document, zoom);
 
@@ -692,12 +694,13 @@ fn quote_rows(
 /// Cut the picture into tiles no taller than the GPU takes, and never
 /// across one of `cut_rows`.
 fn split_into_tiles(
-    buffer: &[u8],
+    buffer: Vec<u8>,
     px_width: u32,
     px_height: u32,
     scale: f32,
     cut_rows: &[u32],
 ) -> Vec<Tile> {
+    let buffer = Bytes::from(buffer);
     let row_bytes = px_width as usize * 4;
     let mut tiles = Vec::new();
     let mut top = 0;
@@ -715,7 +718,7 @@ fn split_into_tiles(
             height: rows as f32 / scale,
             px_width,
             px_height: rows,
-            rgba: buffer[start..end].to_vec(),
+            rgba: buffer.slice(start..end),
         });
         top += rows;
     }
