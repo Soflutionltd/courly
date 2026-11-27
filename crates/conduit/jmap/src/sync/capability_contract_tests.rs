@@ -405,6 +405,18 @@ async fn every_false_pim_flag_refuses_without_touching_the_wire() {
     );
     refuses!(
         caps,
+        app_data,
+        AccountOperation::AppDataGet,
+        account.app_data_get("k".to_string())
+    );
+    refuses!(
+        caps,
+        app_data,
+        AccountOperation::AppDataSet,
+        account.app_data_set("k".to_string(), None)
+    );
+    refuses!(
+        caps,
         message_reactions,
         AccountOperation::MessageReactionsRead,
         account.message_reactions(&[ObjectId("m1".to_string())])

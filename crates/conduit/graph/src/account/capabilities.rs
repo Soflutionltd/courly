@@ -54,6 +54,7 @@ pub(crate) fn build_capabilities(
         delta_token_expires_after: None,
         pim_methods: PimMethodSupport {
             category_definitions: true,
+            app_data: true,
             message_reactions: true,
             add_to_container: true,
             remove_from_container: false,

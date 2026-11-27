@@ -136,6 +136,16 @@ static MIGRATIONS: &[Migration] = &[
                 PRIMARY KEY (account_id, message_id)
               );",
     },
+    Migration {
+        version: 108,
+        description: "Signatures deleted here, for the mailbox sync",
+        sql: "CREATE TABLE signature_tombstones (
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL,
+                deleted_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id, server_id)
+              );",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.

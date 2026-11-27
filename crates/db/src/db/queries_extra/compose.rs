@@ -211,6 +211,7 @@ pub fn db_update_signature_sync(
 /// not error on zero matches), so callers do not need to pre-check.
 pub fn db_delete_signature_sync(conn: &impl WriteTarget, id: &str) -> Result<(), String> {
     log::info!("Deleting signature: id={id}");
+    super::signature_sync::record_signature_tombstone(conn, id)?;
     conn.execute("DELETE FROM signatures WHERE id = ?1", params![id])
         .map_err(|e| {
             log::error!("Failed to delete signature {id}: {e}");

@@ -50,6 +50,7 @@ pub(crate) fn gmail_capabilities() -> AccountCapabilities {
         delta_token_expires_after: None,
         pim_methods: PimMethodSupport {
             category_definitions: false,
+            app_data: false,
             message_reactions: false,
             add_to_container: true,
             remove_from_container: true,

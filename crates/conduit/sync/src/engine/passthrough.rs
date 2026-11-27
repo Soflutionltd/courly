@@ -553,6 +553,28 @@ impl SyncEngine {
             .await?)
     }
 
+    /// Forwards to the account's application document read.
+    pub async fn app_data_get(
+        &self,
+        account_id: &AccountId,
+        key: String,
+    ) -> Result<Option<String>, Error> {
+        Ok(self.live_account(account_id)?.app_data_get(key).await?)
+    }
+
+    /// Forwards to the account's application document write.
+    pub async fn app_data_set(
+        &self,
+        account_id: &AccountId,
+        key: String,
+        value: Option<String>,
+    ) -> Result<(), Error> {
+        Ok(self
+            .live_account(account_id)?
+            .app_data_set(key, value)
+            .await?)
+    }
+
     /// Forwards to the account's provider reaction-read surface.
     pub async fn message_reactions(
         &self,

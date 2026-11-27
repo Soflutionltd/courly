@@ -203,6 +203,24 @@ pub trait Account: Send + Sync {
         Box::pin(async { Err(unsupported_error(AccountOperation::CategoryDefinitionDelete)) })
     }
 
+    /// Read the application document stored in the mailbox under `key`,
+    /// or `None` when there is none. The store belongs to the application,
+    /// out of the user's sight, and follows the mailbox: every client
+    /// attached to the account reads what another one wrote.
+    fn app_data_get(&self, _key: String) -> AccountFuture<Result<Option<String>, AccountError>> {
+        Box::pin(async { Err(unsupported_error(AccountOperation::AppDataGet)) })
+    }
+
+    /// Replace the application document stored under `key`, or remove it
+    /// when `value` is `None`. The value comes back byte for byte.
+    fn app_data_set(
+        &self,
+        _key: String,
+        _value: Option<String>,
+    ) -> AccountFuture<Result<(), AccountError>> {
+        Box::pin(async { Err(unsupported_error(AccountOperation::AppDataSet)) })
+    }
+
     /// Read reaction state. Providers preserving per-item failures override this.
     fn message_reactions(
         &self,

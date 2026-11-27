@@ -1315,6 +1315,8 @@ const OPERATIONS: &[AccountOperation] = &[
     AccountOperation::Expunge,
     AccountOperation::CategoryDefinitionUpsert,
     AccountOperation::CategoryDefinitionDelete,
+    AccountOperation::AppDataGet,
+    AccountOperation::AppDataSet,
 ];
 
 fn encode_operation(operation: AccountOperation) -> u8 {

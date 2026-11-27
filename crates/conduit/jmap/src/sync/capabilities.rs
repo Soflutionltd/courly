@@ -257,6 +257,7 @@ pub(crate) fn build(
         delta_token_expires_after: None,
         pim_methods: PimMethodSupport {
             category_definitions: false,
+            app_data: false,
             message_reactions: false,
             add_to_container: true,
             remove_from_container: true,
@@ -598,6 +599,7 @@ mod tests {
             ("set_category", pim.set_category),
             ("set_extended_property", pim.set_extended_property),
             ("category_definitions", pim.category_definitions),
+            ("app_data", pim.app_data),
             ("message_reactions", pim.message_reactions),
             ("host_attachment", pim.host_attachment),
         ] {

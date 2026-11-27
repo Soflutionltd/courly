@@ -174,6 +174,10 @@ pub struct PimMethodSupport {
     pub category_definitions: bool,
     /// Read Exchange-native message reaction properties.
     pub message_reactions: bool,
+    /// Keep small application documents in the mailbox itself
+    /// (`app_data_get` / `app_data_set`), so every client of the account
+    /// reads the same one.
+    pub app_data: bool,
     // Mail mutation primitives.
     pub add_to_container: bool,
     pub remove_from_container: bool,

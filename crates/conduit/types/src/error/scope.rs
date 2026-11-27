@@ -204,6 +204,8 @@ pub enum AccountOperation {
     EventAutocomplete,
     Close,
     Expunge,
+    AppDataGet,
+    AppDataSet,
 }
 
 impl AccountOperation {
@@ -277,6 +279,10 @@ impl AccountOperation {
                 | Self::EventRsvp
                 | Self::Expunge
                 | Self::CategoryDefinitionDelete
+                // A set is find-then-create on a mailbox-backed store, so a
+                // blind replay of a create that landed would file the
+                // document twice.
+                | Self::AppDataSet
         )
     }
 }

@@ -1,3 +1,4 @@
+mod app_data;
 mod autodiscover;
 mod batch_routing;
 mod blob;
@@ -1208,6 +1209,20 @@ impl Account for GraphAccount {
     fn containers_list(&self) -> AccountFuture<Result<conduit_types::ContainerList, AccountError>> {
         let account = self.clone();
         Box::pin(async move { pim::containers_list(account).await })
+    }
+
+    fn app_data_get(&self, key: String) -> AccountFuture<Result<Option<String>, AccountError>> {
+        let account = self.clone();
+        Box::pin(async move { app_data::app_data_get(account, key).await })
+    }
+
+    fn app_data_set(
+        &self,
+        key: String,
+        value: Option<String>,
+    ) -> AccountFuture<Result<(), AccountError>> {
+        let account = self.clone();
+        Box::pin(async move { app_data::app_data_set(account, key, value).await })
     }
 
     fn category_definitions_list(

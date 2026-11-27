@@ -445,6 +445,11 @@ impl ResidentEngine {
                 Arc::clone(&slot),
                 account_id.to_string(),
             ));
+            tokio::spawn(signature_sync_loop(
+                Arc::clone(&self.inner),
+                Arc::clone(&slot),
+                account_id.to_string(),
+            ));
         }
         self.inner
             .slots
@@ -1499,6 +1504,60 @@ async fn category_refresh_loop(
             Err(error) => {
                 log::warn!("Graph master category sync failed for account {account_id}: {error}");
             }
+        }
+    }
+}
+
+/// How often the signature table is checked for a change to send to the
+/// mailbox. The check reads the table only, so a signature edited here
+/// reaches the mailbox within this delay at no cost when nothing changed.
+const SIGNATURE_PUSH_INTERVAL: Duration = Duration::from_secs(20);
+
+/// Every this many checks the mailbox document is read whatever the table
+/// holds, to pick up what another Courly wrote: once every five minutes,
+/// two requests each.
+const SIGNATURE_PULL_EVERY: u32 = 15;
+
+async fn signature_sync_loop(
+    inner: Arc<ResidentEngineInner>,
+    slot: Arc<ResidentSlot>,
+    account_id: String,
+) {
+    let mut checks: u32 = 0;
+    // After a failure the mailbox is left alone until the next full pass,
+    // so a store that refuses writes is not asked again every few seconds.
+    let mut failed = false;
+    loop {
+        let full_pass = checks.is_multiple_of(SIGNATURE_PULL_EVERY);
+        checks = checks.wrapping_add(1);
+        if failed && !full_pass {
+            tokio::select! {
+                () = slot.cancel.cancelled() => return,
+                () = tokio::time::sleep(SIGNATURE_PUSH_INTERVAL) => {}
+            }
+            continue;
+        }
+        let only_if_pending = !full_pass;
+        failed = false;
+        match super::mailbox_signatures::sync_mailbox_signatures(
+            &inner.engine.engine(),
+            &account_id,
+            &inner.read_db,
+            &inner.write_db,
+            only_if_pending,
+        )
+        .await
+        {
+            Ok(outcome) if outcome.local_changed => slot.mutation_signal.notify_one(),
+            Ok(_) => {}
+            Err(error) => {
+                failed = true;
+                log::warn!("Signature sync with the mailbox failed for account {account_id}: {error}");
+            }
+        }
+        tokio::select! {
+            () = slot.cancel.cancelled() => return,
+            () = tokio::time::sleep(SIGNATURE_PUSH_INTERVAL) => {}
         }
     }
 }
