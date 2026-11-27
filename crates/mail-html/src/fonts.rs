@@ -150,10 +150,20 @@ fn index_office_fonts() -> HashMap<String, Vec<PathBuf>> {
             if !is_font || !seen.insert(entry.file_name()) {
                 continue;
             }
-            let Ok(bytes) = std::fs::read(&path) else {
+            let Ok(file) = std::fs::File::open(&path) else {
                 continue;
             };
-            // One collection per file, dropped with the file's bytes: a
+            // Mapped, not read: a font is opened here only for its family
+            // names, and the macOS allocator keeps freed blocks of this size
+            // in a cache that counts in the footprint, 105 MB measured after
+            // the East Asian fonts went through it.
+            // SAFETY: the map is read-only and dropped within this
+            // iteration; the files are fonts installed with Office, which
+            // nothing rewrites in place while the suite is installed.
+            let Ok(bytes) = (unsafe { memmap2::Mmap::map(&file) }) else {
+                continue;
+            };
+            // One collection per file, dropped with the file's map: a
             // single one would hold every Office font in memory at once,
             // half a gigabyte with the full suite installed.
             let mut probe = Collection::new(CollectionOptions {

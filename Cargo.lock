@@ -4759,6 +4759,7 @@ dependencies = [
  "data-url",
  "html5ever 0.40.1",
  "log",
+ "memmap2",
  "num-traits",
  "parley",
  "peniko",
