@@ -134,10 +134,6 @@ impl FontLibrary {
 /// Family names in every Office font file, read once per process.
 fn index_office_fonts() -> HashMap<String, Vec<PathBuf>> {
     let mut seen = HashSet::new();
-    let mut probe = Collection::new(CollectionOptions {
-        shared: false,
-        system_fonts: false,
-    });
     let mut index: HashMap<String, Vec<PathBuf>> = HashMap::new();
     for dir in OFFICE_FONT_DIRS {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -157,6 +153,13 @@ fn index_office_fonts() -> HashMap<String, Vec<PathBuf>> {
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
+            // One collection per file, dropped with the file's bytes: a
+            // single one would hold every Office font in memory at once,
+            // half a gigabyte with the full suite installed.
+            let mut probe = Collection::new(CollectionOptions {
+                shared: false,
+                system_fonts: false,
+            });
             for (family, _) in probe.register_fonts(Blob::new(Arc::new(bytes) as _), None) {
                 if let Some(name) = probe.family_name(family) {
                     index
