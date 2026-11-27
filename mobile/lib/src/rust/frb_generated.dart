@@ -76,7 +76,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1972306657;
+  int get rustContentHash => -1444886808;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -112,9 +112,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BigInt> crateApiEngineEnginePing();
 
-  Future<List<ThreadSummary>> crateApiMailboxInboxThreads({
+  Future<List<ThreadSummary>> crateApiMailboxFolderThreads({
     required String dataDir,
     String? accountId,
+    required MailFolder folder,
     required int limit,
   });
 
@@ -158,6 +159,10 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiActionsTrashThread({
     required String accountId,
     required String threadId,
+  });
+
+  Future<List<FolderUnread>> crateApiMailboxUnreadCounts({
+    required String dataDir,
   });
 }
 
@@ -338,9 +343,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "engine_ping", argNames: []);
 
   @override
-  Future<List<ThreadSummary>> crateApiMailboxInboxThreads({
+  Future<List<ThreadSummary>> crateApiMailboxFolderThreads({
     required String dataDir,
     String? accountId,
+    required MailFolder folder,
     required int limit,
   }) {
     return handler.executeNormal(
@@ -349,6 +355,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(dataDir, serializer);
           sse_encode_opt_String(accountId, serializer);
+          sse_encode_mail_folder(folder, serializer);
           sse_encode_u_32(limit, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -361,17 +368,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_list_thread_summary,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateApiMailboxInboxThreadsConstMeta,
-        argValues: [dataDir, accountId, limit],
+        constMeta: kCrateApiMailboxFolderThreadsConstMeta,
+        argValues: [dataDir, accountId, folder, limit],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiMailboxInboxThreadsConstMeta =>
+  TaskConstMeta get kCrateApiMailboxFolderThreadsConstMeta =>
       const TaskConstMeta(
-        debugName: "inbox_threads",
-        argNames: ["dataDir", "accountId", "limit"],
+        debugName: "folder_threads",
+        argNames: ["dataDir", "accountId", "folder", "limit"],
       );
 
   @override
@@ -699,6 +706,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     argNames: ["accountId", "threadId"],
   );
 
+  @override
+  Future<List<FolderUnread>> crateApiMailboxUnreadCounts({
+    required String dataDir,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dataDir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_folder_unread,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMailboxUnreadCountsConstMeta,
+        argValues: [dataDir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMailboxUnreadCountsConstMeta =>
+      const TaskConstMeta(debugName: "unread_counts", argNames: ["dataDir"]);
+
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -870,6 +907,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FolderUnread dco_decode_folder_unread(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FolderUnread(
+      accountId: dco_decode_opt_String(arr[0]),
+      folder: dco_decode_mail_folder(arr[1]),
+      unread: dco_decode_u_32(arr[2]),
+    );
+  }
+
+  @protected
   int dco_decode_i_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
@@ -917,6 +967,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<FolderUnread> dco_decode_list_folder_unread(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_folder_unread).toList();
+  }
+
+  @protected
   List<MessageView> dco_decode_list_message_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_message_view).toList();
@@ -932,6 +988,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<ThreadSummary> dco_decode_list_thread_summary(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_thread_summary).toList();
+  }
+
+  @protected
+  MailFolder dco_decode_mail_folder(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return MailFolder.values[raw as int];
   }
 
   @protected
@@ -1293,6 +1355,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FolderUnread sse_decode_folder_unread(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_accountId = sse_decode_opt_String(deserializer);
+    var var_folder = sse_decode_mail_folder(deserializer);
+    var var_unread = sse_decode_u_32(deserializer);
+    return FolderUnread(
+      accountId: var_accountId,
+      folder: var_folder,
+      unread: var_unread,
+    );
+  }
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
@@ -1366,6 +1441,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<FolderUnread> sse_decode_list_folder_unread(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FolderUnread>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_folder_unread(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1396,6 +1485,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_thread_summary(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  MailFolder sse_decode_mail_folder(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return MailFolder.values[inner];
   }
 
   @protected
@@ -1784,6 +1880,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_folder_unread(FolderUnread self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_String(self.accountId, serializer);
+    sse_encode_mail_folder(self.folder, serializer);
+    sse_encode_u_32(self.unread, serializer);
+  }
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
@@ -1841,6 +1945,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_folder_unread(
+    List<FolderUnread> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_folder_unread(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_message_view(
     List<MessageView> self,
     SseSerializer serializer,
@@ -1872,6 +1988,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_thread_summary(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_mail_folder(MailFolder self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected

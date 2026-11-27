@@ -1,3 +1,4 @@
+import 'package:courly_mobile/mail_folders.dart';
 import 'package:courly_mobile/screens/add_account_screen.dart';
 import 'package:courly_mobile/screens/inbox_screen.dart';
 import 'package:courly_mobile/src/rust/api/mailbox.dart';
@@ -6,8 +7,9 @@ import 'package:courly_mobile/widgets/glass.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// The mailboxes page, as in Apple Mail: every inbox together, then each
-/// account's own, in grouped rounded sections, and "Add an account" below.
+/// The mailboxes page, as in Apple Mail: every inbox together and each
+/// account's own, then one section per account with its other folders,
+/// each row with its unread count, and "Add an account" below.
 /// The app opens straight on the inbox of every account, pushed over this
 /// page, so its back button leads here.
 class MailboxesScreen extends StatefulWidget {
@@ -20,7 +22,16 @@ class MailboxesScreen extends StatefulWidget {
 }
 
 class _MailboxesScreenState extends State<MailboxesScreen> {
+  /// The folders listed under each account, the inbox being above.
+  static const _accountFolders = [
+    MailFolder.sent,
+    MailFolder.archive,
+    MailFolder.trash,
+    MailFolder.spam,
+  ];
+
   List<AccountSummary> _accounts = const [];
+  List<FolderUnread> _unread = const [];
   String? _loadError;
 
   @override
@@ -35,9 +46,11 @@ class _MailboxesScreenState extends State<MailboxesScreen> {
   Future<void> _reload() async {
     try {
       final accounts = await listAccounts(dataDir: widget.dataDir);
+      final unread = await unreadCounts(dataDir: widget.dataDir);
       if (!mounted) return;
       setState(() {
         _accounts = accounts;
+        _unread = unread;
         _loadError = null;
       });
     } catch (error) {
@@ -46,10 +59,29 @@ class _MailboxesScreenState extends State<MailboxesScreen> {
     }
   }
 
+  /// The unread conversations of [folder] in [accountId], or in every
+  /// account's inbox when it is null.
+  int _unreadIn(String? accountId, MailFolder folder) {
+    for (final count in _unread) {
+      if (count.accountId == accountId && count.folder == folder) {
+        return count.unread;
+      }
+    }
+    return 0;
+  }
+
   /// Every account's inbox when [accountId] is null. The first one, at
   /// launch, appears without sliding in.
-  Future<void> _openInbox(String? accountId, {bool animate = true}) async {
-    final page = InboxScreen(dataDir: widget.dataDir, accountId: accountId);
+  Future<void> _openInbox(
+    String? accountId, {
+    MailFolder folder = MailFolder.inbox,
+    bool animate = true,
+  }) async {
+    final page = InboxScreen(
+      dataDir: widget.dataDir,
+      accountId: accountId,
+      folder: folder,
+    );
     await Navigator.of(context).push(
       animate
           ? MaterialPageRoute<void>(builder: (_) => page)
@@ -104,6 +136,7 @@ class _MailboxesScreenState extends State<MailboxesScreen> {
                   title: 'Toutes les boîtes de réception',
                   subtitle:
                       '${_accounts.length} compte${_accounts.length > 1 ? 's' : ''}',
+                  unread: _unreadIn(null, MailFolder.inbox),
                   onTap: () => _openInbox(null),
                 ),
                 for (final account in _accounts)
@@ -112,10 +145,36 @@ class _MailboxesScreenState extends State<MailboxesScreen> {
                     leading: AccountAvatar(account: account, size: 32),
                     title: account.name,
                     subtitle: account.email,
+                    unread: _unreadIn(account.id, MailFolder.inbox),
                     onTap: () => _openInbox(account.id),
                   ),
               ],
             ),
+          for (final account in _accounts) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(32, 0, 32, 8),
+              child: Text(
+                account.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            _Section(
+              children: [
+                for (final folder in _accountFolders)
+                  _MailboxRow(
+                    key: ValueKey('folder-${account.id}-${folder.name}'),
+                    leading: Icon(folder.icon, size: 20, color: scheme.primary),
+                    title: folder.label,
+                    unread: _unreadIn(account.id, folder),
+                    onTap: () => _openInbox(account.id, folder: folder),
+                  ),
+              ],
+            ),
+          ],
           _Section(
             children: [
               _MailboxRow(
@@ -177,12 +236,16 @@ class _MailboxRow extends StatelessWidget {
     required this.title,
     required this.onTap,
     this.subtitle,
+    this.unread = 0,
     this.showChevron = true,
   });
 
   final Widget leading;
   final String title;
   final String? subtitle;
+
+  /// The unread count shown before the chevron, when there is one.
+  final int unread;
   final VoidCallback onTap;
   final bool showChevron;
 
@@ -222,6 +285,16 @@ class _MailboxRow extends StatelessWidget {
                   ],
                 ),
               ),
+              if (unread > 0)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8, right: 4),
+                  child: Text(
+                    '$unread',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               if (showChevron)
                 Icon(
                   LucideIcons.chevronRight,

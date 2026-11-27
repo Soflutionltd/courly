@@ -22,6 +22,7 @@ class ThreadScreen extends StatefulWidget {
     required this.accountId,
     required this.threadId,
     required this.markRead,
+    required this.canFile,
   });
 
   final String dataDir;
@@ -30,6 +31,9 @@ class ThreadScreen extends StatefulWidget {
 
   /// Whether opening the conversation should mark it read.
   final bool markRead;
+
+  /// Whether the conversation can be archived or deleted from here.
+  final bool canFile;
 
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
@@ -142,18 +146,20 @@ class _ThreadScreenState extends State<ThreadScreen> {
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
-        AdaptiveAppBarAction(
-          iosSymbol: 'archivebox',
-          icon: LucideIcons.archive,
-          label: 'Archiver',
-          onPressed: () => _act(ThreadOutcome.archived),
-        ),
-        AdaptiveAppBarAction(
-          iosSymbol: 'trash',
-          icon: LucideIcons.trash2,
-          label: 'Supprimer',
-          onPressed: () => _act(ThreadOutcome.deleted),
-        ),
+        if (widget.canFile) ...[
+          AdaptiveAppBarAction(
+            iosSymbol: 'archivebox',
+            icon: LucideIcons.archive,
+            label: 'Archiver',
+            onPressed: () => _act(ThreadOutcome.archived),
+          ),
+          AdaptiveAppBarAction(
+            iosSymbol: 'trash',
+            icon: LucideIcons.trash2,
+            label: 'Supprimer',
+            onPressed: () => _act(ThreadOutcome.deleted),
+          ),
+        ],
       ],
       // Built inside the page, where the padding includes the glass bar.
       body: Builder(builder: (context) => _body(context, thread)),

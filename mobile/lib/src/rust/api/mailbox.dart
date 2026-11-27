@@ -7,21 +7,30 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `open`
+// These functions are ignored because they are not marked as `pub`: `id`, `open`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `eq`, `fmt`
 
 /// Every account on the device, in the order the user set.
 Future<List<AccountSummary>> listAccounts({required String dataDir}) =>
     RustLib.instance.api.crateApiMailboxListAccounts(dataDir: dataDir);
 
-/// The newest conversations of the inbox: of one account, or of every
-/// account when `account_id` is `None`, pinned ones first.
-Future<List<ThreadSummary>> inboxThreads({
+/// The unread count of every folder that has unread mail: each account's
+/// folders, and the inbox of every account together, which is wider than
+/// the sum of the inboxes (it also takes mail filed in custom folders).
+Future<List<FolderUnread>> unreadCounts({required String dataDir}) =>
+    RustLib.instance.api.crateApiMailboxUnreadCounts(dataDir: dataDir);
+
+/// The newest conversations of a folder: of one account, or of every
+/// account when `account_id` is `None`. The inbox lists pinned ones first.
+Future<List<ThreadSummary>> folderThreads({
   required String dataDir,
   String? accountId,
+  required MailFolder folder,
   required int limit,
-}) => RustLib.instance.api.crateApiMailboxInboxThreads(
+}) => RustLib.instance.api.crateApiMailboxFolderThreads(
   dataDir: dataDir,
   accountId: accountId,
+  folder: folder,
   limit: limit,
 );
 
@@ -58,7 +67,37 @@ class AccountSummary {
           color == other.color;
 }
 
-/// One conversation as the inbox list shows it.
+/// How many unread conversations a folder holds.
+class FolderUnread {
+  /// The account the folder belongs to, or `None` for the inbox of every
+  /// account together.
+  final String? accountId;
+  final MailFolder folder;
+  final int unread;
+
+  const FolderUnread({
+    this.accountId,
+    required this.folder,
+    required this.unread,
+  });
+
+  @override
+  int get hashCode => accountId.hashCode ^ folder.hashCode ^ unread.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FolderUnread &&
+          runtimeType == other.runtimeType &&
+          accountId == other.accountId &&
+          folder == other.folder &&
+          unread == other.unread;
+}
+
+/// A system folder the phone can open.
+enum MailFolder { inbox, sent, archive, trash, spam }
+
+/// One conversation as a folder's list shows it.
 class ThreadSummary {
   final String id;
   final String accountId;

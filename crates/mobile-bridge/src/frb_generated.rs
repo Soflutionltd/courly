@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1972306657;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1444886808;
 
 // Section: executor
 
@@ -228,7 +228,7 @@ fn wire__crate__api__engine__engine_ping_impl(
         },
     )
 }
-fn wire__crate__api__mailbox__inbox_threads_impl(
+fn wire__crate__api__mailbox__folder_threads_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -236,7 +236,7 @@ fn wire__crate__api__mailbox__inbox_threads_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "inbox_threads",
+            debug_name: "folder_threads",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -252,13 +252,15 @@ fn wire__crate__api__mailbox__inbox_threads_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_data_dir = <String>::sse_decode(&mut deserializer);
             let api_account_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_folder = <crate::api::mailbox::MailFolder>::sse_decode(&mut deserializer);
             let api_limit = <u32>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::mailbox::inbox_threads(
+                    let output_ok = crate::api::mailbox::folder_threads(
                         api_data_dir,
                         api_account_id,
+                        api_folder,
                         api_limit,
                     )?;
                     std::result::Result::Ok(output_ok)
@@ -612,6 +614,39 @@ fn wire__crate__api__actions__trash_thread_impl(
         },
     )
 }
+fn wire__crate__api__mailbox__unread_counts_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "unread_counts",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_data_dir = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::mailbox::unread_counts(api_data_dir)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 
 // Section: dart2rust
 
@@ -780,6 +815,20 @@ impl SseDecode for crate::api::engine::EngineReady {
     }
 }
 
+impl SseDecode for crate::api::mailbox::FolderUnread {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_accountId = <Option<String>>::sse_decode(deserializer);
+        let mut var_folder = <crate::api::mailbox::MailFolder>::sse_decode(deserializer);
+        let mut var_unread = <u32>::sse_decode(deserializer);
+        return crate::api::mailbox::FolderUnread {
+            account_id: var_accountId,
+            folder: var_folder,
+            unread: var_unread,
+        };
+    }
+}
+
 impl SseDecode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -856,6 +905,20 @@ impl SseDecode for Vec<crate::api::thread::AttachmentView> {
     }
 }
 
+impl SseDecode for Vec<crate::api::mailbox::FolderUnread> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::mailbox::FolderUnread>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::thread::MessageView> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -891,6 +954,21 @@ impl SseDecode for Vec<crate::api::mailbox::ThreadSummary> {
             ));
         }
         return ans_;
+    }
+}
+
+impl SseDecode for crate::api::mailbox::MailFolder {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::mailbox::MailFolder::Inbox,
+            1 => crate::api::mailbox::MailFolder::Sent,
+            2 => crate::api::mailbox::MailFolder::Archive,
+            3 => crate::api::mailbox::MailFolder::Trash,
+            4 => crate::api::mailbox::MailFolder::Spam,
+            _ => unreachable!("Invalid variant for MailFolder: {}", inner),
+        };
     }
 }
 
@@ -1146,7 +1224,7 @@ fn pde_ffi_dispatcher_primary_impl(
         3 => wire__crate__api__compose__compose_draft_impl(port, ptr, rust_vec_len, data_len),
         4 => wire__crate__api__accounts__discover_account_impl(port, ptr, rust_vec_len, data_len),
         5 => wire__crate__api__engine__engine_ping_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__mailbox__inbox_threads_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__mailbox__folder_threads_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__api__database__init_app_impl(port, ptr, rust_vec_len, data_len),
         8 => wire__crate__api__mailbox__list_accounts_impl(port, ptr, rust_vec_len, data_len),
         9 => wire__crate__api__thread__mark_thread_read_impl(port, ptr, rust_vec_len, data_len),
@@ -1169,6 +1247,7 @@ fn pde_ffi_dispatcher_primary_impl(
         14 => wire__crate__api__engine__start_engine_impl(port, ptr, rust_vec_len, data_len),
         15 => wire__crate__api__thread__thread_detail_impl(port, ptr, rust_vec_len, data_len),
         16 => wire__crate__api__actions__trash_thread_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__mailbox__unread_counts_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1414,6 +1493,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::engine::EngineReady>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::mailbox::FolderUnread {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.account_id.into_into_dart().into_dart(),
+            self.folder.into_into_dart().into_dart(),
+            self.unread.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::mailbox::FolderUnread
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::mailbox::FolderUnread>
+    for crate::api::mailbox::FolderUnread
+{
+    fn into_into_dart(self) -> crate::api::mailbox::FolderUnread {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::accounts::ImapServers {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1436,6 +1537,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::accounts::ImapServers>
     for crate::api::accounts::ImapServers
 {
     fn into_into_dart(self) -> crate::api::accounts::ImapServers {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::mailbox::MailFolder {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Inbox => 0.into_dart(),
+            Self::Sent => 1.into_dart(),
+            Self::Archive => 2.into_dart(),
+            Self::Trash => 3.into_dart(),
+            Self::Spam => 4.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::mailbox::MailFolder
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::mailbox::MailFolder>
+    for crate::api::mailbox::MailFolder
+{
+    fn into_into_dart(self) -> crate::api::mailbox::MailFolder {
         self
     }
 }
@@ -1737,6 +1862,15 @@ impl SseEncode for crate::api::engine::EngineReady {
     }
 }
 
+impl SseEncode for crate::api::mailbox::FolderUnread {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.account_id, serializer);
+        <crate::api::mailbox::MailFolder>::sse_encode(self.folder, serializer);
+        <u32>::sse_encode(self.unread, serializer);
+    }
+}
+
 impl SseEncode for i32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1794,6 +1928,16 @@ impl SseEncode for Vec<crate::api::thread::AttachmentView> {
     }
 }
 
+impl SseEncode for Vec<crate::api::mailbox::FolderUnread> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::mailbox::FolderUnread>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::thread::MessageView> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1821,6 +1965,25 @@ impl SseEncode for Vec<crate::api::mailbox::ThreadSummary> {
         for item in self {
             <crate::api::mailbox::ThreadSummary>::sse_encode(item, serializer);
         }
+    }
+}
+
+impl SseEncode for crate::api::mailbox::MailFolder {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::mailbox::MailFolder::Inbox => 0,
+                crate::api::mailbox::MailFolder::Sent => 1,
+                crate::api::mailbox::MailFolder::Archive => 2,
+                crate::api::mailbox::MailFolder::Trash => 3,
+                crate::api::mailbox::MailFolder::Spam => 4,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 

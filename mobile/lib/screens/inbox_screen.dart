@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:courly_mobile/mail_folders.dart';
 import 'package:courly_mobile/screens/add_account_screen.dart';
 import 'package:courly_mobile/screens/compose_screen.dart';
 import 'package:courly_mobile/src/rust/api/actions.dart';
@@ -12,15 +13,23 @@ import 'package:courly_mobile/widgets/sender_avatar.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// The inbox of every account, or of [accountId] alone, opened over the
-/// mailboxes page as in Apple Mail: the glass back button returns to it.
+/// One folder's conversations, of every account or of [accountId] alone,
+/// opened over the mailboxes page as in Apple Mail: the glass back button
+/// returns to it.
 class InboxScreen extends StatefulWidget {
-  const InboxScreen({super.key, required this.dataDir, this.accountId});
+  const InboxScreen({
+    super.key,
+    required this.dataDir,
+    this.accountId,
+    this.folder = MailFolder.inbox,
+  });
 
   final String dataDir;
 
   /// The account shown, or every account when null.
   final String? accountId;
+
+  final MailFolder folder;
 
   @override
   State<InboxScreen> createState() => _InboxScreenState();
@@ -52,9 +61,10 @@ class _InboxScreenState extends State<InboxScreen> {
   Future<void> _reload() async {
     try {
       final accounts = await listAccounts(dataDir: widget.dataDir);
-      final threads = await inboxThreads(
+      final threads = await folderThreads(
         dataDir: widget.dataDir,
         accountId: widget.accountId,
+        folder: widget.folder,
         limit: 100,
       );
       if (!mounted) return;
@@ -86,6 +96,7 @@ class _InboxScreenState extends State<InboxScreen> {
           accountId: thread.accountId,
           threadId: thread.id,
           markRead: !thread.isRead,
+          canFile: widget.folder.canFile,
         ),
       ),
     );
@@ -185,7 +196,9 @@ class _InboxScreenState extends State<InboxScreen> {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                   child: Text(
-                    selected?.name ?? 'Boîte de réception',
+                    widget.folder == MailFolder.inbox && selected != null
+                        ? selected.name
+                        : widget.folder.label,
                     style: theme.textTheme.headlineMedium,
                   ),
                 ),
@@ -212,7 +225,7 @@ class _InboxScreenState extends State<InboxScreen> {
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
-                'La boîte de réception n\'a pas pu être lue : $error',
+                'Les messages n\'ont pas pu être lus : $error',
                 textAlign: TextAlign.center,
               ),
             ),
@@ -228,7 +241,9 @@ class _InboxScreenState extends State<InboxScreen> {
         fill(
           Center(
             child: Text(
-              'Synchronisation en cours…',
+              widget.folder == MailFolder.inbox
+                  ? 'Synchronisation en cours…'
+                  : 'Aucune conversation',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -246,6 +261,9 @@ class _InboxScreenState extends State<InboxScreen> {
             final thread = _threads[index];
             return Dismissible(
               key: ValueKey('thread-${thread.accountId}-${thread.id}'),
+              direction: widget.folder.canFile
+                  ? DismissDirection.horizontal
+                  : DismissDirection.none,
               background: const _SwipeAction(
                 color: CourlyTheme.archive,
                 icon: LucideIcons.archive,

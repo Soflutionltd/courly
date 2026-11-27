@@ -85,6 +85,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   EngineReady dco_decode_engine_ready(dynamic raw);
 
   @protected
+  FolderUnread dco_decode_folder_unread(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
@@ -103,6 +106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<AttachmentView> dco_decode_list_attachment_view(dynamic raw);
 
   @protected
+  List<FolderUnread> dco_decode_list_folder_unread(dynamic raw);
+
+  @protected
   List<MessageView> dco_decode_list_message_view(dynamic raw);
 
   @protected
@@ -110,6 +116,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ThreadSummary> dco_decode_list_thread_summary(dynamic raw);
+
+  @protected
+  MailFolder dco_decode_mail_folder(dynamic raw);
 
   @protected
   MessageView dco_decode_message_view(dynamic raw);
@@ -226,6 +235,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   EngineReady sse_decode_engine_ready(SseDeserializer deserializer);
 
   @protected
+  FolderUnread sse_decode_folder_unread(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -248,6 +260,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<FolderUnread> sse_decode_list_folder_unread(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer);
 
   @protected
@@ -257,6 +274,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ThreadSummary> sse_decode_list_thread_summary(
     SseDeserializer deserializer,
   );
+
+  @protected
+  MailFolder sse_decode_mail_folder(SseDeserializer deserializer);
 
   @protected
   MessageView sse_decode_message_view(SseDeserializer deserializer);
@@ -408,6 +428,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_engine_ready(EngineReady self, SseSerializer serializer);
 
   @protected
+  void sse_encode_folder_unread(FolderUnread self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
@@ -432,6 +455,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_folder_unread(
+    List<FolderUnread> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_message_view(
     List<MessageView> self,
     SseSerializer serializer,
@@ -448,6 +477,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     List<ThreadSummary> self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_mail_folder(MailFolder self, SseSerializer serializer);
 
   @protected
   void sse_encode_message_view(MessageView self, SseSerializer serializer);
