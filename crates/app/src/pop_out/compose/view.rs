@@ -823,12 +823,12 @@ fn compose_footer<'a>(
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .style(
-        theme::ButtonClass::Chip {
-            active: state.request_read_receipt,
-        }
-        .style(),
-    )
+    // Off, it looks like its neighbours; only a requested receipt is tinted.
+    .style(if state.request_read_receipt {
+        theme::ButtonClass::Chip { active: true }.style()
+    } else {
+        theme::ButtonClass::Action.style()
+    })
     .on_press(Message::PopOut(
         window_id,
         PopOutMessage::Compose(ComposeMessage::ToggleReadReceipt),
