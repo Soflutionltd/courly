@@ -42,7 +42,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.2.13"
+version = "0.2.14"
 edition = "2024"
 authors = ["Soflution Ltd"]
 license = "LicenseRef-PolyForm-Shield-1.0.0"
