@@ -250,6 +250,11 @@ fn actions_from_graph(actions: &GraphMessageRuleActions) -> Vec<FilterAction> {
     out
 }
 
+/// Rank given to a created rule. Graph requires one and refuses a rule
+/// without it. First, so a rule that stops processing is not pre-empted by
+/// an older one that files the same mail elsewhere.
+const CREATED_RULE_SEQUENCE: i32 = 1;
+
 fn message_rule_from_create(
     rule: FilterRuleCreate,
     op: AccountOperation,
@@ -261,6 +266,7 @@ fn message_rule_from_create(
         id: None,
         display_name: Some(rule.name.unwrap_or_else(|| DEFAULT_RULE_NAME.to_string())),
         is_enabled: Some(rule.is_enabled),
+        sequence: Some(CREATED_RULE_SEQUENCE),
         conditions,
         exceptions,
         actions,
@@ -488,6 +494,7 @@ mod tests {
             id: Some("r1".to_string()),
             display_name: Some("Rule".to_string()),
             is_enabled: Some(true),
+            sequence: Some(3),
             conditions: GraphMessageRulePredicates {
                 subject_contains: vec!["invoice".to_string()],
                 ..GraphMessageRulePredicates::default()
@@ -529,6 +536,11 @@ mod tests {
             message_rule_from_create(rule, AccountOperation::FilterCreate).expect("rule maps");
 
         assert_eq!(graph.display_name.as_deref(), Some("Move"));
+        // Graph refuses a created rule that names no rank.
+        assert_eq!(
+            serde_json::to_value(&graph).expect("rule serializes")["sequence"],
+            serde_json::json!(1)
+        );
         assert_eq!(graph.conditions.from_addresses.len(), 1);
         assert_eq!(graph.exceptions.subject_contains, vec!["spam".to_string()]);
         assert_eq!(graph.actions.move_to_folder.as_deref(), Some("archive"));

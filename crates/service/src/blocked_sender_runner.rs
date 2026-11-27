@@ -14,6 +14,9 @@ use super::actions::{ActionContext, ActionOutcome, MailOperation, batch_execute}
 use crate::sync::SyncRuntime;
 
 pub(crate) async fn drain_blocked_senders(ctx: &ActionContext, sync_runtime: Option<&SyncRuntime>) {
+    if let Some(runtime) = sync_runtime {
+        crate::handlers::sender::create_missing_junk_rules(runtime, &ctx.write_db).await;
+    }
     let found = match ctx
         .write_db
         .with_write(db::db::queries_extra::blocked_inbox_threads)

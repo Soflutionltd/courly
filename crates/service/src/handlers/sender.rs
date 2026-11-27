@@ -24,6 +24,8 @@ use crate::boot::BootSharedState;
 use crate::conduit::ConduitProviderKind;
 use crate::conduit::resident::ResidentActionAccount;
 use crate::conduit::server_filters::{ServerFilterError, ServerFilterSurface};
+use crate::sync::SyncRuntime;
+use service_state::WriteDbState;
 
 pub(crate) async fn handle_block(
     boot_state: &Arc<BootSharedState>,
@@ -38,7 +40,8 @@ pub(crate) async fn handle_block(
         .map_err(ServiceError::Internal)?;
 
     if newly_blocked
-        && let Some((account, filters)) = graph_account(boot_state, &params.account_id).await
+        && let Some(runtime) = boot_state.sync_runtime()
+        && let Some((account, filters)) = graph_account(&runtime, &params.account_id).await
     {
         // The local block already holds: if the rule cannot be created the
         // sweep still sends this sender's mail to Spam while Courly runs.
@@ -94,8 +97,12 @@ pub(crate) async fn handle_unblock(
     // would keep landing in Junk after the user unblocked them. A failure
     // leaves the block in place so the user can retry.
     if let Some(rule_id) = rule_id {
-        let (_, filters) = graph_account(boot_state, &params.account_id)
-            .await
+        let runtime = boot_state.sync_runtime();
+        let reachable = match runtime {
+            Some(runtime) => graph_account(&runtime, &params.account_id).await,
+            None => None,
+        };
+        let (_, filters) = reachable
             .ok_or_else(|| {
                 ServiceError::Internal(
                     "the account is not connected; its junk rule cannot be removed yet".into(),
@@ -121,10 +128,9 @@ pub(crate) async fn handle_unblock(
 /// its rules, when it is a Microsoft (Graph) account the engine can reach
 /// now; `None` for other providers or an offline account.
 async fn graph_account(
-    boot_state: &Arc<BootSharedState>,
+    runtime: &SyncRuntime,
     account_id: &str,
 ) -> Option<(ResidentActionAccount, ServerFilterSurface)> {
-    let runtime = boot_state.sync_runtime()?;
     match runtime.resident_action_account(account_id).await {
         Ok(account) if account.provider == ConduitProviderKind::Graph => {
             Some((account, runtime.server_filters()))
@@ -133,6 +139,77 @@ async fn graph_account(
         Err(error) => {
             log::warn!("sender rule: account {account_id} not reachable: {error}");
             None
+        }
+    }
+}
+
+/// Give every block that no server rule enforces one more try at its rule.
+///
+/// A block whose rule could not be created, the account being offline or
+/// the server refusing, is otherwise held by the sweep alone: the sender's
+/// mail shows in the inbox until the sweep moves it, and reaches the other
+/// devices untouched. Each block is tried once per service run, so a rule
+/// the server keeps refusing is not asked for on every wakeup.
+pub(crate) async fn create_missing_junk_rules(runtime: &SyncRuntime, write_db: &WriteDbState) {
+    static TRIED: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+    let pending = match write_db
+        .with_write(db::db::queries_extra::blocked_senders_without_rule)
+        .await
+    {
+        Ok(pending) => pending,
+        Err(error) => {
+            log::warn!("sender rule: blocks without a rule could not be read: {error}");
+            return;
+        }
+    };
+    for blocked in pending {
+        let key = (blocked.account_id.clone(), blocked.sender_address.clone());
+        let Some((account, filters)) = graph_account(runtime, &blocked.account_id).await else {
+            // Another provider, or offline for now: an offline account is
+            // tried again on a later wakeup.
+            continue;
+        };
+        {
+            let mut tried = TRIED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if tried.contains(&key) {
+                continue;
+            }
+            tried.push(key);
+        }
+        match create_junk_rule(
+            &account,
+            &filters,
+            &blocked.account_id,
+            &blocked.sender_address,
+        )
+        .await
+        {
+            Ok(rule_id) => {
+                let account_id = blocked.account_id.clone();
+                let address = blocked.sender_address.clone();
+                let stored = write_db
+                    .with_write(move |conn| {
+                        db::db::queries_extra::set_blocked_sender_rule_id(
+                            conn,
+                            &account_id,
+                            &address,
+                            Some(&rule_id.0),
+                        )
+                    })
+                    .await;
+                match stored {
+                    Ok(()) => log::info!(
+                        "sender rule: junk rule created for a block that had none on account {}",
+                        blocked.account_id
+                    ),
+                    Err(error) => log::warn!("sender rule: rule id not stored: {error}"),
+                }
+            }
+            Err(error) => log::warn!(
+                "sender rule: junk rule still not created on account {}: {error}",
+                blocked.account_id
+            ),
         }
     }
 }

@@ -45,6 +45,9 @@ pub(crate) struct GraphMessageRule {
     pub(crate) display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) is_enabled: Option<bool>,
+    /// The rule's rank among the mailbox's rules, lowest first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sequence: Option<i32>,
     #[serde(default, skip_serializing_if = "GraphMessageRulePredicates::is_empty")]
     pub(crate) conditions: GraphMessageRulePredicates,
     #[serde(default, skip_serializing_if = "GraphMessageRulePredicates::is_empty")]

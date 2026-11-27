@@ -91,6 +91,17 @@ pub fn set_blocked_sender_rule_id(
 }
 
 /// The account's blocked list, sorted by address.
+/// Every block, on any account, that no server rule enforces yet.
+pub fn blocked_senders_without_rule(conn: &WriteConn<'_>) -> Result<Vec<DbBlockedSender>, String> {
+    query_as::<DbBlockedSender>(
+        conn,
+        "SELECT id, account_id, sender_address, provider_rule_id, created_at
+         FROM blocked_senders WHERE provider_rule_id IS NULL
+         ORDER BY account_id, sender_address",
+        &[],
+    )
+}
+
 pub fn list_blocked_senders(
     conn: &WriteConn<'_>,
     account_id: &str,

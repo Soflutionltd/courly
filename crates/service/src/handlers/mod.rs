@@ -20,7 +20,7 @@ mod label;
 mod oauth;
 mod pending_ops_kick;
 mod pinned_search;
-mod sender;
+pub(crate) mod sender;
 mod settings;
 mod signature;
 mod smart_folder;
