@@ -124,6 +124,16 @@ impl ReadyApp {
                 _ => Task::none(),
             };
         }
+        if self.commitment_dialog.is_some() && window_id == self.main_window_id {
+            use crate::ui::commitment_dialog::CommitmentDialogMessage;
+            // Enter belongs to the dialog's own fields.
+            return match key {
+                Key::Named(Named::Escape) => {
+                    self.update(Message::CommitmentDialog(CommitmentDialogMessage::Cancel))
+                }
+                _ => Task::none(),
+            };
+        }
         if self.recipients_dialog.is_some() && window_id == self.main_window_id {
             if *key == Key::Named(Named::Escape) {
                 self.recipients_dialog = None;

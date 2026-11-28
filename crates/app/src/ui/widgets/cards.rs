@@ -526,6 +526,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_forward: impl Fn(usize) -> M,
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
+    on_note_commitment: impl Fn(usize) -> M,
     on_recipients: impl Fn(usize, Option<usize>) -> M,
 ) -> Element<'a, M> {
     let sender_name = sender_or_unknown(msg.from_name.as_deref(), msg.from_address.as_deref());
@@ -566,6 +567,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         header_icon_button(icon::reply_all(), on_reply_all(index)),
         header_icon_button(icon::forward(), on_forward(index)),
         header_icon_button(icon::calendar(), on_create_event(index)),
+        header_icon_button(icon::check(), on_note_commitment(index)),
     ]
     .spacing(SPACE_XXXS)
     .align_y(Alignment::Center);

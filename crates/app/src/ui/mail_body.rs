@@ -381,7 +381,8 @@ impl HtmlBodyState {
                 self.link_menu = None;
                 self.selection_menu = Some(at);
             }
-            SelectAction::CloseMenu => {}
+            // The host reads the selection itself, with `selected_text`.
+            SelectAction::CloseMenu | SelectAction::Owe | SelectAction::Await => {}
             SelectAction::Copy => {
                 return self
                     .selection
@@ -390,6 +391,14 @@ impl HtmlBodyState {
             }
         }
         None
+    }
+
+    /// The text the reader selected, when there is some.
+    pub fn selected_text(&self) -> Option<String> {
+        let lines = self.rendered.as_ref()?.text.as_slice();
+        self.selection
+            .map(|selection| selection.text(lines))
+            .filter(|text| !text.trim().is_empty())
     }
 
     /// The text of the current render, as a reader would copy all of it.
@@ -656,6 +665,8 @@ enum Links<'a, M> {
         on_link: Rc<dyn Fn(LinkAction) -> M + 'a>,
         on_select: Rc<dyn Fn(SelectAction) -> M + 'a>,
         search_terms: &'a [String],
+        /// Whether the selection can be written down as a commitment.
+        commitments: bool,
     },
 }
 
@@ -773,6 +784,33 @@ pub fn view_with_link_menu<'a, M: Clone + 'a>(
             on_link: Rc::new(on_link),
             on_select: Rc::new(on_select),
             search_terms,
+            commitments: false,
+        },
+        on_show_remote,
+    )
+}
+
+/// [`view_with_link_menu`] for a message of the reading pane, whose
+/// selection can also be written down as a commitment: `on_select` then
+/// receives [`SelectAction::Owe`] and [`SelectAction::Await`].
+pub fn view_with_commitments<'a, M: Clone + 'a>(
+    state: Option<&'a HtmlBodyState>,
+    fallback_text: Option<&'a str>,
+    search_terms: &'a [String],
+    on_width: impl Fn(f32) -> M + 'a,
+    on_link: impl Fn(LinkAction) -> M + 'a,
+    on_select: impl Fn(SelectAction) -> M + 'a,
+    on_show_remote: M,
+) -> BodyCards<'a, M> {
+    body_view(
+        state,
+        fallback_text,
+        on_width,
+        &Links::WithMenu {
+            on_link: Rc::new(on_link),
+            on_select: Rc::new(on_select),
+            search_terms,
+            commitments: true,
         },
         on_show_remote,
     )
@@ -928,7 +966,10 @@ fn rendered_page<'a, M: Clone + 'a>(
         }
     };
     if let Links::WithMenu {
-        on_link, on_select, ..
+        on_link,
+        on_select,
+        commitments,
+        ..
     } = links
     {
         if let Some((href, at)) = link_menu.filter(|(_, at)| shows(*at)) {
@@ -939,7 +980,7 @@ fn rendered_page<'a, M: Clone + 'a>(
                 .on_dismiss(on_link(LinkAction::CloseMenu));
         } else if let Some(at) = selection_menu.filter(|at| shows(*at)) {
             page = page
-                .popup(selection_menu_card(on_select.as_ref()))
+                .popup(selection_menu_card(on_select.as_ref(), *commitments))
                 .anchor_offset(at - from_body)
                 .popup_width(SELECTION_MENU_WIDTH)
                 .on_dismiss(on_select(SelectAction::CloseMenu));
@@ -1014,22 +1055,35 @@ fn link_menu_card<'a, M: Clone + 'a>(
 /// The right-click menu of selected text.
 fn selection_menu_card<'a, M: Clone + 'a>(
     on_select: &(dyn Fn(SelectAction) -> M + 'a),
+    commitments: bool,
 ) -> Element<'a, M> {
-    container(
-        column![
-            link_menu_item(
-                icon::copy(),
-                t!("main.selection_menu.copy"),
-                on_select(SelectAction::Copy),
-            ),
-            link_menu_item(
-                icon::align_left(),
-                t!("main.selection_menu.select_all"),
-                on_select(SelectAction::SelectAll),
-            ),
-        ]
-        .spacing(SPACE_XXS),
-    )
+    let mut items = column![
+        link_menu_item(
+            icon::copy(),
+            t!("main.selection_menu.copy"),
+            on_select(SelectAction::Copy),
+        ),
+        link_menu_item(
+            icon::align_left(),
+            t!("main.selection_menu.select_all"),
+            on_select(SelectAction::SelectAll),
+        ),
+    ]
+    .spacing(SPACE_XXS);
+    if commitments {
+        items = items
+            .push(link_menu_item(
+                icon::send(),
+                t!("main.selection_menu.owe"),
+                on_select(SelectAction::Owe),
+            ))
+            .push(link_menu_item(
+                icon::clock(),
+                t!("main.selection_menu.await"),
+                on_select(SelectAction::Await),
+            ));
+    }
+    container(items)
     .padding(PAD_DROPDOWN)
     .style(theme::ContainerClass::SelectMenu.style())
     .into()

@@ -116,6 +116,13 @@ impl ReadyApp {
                 ui::modal_overlay::ModalSurface::Modal,
                 Message::Noop,
             )
+        } else if let Some(dialog) = self.commitment_dialog.as_ref() {
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                dialog.view().map(Message::CommitmentDialog),
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
         } else if let Some(dialog) = self.recipients_dialog.as_ref() {
             ui::modal_overlay::modal_overlay(
                 main_layout,

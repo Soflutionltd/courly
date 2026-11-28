@@ -346,6 +346,11 @@ impl ReadyApp {
             ReadingPaneEvent::CreateEventFromEmail { message_index } => {
                 self.create_event_from_email(message_index)
             }
+            ReadingPaneEvent::NoteCommitment {
+                message_index,
+                text,
+                direction,
+            } => self.note_commitment(message_index, &text, direction),
             ReadingPaneEvent::RespondToMeetingInvite {
                 message_id,
                 account_id,

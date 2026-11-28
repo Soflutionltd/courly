@@ -48,6 +48,10 @@ pub enum SelectAction {
     },
     SelectAll,
     Copy,
+    /// Write the selection down as something the reader owes.
+    Owe,
+    /// Write the selection down as something the reader is waiting for.
+    Await,
     /// Right-click on the selection: show its menu at this offset from the
     /// page's top-left corner.
     ShowMenu(Vector),

@@ -262,6 +262,7 @@ pub enum Message {
     ConfirmPermanentDelete,
     CancelPermanentDelete,
     FolderDialog(crate::ui::folder_dialog::FolderDialogMessage),
+    CommitmentDialog(crate::ui::commitment_dialog::CommitmentDialogMessage),
     RecipientsDialog(crate::ui::recipients::RecipientsMessage),
     MoveMenu(crate::ui::move_menu::MoveMenuMessage),
     CategoryMenu(crate::ui::category_menu::CategoryMenuMessage),

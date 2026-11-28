@@ -663,6 +663,7 @@ impl ReadyApp {
             Message::EmailAction(action) => self.handle_email_action(action),
             Message::ConfirmPermanentDelete => self.confirm_permanent_delete(),
             Message::FolderDialog(msg) => self.handle_folder_dialog(msg),
+            Message::CommitmentDialog(msg) => self.handle_commitment_dialog(msg),
             Message::RecipientsDialog(msg) => {
                 use crate::ui::recipients::RecipientsMessage;
                 match msg {

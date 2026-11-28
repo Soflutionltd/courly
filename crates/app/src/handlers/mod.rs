@@ -12,6 +12,7 @@ mod calendar;
 mod category_menu;
 mod chat;
 pub(crate) mod commands;
+mod commitments;
 mod contacts;
 mod core;
 mod folders;

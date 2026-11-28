@@ -43,6 +43,9 @@ pub enum ReadingPaneMessage {
     EditContact(String),
     /// Create a calendar event from this message (calendar button).
     CreateEventFromEmail(usize),
+    /// Write a commitment down from this message: its selected text, or
+    /// its subject when nothing is selected.
+    NoteCommitment(usize),
     /// Edit or answer the invite card of the message with this id.
     Invite(String, super::invite_card::InviteMessage),
     /// The invite of the message with this id resolved against the calendar.
@@ -125,6 +128,12 @@ pub enum ReadingPaneEvent {
     /// User clicked the calendar button on a message to create a calendar event.
     CreateEventFromEmail {
         message_index: usize,
+    },
+    /// Write the selected text of a message down as a commitment.
+    NoteCommitment {
+        message_index: usize,
+        text: String,
+        direction: super::commitment_dialog::Direction,
     },
     /// Answer a synced meeting invite. Unsynced invites deliberately have
     /// no standalone iMIP mail-reply path.
@@ -871,6 +880,23 @@ impl Component for ReadingPane {
             ReadingPaneMessage::EditContact(email) => {
                 (Task::none(), Some(ReadingPaneEvent::EditContact { email }))
             }
+            ReadingPaneMessage::NoteCommitment(index) => {
+                let selected = self
+                    .html_bodies
+                    .get(index)
+                    .and_then(super::mail_body::HtmlBodyState::selected_text);
+                let text = selected.or_else(|| {
+                    self.thread_messages
+                        .get(index)
+                        .and_then(|message| message.subject.clone())
+                });
+                let event = text.map(|text| ReadingPaneEvent::NoteCommitment {
+                    message_index: index,
+                    text,
+                    direction: super::commitment_dialog::Direction::Owed,
+                });
+                (Task::none(), event)
+            }
             ReadingPaneMessage::CreateEventFromEmail(index) => (
                 Task::none(),
                 Some(ReadingPaneEvent::CreateEventFromEmail {
@@ -970,6 +996,27 @@ impl Component for ReadingPane {
                 (task, None)
             }
             ReadingPaneMessage::BodySelect(index, action) => {
+                use super::commitment_dialog::Direction;
+                use super::mail_selection::SelectAction;
+                let direction = match action {
+                    SelectAction::Owe => Some(Direction::Owed),
+                    SelectAction::Await => Some(Direction::Awaited),
+                    _ => None,
+                };
+                if let Some(direction) = direction {
+                    let state = self.html_bodies.get_mut(index);
+                    let text = state.as_ref().and_then(|state| state.selected_text());
+                    // Close the menu; the selection stays as it is.
+                    if let Some(state) = state {
+                        let _ = state.select(SelectAction::CloseMenu);
+                    }
+                    let event = text.map(|text| ReadingPaneEvent::NoteCommitment {
+                        message_index: index,
+                        text,
+                        direction,
+                    });
+                    return (Task::none(), event);
+                }
                 let copied = self
                     .html_bodies
                     .get_mut(index)
@@ -1264,7 +1311,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     // Every message of the conversation is shown in full: none is folded.
     for (i, msg) in pane.thread_messages.iter().enumerate() {
         let html_body = msg.body_html.as_ref().map(|_| {
-            super::mail_body::view_with_link_menu(
+            super::mail_body::view_with_commitments(
                 pane.html_bodies.get(i),
                 msg.body_text.as_deref(),
                 &pane.search_highlight_terms,
@@ -1346,6 +1393,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
             ReadingPaneMessage::Forward,
             ReadingPaneMessage::EditContact,
             ReadingPaneMessage::CreateEventFromEmail,
+            ReadingPaneMessage::NoteCommitment,
             ReadingPaneMessage::ShowRecipients,
         );
         // The card carries an id so the view can scroll to this message.
