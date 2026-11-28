@@ -1501,6 +1501,27 @@ impl ServiceClient {
         Ok(())
     }
 
+    /// Create a commitment or replace its content via `commitment.save`.
+    pub async fn save_commitment(
+        &self,
+        params: service_api::CommitmentSaveParams,
+    ) -> Result<(), ClientError> {
+        let _ack: service_api::CommitmentAck = self
+            .request(RequestParams::CommitmentSave { params })
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a commitment via `commitment.delete`. Idempotent.
+    pub async fn delete_commitment(&self, id: String) -> Result<(), ClientError> {
+        let _ack: service_api::CommitmentAck = self
+            .request(RequestParams::CommitmentDelete {
+                params: service_api::CommitmentDeleteParams { id },
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Add `sender_address` to the account's blocked list via
     /// `sender.block`; returns whether it was newly blocked.
     pub async fn block_sender(

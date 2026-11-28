@@ -20,6 +20,7 @@ mod label;
 mod oauth;
 mod pending_ops_kick;
 mod pinned_search;
+mod commitment;
 pub(crate) mod sender;
 mod settings;
 mod signature;
@@ -128,6 +129,12 @@ pub(crate) async fn dispatch(
         RequestParams::TemplateSave { params } => template::handle_save(&boot_state, params).await,
         RequestParams::TemplateDelete { params } => {
             template::handle_delete(&boot_state, params).await
+        }
+        RequestParams::CommitmentSave { params } => {
+            commitment::handle_save(&boot_state, params).await
+        }
+        RequestParams::CommitmentDelete { params } => {
+            commitment::handle_delete(&boot_state, params).await
         }
         RequestParams::SenderBlock { params } => sender::handle_block(&boot_state, params).await,
         RequestParams::SenderUnblock { params } => {

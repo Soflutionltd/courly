@@ -146,6 +146,26 @@ static MIGRATIONS: &[Migration] = &[
                 PRIMARY KEY (account_id, server_id)
               );",
     },
+    Migration {
+        version: 109,
+        description: "Commitments: what is owed and what is awaited",
+        sql: "CREATE TABLE commitments (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                direction TEXT NOT NULL CHECK (direction IN ('owed', 'awaited')),
+                text TEXT NOT NULL,
+                person_name TEXT,
+                person_address TEXT,
+                due_date TEXT,
+                thread_id TEXT,
+                message_id TEXT,
+                done_at INTEGER,
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+              );
+              CREATE INDEX idx_commitments_open ON commitments(done_at, due_date);
+              CREATE INDEX idx_commitments_thread ON commitments(account_id, thread_id);",
+    },
 ];
 
 /// Run all pending migrations. Called once at startup.

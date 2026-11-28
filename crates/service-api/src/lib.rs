@@ -21,6 +21,7 @@ mod push;
 mod redacted;
 mod request;
 mod response;
+mod commitment;
 mod sender;
 mod settings;
 mod signature;
@@ -133,6 +134,7 @@ pub use request::{
     TestThreadReadParams,
 };
 pub use response::{HealthPingResponse, ShutdownResponse};
+pub use commitment::{CommitmentAck, CommitmentDeleteParams, CommitmentSaveParams};
 pub use sender::{SenderBlockAck, SenderBlockParams, SenderUnblockAck};
 pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
 pub use signature::{

@@ -39,6 +39,7 @@ use crate::settings::SettingsSetParams;
 use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
+use crate::commitment::{CommitmentDeleteParams, CommitmentSaveParams};
 use crate::sender::SenderBlockParams;
 use crate::smart_folder::SmartFolderCreateParams;
 use crate::sync::{
@@ -1288,6 +1289,19 @@ pub enum RequestParams {
     TemplateDelete {
         params: TemplateDeleteParams,
     },
+    /// Create a commitment, or replace the content of the one with this
+    /// id. Idempotent: saving the same content twice leaves one row.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    CommitmentSave {
+        params: CommitmentSaveParams,
+    },
+    /// Delete a commitment. Idempotent; deleting one that is gone returns Ok.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    CommitmentDelete {
+        params: CommitmentDeleteParams,
+    },
     /// Add an address to an account's `blocked_senders` list. Idempotent:
     /// blocking an address twice leaves one row.
     ///
@@ -1795,6 +1809,8 @@ impl RequestParams {
             Self::SignatureReorder { .. } => "signature.reorder",
             Self::TemplateSave { .. } => "template.save",
             Self::TemplateDelete { .. } => "template.delete",
+            Self::CommitmentSave { .. } => "commitment.save",
+            Self::CommitmentDelete { .. } => "commitment.delete",
             Self::SenderBlock { .. } => "sender.block",
             Self::SenderUnblock { .. } => "sender.unblock",
             Self::LabelGroupReorder { .. } => "label_group.reorder",
@@ -1951,6 +1967,8 @@ impl RequestParams {
             | Self::SignatureReorder { .. }
             | Self::TemplateSave { .. }
             | Self::TemplateDelete { .. }
+            | Self::CommitmentSave { .. }
+            | Self::CommitmentDelete { .. }
             | Self::SenderBlock { .. }
             | Self::SenderUnblock { .. }
             | Self::LabelGroupReorder { .. }
@@ -2130,6 +2148,8 @@ impl RequestParams {
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
             | Self::TemplateDelete { .. }
+            | Self::CommitmentSave { .. }
+            | Self::CommitmentDelete { .. }
             | Self::SenderBlock { .. }
             | Self::SenderUnblock { .. }
             // Deleting a draft that is already gone is a no-op.
@@ -2254,6 +2274,8 @@ impl RequestParams {
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
             Self::TemplateSave { params } => serde_json::json!({ "params": params }),
             Self::TemplateDelete { params } => serde_json::json!({ "params": params }),
+            Self::CommitmentSave { params } => serde_json::json!({ "params": params }),
+            Self::CommitmentDelete { params } => serde_json::json!({ "params": params }),
             Self::SenderBlock { params } | Self::SenderUnblock { params } => {
                 serde_json::json!({ "params": params })
             }
@@ -2600,6 +2622,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("template.delete params: {e}"))?;
                 Ok(Self::TemplateDelete { params: p.params })
+            }
+            "commitment.save" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: CommitmentSaveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("commitment.save params: {e}"))?;
+                Ok(Self::CommitmentSave { params: p.params })
+            }
+            "commitment.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: CommitmentDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("commitment.delete params: {e}"))?;
+                Ok(Self::CommitmentDelete { params: p.params })
             }
             "sender.block" | "sender.unblock" => {
                 #[derive(Deserialize)]
@@ -5278,6 +5318,41 @@ mod tests {
                 original.timeout(),
                 RequestTimeoutKind::Finite(Duration::from_secs(5)),
             );
+        }
+    }
+
+    #[test]
+    fn commitment_requests_round_trip_and_may_be_replayed() {
+        let save = RequestParams::CommitmentSave {
+            params: CommitmentSaveParams {
+                id: "c-1".into(),
+                account_id: "acct-1".into(),
+                direction: "awaited".into(),
+                text: "the signed contract".into(),
+                person_name: Some("Ada".into()),
+                person_address: Some("ada@example.com".into()),
+                due_date: Some("2026-12-04".into()),
+                thread_id: Some("thread-1".into()),
+                message_id: None,
+                done: false,
+            },
+        };
+        let delete = RequestParams::CommitmentDelete {
+            params: CommitmentDeleteParams { id: "c-1".into() },
+        };
+        for (original, method) in [(save, "commitment.save"), (delete, "commitment.delete")] {
+            assert_eq!(original.method_name(), method);
+            let parsed = RequestParams::from_method_params(
+                original.method_name(),
+                Some(original.params_value()),
+            )
+            .expect("parse");
+            assert_eq!(parsed, original);
+            assert_eq!(
+                original.timeout(),
+                RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            );
+            assert_eq!(original.idempotency(), Idempotency::Conditional);
         }
     }
 
