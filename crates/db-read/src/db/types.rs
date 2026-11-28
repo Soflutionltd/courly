@@ -565,6 +565,27 @@ pub struct DbBlockedSenderEntry {
     pub sender_address: String,
 }
 
+// ── Commitments ─────────────────────────────────────────────
+
+/// Something the user owes (`direction` "owed") or is waiting for
+/// ("awaited"), written down from a mail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DbCommitment {
+    pub id: String,
+    pub account_id: String,
+    pub direction: String,
+    pub text: String,
+    pub person_name: Option<String>,
+    pub person_address: Option<String>,
+    /// The day it is due, as `YYYY-MM-DD`.
+    pub due_date: Option<String>,
+    pub thread_id: Option<String>,
+    pub message_id: Option<String>,
+    pub done_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 // ── Signature ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

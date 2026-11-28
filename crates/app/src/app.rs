@@ -139,6 +139,8 @@ pub struct ReadyApp {
     pub(crate) folder_dialog: Option<crate::ui::folder_dialog::FolderDialog>,
     /// Dialog writing a commitment down from the open mail.
     pub(crate) commitment_dialog: Option<crate::ui::commitment_dialog::CommitmentDialog>,
+    /// The list of commitments, opened from the rail.
+    pub(crate) commitment_list: Option<crate::ui::commitment_list::CommitmentList>,
     /// Everyone a message was sent to, opened from the "To" line of its card.
     pub(crate) recipients_dialog: Option<crate::ui::recipients::RecipientsDialog>,
     /// The ribbon's Move menu, open under its button.
@@ -557,6 +559,7 @@ impl ReadyApp {
             pending_permanent_delete: None,
             folder_dialog: None,
             commitment_dialog: None,
+            commitment_list: None,
             recipients_dialog: None,
             move_menu: None,
             category_menu: None,

@@ -75,7 +75,11 @@ pub fn title_bar<'a>(
     .into()
 }
 
-pub fn app_rail<'a>(mode: AppMode, settings_open: bool) -> Element<'a, Message> {
+pub fn app_rail<'a>(
+    mode: AppMode,
+    settings_open: bool,
+    commitments_open: bool,
+) -> Element<'a, Message> {
     let in_mail = mode == AppMode::Mail && !settings_open;
     let in_calendar = mode == AppMode::Calendar && !settings_open;
     container(
@@ -86,6 +90,7 @@ pub fn app_rail<'a>(mode: AppMode, settings_open: bool) -> Element<'a, Message> 
                 in_calendar,
                 Message::SetAppMode(AppMode::Calendar)
             ),
+            widgets::rail_button(icon::check(), commitments_open, Message::OpenCommitments),
             Space::new().height(Length::Fill),
             widgets::rail_button(icon::settings(), settings_open, Message::ToggleSettings),
         ]

@@ -30,6 +30,7 @@ pub use db_read::db::queries_extra::{
     get_threads_for_label_group, get_threads_for_namespace, get_threads_for_shared_mailbox,
     get_threads_for_shared_mailbox_label_group, get_threads_for_shared_mailbox_snoozed,
     get_threads_for_shared_mailbox_starred, get_threads_scoped, get_used_account_colors_sync,
+    list_commitments,
     load_contacts_for_settings_sync, load_group_member_emails_sync, load_groups_for_settings_sync,
     query_thread_list_decorations, search_people_for_typeahead_sync,
 };

@@ -10,6 +10,7 @@ pub mod chrome;
 pub mod dialog;
 pub mod emoji_picker;
 pub mod commitment_dialog;
+pub mod commitment_list;
 pub mod folder_dialog;
 pub mod invite_card;
 pub mod label_paint;

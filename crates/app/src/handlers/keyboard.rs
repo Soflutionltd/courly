@@ -134,6 +134,15 @@ impl ReadyApp {
                 _ => Task::none(),
             };
         }
+        if self.commitment_list.is_some() && window_id == self.main_window_id {
+            use crate::ui::commitment_list::CommitmentListMessage;
+            return match key {
+                Key::Named(Named::Escape) => {
+                    self.update(Message::CommitmentList(CommitmentListMessage::Close))
+                }
+                _ => Task::none(),
+            };
+        }
         if self.recipients_dialog.is_some() && window_id == self.main_window_id {
             if *key == Key::Named(Named::Escape) {
                 self.recipients_dialog = None;

@@ -61,6 +61,13 @@ impl ReadyApp {
         let Some((account_id, thread_id)) = crate::new_mail::thread_of(identifier) else {
             return Task::none();
         };
+        self.open_thread_of(account_id, thread_id)
+    }
+
+    /// Show the conversation `thread_id` of `account_id`: at once when the
+    /// list on screen holds it, else from the account's inbox once it has
+    /// loaded. A conversation the inbox no longer holds stays closed.
+    pub(crate) fn open_thread_of(&mut self, account_id: String, thread_id: String) -> Task<Message> {
         if self.show_settings {
             self.close_settings();
         }

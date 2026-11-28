@@ -374,21 +374,6 @@ impl_from_row!(DbBlockedSender {
     created_at,
 });
 
-impl_from_row!(DbCommitment {
-    id,
-    account_id,
-    direction,
-    text,
-    person_name,
-    person_address,
-    due_date,
-    thread_id,
-    message_id,
-    done_at,
-    created_at,
-    updated_at,
-});
-
 // ── Phishing Allowlist ──────────────────────────────────────
 
 impl_from_row!(DbPhishingAllowlistEntry {

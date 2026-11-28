@@ -5,12 +5,7 @@
 //! takes nothing from it. The mail is only where it can be read again.
 
 use super::super::WriteConn;
-use super::super::types::DbCommitment;
-use crate::db::{ReadConn, query_as};
 use rusqlite::params;
-
-const COLUMNS: &str = "id, account_id, direction, text, person_name, person_address, \
-     due_date, thread_id, message_id, done_at, created_at, updated_at";
 
 /// `commitments.direction` of something the user owes.
 pub const COMMITMENT_OWED: &str = "owed";
@@ -97,27 +92,10 @@ pub fn delete_commitment(conn: &WriteConn<'_>, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Every open commitment, and those closed since `closed_since` (unix
-/// seconds), soonest due first; one without a due date comes after those
-/// that have one.
-pub fn list_commitments(
-    conn: &ReadConn<'_>,
-    closed_since: i64,
-) -> Result<Vec<DbCommitment>, String> {
-    query_as::<DbCommitment>(
-        conn,
-        &format!(
-            "SELECT {COLUMNS} FROM commitments \
-             WHERE done_at IS NULL OR done_at >= ?1 \
-             ORDER BY done_at IS NOT NULL, due_date IS NULL, due_date, created_at"
-        ),
-        &[&closed_since],
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use db_read::db::queries_extra::list_commitments;
     use rusqlite::Connection;
 
     fn open_with_account() -> Connection {

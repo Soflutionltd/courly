@@ -123,6 +123,13 @@ impl ReadyApp {
                 ui::modal_overlay::ModalSurface::Modal,
                 Message::Noop,
             )
+        } else if let Some(list) = self.commitment_list.as_ref() {
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                list.view().map(Message::CommitmentList),
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
         } else if let Some(dialog) = self.recipients_dialog.as_ref() {
             ui::modal_overlay::modal_overlay(
                 main_layout,
@@ -237,7 +244,11 @@ impl ReadyApp {
             search = search.popup(menu);
         }
         let search: Element<'_, Message> = search.into();
-        let rail = ui::chrome::app_rail(self.app_mode, self.show_settings);
+        let rail = ui::chrome::app_rail(
+            self.app_mode,
+            self.show_settings,
+            self.commitment_list.is_some(),
+        );
 
         let body: Element<'_, Message> = if self.show_settings {
             pane(self.settings.view().map(Message::Settings))

@@ -664,6 +664,8 @@ impl ReadyApp {
             Message::ConfirmPermanentDelete => self.confirm_permanent_delete(),
             Message::FolderDialog(msg) => self.handle_folder_dialog(msg),
             Message::CommitmentDialog(msg) => self.handle_commitment_dialog(msg),
+            Message::OpenCommitments => self.open_commitments(),
+            Message::CommitmentList(msg) => self.handle_commitment_list(msg),
             Message::RecipientsDialog(msg) => {
                 use crate::ui::recipients::RecipientsMessage;
                 match msg {
